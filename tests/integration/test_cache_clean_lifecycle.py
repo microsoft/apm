@@ -67,7 +67,8 @@ def test_cache_clean_status_matches_residual_state(tmp_path: Path, denied: tuple
     git_factory.commit(repository, message="Seed cached package")
     cache = GitCache(isolated.cache_root)
     checkout = cache.get_checkout(repository.file_url, "main", env=environment)
-    db = next((isolated.cache_root / "git" / "db_v1").iterdir())
+    # filelock>=4 keeps released "<shard>.lock" files beside each shard.
+    db = next(p for p in (isolated.cache_root / "git" / "db_v1").iterdir() if p.is_dir())
     http_cache = HttpCache(isolated.cache_root)
     with LocalMcpRegistryFactory(tmp_path / "registry").start(
         {"name": "test/cache-clean", "description": "Cleanup fixture"}
@@ -77,7 +78,7 @@ def test_cache_clean_status_matches_residual_state(tmp_path: Path, denied: tuple
         response.raise_for_status()
         http_cache.store(url, response.content, headers={"Cache-Control": "max-age=3600"})
         assert http_cache.get(url).body == response.content
-    http = next((isolated.cache_root / "http_v1").iterdir())
+    http = next(p for p in (isolated.cache_root / "http_v1").iterdir() if p.is_dir())
     entries = {"db": db, "checkout": checkout, "http": http}
     for family, entry in entries.items():
         (entry / f"deny-{family}").write_bytes(family.encode("ascii"))

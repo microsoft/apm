@@ -35,7 +35,7 @@
     },
     {
       "id": "legacy-mcp-ownership-key-migration",
-      "decision": "MCP native connection baseline comparison and safe removal, plus legacy target ownership migration and adoption",
+      "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
       "owner": "install/mcp/ownership.py",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
       "guards": ["install-deployment-mcp-ownership-migration"]
@@ -43,7 +43,7 @@
     {
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
-      "owner": "deployment_ledger.py; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
+      "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
         "src/apm_cli/integration/skill_support.py",
@@ -110,8 +110,8 @@
     },
     {
       "id": "unmanaged-skill-preflight",
-      "decision": "Whole-plan unmanaged skill refusal before native deployment",
-      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment",
+      "decision": "Whole-plan unmanaged skill refusal and unmatched skills: selection refusal before native deployment",
+      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes",
       "selectors": [
         "src/apm_cli/install/deployment_plan.py",
         "src/apm_cli/integration/skill_preflight.py"
@@ -193,6 +193,13 @@
       "owner": "deps/reachability.py (compute_forward_reachable_keys)",
       "selectors": ["src/apm_cli/deps/reachability.py"],
       "guards": ["install-deployment-uninstall-reachability"]
+    },
+    {
+      "id": "legacy-lockfile-parent-placement",
+      "decision": "Legacy lockfile transitive parent placement for deps tree and deps why",
+      "owner": "deps/lock_parent_placement.py (place_legacy_lock_parents, installed_manifest_children)",
+      "selectors": ["src/apm_cli/deps/lock_parent_placement.py"],
+      "guards": ["install-deployment-lock-parent-placement"]
     },
     {
       "id": "ci-audit-scratch-materialization",

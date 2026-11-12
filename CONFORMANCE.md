@@ -39,13 +39,13 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Producer | 12 | 0 | 0 | 0 |
 | Consumer | 101 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
-| Governance | 20 | 0 | 0 | 0 |
+| Governance | 21 | 0 | 0 | 0 |
 
 ## Per-requirement coverage
 
 | Req ID | Keyword | Sec | Class | Status | Tests | Oracle |
 |--------|---------|----:|-------|--------|------:|--------|
-| [req-cf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-001) | MUST | 12.5 | consumer | active | 6 | - |
+| [req-cf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-001) | MUST | 12.5 | consumer | active | 10 | - |
 | [req-cf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-002) | MUST | 12.3 | consumer | active | 1 | - |
 | [req-ext-001](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-001) | MUST | 4.1 | consumer | active | 1 | - |
 | [req-ext-002](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-002) | MUST | 4.1 | producer | active | 1 | - |
@@ -55,7 +55,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-lk-003](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-003) | MUST | 5.2 | consumer | active | 9 | - |
 | [req-lk-004](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-004) | MUST | 5.4 | consumer | active | 1 | - |
 | [req-lk-005](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-005) | MUST | 5.5 | consumer | active | 2 | - |
-| [req-lk-006](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-006) | MUST | 5.5 | consumer | active | 22 | - |
+| [req-lk-006](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-006) | MUST | 5.5 | consumer | active | 32 | - |
 | [req-lk-007](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-007) | SHOULD | 5.5 | consumer | active | 1 | - |
 | [req-lk-008](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-008) | MUST | 5.6 | consumer | active | 3 | - |
 | [req-lk-009](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-009) | MUST | 5.6 | consumer | active | 1 | - |
@@ -118,6 +118,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-pl-018](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-018) | MUST | 6.3.1 | governance | active | 1 | - |
 | [req-pl-019](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-019) | MUST | 6.8.1 | governance | active | 14 | - |
 | [req-pl-020](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-020) | MUST | 6.8.1 | governance | active | 3 | - |
+| [req-pl-021](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-021) | MUST | 6.1 | governance | active | 5 | - |
 | [req-pr-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-001) | MUST | 8.2 | consumer | active | 1 | - |
 | [req-pr-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-002) | MUST | 8.3 | consumer | active | 2 | - |
 | [req-pr-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-003) | MUST | 8.3 | consumer | active | 1 | - |
@@ -129,8 +130,8 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-rg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rg-001) | MUST | 11.3.3 | registry | active | 1 | - |
 | [req-rpl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-001) | MUST | 4.8.1 | consumer | active | 7 | - |
 | [req-rpl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-002) | MUST | 4.8.1 | consumer | active | 5 | - |
-| [req-rpl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-003) | MUST | 4.8.1 | consumer | active | 3 | - |
-| [req-rpl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-004) | MUST | 4.8.1 | consumer | active | 4 | - |
+| [req-rpl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-003) | MUST | 4.8.1 | consumer | active | 5 | - |
+| [req-rpl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-004) | MUST | 4.8.1 | consumer | active | 6 | - |
 | [req-rs-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-001) | MUST | 7.2 | consumer | active | 6 | - |
 | [req-rs-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-002) | MUST | 7.3 | consumer | active | 3 | - |
 | [req-rs-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-003) | MUST | 7.3 | consumer | active | 1 | - |
@@ -167,7 +168,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 4 | - |
 | [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-004](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-004) | MUST | 4.2.1 | consumer | active | 1 | - |
-| [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 1 | - |
+| [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 14 | - |
 | [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 1 | - |

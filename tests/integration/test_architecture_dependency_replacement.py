@@ -17,6 +17,36 @@ FROZEN_RULE = "install-deployment-frozen-mutation-eligibility"
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/commands/install.py",
+            "or not lockfile_satisfies_replacements(_existing_lock, apm_package.replace_rules)[0]",
+            "or False",
+        ),
+        (
+            "src/apm_cli/install/helpers/no_work.py",
+            "builder.save_replacement_intent()",
+            "None",
+        ),
+        (
+            "src/apm_cli/install/pipeline.py",
+            "local_cleanup_pending=(",
+            "local_cleanup_pending=bool(_old_local_deployed) or (",
+        ),
+        (
+            "src/apm_cli/install/pipeline.py",
+            "apm_package=apm_package,\n        logger=logger,\n    ):",
+            "apm_package=None,\n        logger=logger,\n    ):",
+        ),
+        (
+            "src/apm_cli/install/phases/lockfile.py",
+            "lockfile = copy.deepcopy(existing) if existing is not None else LockFile()",
+            "lockfile = LockFile()",
+        ),
+        (
+            "src/apm_cli/install/phases/lockfile.py",
+            "self._write_if_changed(lockfile, get_lockfile_path(self.ctx.apm_dir), LockFile)",
+            "None",
+        ),
+        (
             "src/apm_cli/models/dependency/replacement.py",
             "return (self.host, self.port, self.repo_url, self.subpath)",
             "return ('github.com', None, self.repo_url, self.subpath)",

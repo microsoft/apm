@@ -77,9 +77,11 @@ opt-out (`--no-drift`).
 
 For repos that commit their deployed files, use the audit-only pattern to
 catch tampering or stale committed outputs without letting `apm install`
-rewrite the checkout first. `apm install` overwrites managed files before
-audit runs, which erases any tampered bytes before `content-integrity` or
-drift can see them. Pass `setup-only: true` to the action so it only
+rewrite the checkout first. `apm install` can restore managed output, such
+as deployed instructions, before `content-integrity` or drift can inspect
+the changed bytes. Edited managed skill members are instead preserved,
+along with their original deployment hashes, unless you explicitly use
+`--force`. Pass `setup-only: true` to the action so it only
 provides the CLI, then run the full CI gate:
 
 ```yaml

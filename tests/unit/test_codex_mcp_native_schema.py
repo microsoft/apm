@@ -74,9 +74,11 @@ def test_native_output_preserves_uuid_conflicts_after_reparse(
     )
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize("owned", [True, False])
 def test_install_corrects_only_recorded_managed_entries(
-    tmp_path: Path, dependency: MCPDependency, owned: bool
+    tmp_path: Path, dependency: MCPDependency, owned: bool, newline: str
 ) -> None:
     """A recorded name cannot authorize removal of unverifiable legacy identity."""
     adapter = CodexClientAdapter(project_root=tmp_path)
@@ -94,7 +96,8 @@ def test_install_corrects_only_recorded_managed_entries(
         + legacy
         + user_settings
     )
-    native_path.write_text(original, encoding="utf-8")
+    original_bytes = original.replace("\n", newline).encode("utf-8")
+    native_path.write_bytes(original_bytes)
     owners = {"codex": {"managed"}} if owned else {}
 
     with pytest.raises(MCPNativeConflictError) as conflict:
@@ -106,7 +109,7 @@ def test_install_corrects_only_recorded_managed_entries(
             managed_target_servers=owners,
         )
     assert not conflict.value.wrote_connections
-    assert native_path.read_bytes() == original.encode("utf-8")
+    assert native_path.read_bytes() == original_bytes
     assert not owners.get("codex")
 
     # Exercise the low-level migration writer separately from install authorization.
@@ -370,10 +373,16 @@ def test_inline_registry_comment_blocks_legacy_ownership_adoption(
     assert Path(adapter.get_config_path()).read_text(encoding="utf-8") == original
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize("full_root_keys", [False, True])
 @pytest.mark.parametrize("registry_id", ["", "registry-uuid"])
 def test_dotted_legacy_config_preserves_identity_and_layout(
-    tmp_path: Path, dependency: MCPDependency, full_root_keys: bool, registry_id: str
+    tmp_path: Path,
+    dependency: MCPDependency,
+    full_root_keys: bool,
+    registry_id: str,
+    newline: str,
 ) -> None:
     """Dotted identity needs verification; the writer preserves its native layout."""
     prefix = "mcp_servers." if full_root_keys else ""
@@ -396,7 +405,8 @@ def test_dotted_legacy_config_preserves_identity_and_layout(
     adapter = CodexClientAdapter(project_root=tmp_path)
     path = Path(adapter.get_config_path())
     path.parent.mkdir()
-    path.write_text(original, encoding="utf-8")
+    original_bytes = original.replace("\n", newline).encode("utf-8")
+    path.write_bytes(original_bytes)
     stored = {"managed": dependency.to_dict()}
     ownership = resolve_mcp_target_servers(
         recorded_target_servers={"codex": {"managed"}} if registry_id else {},
@@ -417,7 +427,7 @@ def test_dotted_legacy_config_preserves_identity_and_layout(
                 managed_target_servers=ownership,
             )
         assert not conflict.value.wrote_connections
-        assert path.read_bytes() == original.encode("utf-8")
+        assert path.read_bytes() == original_bytes
         assert not ownership.get("codex")
         # The writer's formatting contract does not confer install ownership.
         assert adapter.migrate_legacy_managed_servers({"managed"}) == {"managed"}

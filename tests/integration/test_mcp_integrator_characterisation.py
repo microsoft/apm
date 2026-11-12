@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.core.scope import InstallScope
+from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
+from tests.utils.managed_mcp import install_managed_mcp
 
 
 def _make_dep(
@@ -380,31 +382,46 @@ class TestRemoveStale:
     def test_removes_from_codex_config(self, tmp_path: Path) -> None:
         import toml
 
-        config_path = tmp_path / "codex.toml"
+        config_path = tmp_path / ".codex" / "config.toml"
+        config_path.parent.mkdir()
         config_path.write_text(
             toml.dumps(
                 {
                     "mcp_servers": {
-                        "stale": {"command": "echo"},
                         "keep": {"command": "cat"},
                     }
                 }
             ),
             encoding="utf-8",
         )
-        client = MagicMock()
-        client.get_config_path.return_value = str(config_path)
+        stored, hashes = install_managed_mcp(tmp_path, "codex", "stale")
+        before = config_path.read_bytes()
+        for names, baseline in (({"stale"}, {}), ({"keep"}, stored)):
+            with pytest.raises(RequiredIntegrationError, match="managed baseline"):
+                MCPIntegrator.remove_stale(
+                    names,
+                    runtime="codex",
+                    project_root=tmp_path,
+                    stored_configs=baseline,
+                    native_hashes=hashes,
+                )
+            assert config_path.read_bytes() == before
 
         with (
             patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["codex"]),
-            patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
             patch("apm_cli.integration.mcp_integrator._rich_success") as mock_success,
         ):
-            MCPIntegrator.remove_stale({"stale"}, runtime="codex", project_root=tmp_path)
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="codex",
+                project_root=tmp_path,
+                stored_configs=stored,
+                native_hashes=hashes,
+            )
 
         config = toml.loads(config_path.read_text(encoding="utf-8"))
         assert "stale" not in config["mcp_servers"]
-        assert "keep" in config["mcp_servers"]
+        assert config["mcp_servers"] == {"keep": {"command": "cat"}}
         mock_success.assert_called_once()
 
     def test_removes_from_cursor_config(self, tmp_path: Path) -> None:
@@ -492,8 +509,9 @@ class TestRemoveStale:
         (tmp_path / ".claude").mkdir()
         config_path = _write_json(
             tmp_path / ".mcp.json",
-            {"mcpServers": {"stale": {"command": "echo"}, "keep": {"command": "cat"}}},
+            {"mcpServers": {"keep": {"command": "cat"}}},
         )
+        stored, hashes = install_managed_mcp(tmp_path, "claude", "stale")
         logger = MagicMock()
 
         with patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["claude"]):
@@ -503,11 +521,13 @@ class TestRemoveStale:
                 project_root=tmp_path,
                 logger=logger,
                 scope=None,
+                stored_configs=stored,
+                native_hashes=hashes,
             )
 
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert "stale" not in config["mcpServers"]
-        assert "keep" in config["mcpServers"]
+        assert config["mcpServers"] == {"keep": {"command": "cat"}}
         messages = [call.args[0] for call in logger.progress.call_args_list]
         assert any("scope unspecified" in message for message in messages)
         assert any(
@@ -528,29 +548,44 @@ class TestRemoveStale:
     def test_removes_from_claude_user_config_at_user_scope(self, tmp_path: Path) -> None:
         config_path = _write_json(
             tmp_path / ".claude.json",
-            {"mcpServers": {"stale": {"command": "echo"}, "keep": {"command": "cat"}}},
+            {"mcpServers": {"keep": {"command": "cat"}}, "personal": {"theme": "dark"}},
         )
-        client = MagicMock()
-        client.supports_user_scope = True
         logger = MagicMock()
 
         with (
             patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["claude"]),
-            patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
             patch("apm_cli.integration.mcp_integrator.Path.home", return_value=tmp_path),
             patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}),
         ):
+            stored, hashes = install_managed_mcp(tmp_path, "claude", "stale", user_scope=True)
+            before = config_path.read_bytes()
+            for names, baseline in (({"stale"}, {}), ({"keep"}, stored)):
+                with pytest.raises(RequiredIntegrationError, match="managed baseline"):
+                    MCPIntegrator.remove_stale(
+                        names,
+                        runtime="claude",
+                        project_root=tmp_path,
+                        scope=InstallScope.USER,
+                        stored_configs=baseline,
+                        native_hashes=hashes,
+                    )
+                assert config_path.read_bytes() == before
             MCPIntegrator.remove_stale(
                 {"stale"},
                 runtime="claude",
                 project_root=tmp_path,
                 logger=logger,
                 scope=InstallScope.USER,
+                stored_configs=stored,
+                native_hashes=hashes,
             )
 
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert "stale" not in config["mcpServers"]
-        assert "keep" in config["mcpServers"]
+        assert config == {
+            "mcpServers": {"keep": {"command": "cat"}},
+            "personal": {"theme": "dark"},
+        }
         logger.progress.assert_called_once()
 
     def test_expands_full_reference_to_short_name(self, tmp_path: Path) -> None:

@@ -27,12 +27,14 @@ from apm_cli.integration.skill_package_routing import (
     should_install_skill as _should_install_skill,
 )
 from apm_cli.integration.skill_preflight import find_unmanaged_conflicts, selected_skill_sources
+from apm_cli.integration.skill_preflight import preflight_skill_selection as _preflight_selection
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
     build_skill_ownership_maps,
     clean_orphaned_skills,
     get_lockfile_owned_agent_skills,
+    skill_dir_has_content,
 )
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
@@ -51,6 +53,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.models.validation import PackageType
 
@@ -366,6 +369,7 @@ class SkillIntegrator(BaseIntegrator):
 
     selected_skill_sources = staticmethod(selected_skill_sources)
     find_unmanaged_conflicts = find_unmanaged_conflicts
+    preflight_skill_selection = staticmethod(_preflight_selection)
 
     def __init__(self) -> None:
         super().__init__()
@@ -387,25 +391,37 @@ class SkillIntegrator(BaseIntegrator):
         self._skill_can_complete = False
         self._skill_completed_roots: dict[Path, set[str]] = {}
         self._skill_completed_files: dict[Path, set[str]] = {}
+        self._materialization_session: DeploymentMaterializationSession | None = None
 
     @contextmanager
-    def ownership_snapshot(self, *, replay_lockfile=None) -> Iterator[None]:
+    def ownership_snapshot(
+        self,
+        *,
+        replay_lockfile=None,
+        materialization_session: "DeploymentMaterializationSession | None" = None,
+    ) -> Iterator[None]:
         """Reuse immutable durable ownership during one sequential deployment batch."""
         if self._ownership_snapshots is not None:
             raise RuntimeError("A skill ownership snapshot is already active")
         self._ownership_snapshots = {}
         self._hash_snapshots = {}
+        self._materialization_session = materialization_session
         if replay_lockfile is not None:
             from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
             self._replay_owners = DeploymentLedgerCodec.active_file_owners(replay_lockfile)
         try:
-            yield
+            try:
+                yield
+            finally:
+                if materialization_session is not None:
+                    materialization_session.flush()
         finally:
             self._ownership_snapshots = None
             self._hash_snapshots = None
             self._skill_session_hashes.clear()
             self._replay_owners = None
+            self._materialization_session = None
 
     def _skill_member_skipped(self, _path: Path) -> None:
         self._skill_can_complete = False
@@ -463,6 +479,14 @@ class SkillIntegrator(BaseIntegrator):
         )
         directory_entry = entry(destination)
         anchor = entry(destination / "SKILL.md")
+        written: list[Path] = []
+        session = self._materialization_session
+        owner = self._skill_current_owner
+        targets = self._skill_targets or []
+        if session is not None and (
+            self._skill_source_plan is None or owner is None or not targets
+        ):
+            raise RuntimeError("Live skill materialization requires an admitted source plan.")
         copied = self.copy_directory_files(
             source,
             destination,
@@ -479,21 +503,33 @@ class SkillIntegrator(BaseIntegrator):
                 )
             ),
             recorded_hashes=hashes,
+            baseline_hash=(
+                (lambda path: session.baseline(path, targets)) if session is not None else None
+            ),
+            on_member_written=written.append,
+            requires_write=(
+                (lambda path: session.requires_target_write(path, targets, owner))
+                if session is not None
+                else None
+            ),
             on_member_skipped=self._skill_member_skipped,
             unchanged=unchanged,
             write_allowed=lambda path: (
-                self._replay_owners is None
-                or self._replay_owners.get(path, self._skill_current_owner)
-                == self._skill_current_owner
+                self._replay_owners is None or self._replay_owners.get(path, owner) == owner
             ),
             force=force or managed_files is None,
             diagnostics=diagnostics,
+            package=owner or "",
         )
         if not unchanged:
             if self.link_resolver is None:
                 self._skill_can_complete = False
             self._resolve_markdown_links_in_skill_bundle(source, destination, copied)
         written_hashes = {entry(path): compute_file_hash(path) for path in copied}
+        if session is not None and written:
+            if self.link_resolver is None:
+                raise RuntimeError("Cannot record skill writes without final link rendering.")
+            session.record({path: written_hashes[entry(path)] for path in written}, targets, owner)
         self._skill_session_hashes.update(written_hashes)
         self._skill_files.extend(copied)
         plan = self._skill_source_plan
@@ -900,7 +936,7 @@ class SkillIntegrator(BaseIntegrator):
             target = target_skills_root / sub_name
             rewriter = link_rewriter or SkillIntegrator()
             rel_path = rewriter._skill_path_entry(target, materialization_root)
-            target_existed = target.exists()
+            target_existed = skill_dir_has_content(target)
             unchanged = target_existed and SkillIntegrator.is_skill_dir_identical_to_source(
                 sub_skill_path, target
             )
@@ -1074,7 +1110,7 @@ class SkillIntegrator(BaseIntegrator):
                 parent_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
+                diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
                 project_root=project_root,
@@ -1213,7 +1249,8 @@ class SkillIntegrator(BaseIntegrator):
 
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
-            if self.check_collision(
+            target_existed = skill_dir_has_content(target_skill_dir)
+            if target_existed and self.check_collision(
                 target_skill_dir,
                 rel_path,
                 {rel_path} if session_owned else collision_managed,
@@ -1223,7 +1260,6 @@ class SkillIntegrator(BaseIntegrator):
                 self._skill_can_complete = False
                 continue
 
-            target_existed = target_skill_dir.exists()
             from apm_cli.models.apm_package import PackageType as _PackageType
 
             copied = self._copy_skill_bundle(
@@ -1299,7 +1335,7 @@ class SkillIntegrator(BaseIntegrator):
                 current_key or skill_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
+                diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
                 project_root=project_root,
@@ -1409,7 +1445,7 @@ class SkillIntegrator(BaseIntegrator):
                 parent_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
+                diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
                 project_root=project_root,
@@ -1879,6 +1915,7 @@ class SkillIntegrator(BaseIntegrator):
         project_root: Path,
         managed_files: set = None,  # noqa: RUF013
         targets=None,
+        removed_paths: list[Path] | None = None,
     ) -> dict[str, int]:
         """Sync recorded skill paths, or use legacy package-name orphan detection.
 
@@ -1958,6 +1995,8 @@ class SkillIntegrator(BaseIntegrator):
                     else:
                         target.unlink()
                     stats["files_removed"] += 1
+                    if removed_paths is not None:
+                        removed_paths.append(target)
                 except Exception:
                     stats["errors"] += 1
 
@@ -1978,8 +2017,6 @@ class SkillIntegrator(BaseIntegrator):
 
             return stats
 
-        # Legacy fallback: npm-style orphan detection
-        # Build set of expected skill directory names from installed packages
         installed_skill_names = set()
         for dep in apm_package.get_apm_dependencies():
             raw_name = dep.repo_url.split("/")[-1]
@@ -2029,7 +2066,10 @@ class SkillIntegrator(BaseIntegrator):
 
             if skills_dir.exists():
                 result = self._clean_orphaned_skills(
-                    skills_dir, installed_skill_names, project_root=project_root
+                    skills_dir,
+                    installed_skill_names,
+                    project_root=project_root,
+                    removed_paths=removed_paths,
                 )
                 stats["files_removed"] += result["files_removed"]
                 stats["errors"] += result["errors"]
@@ -2042,6 +2082,7 @@ class SkillIntegrator(BaseIntegrator):
         installed_skill_names: set,
         *,
         project_root: Path | None = None,
+        removed_paths: list[Path] | None = None,
     ) -> dict[str, int]:
         """Clean legacy-orphan skill directories without touching foreign agents."""
         return clean_orphaned_skills(
@@ -2049,6 +2090,7 @@ class SkillIntegrator(BaseIntegrator):
             installed_skill_names,
             project_root=project_root,
             get_lockfile_owned_agent_skills=self._get_lockfile_owned_agent_skills,
+            removed_paths=removed_paths,
         )
 
     @staticmethod

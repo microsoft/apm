@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import (
     GitCommit,
@@ -64,7 +64,11 @@ def _instruction(marker: str) -> str:
     return f"---\napplyTo: '**'\n---\n# {marker}\n"
 
 
-def _new_scenario(root: Path) -> _Scenario:
+def _new_scenario(
+    root: Path,
+    *,
+    mcp_dependencies: tuple[dict[str, object], ...] = (),
+) -> _Scenario:
     """Create two GitHub-shaped local repositories and one pinned consumer."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     environment = isolated.subprocess_env()
@@ -102,6 +106,7 @@ def _new_scenario(root: Path) -> _Scenario:
             {"git": released_url, "ref": released_old.sha, "alias": "released"},
             {"git": retained_url, "ref": retained.sha, "alias": "retained"},
         ),
+        mcp_dependencies=mcp_dependencies,
         targets=("claude",),
     )
     return _Scenario(
@@ -299,3 +304,137 @@ def test_update_malformed_tag_output_exits_before_writes(
     assert "No files changed" in output
     assert manifest.read_bytes() == manifest_before
     assert lock_path.read_bytes() == lock_before
+
+
+_LEGACY_GENERATED_AT = "2026-01-01T00:00:00+00:00"
+_MCP_SERVER = "revision-pin-local-server"
+_REPLACEMENT_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
+
+
+def _set_manifest(scenario: _Scenario, *, released_ref: str, replace: bool) -> None:
+    """Re-pin the released dependency and toggle one dormant replacement rule."""
+    manifest_path = scenario.consumer.manifest_path
+    manifest = load_yaml(manifest_path)
+    for entry in manifest["dependencies"]["apm"]:
+        if entry["alias"] == "released":
+            entry["ref"] = released_ref
+    if replace:
+        manifest["$schema"] = _REPLACEMENT_SCHEMA
+        manifest["replace"] = [
+            {
+                "for": {"git": "https://github.com/unused-replacement-fixture/base.git"},
+                "with": {"path": "../intentionally-absent"},
+            }
+        ]
+    else:
+        manifest.pop("replace", None)
+        manifest.pop("$schema", None)
+    dump_yaml(manifest, manifest_path)
+
+
+def _assert_unchanged_installs(
+    apm_binary_path: Path, scenario: _Scenario, lock_path: Path
+) -> bytes:
+    """Two consecutive unchanged installs must leave the lock bytes untouched."""
+    expected = lock_path.read_bytes()
+    for _ in range(2):
+        installed = _install(apm_binary_path, scenario)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        assert lock_path.read_bytes() == expected
+    return expected
+
+
+def _assert_lock_state(
+    lock_path: Path,
+    scenario: _Scenario,
+    *,
+    version: str,
+    released_commit: str,
+    released_tag: str | None,
+) -> dict:
+    """Check schema version, both pins and MCP ownership in the written lock."""
+    lock = load_yaml(lock_path)
+    assert lock["lockfile_version"] == version
+    by_commit = {entry["resolved_commit"]: entry for entry in lock["dependencies"]}
+    assert set(by_commit) == {released_commit, scenario.retained.sha}
+    assert by_commit[released_commit].get("resolved_tag") == released_tag
+    assert "resolved_tag" not in by_commit[scenario.retained.sha]
+    assert lock["mcp_servers"] == [_MCP_SERVER]
+    assert lock["mcp_target_servers"] == {"claude": [_MCP_SERVER]}
+    return lock
+
+
+def test_unchanged_install_keeps_revision_pin_tag_lock_bytes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A carried-forward resolved_tag must not churn a committed lock (#3433)."""
+    scenario = _new_scenario(
+        tmp_path / "no-churn",
+        mcp_dependencies=(
+            {
+                "name": _MCP_SERVER,
+                "registry": False,
+                "transport": "stdio",
+                "command": "python",
+                "args": ["-m", "revision_pin_server"],
+            },
+        ),
+    )
+    lock_path = scenario.consumer.root / "apm.lock.yaml"
+    installed = _install(apm_binary_path, scenario)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    applied = _run(apm_binary_path, scenario, "--yes")
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    _assert_lock_state(
+        lock_path,
+        scenario,
+        version="2",
+        released_commit=scenario.released_new.sha,
+        released_tag="v2.0.0",
+    )
+    # Model a lock committed by an older CLI that still recorded generated_at.
+    lock_text = lock_path.read_text(encoding="utf-8")
+    assert "generated_at" not in lock_text
+    lock_path.write_text(
+        lock_text.replace(
+            "lockfile_version: '2'\n",
+            f"lockfile_version: '2'\ngenerated_at: '{_LEGACY_GENERATED_AT}'\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    assert load_yaml(lock_path)["generated_at"] == _LEGACY_GENERATED_AT
+
+    _assert_unchanged_installs(apm_binary_path, scenario, lock_path)
+
+    _set_manifest(scenario, released_ref=scenario.released_new.sha, replace=True)
+    installed = _install(apm_binary_path, scenario)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    replaced = _assert_lock_state(
+        lock_path,
+        scenario,
+        version="3",
+        released_commit=scenario.released_new.sha,
+        released_tag="v2.0.0",
+    )
+    assert replaced["replacements"]
+    _assert_unchanged_installs(apm_binary_path, scenario, lock_path)
+
+    _set_manifest(scenario, released_ref=scenario.released_old.sha, replace=False)
+    before_ref_change = lock_path.read_bytes()
+    installed = _install(apm_binary_path, scenario)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert lock_path.read_bytes() != before_ref_change
+    repinned = _assert_lock_state(
+        lock_path,
+        scenario,
+        version="1",
+        released_commit=scenario.released_old.sha,
+        released_tag=None,
+    )
+    assert "replacements" not in repinned
+    assert repinned["generated_at"] != _LEGACY_GENERATED_AT
+    _assert_unchanged_installs(apm_binary_path, scenario, lock_path)

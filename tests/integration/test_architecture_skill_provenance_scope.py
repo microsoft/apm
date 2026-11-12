@@ -51,7 +51,7 @@ PIPELINE = "src/apm_cli/install/pipeline.py"
         ),
         (
             PIPELINE,
-            "        _run_integration_phase(ctx)",
+            "        materialization_session = _run_integration_phase(ctx)",
             "        pass",
             "snapshot lifetime must enclose only integration",
         ),

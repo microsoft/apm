@@ -490,6 +490,21 @@ def git_no_templates_args() -> tuple[str]:
     return ("--template=",)
 
 
+def git_autocrlf_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin against host CRLF conversion.
+
+    ``core.autocrlf`` snapshots frozen into ``GIT_CONFIG_KEY_n`` by
+    :func:`git_clone_env` (apm#2971) outrank repository-local config, so on a
+    host whose system gitconfig sets ``core.autocrlf=true`` a working-tree
+    clone rewrites LF-committed blobs as CRLF. A checkout that runs without
+    the snapshot then compares that CRLF worktree against the LF index and
+    refuses the switch with "local changes would be overwritten" (apm#3368).
+    ``-c`` outranks the snapshots, so clone and checkout agree and the
+    materialized bytes are the committed bytes.
+    """
+    return "-c", "core.autocrlf=false"
+
+
 class _GitProgress(Protocol):
     """Git progress callback consumed by the clone subprocess adapter."""
 
@@ -1395,6 +1410,7 @@ def clone_git_worktree(
     args = [
         get_git_executable(),
         *git_no_hooks_args(),
+        *git_autocrlf_pin_args(),
         "clone",
         *git_no_templates_args(),
     ]
@@ -1473,6 +1489,7 @@ def checkout_git_worktree(
         [
             get_git_executable(),
             *git_no_hooks_args(),
+            *git_autocrlf_pin_args(),
             "-C",
             str(worktree),
             "checkout",

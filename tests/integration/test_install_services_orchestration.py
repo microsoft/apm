@@ -9,6 +9,7 @@ import pytest
 from apm_cli.install import services
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import IntegrationResult
+from apm_cli.integration.skill_support import SkillIntegrationResult
 
 
 def make_package_info(install_path: Path) -> MagicMock:
@@ -101,13 +102,19 @@ def make_skill_result(
     sub_skills_promoted: int = 0,
     bin_deployed: int = 0,
     bin_skipped_reason: str | None = None,
-) -> SimpleNamespace:
-    return SimpleNamespace(
+    deployed_files: tuple[Path, ...] = (),
+) -> SkillIntegrationResult:
+    return SkillIntegrationResult(
         target_paths=target_paths or [],
         skill_created=skill_created,
+        skill_updated=False,
+        skill_skipped=False,
+        skill_path=None,
+        references_copied=0,
         sub_skills_promoted=sub_skills_promoted,
         bin_deployed=bin_deployed,
         bin_skipped_reason=bin_skipped_reason,
+        deployed_files=deployed_files,
     )
 
 
@@ -580,6 +587,10 @@ class TestIntegratePackagePrimitives:
 
     def test_deployed_files_include_skill_paths(self, tmp_path: Path) -> None:
         skill_path = tmp_path / ".claude" / "skills" / "demo" / "SKILL.md"
+        skill_result = make_skill_result(target_paths=[skill_path], skill_created=True)
+        assert isinstance(skill_result, SkillIntegrationResult)
+        assert skill_result.deployed_files == ()
+        assert skill_result.complete is False
 
         with patch(
             "apm_cli.install.services._deployed_path_entry",
@@ -588,21 +599,16 @@ class TestIntegratePackagePrimitives:
             result, _, _, _ = invoke_integrate(
                 tmp_path,
                 targets=[make_target(primitives={})],
-                skill_result=make_skill_result(
-                    target_paths=[skill_path],
-                    skill_created=True,
-                ),
+                skill_result=skill_result,
             )
 
         assert result["deployed_files"] == [".claude/skills/demo/SKILL.md"]
+        assert "completed_reintegration" not in result
 
     def test_deployed_files_expand_skill_dir_to_contained_files(self, tmp_path: Path) -> None:
-        # #1716 regression trap: a deployed skill DIRECTORY must also record
-        # its contained files so per-file content hashes
-        # (compute_deployed_hashes -> content-integrity) cover
-        # SKILL.md / assets / scripts. Without the expansion, skills are
-        # dir-only entries and skill content drift escapes the documented
-        # ``apm audit --ci --no-drift`` gate.
+        # #1716: record the producer's exact materialized members alongside the
+        # directory so per-file hashes cover skill content without adopting
+        # unreported files from the destination tree.
         skill_dir = tmp_path / ".agents" / "skills" / "demo"
         (skill_dir / "assets").mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# demo skill\n")
@@ -614,6 +620,7 @@ class TestIntegratePackagePrimitives:
             skill_result=make_skill_result(
                 target_paths=[skill_dir],
                 skill_created=True,
+                deployed_files=(skill_dir / "SKILL.md", skill_dir / "assets" / "schema.json"),
             ),
         )
 
@@ -624,6 +631,12 @@ class TestIntegratePackagePrimitives:
         # Per-file entries added -> content-integrity coverage.
         assert ".agents/skills/demo/SKILL.md" in df
         assert ".agents/skills/demo/assets/schema.json" in df
+        assert df == [
+            ".agents/skills/demo",
+            ".agents/skills/demo/SKILL.md",
+            ".agents/skills/demo/assets/schema.json",
+        ]
+        assert "completed_reintegration" not in result
 
     def test_two_target_paths_are_collapsed_on_one_line(self, tmp_path: Path) -> None:
         targets = [

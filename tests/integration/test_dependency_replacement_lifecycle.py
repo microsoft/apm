@@ -12,7 +12,7 @@ import pytest
 
 from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.models.dependency.replacement import parse_replace_block
+from apm_cli.models.dependency.replacement import parse_replace_block, replacement_rule_to_dict
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_unmanaged_skill_preflight_lifecycle import _native_bytes
 from tests.unit.copilot_plugins._builders import write_agent_plugin
@@ -137,6 +137,94 @@ def _replacement_fixture(tmp_path: Path, apm_binary_path: Path) -> ReplacementFi
         repositories,
         environment,
         ApmLifecycleRunner((str(apm_binary_path),)),
+    )
+
+
+def _assert_empty_graph_replacement_lifecycle(
+    tmp_path: Path, runner: ApmLifecycleRunner, keep_targets: bool
+) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "empty-graph", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    packages = LocalPackageFactory(isolated.package_root)
+    dependency = packages.create("local-skill")
+    packages.add_skill(
+        dependency, "demo", "---\nname: demo\ndescription: Fixture\n---\n\nFixture.\n"
+    )
+    consumers = LocalPackageFactory(isolated.work_root)
+    consumer = consumers.create(
+        "consumer", dependencies=({"path": str(dependency.root)},), targets=("claude", "codex")
+    )
+    manifest = load_yaml(consumer.manifest_path)
+    manifest.update({"$schema": _SCHEMA, "replace": []})
+    lock_path = consumer.root / "apm.lock.yaml"
+
+    def install(*flags: str, success: bool = True) -> CommandResult:
+        dump_yaml(manifest, consumer.manifest_path)
+        manifest_bytes = consumer.manifest_path.read_bytes()
+        result = runner.run(("install", "--no-policy", *flags), cwd=consumer.root, env=environment)
+        assert (result.returncode == 0) is success, result.stdout + result.stderr
+        assert consumer.manifest_path.read_bytes() == manifest_bytes
+        return result
+
+    install()
+    assert load_yaml(lock_path)["dependencies"]
+    unmanaged = consumer.root / ".agents/skills/user/SKILL.md"
+    unmanaged.parent.mkdir(parents=True)
+    unmanaged.write_bytes(b"Unmanaged content\n")
+    manifest["dependencies"] = {"apm": []}
+    install()
+    empty = load_yaml(lock_path)
+    assert empty["dependencies"] == []
+    assert empty["deployments"] == []
+    assert empty["replacements"] == []
+    if not keep_targets:
+        manifest.pop("targets", None)
+
+    rule = {
+        "for": {"git": "https://github.com/unused-replacement-fixture/base.git"},
+        "with": {"path": "../intentionally-absent"},
+    }
+    for table in ([rule], [], [rule], None):
+        if table is None:
+            manifest.pop("replace")
+        else:
+            manifest["replace"] = table
+        before = _snapshot(consumer.root)
+        install("--dry-run")
+        assert _snapshot(consumer.root) == before
+        refused = install("--frozen", success=False)
+        assert "replacement rules differ" in refused.stdout + refused.stderr
+        assert _snapshot(consumer.root) == before
+
+        updated = install()
+        assert "Updated apm.lock.yaml" in updated.stdout
+        assert "already up to date" not in updated.stdout
+        locked = load_yaml(lock_path)
+        expected = (
+            None
+            if table is None
+            else [replacement_rule_to_dict(parsed) for parsed in parse_replace_block(table)]
+        )
+        assert locked.get("replacements") == expected
+        assert locked["dependencies"] == []
+        assert locked["deployments"] == []
+        if table is not None:
+            assert locked["lockfile_version"] == "3"
+        assert unmanaged.read_bytes() == b"Unmanaged content\n"
+        assert not (consumer.root / "../intentionally-absent").exists()
+        stable = _snapshot(consumer.root)
+        unchanged = install()
+        assert "already up to date" in unchanged.stdout
+        install("--frozen")
+        assert _snapshot(consumer.root) == stable
+
+
+@pytest.mark.parametrize("keep_targets", [True, False], ids=["declared-targets", "no-target"])
+def test_empty_graph_persists_dormant_replacement_table(
+    tmp_path: Path, apm_binary_path: Path, keep_targets: bool
+) -> None:
+    _assert_empty_graph_replacement_lifecycle(
+        tmp_path, ApmLifecycleRunner((str(apm_binary_path),)), keep_targets
     )
 
 

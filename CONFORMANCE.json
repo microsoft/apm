@@ -16,9 +16,13 @@
       "keyword": "MUST",
       "section": "12.5",
       "status": "active",
-      "test_count": 6,
+      "test_count": 10,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_round_trip_clause_present_in_spec",
+        "tests/spec_conformance/test_round_trip.py::test_existing_install_manifest_round_trip_preserves_declared_metadata[pinned-shorthand-duplicate]",
+        "tests/spec_conformance/test_round_trip.py::test_existing_install_manifest_round_trip_preserves_declared_metadata[pinned-shorthand-single]",
+        "tests/spec_conformance/test_round_trip.py::test_existing_install_manifest_round_trip_preserves_declared_metadata[structured-metadata-duplicate]",
+        "tests/spec_conformance/test_round_trip.py::test_existing_install_manifest_round_trip_preserves_declared_metadata[structured-metadata-single]",
         "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[round-trip-unknown-fields.yml]",
         "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[v2-with-registry.yml]",
         "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[valid-extends.yml]",
@@ -151,12 +155,20 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 22,
+      "test_count": 32,
       "tests": [
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-http]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-stdio]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[True-http]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[True-stdio]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_admission_failure_cannot_promote_materialization_receipt[mcp-mismatch-absent-receipt]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_admission_failure_cannot_promote_materialization_receipt[mcp-mismatch-prior-receipt]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_admission_failure_cannot_promote_materialization_receipt[missing-lock-absent-receipt]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_admission_failure_cannot_promote_materialization_receipt[missing-lock-prior-receipt]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_receipt_write_never_rewrites_committed_lock[create-receipt-git-subdirectory]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_receipt_write_never_rewrites_committed_lock[create-receipt-local]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_receipt_write_never_rewrites_committed_lock[update-receipt-git-subdirectory]",
+        "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py::test_frozen_receipt_write_never_rewrites_committed_lock[update-receipt-local]",
         "tests/spec_conformance/test_frozen_service_lock_reqs.py::test_frozen_service_command_preserves_committed_lock_bytes[narrower]",
         "tests/spec_conformance/test_frozen_service_lock_reqs.py::test_frozen_service_command_preserves_committed_lock_bytes[recorded]",
         "tests/spec_conformance/test_frozen_service_lock_reqs.py::test_frozen_service_command_preserves_committed_lock_bytes[unrecorded]",
@@ -173,6 +185,8 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-user]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[missing-pin-project]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[missing-pin-user]",
+        "tests/spec_conformance/test_mcp_collision_lock_reqs.py::test_actual_write_receipt_respects_lock_write_suppression[frozen-context]",
+        "tests/spec_conformance/test_mcp_collision_lock_reqs.py::test_actual_write_receipt_respects_lock_write_suppression[ordinary]",
         "tests/spec_conformance/test_mcp_collision_lock_reqs.py::test_partial_mcp_conflict_persistence_respects_lock_write_suppression[frozen-context]",
         "tests/spec_conformance/test_mcp_collision_lock_reqs.py::test_partial_mcp_conflict_persistence_respects_lock_write_suppression[ordinary]"
       ]
@@ -995,6 +1009,21 @@
       ]
     },
     {
+      "conformance_class": "governance",
+      "id": "req-pl-021",
+      "keyword": "MUST",
+      "section": "6.1",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_served_from_stale_cache_counts_as_resolved",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_that_cannot_load_fails_closed[malformed]",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_that_cannot_load_fails_closed[missing-file]",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_that_cannot_load_fails_closed[unreachable]",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_under_operator_disable_is_disclosed"
+      ]
+    },
+    {
       "conformance_class": "consumer",
       "id": "req-pr-001",
       "keyword": "MUST",
@@ -1168,8 +1197,10 @@
       "keyword": "MUST",
       "section": "4.8.1",
       "status": "active",
-      "test_count": 3,
+      "test_count": 5,
       "tests": [
+        "tests/spec_conformance/test_source_replacement_lifecycle.py::test_empty_graph_replacement_intent_is_persisted[declared-targets]",
+        "tests/spec_conformance/test_source_replacement_lifecycle.py::test_empty_graph_replacement_intent_is_persisted[no-target]",
         "tests/spec_conformance/test_source_replacement_reqs.py::test_empty_and_dormant_tables_are_not_absent_or_implicitly_accepted",
         "tests/spec_conformance/test_source_replacement_reqs.py::test_selected_source_policy_and_original_ownership_survive_lock_replay[source0]",
         "tests/spec_conformance/test_source_replacement_reqs.py::test_selected_source_policy_and_original_ownership_survive_lock_replay[source1]"
@@ -1181,8 +1212,10 @@
       "keyword": "MUST",
       "section": "4.8.1",
       "status": "active",
-      "test_count": 4,
+      "test_count": 6,
       "tests": [
+        "tests/spec_conformance/test_source_replacement_lifecycle.py::test_empty_graph_replacement_intent_is_persisted[declared-targets]",
+        "tests/spec_conformance/test_source_replacement_lifecycle.py::test_empty_graph_replacement_intent_is_persisted[no-target]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[changed-source]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[missing-baseline]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[missing-source]",
@@ -1662,9 +1695,22 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 14,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_exact_bytes[---\\napplyTo: ['caf\\xe9/**']\\n---\\n\\nBody\\n----\\ntrigger: glob\\nglobs: \"caf\\\\u00e9/**\"\\n---\\n\\nBody\\n]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_exact_bytes[---\\napplyTo:\\n  - '*.py'\\n  - 'src/**'\\n---\\n\\n\\nBody\\n----\\ntrigger: glob\\nglobs: \"*.py, src/**\"\\n---\\n\\nBody\\n]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_exact_bytes[---\\ndescription: General\\n---\\n\\nBody\\n----\\ntrigger: always_on\\n---\\n\\nBody\\n]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: \"a\\\\\\\\,b, c\"\\n---\\n\\nBody\\n-expected7]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: '**/app/services/**, **/app/jobs/**'\\n---\\n\\nBody\\n-expected2]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: '*.py'\\n---\\n\\nBody\\n-expected0]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: ','\\n---\\n\\nBody\\n-expected4]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: 'a, a'\\n---\\n\\nBody\\n-expected9]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: 'a\\\\\\\\b'\\n---\\n\\nBody\\n-expected8]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: 'src/**/*.{ts,tsx}'\\n---\\n\\nBody\\n-expected6]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: []\\n---\\n\\nBody\\n-expected5]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo:\\n  - '**/app/services/**'\\n  - '**/app/jobs/**'\\n---\\n\\nBody\\n-expected1]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\ndescription: General development principles\\n---\\n\\nBody\\n-expected3]"
       ]
     },
     {
@@ -1828,7 +1874,7 @@
       "xfail": 0
     },
     "governance": {
-      "active": 20,
+      "active": 21,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1846,5 +1892,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 135
+  "total_requirements": 136
 }

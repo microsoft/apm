@@ -38,6 +38,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_mcp_ownership_migration,
     check_uninstall_reachability,
 )
+from scripts.architecture_linter.checks.install_lock_parent_placement import (
+    GUARD_LOCK_PARENT_PLACEMENT,
+    check_lock_parent_placement,
+)
 from scripts.architecture_linter.checks.install_lsp_plugin import (
     GUARD_EXECUTABLE_TRUST,
     GUARD_LSP_LIFECYCLE,
@@ -203,6 +207,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_UNINSTALL_REACHABILITY,
         "Post-uninstall dependency reachability routes through deps/reachability.py.",
         check_uninstall_reachability,
+    ),
+    _rule(
+        GUARD_LOCK_PARENT_PLACEMENT,
+        "Legacy lockfile parent placement routes through deps/lock_parent_placement.py.",
+        check_lock_parent_placement,
     ),
     _rule(
         _GUARD_AUDIT_REPLAY,

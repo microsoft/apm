@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -275,17 +276,19 @@ def test_selected_package_install_retains_unselected_service_evidence(
     scenario = _new_scenario(tmp_path / "selected-service-graph", apm_binary_path)
     selected = _publish(scenario, "selected", skill="selected-skill")
     service = _publish(scenario, "retained-service", mcp=True)
+    # Named installs validate this controlled Git route with real ls-remote.
+    selected_url = "https://git.example.invalid/apm-fixture-org/selected"
     scenario.environment.update(
         scenario.repositories.url_rewrite_subprocess_env_many(
             (
-                (selected.repository, selected.remote_url),
+                (selected.repository, selected_url),
                 (service.repository, service.remote_url),
             )
         )
     )
     project = scenario.consumers.create(
         "selected-consumer",
-        dependencies=(selected.dependency, service.dependency),
+        dependencies=({**selected.dependency, "git": selected_url}, service.dependency),
         targets=("copilot", "claude"),
     )
     _success(scenario, project, label="complete-graph-baseline")
@@ -294,12 +297,28 @@ def test_selected_package_install_retains_unselected_service_evidence(
     assert set(json.loads((project.root / ".github/mcp.json").read_bytes())["mcpServers"]) == {
         "fixture-mcp"
     }
+    trace = tmp_path / "selected-preflight.jsonl"
+    scenario.environment["GIT_TRACE2_EVENT"] = str(trace)
     _success(
         scenario,
         project,
-        f"apm-fixture-org/selected#{selected.commit.sha}",
+        f"{selected_url}#{selected.commit.sha}",
         label="selected-package-keeps-full-service-graph",
     )
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    probes = [
+        event["argv"]
+        for event in events
+        if event["event"] == "start" and "ls-remote" in event["argv"]
+    ]
+    assert probes, events
+    assert any(
+        urlparse(argument).hostname == "git.example.invalid"
+        and urlparse(argument).path.removesuffix(".git") == "/apm-fixture-org/selected"
+        for argv in probes
+        for argument in argv
+    )
+    scenario.environment.pop("GIT_TRACE2_EVENT")
     assert _native_bytes(scenario, project) == native
     assert {dep["resolved_commit"] for dep in load_yaml(lock)["dependencies"]} == {
         selected.commit.sha,

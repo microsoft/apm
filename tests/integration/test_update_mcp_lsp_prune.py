@@ -24,35 +24,17 @@ consent gate.
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from tests.utils.materialized_downloader import stub_materialized_downloader
 
 _OLD_SHA = "a" * 40
 _NEW_SHA = "b" * 40
-
-
-def _stub_downloader_for_lockfile(mock_dl_cls) -> None:
-    """Configure a patched ``GitHubPackageDownloader`` so the resolver
-    never touches the network and reports a commit change (``_NEW_SHA``)
-    against the pre-seeded lockfile's ``_OLD_SHA`` -- driving an "update"
-    plan entry so ``apm update --yes`` proceeds past the consent gate.
-    """
-    instance = mock_dl_cls.return_value
-    pkg_info = MagicMock()
-    pkg_info.resolved_reference.resolved_commit = _NEW_SHA
-    pkg_info.resolved_reference.ref_name = "main"
-    pkg_info.resolved_reference.is_branch = True
-    pkg_info.resolved_reference.is_tag = False
-    pkg_info.resolved_reference.is_sha = False
-    pkg_info.package_type.value = "apm_package"
-    pkg_info.package.name = "stub-package"
-    pkg_info.package.version = "0.0.0"
-    instance.download_package.return_value = pkg_info
 
 
 def _write_apm_yml(
@@ -138,8 +120,8 @@ class TestUpdatePrunesOrphanedMCPServers:
     def test_apm_update_prunes_orphaned_mcp_server(self, mock_dl_cls, project):
         """A manifest with no MCP deps must have previously-locked orphaned
         MCP servers pruned from ``apm.lock.yaml`` after ``apm update --yes``."""
-        _stub_downloader_for_lockfile(mock_dl_cls)
         apm_modules = project / "apm_modules"
+        stub_materialized_downloader(mock_dl_cls, apm_modules, commit=_NEW_SHA)
 
         # Root manifest depends on plain-pkg and declares no MCP servers
         # (simulating a dependency that has dropped its MCP server).
@@ -183,8 +165,8 @@ class TestUpdatePrunesOrphanedMCPServers:
     @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_apm_update_dry_run_does_not_touch_mcp_state(self, mock_dl_cls, project):
         """``apm update --dry-run`` must not mutate MCP lockfile state."""
-        _stub_downloader_for_lockfile(mock_dl_cls)
         apm_modules = project / "apm_modules"
+        stub_materialized_downloader(mock_dl_cls, apm_modules, commit=_NEW_SHA)
 
         _write_apm_yml(project / "apm.yml", deps=["acme/plain-pkg"])
         _make_pkg(apm_modules, "acme/plain-pkg")
@@ -226,8 +208,8 @@ class TestUpdateRunsLSPIntegration:
     def test_apm_update_writes_declared_lsp_server_to_lockfile(self, mock_dl_cls, project):
         """A manifest that declares an LSP server must have it recorded in
         ``apm.lock.yaml`` after ``apm update --yes``."""
-        _stub_downloader_for_lockfile(mock_dl_cls)
         apm_modules = project / "apm_modules"
+        stub_materialized_downloader(mock_dl_cls, apm_modules, commit=_NEW_SHA)
 
         _write_apm_yml(
             project / "apm.yml",

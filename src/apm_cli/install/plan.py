@@ -56,7 +56,7 @@ _ACTION_UNCHANGED = "unchanged"
 
 
 def lockfile_satisfies_replacements(
-    lockfile: LockFile,
+    lockfile: LockFile | None,
     rules: list[ReplacementRule] | None,
 ) -> tuple[bool, list[str]]:
     """Compare the complete root replacement intent without accessing sources."""
@@ -66,6 +66,10 @@ def lockfile_satisfies_replacements(
         replacement_rules_from_dicts,
     )
 
+    if lockfile is None:
+        return (
+            (True, []) if rules is None else (False, ["  - replacement declaration is not locked"])
+        )
     if rules is None and lockfile.replacements is None:
         return True, []
     if rules is None or lockfile.replacements is None:

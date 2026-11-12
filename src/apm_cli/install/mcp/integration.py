@@ -91,12 +91,16 @@ def run_owned_mcp_integration(
     verbose: bool = False,
 ) -> int:
     """Reconcile one bundle owner's MCP servers and persist ownership."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import MCPNativeConflictError
+    from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
 
     lockfile = LockFile.read(lock_path) or LockFile()
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+    old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
     owner_token = f"bundle:{owner}"
     old_owned = {
         name
@@ -115,7 +119,8 @@ def run_owned_mcp_integration(
             "Bundle MCP server name conflicts with another owner: " + ", ".join(sorted(conflicts))
         )
 
-    managed_targets = {target: set(names) for target, names in lockfile.mcp_target_servers.items()}
+    previous_targets = {target: set(names) for target, names in lockfile.mcp_target_servers.items()}
+    managed_targets = {target: names & old_owned for target, names in previous_targets.items()}
     count = 0
     conflict = None
     if dependencies:
@@ -130,15 +135,18 @@ def run_owned_mcp_integration(
                 explicit_target=target_runtimes,
                 logger=logger,
                 managed_target_servers=managed_targets,
+                native_hashes=native_hashes,
                 fail_on_write_error=True,
             )
         except MCPNativeConflictError as exc:
             if not exc.wrote_connections:
                 raise
             conflict = exc
+    selected_targets = set(managed_targets) if dependencies else set()
+    retain_deferred_mcp_claims(managed_targets, previous_targets, new_names)
     stale = old_owned - new_names
     for target, names in list(managed_targets.items()):
-        stale_for_target = stale & names
+        stale_for_target = (stale if target in selected_targets else old_owned) & names
         if stale_for_target and conflict is None:
             _OwnedMCPIntegrator.remove_stale(
                 stale_for_target,
@@ -148,6 +156,7 @@ def run_owned_mcp_integration(
                 scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
                 fail_on_write_error=True,
                 stored_configs=lockfile.mcp_configs,
+                native_hashes=old_native_hashes,
             )
             names.difference_update(stale_for_target)
 
@@ -158,11 +167,10 @@ def run_owned_mcp_integration(
     lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - retired) | new_names)
     lockfile.mcp_configs.update(_OwnedMCPIntegrator.get_server_configs(dependencies))
     lockfile.mcp_config_provenance.update(dict.fromkeys(new_names, owner_token))
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         {target: sorted(names) for target, names in managed_targets.items() if names},
+        native_hashes=native_hashes,
     )
     lockfile.write(lock_path)
     if conflict is not None:
@@ -261,10 +269,15 @@ def run_mcp_integration(  # noqa: PLR0913
             report the violation, and exit non-zero; already-installed APM
             packages are left in place.
     """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import MCPNativeConflictError
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.policy.install_preflight import run_policy_preflight
+
+    previous_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(previous_lock) if previous_lock else {}
+    old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
 
     prepared = prepared or prepare_mcp_integration(
         apm_package=apm_package,
@@ -362,6 +375,7 @@ def run_mcp_integration(  # noqa: PLR0913
                 diagnostics=diagnostics,
                 scope=scope,
                 managed_target_servers=managed_target_servers,
+                native_hashes=native_hashes,
             )
         except MCPNativeConflictError as exc:
             if not exc.wrote_connections:
@@ -372,18 +386,22 @@ def run_mcp_integration(  # noqa: PLR0913
         new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
 
         if conflict is not None:
+            from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
+
             # No cleanup has happened: retain prior declarations and retired targets.
+            retain_deferred_mcp_claims(
+                managed_target_servers, old_mcp_target_servers, new_mcp_servers
+            )
             new_mcp_servers |= old_mcp_servers
             new_mcp_configs = {**old_mcp_configs, **new_mcp_configs}
             new_mcp_provenance = {**old_mcp_provenance, **new_mcp_provenance}
-            for target, servers in old_mcp_target_servers.items():
-                managed_target_servers.setdefault(target, builtins.set(servers))
             MCPIntegrator.update_lockfile(
                 new_mcp_servers,
                 lock_path,
                 mcp_configs=new_mcp_configs,
                 mcp_target_servers=managed_target_servers,
                 mcp_config_provenance=new_mcp_provenance,
+                native_hashes=native_hashes,
                 logger=logger,
                 fail_on_write_error=True,
             )
@@ -400,6 +418,7 @@ def run_mcp_integration(  # noqa: PLR0913
                 scope=scope,
                 fail_on_write_error=True,
                 stored_configs=old_mcp_configs,
+                native_hashes=old_native_hashes,
             )
 
         # Remove stale MCP servers that are no longer needed
@@ -431,6 +450,7 @@ def run_mcp_integration(  # noqa: PLR0913
                     scope=scope,
                     fail_on_write_error=True,
                     stored_configs=old_mcp_configs,
+                    native_hashes=old_native_hashes,
                 )
 
         # Persist the new MCP server set, configs, and transitive provenance.
@@ -440,6 +460,7 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_configs=new_mcp_configs,
             mcp_target_servers=managed_target_servers,
             mcp_config_provenance=new_mcp_provenance,
+            native_hashes=native_hashes,
             logger=logger,
             fail_on_write_error=True,
         )
@@ -469,6 +490,7 @@ def run_mcp_integration(  # noqa: PLR0913
                     scope=scope,
                     fail_on_write_error=True,
                     stored_configs=old_mcp_configs,
+                    native_hashes=old_native_hashes,
                 )
             MCPIntegrator.update_lockfile(
                 builtins.set(),

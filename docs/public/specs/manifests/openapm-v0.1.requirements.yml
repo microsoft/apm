@@ -325,6 +325,10 @@ requirements:
     keyword: MUST
     section: "6.8.1"
     conformance_class: governance
+  - id: req-pl-021
+    keyword: MUST
+    section: "6.1"
+    conformance_class: governance
   - id: req-rs-001
     keyword: MUST
     section: "7.2"
