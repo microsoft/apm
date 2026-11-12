@@ -287,9 +287,12 @@ and plugin. Servers then install like `apm.yml`-declared self-defined servers.
 
 ## Resolve a connection name conflict
 
-For self-defined Claude and Codex connections, a normal package update or root
-override updates an unchanged managed connection. A differing native entry
-is preserved, the affected target is named, and install exits `1`.
+For every JSON-config target (VS Code, Copilot CLI, Cursor, Gemini, Kiro,
+OpenCode, Windsurf, Antigravity) and for Claude and Codex, a normal package
+update or root override updates an unchanged managed connection. A differing
+native entry is preserved, the affected target is named, and install exits
+`1`; it is never reported as "already configured". JetBrains and Hermes still
+skip an existing connection by name.
 Successful writes, including registry entries written before a later
 self-defined conflict, remain recorded. This is not a whole-command rollback.
 

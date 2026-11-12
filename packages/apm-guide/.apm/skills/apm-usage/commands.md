@@ -165,8 +165,9 @@ For Cursor credential repair, edit `.cursor/mcp.json` at project scope or
 `~/.cursor/mcp.json` with `--global`; replace only the affected values with
 native `${env:NAME}` references and preserve other fields and servers.
 
-Self-defined Claude/Codex MCP conflicts preserve differing native entries and
-exit `1`; successful writes, including earlier registry writes, stay managed.
+Same-name MCP conflicts on Claude, Codex and every JSON-config target (VS
+Code, Copilot CLI, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity)
+preserve differing native entries and exit `1`; successful writes, including earlier registry writes, stay managed.
 Registry conflicts do not skip nonconflicting self-defined updates. Full APM
 lockfile rebuilds, including `--only apm`, retain prior MCP write receipts.
 `--force` cannot take over a foreign connection; `--frozen` cannot certify it.

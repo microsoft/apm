@@ -218,7 +218,7 @@ def test_unowned_truncated_entry_is_left_with_names_only_guidance(project, runti
 
 
 def test_truncated_key_claimed_by_current_dependency_is_kept(project):
-    _seed_legacy_entry("copilot", project)
+    _seed_legacy_entry("copilot", project, _dep(LEGACY_KEY, "stdio"))
     managed = {"copilot": {REVERSE_DNS, LEGACY_KEY}}
     logger = MagicMock()
     deps = [_dep(REVERSE_DNS, "http"), _dep(LEGACY_KEY, "stdio")]
@@ -290,7 +290,9 @@ def test_native_config_key_follows_stored_self_defined_config(project, runtime):
     self_defined = _dep(REVERSE_DNS, "http").to_dict()
     assert _native_config_key(client, REVERSE_DNS, stored_config=self_defined) == REVERSE_DNS
     registry = {"name": REVERSE_DNS}
-    assert _native_config_key(client, REVERSE_DNS, stored_config=registry) == LEGACY_KEY
+    # VS Code writes every entry under its full reference (see LEGACY_RUNTIMES).
+    expected = REVERSE_DNS if runtime == "vscode" else LEGACY_KEY
+    assert _native_config_key(client, REVERSE_DNS, stored_config=registry) == expected
 
 
 @pytest.mark.parametrize("marker", [{"is_self_defined": True}, {"_raw_stdio": {"command": "x"}}])

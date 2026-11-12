@@ -55,6 +55,8 @@ class HermesClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = True
+    # Non-JSON or JetBrains-managed config: no native content comparison yet.
+    compares_native_connections: bool = False
     target_name: str = "hermes"
     mcp_servers_key: str = "mcp_servers"
 

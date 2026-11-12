@@ -61,6 +61,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
+    @staticmethod
+    def _determine_config_key(
+        server_url: str,
+        server_name: str | None,
+        server_info: dict | None = None,
+    ) -> str:
+        """VS Code keys every entry by its full declared reference, never a short name."""
+        return server_name or server_url
+
     def get_config_path(self, logger=None):
         """Get the path to the VSCode MCP configuration file in the repository.
 
@@ -183,7 +192,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
             # Use provided server name or fallback to server_url
-            config_key = server_name or server_url
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             # Get current config before formatting so optional registry fields
             # that the user already edited can be preserved on reinstall.

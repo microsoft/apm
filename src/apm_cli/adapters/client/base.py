@@ -295,6 +295,12 @@ class MCPClientAdapter(ABC):
     # (e.g. ``VSCodeClientAdapter``) that have no ``KNOWN_TARGETS`` entry.
     mcp_servers_key: str = ""
 
+    # Whether an existing native entry with the requested name is compared by
+    # content before writing, so a differing user connection is preserved and
+    # reported as a conflict instead of "already configured" (#3239, #3681).
+    # Consumed only through ``install.mcp.ownership.native_comparison_clients``.
+    compares_native_connections: bool = True
+
     @staticmethod
     def _merge_extra(config: dict, server_info: dict) -> dict:
         """Merge harness-specific ``_extra`` keys from server_info into config.
@@ -404,13 +410,18 @@ class MCPClientAdapter(ABC):
     def matches_legacy_managed_server_config(
         self, native: object, expected: dict, *, recorded_write: bool | None = None
     ) -> bool:
-        """Recognize a verified write from an older formatter; never a current match.
+        """Recognize an earlier APM write of a connection the lockfile claims.
 
         ``recorded_write`` is ``True`` or ``False`` when the lockfile holds a
         fingerprint of the earlier write that does or does not match *native*,
-        and ``None`` when no fingerprint was recorded.
+        and ``None`` when no fingerprint was recorded. The fingerprint is the
+        proof, even when the entry no longer renders identically (for example a
+        resolved env value that changed since). Without one, only an entry equal
+        to the current render is accepted.
         """
-        return False
+        if recorded_write is not None:
+            return recorded_write
+        return self.matches_managed_server_config(native, expected)
 
     def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
         """Extra target-specific guidance for a preserved conflicting entry."""

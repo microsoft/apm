@@ -23,6 +23,29 @@ class NativeMcpConnectionState(Enum):
     CONFLICT = "conflict"
 
 
+def native_comparison_clients(
+    target_runtimes: list[str], *, project_root: Any, user_scope: bool
+) -> dict[str, Any]:
+    """Return the adapters whose existing native entries are compared by content.
+
+    Single owner of which runtimes preserve and report a differing same-name
+    connection (#3239) rather than treating a name match as configured (#3681).
+    """
+    from apm_cli.factory import ClientFactory
+
+    clients = {}
+    for runtime in target_runtimes:
+        try:
+            client = ClientFactory.create_client(
+                runtime, project_root=project_root, user_scope=user_scope
+            )
+        except ValueError:
+            continue  # unsupported runtimes are reported by the install itself
+        if client.compares_native_connections:
+            clients[runtime] = client
+    return clients
+
+
 def mcp_native_hash(native: dict) -> str:
     """Fingerprint a written native entry without retaining its resolved secrets."""
     encoded = json.dumps(native, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -41,6 +64,36 @@ def _native_config_key(
     if info is None and isinstance(stored_config, dict) and stored_config.get("registry") is False:
         info = {"name": name, "is_self_defined": True}
     return client.determine_config_key(name, None, info)
+
+
+def written_native_hash(
+    client: Any,
+    name: str,
+    *,
+    requested_info: dict | None,
+    existing_configs: Mapping[str, Any] | None = None,
+) -> str | None:
+    """Fingerprint the entry *client* just wrote for *name*, read back from its config.
+
+    Adapters that fingerprint their own render (Claude, Codex) record it in
+    ``written_mcp_hashes``; every other adapter is fingerprinted from the same
+    native view :func:`compare_native_mcp_connection` reads later. Both hash
+    ``client.managed_server_config(native)``, so an adapter overriding it keeps
+    fingerprint and comparison consistent.
+    """
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+
+    if name in client.written_mcp_hashes:
+        return client.written_mcp_hashes[name]
+    existing = (
+        MCPConflictDetector(client).get_existing_server_configs()
+        if existing_configs is None
+        else existing_configs
+    )
+    native = existing.get(_native_config_key(client, name, requested_info=requested_info))
+    return (
+        mcp_native_hash(client.managed_server_config(native)) if isinstance(native, dict) else None
+    )
 
 
 def compare_native_mcp_connection(

@@ -271,10 +271,10 @@ def _install_registry_group(  # noqa: PLR0913
     number of servers newly configured or updated in this group.
     """
     # Lazy import: only available after MCPIntegrator finishes loading.
-    from apm_cli.factory import ClientFactory
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         compare_native_mcp_connection,
+        native_comparison_clients,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -283,11 +283,9 @@ def _install_registry_group(  # noqa: PLR0913
     native_conflicts: list[str] = []
     if written_connections is None:
         written_connections = set()
-    protected_clients = {
-        rt: ClientFactory.create_client(rt, project_root=project_root, user_scope=user_scope)
-        for rt in target_runtimes
-        if rt in {"claude", "codex"}
-    }
+    protected_clients = native_comparison_clients(
+        target_runtimes, project_root=project_root, user_scope=user_scope
+    )
     registry_server_cache: dict[str, dict] = prevalidated_servers or {}
 
     _announce_registry_endpoint(operations.registry_client, logger)
@@ -1295,6 +1293,7 @@ def _install_self_defined_deps(
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         compare_native_mcp_connection,
+        native_comparison_clients,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -1303,6 +1302,9 @@ def _install_self_defined_deps(
     native_conflicts: list[str] = []
     if written_connections is None:
         written_connections = set()
+    protected_clients = native_comparison_clients(
+        target_runtimes, project_root=project_root, user_scope=user_scope
+    )
     self_defined_names = [dep.name for dep in self_defined_deps]
     previously_owned = {
         rt: builtins.set(names) for rt, names in (managed_target_servers or {}).items()
@@ -1317,7 +1319,7 @@ def _install_self_defined_deps(
         project_root=project_root,
         user_scope=user_scope,
     )
-    if {"claude", "codex"}.intersection(target_runtimes):
+    if protected_clients:
         # Native content must be checked even when every requested name exists.
         self_defined_to_install = list(self_defined_names)
     already_configured_candidates_sd = [
@@ -1350,9 +1352,6 @@ def _install_self_defined_deps(
             for name in already_configured_self_defined:
                 logger.verbose_detail(f"{name} already configured, skipping")
 
-    from apm_cli.factory import ClientFactory
-
-    protected_clients = {}
     for dep in self_defined_deps:
         if dep.name not in self_defined_to_install:
             continue
@@ -1388,11 +1387,7 @@ def _install_self_defined_deps(
             replace_existing = is_update and (
                 managed_target_servers is None or dep.name in managed_target_servers.get(rt, set())
             )
-            if rt in {"claude", "codex"}:
-                if rt not in protected_clients:
-                    protected_clients[rt] = ClientFactory.create_client(
-                        rt, project_root=project_root, user_scope=user_scope
-                    )
+            if rt in protected_clients:
                 client = protected_clients[rt]
                 state = compare_native_mcp_connection(
                     client,
