@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Packages with in-repo symbolic links now record the same `content_hash` on Windows as on Linux and macOS, so `apm install --frozen` verifies a lockfile generated on another platform. APM pins `core.symlinks=true` on its own Git commands, re-creates older cached checkouts, and fails with a diagnostic naming the package when the host cannot create symlinks (on Windows, enable Developer Mode). (#3545)
 - `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write (after link rendering) and are claimed in `apm.lock.yaml`, and record receipts, instead of failing as in 0.35.0. Lockfile hashes are not trusted; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
+- `apm install -g` and `apm update -g` for Cursor now deploy package instructions as `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context, instead of silently skipping them; `apm uninstall -g` removes only package-owned rules and keeps your own. -- by @yahavi (#2506)
 
 ## [0.35.1] - 2026-11-11
 
