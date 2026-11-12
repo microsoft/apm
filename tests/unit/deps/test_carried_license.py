@@ -13,6 +13,7 @@ from apm_cli.deps.carried_license import (
     carried_license_paths,
     carry_licenses,
     is_license_file_name,
+    read_repository_license,
     records_from_lock_data,
     records_to_lock_data,
 )
@@ -266,3 +267,59 @@ def test_locked_dependency_round_trips_carried_licenses() -> None:
     assert restored.carried_licenses == (record,)
     assert "carried_licenses" not in restored._unknown_fields
     assert "carried_licenses" not in LockedDependency(repo_url="owner/repo").to_dict()
+
+
+def test_licence_named_directory_neither_counts_nor_gets_overwritten(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    _write(package / "LICENSE", MIT_TEXT)
+    _write(package / "skills" / "a" / "SKILL.md")
+    (package / "skills" / "a" / "NOTICE").mkdir()
+    _write(package / "skills" / "b" / "SKILL.md")
+    (package / "skills" / "b" / "LICENSE").mkdir()
+
+    records = carry_licenses(package)
+
+    assert (package / "skills" / "a" / "LICENSE").read_bytes() == MIT_TEXT
+    assert (package / "skills" / "b" / "LICENSE").is_dir()
+    assert [record.path for record in records] == ["skills/a/LICENSE"]
+
+
+def test_repository_licence_is_read_before_checkout_cleanup(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _write(repo / "COPYING", b"gpl\n")
+    _write(repo / "sub" / "SKILL.md")
+    licence = read_repository_license(repo, "sub")
+    target = tmp_path / "pkg"
+    _materialize_subdir(repo, "sub", target)
+    import shutil
+
+    shutil.rmtree(repo)
+
+    records = carry_licenses(target, repository_license=licence, package_subpath="sub")
+
+    assert (target / "COPYING").read_bytes() == b"gpl\n"
+    assert [(r.path, r.source) for r in records] == [("COPYING", "COPYING")]
+
+
+def test_package_owned_licence_means_nothing_to_read(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _write(repo / "LICENSE", MIT_TEXT)
+    _write(repo / "sub" / "NOTICE", b"own\n")
+
+    assert read_repository_license(repo, "sub") is None
+
+
+def test_licence_markdown_is_never_rendered_as_skill_markdown(tmp_path: Path) -> None:
+    from apm_cli.integration.skill_adoption import render_skill_markdown
+
+    source = _write(tmp_path / "src" / "LICENSE.md", b"Copyright \xa9 2026 [terms](./TERMS.md)\n")
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("licence files must not be link-rendered")
+
+    assert render_skill_markdown(
+        explode, source, tmp_path / "out" / "LICENSE.md", source.parent
+    ) == (
+        "",
+        0,
+    )

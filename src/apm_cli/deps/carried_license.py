@@ -39,10 +39,12 @@ from apm_cli.utils.path_security import (
 
 __all__ = [
     "CarriedLicense",
+    "RepositoryLicense",
     "carried_copies_intact",
     "carried_license_paths",
     "carry_licenses",
     "is_license_file_name",
+    "read_repository_license",
     "records_from_lock_data",
     "records_to_lock_data",
     "verify_locked_package",
@@ -107,11 +109,7 @@ def _licence_in(directory: Path) -> Path | None:
 
 
 def _has_licence(directory: Path) -> bool:
-    try:
-        names = os.listdir(directory)
-    except OSError:
-        return False
-    return any(is_license_file_name(name) for name in names)
+    return _licence_in(directory) is not None
 
 
 def _nearest_licence(start: Path, stop: Path) -> Path | None:
@@ -126,8 +124,12 @@ def _nearest_licence(start: Path, stop: Path) -> Path | None:
         current = current.parent
 
 
-def _copy_verbatim(source: Path, destination: Path) -> None:
-    destination.write_bytes(source.read_bytes())
+def _copy_verbatim(data: bytes, destination: Path) -> bool:
+    """Write *data* unless anything (file, directory or link) already sits there."""
+    if os.path.lexists(destination):
+        return False
+    destination.write_bytes(data)
+    return True
 
 
 def _skill_dirs(package_root: Path) -> list[Path]:
@@ -144,40 +146,75 @@ def _skill_dirs(package_root: Path) -> list[Path]:
     return found
 
 
+@dataclass(frozen=True)
+class RepositoryLicense:
+    """The nearest repository licence above a subdirectory package, read in memory."""
+
+    source: str
+    data: bytes
+
+
+def read_repository_license(
+    repository_root: Path, package_subpath: str
+) -> RepositoryLicense | None:
+    """Read the nearest licence from *package_subpath* up to the repository root.
+
+    Returns ``None`` when the package directory already holds a regular
+    licence file (it travels as package content) or none is in range. Read
+    before the checkout is discarded so the copy can be written after the
+    package is validated and normalized.
+    """
+    validate_path_segments(package_subpath, context="package path", reject_empty=True)
+    repository_root = Path(repository_root).resolve()
+    prefix = PurePosixPath(package_subpath.replace("\\", "/").strip("/"))
+    package_dir = repository_root.joinpath(*prefix.parts)
+    ensure_path_within(package_dir, repository_root)
+    if package_dir == repository_root or _has_licence(package_dir):
+        return None
+    found = _nearest_licence(package_dir.parent, repository_root)
+    if found is None:
+        return None
+    ensure_path_within(found, repository_root)
+    return RepositoryLicense(
+        source=found.relative_to(repository_root).as_posix(), data=found.read_bytes()
+    )
+
+
 def carry_licenses(
     package_root: Path,
     *,
     repository_root: Path | None = None,
     package_subpath: str = "",
+    repository_license: RepositoryLicense | None = None,
 ) -> tuple[CarriedLicense, ...]:
     """Copy the nearest licence into *package_root* and next to each skill in it.
 
-    *repository_root* is the checked-out repository the package was carved
-    from (subdirectory packages only; ``None`` for whole-repo packages, whose
-    root licence is already part of the package). Directories that already
-    hold a licence file keep it untouched. Returns the copies made, sorted by
-    path; an empty tuple means the package is materialized exactly as before.
+    Subdirectory packages pass the *repository_license* read with
+    :func:`read_repository_license` (or a still-present *repository_root*);
+    whole-repo packages pass neither, as their root licence is already
+    package content. Call this after validation so normalization never
+    duplicates an unrecorded copy. Directories that already hold a licence
+    file keep it untouched. Returns the copies made, sorted by path; an empty
+    tuple means the package is materialized exactly as before.
     """
     package_root = Path(package_root)
     prefix = PurePosixPath(package_subpath.replace("\\", "/").strip("/"))
     if package_subpath:
         validate_path_segments(package_subpath, context="package path", reject_empty=True)
+    if repository_license is None and repository_root is not None and package_subpath:
+        repository_license = read_repository_license(repository_root, package_subpath)
     carried: dict[str, CarriedLicense] = {}
 
-    if repository_root is not None and not _has_licence(package_root):
-        repository_root = repository_root.resolve()
-        package_dir = repository_root.joinpath(*prefix.parts)
-        ensure_path_within(package_dir, repository_root)
-        if package_dir != repository_root:
-            found = _nearest_licence(package_dir.parent, repository_root)
-            if found is not None:
-                ensure_path_within(found, repository_root)
-                _copy_verbatim(found, package_root / found.name)
-                carried[found.name] = CarriedLicense(
-                    path=found.name,
-                    source=found.relative_to(repository_root).as_posix(),
-                    hash=compute_file_hash(found),
-                )
+    if repository_license is not None and not _has_licence(package_root):
+        name = PurePosixPath(repository_license.source).name
+        if is_license_file_name(name) and _copy_verbatim(
+            repository_license.data, package_root / name
+        ):
+            carried[name] = CarriedLicense(
+                path=name,
+                source=repository_license.source,
+                hash=compute_file_hash(package_root / name),
+            )
 
     for skill_dir in _skill_dirs(package_root):
         if _has_licence(skill_dir):
@@ -187,7 +224,8 @@ def carry_licenses(
             continue
         ensure_path_within(found, package_root)
         destination = skill_dir / found.name
-        _copy_verbatim(found, destination)
+        if not _copy_verbatim(found.read_bytes(), destination):
+            continue
         found_rel = found.relative_to(package_root).as_posix()
         origin = carried.get(found_rel)
         rel = destination.relative_to(package_root).as_posix()

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.carried_license import is_license_file_name
 from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
@@ -28,6 +29,9 @@ _SUBDIR_REMOTE = "https://github.com/apm-fixture-org/licensed-skills.git"
 _WHOLE_REMOTE = "https://github.com/apm-fixture-org/licensed-bundle.git"
 _PLAIN_REMOTE = "https://github.com/apm-fixture-org/unlicensed-bundle.git"
 _SUBDIR = "skills/productivity/grilling"
+_PLUGIN = "plugins/tool"
+# A relative link a skill-markdown renderer would rewrite: must deploy byte-identical.
+_LICENSE_MD = b"Copyright \xc2\xa9 2026 Fixture. See [terms](./TERMS.md).\n"
 _MIT = b"MIT License\n\nCopyright (c) 2026 Fixture Author\n\nPermission is hereby granted.\n"
 _AUDIT_ARGS = ("audit", "--ci", "--no-policy", "--format", "json")
 
@@ -56,6 +60,24 @@ def _audit(runner: ApmLifecycleRunner, project: Path, env: dict[str, str]) -> di
     return json.loads(result.stdout)
 
 
+def _pre_feature_hash(package: Path) -> str:
+    """Hash the package as APM materialized it before #3556: no licence copies."""
+    tree = package.parent / f".pre-feature-{package.name}"
+    shutil.copytree(package, tree)
+    try:
+        for path in list(tree.rglob("*")):
+            if path.is_file() and (is_license_file_name(path.name) or path.name == ".apm-pin"):
+                path.unlink()
+        return compute_package_hash(tree)
+    finally:
+        shutil.rmtree(tree)
+
+
+def _assert_audit_passes(runner: ApmLifecycleRunner, project: Path, env: dict[str, str]) -> None:
+    payload = _audit(runner, project, env)
+    assert payload["passed"] is True, _failed_details(payload)
+
+
 def _failed_details(payload: dict) -> str:
     return json.dumps([check for check in payload["checks"] if not check["passed"]])
 
@@ -74,12 +96,19 @@ def _scenario(
     _skill(subdir_source / _SUBDIR, "grilling")
     (subdir_source / _SUBDIR / "agents").mkdir()
     (subdir_source / _SUBDIR / "agents" / "openai.yaml").write_text("x: 1\n", encoding="utf-8")
+    plugin = subdir_source / _PLUGIN
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "tool", "version": "1.0.0", "description": "Fixture"}),
+        encoding="utf-8",
+    )
+    _skill(plugin / "skills" / "helper", "helper")
     subdir_repo = repositories.create("licensed-skills", source_tree=subdir_source)
     subdir_pin = repositories.commit(subdir_repo, message="licensed monorepo")
 
     whole_source = isolated.package_root / "licensed-bundle"
     whole_source.mkdir(parents=True)
-    (whole_source / "LICENSE").write_bytes(_MIT)
+    (whole_source / "LICENSE.md").write_bytes(_LICENSE_MD)
     _skill(whole_source / "skills" / "alpha", "alpha")
     whole_repo = repositories.create("licensed-bundle", source_tree=whole_source)
     whole_pin = repositories.commit(whole_repo, message="licensed bundle")
@@ -107,6 +136,7 @@ def _scenario(
             "dependencies": {
                 "apm": [
                     {"git": _SUBDIR_REMOTE, "path": _SUBDIR, "ref": subdir_pin.sha},
+                    {"git": _SUBDIR_REMOTE, "path": _PLUGIN, "ref": subdir_pin.sha},
                     {"git": _WHOLE_REMOTE, "ref": whole_pin.sha},
                     {"git": _PLAIN_REMOTE, "ref": plain_pin.sha},
                 ]
@@ -133,7 +163,8 @@ def test_licence_is_carried_recorded_audited_and_uninstalled(
     assert (grilling_cache / "LICENSE").read_bytes() == _MIT
     assert (deployed_grilling / "LICENSE").read_bytes() == _MIT
     assert (deployed_grilling / "SKILL.md").is_file()
-    assert (deployed_alpha / "LICENSE").read_bytes() == _MIT
+    assert (deployed_alpha / "LICENSE.md").read_bytes() == _LICENSE_MD
+    assert (project / ".agents" / "skills" / "helper" / "LICENSE").read_bytes() == _MIT
     assert (deployed_beta / "SKILL.md").is_file()
     assert not (deployed_beta / "LICENSE").exists()
 
@@ -145,17 +176,23 @@ def test_licence_is_carried_recorded_audited_and_uninstalled(
     ]
     assert ".agents/skills/grilling/LICENSE" in subdir_entry["deployed_files"]
     # content_hash keeps its pre-#3556 value, so older APM clients still verify.
-    legacy_tree = project.parent / "legacy-grilling"
-    shutil.copytree(grilling_cache, legacy_tree)
-    (legacy_tree / "LICENSE").unlink()
-    (legacy_tree / ".apm-pin").unlink(missing_ok=True)
-    assert subdir_entry["content_hash"] == compute_package_hash(legacy_tree)
+    assert subdir_entry["content_hash"] == _pre_feature_hash(grilling_cache)
     whole_entry = next(
         entry for key, entry in entries.items() if "licensed-bundle" in key[0] and not key[1]
     )
+    whole_cache = next(p for p in (project / "apm_modules").rglob("licensed-bundle") if p.is_dir())
     assert whole_entry["carried_licenses"] == [
-        {"path": "skills/alpha/LICENSE", "source": "LICENSE", "hash": licence_hash}
+        {
+            "path": "skills/alpha/LICENSE.md",
+            "source": "LICENSE.md",
+            "hash": compute_file_hash(whole_cache / "LICENSE.md"),
+        }
     ]
+    plugin_entry = next(entry for key, entry in entries.items() if key[1] == _PLUGIN)
+    assert {record["source"] for record in plugin_entry["carried_licenses"]} == {"LICENSE"}
+    # Plugin normalization must not duplicate an unrecorded licence copy.
+    plugin_cache = next(p for p in (project / "apm_modules").rglob("tool") if p.is_dir())
+    assert plugin_entry["content_hash"] == _pre_feature_hash(plugin_cache)
     plain_entry = next(entry for key, entry in entries.items() if "unlicensed" in key[0])
     assert "carried_licenses" not in plain_entry
 
@@ -171,7 +208,7 @@ def test_licence_is_carried_recorded_audited_and_uninstalled(
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
     assert (grilling_cache / "LICENSE").read_bytes() == _MIT
 
-    assert _audit(runner, project, env)["passed"] is True
+    _assert_audit_passes(runner, project, env)
 
     # A pre-#3556 lockfile (no carried_licenses) keeps verifying: the carried
     # copy is excluded from content_hash, so a cold install re-records it.
@@ -195,7 +232,7 @@ def test_licence_is_carried_recorded_audited_and_uninstalled(
     assert "Licence file mismatch" in " ".join((rejected.stdout + rejected.stderr).split())
     (project / "apm.lock.yaml").write_bytes(lock_bytes)
     _ok(runner.run(install, cwd=project, env=env))
-    assert _audit(runner, project, env)["passed"] is True
+    _assert_audit_passes(runner, project, env)
 
     (deployed_grilling / "LICENSE").write_bytes(_MIT + b"edited\n")
     modified = _audit(runner, project, env)
@@ -217,4 +254,4 @@ def test_licence_is_carried_recorded_audited_and_uninstalled(
     )
     assert not deployed_grilling.exists()
     assert not grilling_cache.exists()
-    assert (deployed_alpha / "LICENSE").read_bytes() == _MIT
+    assert (deployed_alpha / "LICENSE.md").read_bytes() == _LICENSE_MD

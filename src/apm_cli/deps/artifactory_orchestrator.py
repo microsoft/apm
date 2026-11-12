@@ -43,7 +43,7 @@ from ..models.apm_package import (
 )
 from ..models.dependency.host_virtual import repository_owner_and_repo, repository_path_segments
 from ..utils.github_host import default_host, is_full_commit_sha, is_github_hostname
-from .carried_license import carry_licenses
+from .carried_license import carry_licenses, read_repository_license
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -302,9 +302,7 @@ class ArtifactoryOrchestrator:
                     robust_copytree(src, dst)
                 else:
                     robust_copy2(src, dst)
-            carried = carry_licenses(
-                target_path, repository_root=temp_path, package_subpath=subdir_path
-            )
+            repository_license = read_repository_license(temp_path, subdir_path)
 
         self._progress(progress_obj, progress_task_id, completed=80)
         from ._shared import _validate_and_load_package
@@ -327,5 +325,7 @@ class ArtifactoryOrchestrator:
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,
             package_type=validation_result.package_type,
-            carried_licenses=carried,
+            carried_licenses=carry_licenses(
+                target_path, repository_license=repository_license, package_subpath=subdir_path
+            ),
         )

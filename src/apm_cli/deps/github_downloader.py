@@ -56,7 +56,7 @@ from .bare_cache import (
     fetch_sha_into_bare,
     materialize_from_bare,
 )
-from .carried_license import carry_licenses
+from .carried_license import carry_licenses, read_repository_license
 from .download_strategies import DownloadDelegate
 from .git_remote_ops import (
     parse_ls_remote_output,
@@ -1642,11 +1642,9 @@ class GitHubPackageDownloader:
                     robust_copytree(src, dst)
                 else:
                     robust_copy2(src, dst)
-            # Sparse cones keep ancestor-directory files, so the repository
-            # licence is still readable here (#3556).
-            carried = carry_licenses(
-                target_path, repository_root=temp_clone_path, package_subpath=subdir_path
-            )
+            # Sparse cones keep ancestor-directory files, so read the repository
+            # licence before cleanup; it is written after validation (#3556).
+            repository_license = read_repository_license(temp_clone_path, subdir_path)
 
             # Capture commit SHA; close the Repo object immediately so its file
             # handles are released before _rmtree() runs in the finally block.
@@ -1728,7 +1726,9 @@ class GitHubPackageDownloader:
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,
             package_type=validation_result.package_type,
-            carried_licenses=carried,
+            carried_licenses=carry_licenses(
+                target_path, repository_license=repository_license, package_subpath=subdir_path
+            ),
         )
 
     def _download_subdirectory_from_artifactory(
