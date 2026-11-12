@@ -801,6 +801,33 @@ class TestLocalBundlePathRouting:
         if original_path != expected:
             assert not original_path.exists()
 
+    @pytest.mark.parametrize("rel", ["hooks.json", "hooks/scripts/fmt.sh", "hooks/fmt.json"])
+    def test_plugin_hook_paths_are_skipped_with_a_named_warning(self, rel: str) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        for target in (KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]):
+            prefixes = frozenset({f"{target.root_dir}/"})
+            assert bundle_deploy_relative_path(rel, prefixes, prefixes, target=target) is None
+            warning = bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target)
+            assert warning is not None
+            assert f"Skipped packed bundle hook file {rel!r}" in warning
+
+    def test_target_rooted_hook_files_keep_routing(self) -> None:
+        """Deployed-layout bundles keep their target hook files (not plugin hooks)."""
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        assert (
+            bundle_deploy_relative_path(".github/hooks/pkg.json", prefixes, prefixes, target=target)
+            == "hooks/pkg.json"
+        )
+
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
         from apm_cli.utils.path_security import PathTraversalError

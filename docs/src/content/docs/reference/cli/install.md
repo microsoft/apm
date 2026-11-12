@@ -405,7 +405,9 @@ apm install ./my-bundle --target opencode
 
 :::note[Claude bundles only]
 This imperative route deploys Claude plugin bundles (the default `apm pack`
-output). A portable Agent Plugins v1 package installs declaratively instead:
+output). It does not register plugin hooks yet: the bundle's `hooks.json` and
+`hooks/` files are skipped with one warning per file. Install the package from
+source to deploy its hooks. A portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
 whole and registers it without locating or executing Copilot. Stable Copilot
 CLI 1.0.81 or newer is required when loading the projection. See

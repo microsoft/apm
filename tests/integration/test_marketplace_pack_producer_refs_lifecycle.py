@@ -148,3 +148,72 @@ def test_pack_carries_relative_hook_script_like_install(
     assert command == "./hooks/scripts/fmt.sh --check", command
     bundle_files = load_yaml(bundle / "apm.lock.yaml")["pack"]["bundle_files"]
     assert "hooks/scripts/fmt.sh" in bundle_files
+
+
+def _linked_producer(world: MarketplacePackWorld) -> Path:
+    """A producer with own-source symlinks and a plugin hook with a script."""
+    root = world.isolated.work_root / "linked"
+    write(
+        root / "apm.yml",
+        "name: linked\nversion: 1.0.0\ndescription: l\nlicense: MIT\ntargets: [claude]\n"
+        "dependencies:\n  apm: []\n",
+    )
+    skill = root / ".apm" / "skills" / "ls"
+    write(skill / "SKILL.md", skill_md("ls"))
+    write(skill / "real.md", "real\n")
+    write(root / "docs" / "guide.md", "guide\n")
+    (skill / "alias.md").symlink_to("real.md")
+    (skill / "guide.md").symlink_to("../../../docs/guide.md")
+    hook = {
+        "hooks": {
+            "PostToolUse": [
+                {"matcher": "Write", "hooks": [{"type": "command", "command": "./scripts/fmt.sh"}]}
+            ]
+        }
+    }
+    write(root / ".apm" / "hooks" / "fmt.json", json.dumps(hook))
+    write(root / ".apm" / "hooks" / "scripts" / "fmt.sh", "#!/bin/sh\necho fmt\n")
+    (root / ".claude").mkdir()
+    return root
+
+
+def test_pack_names_each_dropped_source_symlink(tmp_path: Path, apm_binary_path: Path) -> None:
+    """Own-source links are not followed (Atlas 2026-10-19/20) but never dropped silently."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    root = _linked_producer(world)
+    world.apm(root, "install", "--no-policy")
+    result = world.apm(root, "pack", "-o", str(tmp_path / "out"))
+    text = output(result)
+    for link in (".apm/skills/ls/alias.md", ".apm/skills/ls/guide.md"):
+        assert f"Skipped symlinked source file {link}" in text, text
+    bundle = tmp_path / "out" / "linked-1.0.0"
+    assert (bundle / "skills" / "ls" / "real.md").is_file()
+    assert not (bundle / "skills" / "ls" / "alias.md").exists()
+    assert not (bundle / "skills" / "ls" / "guide.md").exists()
+    assert "Skipped symlinked source file .apm/skills/ls/real.md" not in text
+
+
+def test_bundle_install_skips_plugin_hooks_with_a_named_warning(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Local bundle installs never copy hooks.json raw or rename scripts to *.json."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    root = _linked_producer(world)
+    world.apm(root, "install", "--no-policy")
+    world.apm(root, "pack", "-o", str(tmp_path / "out"))
+    bundle = tmp_path / "out" / "linked-1.0.0"
+    assert (bundle / "hooks.json").is_file()
+    assert (bundle / "hooks" / "scripts" / "fmt.sh").is_file()
+
+    consumer = world.consumer("bundle-hooks-consumer", targets=("claude",))
+    result = world.apm(consumer, "install", str(bundle), "--no-policy")
+    text = output(result)
+    for skipped in ("hooks.json", "hooks/scripts/fmt.sh"):
+        assert f"Skipped packed bundle hook file '{skipped}'" in text, text
+    assert not (consumer / ".claude" / "hooks.json").exists()
+    assert list(consumer.rglob("*.sh.json")) == []
+    assert not (consumer / ".claude" / "hooks").exists()
+    assert (consumer / ".claude" / "skills" / "ls" / "SKILL.md").is_file()
+    lock_text = (consumer / "apm.lock.yaml").read_text()
+    assert "hooks" not in lock_text
+    world.apm(consumer, "audit", "--ci", "--no-policy")

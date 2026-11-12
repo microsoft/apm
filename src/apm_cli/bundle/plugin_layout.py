@@ -19,6 +19,8 @@ class PluginDirSpec:
     apm_basename_fn: Callable[[str], str]
 
 
+PLUGIN_HOOKS_CONFIG = "hooks.json"
+
 PLUGIN_ROOT_DIRS = (
     "agents",
     "skills",
@@ -36,8 +38,8 @@ def find_plugin_root_sources(project_root: Path) -> list[str]:
         for name in PLUGIN_ROOT_DIRS
         if (project_root / name).is_dir() and not (project_root / name).is_symlink()
     ]
-    if (project_root / "hooks.json").is_file():
-        sources.append("hooks.json")
+    if (project_root / PLUGIN_HOOKS_CONFIG).is_file():
+        sources.append(PLUGIN_HOOKS_CONFIG)
     return sources
 
 

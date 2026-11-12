@@ -124,7 +124,12 @@ files and directories, including `.apm/agents -> ../agents`.
 directories under `.apm/agents/` or real `*.agent.md` files at root, then
 rerun `apm install`. Local-path dependencies (`./...` or `../...`) still work:
 contained symlinks are validated and copied as real files into
-`apm_modules/` before agent discovery.
+`apm_modules/` before agent discovery. `apm pack` likewise does not follow
+symlinked source files and names each skipped link in a warning.
+
+`apm install <bundle>` (a packed Claude plugin bundle) does not register
+plugin hooks yet: `hooks.json` and `hooks/` files are skipped with one
+warning per file. Install the package from source to deploy its hooks.
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between

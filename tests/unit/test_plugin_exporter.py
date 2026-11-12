@@ -358,6 +358,26 @@ class TestCollectApmComponents:
         assert "agents/link.agent.md" not in rels
         assert "agents/real.agent.md" in rels
 
+    def test_reports_skipped_symlinked_files(self, tmp_path):
+        """Dropped links are reported so pack can name them; real files are not."""
+        apm = _make_apm_dir(tmp_path, agents=["real.agent.md"])
+        skill = apm / "skills" / "s"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x")
+        try:
+            os.symlink(apm / "agents" / "real.agent.md", apm / "agents" / "link.agent.md")
+            os.symlink("SKILL.md", skill / "alias.md")
+            os.symlink("missing.md", skill / "broken.md")
+        except OSError:
+            pytest.skip("symlinks not supported")
+        skipped: list[Path] = []
+        _collect_apm_components(tmp_path / ".apm", skipped_links=skipped)
+        assert sorted(p.relative_to(apm).as_posix() for p in skipped) == [
+            "agents/link.agent.md",
+            "skills/s/alias.md",
+            "skills/s/broken.md",
+        ]
+
 
 class TestCollectRootPluginComponents:
     def test_root_agents(self, tmp_path):
