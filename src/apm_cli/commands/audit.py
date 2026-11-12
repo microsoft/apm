@@ -1254,7 +1254,8 @@ def _audit_content_scan(
 
 
 @click.command(
-    help="Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations"
+    help="Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
+    short_help="Scan for hidden Unicode, drift, and policy violations",
 )
 @click.argument("package", required=False)
 @click.option(

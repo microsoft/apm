@@ -542,6 +542,7 @@ def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
 @click.command(
     name="export-patch",
     help="Export local edits to APM-managed files as patches against their source packages",
+    short_help="Export local edits as patches to source packages",
 )
 @click.option(
     "--out",
