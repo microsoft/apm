@@ -160,6 +160,12 @@ def _check_native_claude_transition(
         )
 
 
+def _queue_native_claude(ctx: InstallContext | None, package_name: str, plugin: Any) -> None:
+    """Hand an admitted Claude plugin to the native registration phase."""
+    if plugin is not None and ctx is not None:
+        ctx.claude_native_plugins[package_name] = plugin
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -425,8 +431,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             [target for target in targets if target.name in native_target_names],
         )
         if not projection_targets:
-            if ctx is not None:
-                ctx.claude_native_plugins[package_name] = native_claude_plugin
+            _queue_native_claude(ctx, package_name, native_claude_plugin)
             return result
 
     if codex_native is not None:
@@ -678,8 +683,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
-    if native_claude_plugin is not None and ctx is not None:
-        ctx.claude_native_plugins[package_name] = native_claude_plugin
+    _queue_native_claude(ctx, package_name, native_claude_plugin)
     return result
 
 

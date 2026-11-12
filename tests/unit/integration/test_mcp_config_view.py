@@ -653,9 +653,10 @@ def test_removed_local_and_remote_declarations_are_lock_only(tmp_path: Path) -> 
 
 @pytest.mark.parametrize("strict", [None, False])
 @pytest.mark.parametrize("shape", ["hooks", "mcp", "invalid", "wrong-lock-type"])
-def test_local_claude_source_is_read_without_manifest_waiver_or_mutation(
+def test_local_claude_source_is_never_mutated_or_waived_during_mcp_inspection(
     tmp_path: Path, strict: bool | None, shape: str
 ) -> None:
+    """Without the install-synthesized manifest, MCP stays uncollected and the source untouched."""
     root = _write_manifest(tmp_path, name="consumer")
     source = tmp_path / "publisher"
     manifest = source / ".claude-plugin/plugin.json"
@@ -681,8 +682,8 @@ def test_local_claude_source_is_read_without_manifest_waiver_or_mutation(
         trust_transitive_self_defined=True,
         allow_pending=strict,
     )
-    assert bool(view.problems) is (shape in {"invalid", "wrong-lock-type"})
-    assert set(view.configs) == ({"owned-server"} if shape == "mcp" else set())
+    assert view.problems
+    assert view.configs == {}
     assert_unchanged(before, ArtifactSnapshot.capture(source))
     assert not (source / "apm.yml").exists()
     assert not (source / ".apm").exists()

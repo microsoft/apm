@@ -77,7 +77,7 @@ def _persist_uninstall_lockfile(
     logger: CommandLogger,
     integration_cleanup: IntegrationCleanupOutcome,
     *,
-    defer_empty_removal: bool = False,
+    defer_empty_removal: bool = True,
 ) -> bool:
     """Bind actual survivor writes only after final lock persistence succeeds.
 
@@ -109,6 +109,29 @@ def _persist_uninstall_lockfile(
         if integration_cleanup.materialization_session is not None:
             integration_cleanup.materialization_session.bind_committed_claims(lockfile)
     return removal_pending
+
+
+def _persist_lock_then_resync_native(
+    *,
+    persist: bool,
+    lockfile,
+    lockfile_path,
+    logger: CommandLogger,
+    integration_cleanup: IntegrationCleanupOutcome,
+    **resync,
+) -> None:
+    """Persist survivors, converge native registrations, then drop an empty lock.
+
+    An empty last-package lock stays on disk until Claude native cleanup
+    converges, so an interrupted removal can retry from authoritative survivors.
+    """
+    if not persist:
+        _resync_native_registration_after_uninstall(lockfile=lockfile, logger=logger, **resync)
+        return
+    empty = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    _resync_native_registration_after_uninstall(lockfile=lockfile, logger=logger, **resync)
+    if empty:
+        lockfile_path.unlink(missing_ok=True)
 
 
 def _sync_integrations_for_manifest(
@@ -389,6 +412,7 @@ def _finish_selected_profile_uninstall(
             lockfile_path,
             logger,
             IntegrationCleanupOutcome(counts={}, deployed_files={}, failed_paths=[], error_count=0),
+            defer_empty_removal=False,
         )
     logger.success(
         f"Uninstall complete: removed {retained_count} package(s) from the selected profile only"
@@ -893,32 +917,23 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         lockfile_updated = lsp_lock_updated or lockfile_updated
 
-        remove_empty_lockfile = False
-        if (
-            lockfile
-            and (lockfile_updated or profile_lock_updated)
-            and lockfile_ready
-            and mcp_cleanup_error is None
-        ):
-            remove_empty_lockfile = _persist_uninstall_lockfile(
-                lockfile,
-                lockfile_path,
-                logger,
-                integration_cleanup,
-                defer_empty_removal=True,
-            )
-
-        # Rebuild the APM-owned Copilot plugin registration from the surviving
-        # locked state: only APM's own rows disappear, user bytes never do.
-        _resync_native_registration_after_uninstall(
+        # Persist survivors, then rebuild APM-owned native plugin registrations
+        # from that locked state: only APM's own rows disappear, user bytes never do.
+        _persist_lock_then_resync_native(
+            persist=bool(
+                lockfile
+                and (lockfile_updated or profile_lock_updated)
+                and lockfile_ready
+                and mcp_cleanup_error is None
+            ),
+            lockfile=lockfile,
+            lockfile_path=lockfile_path,
+            logger=logger,
+            integration_cleanup=integration_cleanup,
             deploy_root=deploy_root,
             modules_dir=modules_dir,
             scope=scope,
-            lockfile=lockfile,
-            logger=logger,
         )
-        if remove_empty_lockfile:
-            lockfile_path.unlink(missing_ok=True)
 
         # Final summary
         summary_lines = [
