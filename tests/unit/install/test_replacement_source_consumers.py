@@ -222,7 +222,9 @@ def test_replacement_uninstall_bounds_unique_unverifiable_manifest_names(
     )
     lock = LockFile(replacements=[])
     with (
-        patch("apm_cli.commands.uninstall.engine._read_survivor_direct_refs", return_value=[]),
+        patch(
+            "apm_cli.commands.uninstall.engine._read_survivor_direct_refs", return_value=([], [])
+        ),
         patch(
             "apm_cli.deps.reachability.compute_forward_reachable_keys",
             return_value=reachability,

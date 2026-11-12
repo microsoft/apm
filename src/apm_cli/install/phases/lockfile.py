@@ -708,8 +708,8 @@ class LockfileBuilder:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail("apm.lock.yaml unchanged -- skipping write")
         else:
-            lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
-            if self.ctx.logger:
+            persisted = lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
+            if persisted and self.ctx.logger:
                 self.ctx.logger.record_lockfile_write()
                 self.ctx.logger.verbose_detail(
                     f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies"
