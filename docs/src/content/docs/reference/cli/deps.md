@@ -17,7 +17,7 @@ apm deps SUBCOMMAND [OPTIONS]
 
 `apm deps` is the read-and-maintenance counterpart to [`apm install`](../install/). It reads `apm.lock.yaml` and the `apm_modules/` tree to show what is installed, refresh git refs, or remove the tree entirely. It does not add new packages -- use `apm install <package>` for that.
 
-All subcommands operate on the project scope (`./apm_modules/`) by default. Pass `-g` / `--global` where supported to operate on `$APM_HOME/apm_modules/` (default `~/.apm/apm_modules/`). `APM_HOME` changes dependency metadata paths, not target deployment destinations.
+All subcommands operate on the project scope (`./apm_modules/`) by default. Pass `-g` / `--global` where supported to operate on `$APM_HOME/apm_modules/` (default `~/.apm/apm_modules/`). Target files do not move; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract).
 
 ## Subcommands
 

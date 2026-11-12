@@ -3,8 +3,8 @@
 Merges registry name->URL maps from (highest to lowest precedence):
   1. apm-policy.yml  (policy-level mandates)
   2. project apm.yml (already parsed by APMPackage.registries)
-  3. workspace ~/.apm/apm.yml
-  4. ~/.apm/config.json
+  3. user workspace $APM_HOME/apm.yml (default ~/.apm/apm.yml)
+  4. $APM_HOME/config.json (default ~/.apm/config.json)
 
 Only the URL is merged here; token resolution stays in auth.py.
 The first (highest-precedence) definition of a name wins.
@@ -44,7 +44,7 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
 
 
 def _load_config_json_registries(*, create_config: bool = False) -> dict[str, str]:
-    """Return {name: url} from ~/.apm/config.json.
+    """Return {name: url} from $APM_HOME/config.json.
 
     Silently returns an empty dict on any parse error (oversize, deep-nest
     ``RecursionError``, >4300-digit-int ``ValueError``) so a broken or hostile
@@ -113,7 +113,7 @@ def resolve_effective_registries(
 
     Default precedence (highest wins):
       1. ``registries.default`` from project ``apm.yml``
-      2. ``default: true`` on a registry entry in ``~/.apm/config.json``
+      2. ``default: true`` on a registry entry in ``$APM_HOME/config.json``
 
     Returns ``(merged_map, default_name)``. *merged_map* is ``None`` when no
     registry URLs are configured at any layer.

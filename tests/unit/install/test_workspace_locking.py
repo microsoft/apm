@@ -1,6 +1,8 @@
 """Unit contracts for workspace lifecycle serialization."""
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ from apm_cli.cli import cli
 from apm_cli.install.locking import (
     LifecycleBusyError,
     acquire_lifecycle_lock,
+    deployment_root_lock,
     lifecycle_lock,
 )
 
@@ -74,6 +77,29 @@ def test_lifecycle_lock_rejects_symlink_without_touching_target(
     assert (lock_dir / ".apm-lifecycle.lock").is_symlink()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
+def test_deployment_root_lock_rejects_symlink_without_touching_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    lock_dir = home / ".apm-local"
+    lock_dir.mkdir(parents=True)
+    victim = tmp_path / "victim"
+    original = b"preserve me"
+    victim.write_bytes(original)
+    (lock_dir / ".apm-lifecycle.lock").symlink_to(victim)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+
+    with pytest.raises(LifecycleBusyError, match="Replace the symlink"):
+        acquire_lifecycle_lock()
+
+    assert victim.read_bytes() == original
+    assert (lock_dir / ".apm-lifecycle.lock").is_symlink()
+    assert not lifecycle_lock().is_locked
+
+
 def test_busy_error_names_lock_path_and_wait(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
@@ -90,6 +116,55 @@ def test_busy_error_names_lock_path_and_wait(tmp_path: Path, monkeypatch) -> Non
         "Another APM operation is running; waiting up to 0.25s.",
         symbol="info",
     )
+    assert not deployment_root_lock().is_locked
+
+
+_HOLD_LIFECYCLE_LOCK = """
+import sys
+from apm_cli.install.locking import acquire_lifecycle_lock
+lock = acquire_lifecycle_lock(timeout=5)
+print("held", flush=True)
+sys.stdin.read()
+lock.release()
+"""
+
+
+def test_different_apm_homes_still_serialize_on_the_deployment_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Two APM homes share projects and harness dirs, so they must not mutate at once."""
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "APM_HOME": str(tmp_path / "apm-home-a"),
+    }
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_LIFECYCLE_LOCK],
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home-b"))
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        with (
+            patch("apm_cli.utils.console._rich_info"),
+            pytest.raises(LifecycleBusyError, match=r"shared by every APM_HOME.*\.apm-local"),
+        ):
+            acquire_lifecycle_lock(timeout=0.25)
+        assert not lifecycle_lock().is_locked
+    finally:
+        holder.communicate(input="", timeout=30)
+
+    lock = acquire_lifecycle_lock(timeout=5)
+    lock.release()
 
 
 def test_install_root_redirect_teardown_error_releases_lock(tmp_path: Path, monkeypatch) -> None:

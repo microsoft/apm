@@ -52,6 +52,8 @@ _LEGACY_USER_TARGET_PREFIXES = {
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 UNATTRIBUTED_TARGET = "legacy"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
+LOCAL_STATE_DIR = ".apm-local"
+"""Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
 _LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
@@ -94,9 +96,11 @@ class DeploymentMaterializationSession:
 
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
         apm_home = get_apm_home()
+        # Containment is anchored one level above APM_HOME (``$HOME`` by
+        # default); for a shallow custom root the symlink check is the guard.
         self._receipts_base = apm_home.parent
         self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
-        self.identity_path = self.root / ".apm-local" / "installation"
+        self.identity_path = self.root / LOCAL_STATE_DIR / "installation"
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}

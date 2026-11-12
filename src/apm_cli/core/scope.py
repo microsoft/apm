@@ -42,16 +42,42 @@ USER_APM_DIR = ".apm"
 """Directory under ``$HOME`` for user-scope metadata."""
 
 
+def _startup_cwd() -> Path | None:
+    try:
+        return Path(os.getcwd())
+    except OSError:
+        return None
+
+
+_STARTUP_CWD = _startup_cwd()
+"""Working directory captured at import, used to anchor a relative ``APM_HOME``.
+
+Global commands such as ``apm lock -g`` ``chdir`` into the APM home; anchoring
+once keeps every later lookup on the same directory instead of nesting it.
+"""
+
+
 def get_apm_home() -> Path:
     """Return the canonical root for APM-owned user metadata.
 
     ``APM_HOME`` overrides the default ``~/.apm`` location.  An unset or
-    empty value preserves the platform default.  Target deployment roots are
-    deliberately resolved elsewhere and are not affected by this helper.
+    empty value preserves the platform default.  A leading ``~`` is expanded
+    and a relative value is anchored to the directory the process started in.
+    Target deployment roots are deliberately resolved elsewhere and are not
+    affected by this helper.
     """
     configured = os.environ.get("APM_HOME")
     if configured:
-        return Path(configured)
+        home = Path(configured).expanduser()
+        if not home.is_absolute():
+            if _STARTUP_CWD is None:
+                raise ValueError(
+                    f"APM_HOME={configured!r} is relative, but the starting directory is "
+                    "unavailable. Set an absolute APM_HOME or start APM from an existing "
+                    "directory."
+                )
+            home = _STARTUP_CWD / home
+        return home
     return Path.home() / USER_APM_DIR
 
 

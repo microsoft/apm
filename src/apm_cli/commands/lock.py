@@ -102,7 +102,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     "global_",
     is_flag=True,
     default=False,
-    help="Operate on the APM user manifest instead of the current project",
+    help="Operate on the APM user home ($APM_HOME) instead of the current project",
 )
 @click.option(
     "--update",

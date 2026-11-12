@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; target deployment destinations are unchanged. -- by @WilliamK112 (#3614)
+- `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; a relative value resolves against the starting directory; target deployment destinations are unchanged, and state-changing commands still serialize across `APM_HOME` values. -- by @WilliamK112 (#3614)
 - `apm install` for Codex now warns, naming the agent, when an agent's `model` is a Claude alias (`opus`, `sonnet`, `haiku`, `inherit`) or `claude-*` id; the value is still written to the Codex TOML exactly as declared. Rebuilt from #3481 by @xubenqiang. (#3650)
 - `apm --help` shows the `apm view` summary in full again instead of wrapping it at 80 columns. (#3651)
 - `apm install` again resolves transitive `git:` + `path:` dependencies from private GitHub monorepos on Git older than 2.36: a sparse checkout whose anonymous file fetch was rejected is no longer cached as an empty package (which failed `Not a valid APM package`). APM now retries it with credentials and rebuilds incomplete cached checkouts left by 0.29.1 and later, so `APM_NO_CACHE=1` is no longer needed. -- with credit to @jiteshjadav-rogers (#3602)
@@ -307,10 +307,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
 - File-lock retry diagnostics no longer include paths or exception text that may contain secrets, while retaining retry counts and delays. (#2742)
-
-### Fixed
-
-- GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
 
 ## [0.30.0] - 2026-09-07
 

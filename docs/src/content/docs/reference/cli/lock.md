@@ -33,7 +33,7 @@ This mirrors the ergonomics of `cargo generate-lockfile` and `pnpm lock`.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--verbose`, `-v` | off | Show per-dependency resolution details. |
-| `--global`, `-g` | off | Operate on `$APM_HOME/apm.yml` (default `~/.apm/apm.yml`) and write the lockfile beside it instead of using the current project (mirrors `apm install -g`). Target deployment paths are irrelevant because `apm lock` never deploys files. |
+| `--global`, `-g` | off | Operate on `$APM_HOME/apm.yml` (default `~/.apm/apm.yml`) and write the lockfile beside it instead of using the current project (mirrors `apm install -g`). `apm lock` never deploys files; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract). |
 | `--update` | off | Re-resolve deps to their latest matching SHAs from upstream before writing the lockfile. Stale local bare-repository refs are not accepted. |
 | `--no-policy` | off | Skip policy enforcement during resolution. |
 | `--target TARGET`, `-t TARGET` | none | Agent target for policy enforcement during resolution. No files are deployed or deleted regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
