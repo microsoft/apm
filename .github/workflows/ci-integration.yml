@@ -126,7 +126,7 @@ jobs:
       - name: Select shard durations
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/ci-shard-durations.sh .shard-plan
+        run: bash scripts/ci-shard-durations.sh shard-plan
 
       - name: Plan shards
         id: plan
@@ -136,12 +136,12 @@ jobs:
         run: |
           uv run --frozen python -m pytest tests/integration --collect-only -q \
             -p no:cacheprovider -p scripts.ci_sharding -m "$HERMETIC_MARK_EXPR" \
-            --shard-durations .shard-plan/linux-x86_64.json --shard-plan-out .shard-plan/plan.json \
+            --shard-durations shard-plan/linux-x86_64.json --shard-plan-out shard-plan/plan.json \
             --shard-target-seconds 420 --shard-workers 4 --shard-max 8 | tail -n 1
-          cat .shard-plan/plan.json
+          cat shard-plan/plan.json
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
-          plan = json.load(open(".shard-plan/plan.json"))
+          plan = json.load(open("shard-plan/plan.json"))
           print(f"shards={json.dumps(plan['shards'])}")
           print(f"count={plan['shard_count']}")
           PY
@@ -150,7 +150,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-shard-plan
-          path: .shard-plan/*.json
+          path: shard-plan/*.json
           retention-days: 7
           if-no-files-found: error
 
@@ -252,7 +252,7 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: integration-shard-plan
-          path: ./.shard-plan/
+          path: ./shard-plan/
 
       - name: Make binary executable
         run: chmod +x ./dist/apm-linux-x86_64/apm
@@ -312,7 +312,7 @@ jobs:
           PYTEST_EXTRA_ARGS: >-
             -p scripts.ci_sharding
             --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
-            --shard-durations .shard-plan/linux-x86_64.json
+            --shard-durations shard-plan/linux-x86_64.json
             --shard-store-durations durations-linux-x86_64-${{ matrix.shard }}.json
             -n 4 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0 --durations=15
         run: |
