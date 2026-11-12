@@ -127,7 +127,7 @@ Then compare:
 - Flag names, argument names, and descriptions should match between docs and CLI help.
 - Usage examples in docs should be syntactically correct per the actual CLI interface.
 - If docs mention commands or flags not present in the CLI (or vice versa), flag as **high severity**.
-- Hidden aliases and hidden options (for example `apm info`) do not appear in `--help`, so Step 2 does not list them. Before flagging a command or flag that the docs mention but Step 2 did not find, invoke it directly (for example `apm info --help`); report it only if that invocation fails.
+- Hidden aliases and hidden options (for example `apm info`) do not appear in `--help`, so Step 2 does not list them. Before flagging a command or flag that the docs mention but Step 2 did not find, invoke it directly before flagging it. For a command, run `<command> --help` (for example `apm info --help`). For an option, pass it together with `--help` (for example `apm marketplace add --branch main --help`). Report it only if that invocation fails (for example `No such command` or `No such option`).
 
 ### 3.5 Flag Consistency Audit
 Check these common flags across all commands that support them:
