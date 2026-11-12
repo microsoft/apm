@@ -105,10 +105,12 @@ dependencies:
 ```
 
 - A first segment containing a dot (and not starting with one) is a host;
-  dotted GitLab groups need their host (`gitlab.com/my.group/**`), and
+  dotted GitLab groups need their host (`gitlab.com/my.group/**`; a bare
+  `my.group/**` now matches nothing, so as a deny it no longer blocks), and
   `./` or `../` local-path patterns stay hostless.
-- Hosts match exactly (case and port ignored, also in `GITHUB_HOST`); no lookalike or subdomain
-  matches, no wildcards in the host segment.
+- Hosts match exactly (case, port and trailing dot ignored, also in
+  `GITHUB_HOST`); no lookalike or subdomain matches. Wildcards are not
+  expanded in the host: `*.corp.example/**` matches nothing.
 - Shorthand, HTTPS and SSH forms of a package give the same result.
 - Hostless patterns (`contoso/**`) keep matching every host.
 - Enforced at install and by `apm audit` (direct deps incl. dev deps and

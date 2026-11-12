@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Dependency policy `allow`/`deny` patterns can name a host, e.g. `github.com/example-org/**` or `ghes.corp.example/**`. Every direct and transitive dependency is matched exactly against its written host, or the default host (`GITHUB_HOST`, else `github.com`), at install and in `apm audit`, which now also checks dev dependencies, `replace`-selected sources and transitive entries in `apm.lock.yaml`; violations name the host. Hostless patterns still match any host. A pattern whose first segment contains a dot (and does not start with one) is now read as a host, so write dotted GitLab groups as `gitlab.com/my.group/**`; `./` and `../` local-path patterns are unchanged. (#3606)
+- Dependency policy `allow`/`deny` patterns can name a host, e.g. `github.com/example-org/**` or `ghes.corp.example/**`. Every direct and transitive dependency is matched exactly against its written host, or the default host (`GITHUB_HOST`, else `github.com`), at install and in `apm audit`, which now also checks dev dependencies, `replace`-selected sources and transitive entries in `apm.lock.yaml`; violations name the host. Hostless patterns still match any host. (#3606)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
 - A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A dependency policy pattern whose first segment contains a dot (and does not start with one) is now read as a host. An existing hostless pattern for a dotted GitLab group, such as `my.group/**`, now matches nothing: an `allow` entry rejects those packages and a `deny` entry no longer blocks them. Rewrite it with its host, e.g. `gitlab.com/my.group/**`. `./` and `../` local-path patterns are unchanged. (#3606)
 - `apm mcp install --help` now lists its forwarded install options (`--transport`, `--url`, `--env`, `--header`, `--target`, `--registry`, `--mcp-version`, `--global`, `--trust-transitive-mcp`, `--dev`, `--dry-run`, `--force`, `--verbose`, `--no-policy`) with the same help text, accepted values and shell completion as `apm install`, instead of a hand-written summary that had drifted; forwarded installs behave as before. (#3633)
 - `apm compile` places scoped `applyTo` instructions much faster on large projects (about 41x on a ~10,000-directory benchmark) by caching resolved paths and computing placement scores once per run; matching, placement, symlink handling and generated output are unchanged. -- by @sekosen (#3379)
 - **BREAKING:** APM now requires Python 3.11 or newer (Python 3.10 reached end of life in October 2026); standalone installers are unaffected (#3562)

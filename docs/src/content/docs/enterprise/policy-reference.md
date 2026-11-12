@@ -415,8 +415,8 @@ With this policy, `example-org/repo` is allowed only while the default host is `
 
 | Rule | Behavior |
 |------|----------|
-| Host recognition | The first segment is a host if and only if it contains a dot and does not start with one. Write dotted GitLab groups with their host: `gitlab.com/my.group/**`. Relative local-path patterns such as `./packages/**` stay hostless. |
-| Exact host | Hosts compare exactly, ignoring case and port (including a port in `GITHUB_HOST`). `ghes.corp.example` does not match `ghes.corp.example.evil.test` or `x.ghes.corp.example`. Wildcards are not expanded in the host segment. |
+| Host recognition | The first segment is a host if and only if it contains a dot and does not start with one. Write dotted GitLab groups with their host: `gitlab.com/my.group/**`; an existing `my.group/**` now matches nothing, so as a `deny` it no longer blocks. Relative local-path patterns such as `./packages/**` stay hostless. |
+| Exact host | Hosts compare exactly, ignoring case, port and a trailing dot (also in `GITHUB_HOST`). `ghes.corp.example` does not match `ghes.corp.example.evil.test` or `x.ghes.corp.example`. Wildcards are not expanded in the host segment: `*.corp.example/**` matches no dependency, so list each host. |
 | Reference forms | `owner/repo`, `github.com/owner/repo`, `https://...` and `git@...:` forms of the same package give the same result. |
 | Hostless patterns | Unchanged: `contoso/**` still matches `contoso/*` repositories on **any** host. Use a host-qualified pattern to restrict the host. |
 | Local paths | Never match host-qualified patterns. |
