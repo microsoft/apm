@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.cache import git_cache as git_cache_module
+from apm_cli.cache.git_cache import GitCache
 from apm_cli.utils.git_env import (
     GitOutputDecodeError,
     clone_git_worktree,
@@ -156,3 +158,63 @@ def test_unchecked_failure_returns_visible_escapes(cp936_default_codec: None) ->
 
     assert result.returncode == 1
     assert result.stderr == "fatal: \\x94\n"
+
+
+def _decode_error(argv: list[str]) -> GitOutputDecodeError:
+    return GitOutputDecodeError(argv, UnicodeDecodeError("utf-8", b"\x94", 0, 1, "bad"))
+
+
+def _ok(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+def test_checkout_decode_rejection_removes_staged_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = GitCache(tmp_path)
+    sha = "a" * 40
+    staged: list[Path] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if "checkout" in argv:
+            stage = Path(argv[argv.index("-C") + 1])
+            (stage / "partial.md").write_text("x\n", encoding="utf-8")
+            staged.append(stage)
+            raise _decode_error(argv)
+        return _ok(argv)
+
+    monkeypatch.setattr(git_cache_module, "run_git_text", fake_run)
+
+    with pytest.raises(RuntimeError, match="not valid UTF-8"):
+        cache._create_checkout("https://example.com/o/r", "shard", sha)
+
+    assert staged
+    assert not staged[0].exists()
+    assert list((cache._checkouts_root / "shard" / sha).iterdir()) == []
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_bare_clone_decode_rejection_removes_staged_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, partial: bool
+) -> None:
+    cache = GitCache(tmp_path)
+    staged: list[Path] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        stage = Path(argv[-1])
+        (stage / "packed-refs").write_text("x\n", encoding="utf-8")
+        staged.append(stage)
+        if partial and "--filter=blob:none" in argv:
+            raise subprocess.CalledProcessError(
+                128, argv, stderr="fatal: server does not support filter"
+            )
+        raise _decode_error(argv)
+
+    monkeypatch.setattr(git_cache_module, "run_git_text", fake_run)
+
+    with pytest.raises(RuntimeError, match="not valid UTF-8"):
+        cache._ensure_bare_repo("https://example.com/o/r", "shard", "a" * 40, partial=partial)
+
+    assert len(staged) == (2 if partial else 1)
+    assert not any(stage.exists() for stage in staged)
+    assert [p.name for p in cache._db_root.iterdir() if not p.name.endswith(".lock")] == []

@@ -530,7 +530,9 @@ class GitCache:
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056), so a
+            # rejected clone output still removes the staged tree.
+            except (subprocess.SubprocessError, OSError) as exc:
                 # Partial clone fallback: some servers reject --filter
                 # (old Gerrit / pre-2.20 GHE). Retry once without it so
                 # we never block on this optimization. The resulting
@@ -571,11 +573,7 @@ class GitCache:
                         from ..utils.console import _rich_warning
 
                         _rich_warning(_partial_clone_fallback_warning(url))
-                    except (
-                        subprocess.CalledProcessError,
-                        subprocess.TimeoutExpired,
-                        OSError,
-                    ) as exc2:
+                    except (subprocess.SubprocessError, OSError) as exc2:
                         from ..utils.file_ops import robust_rmtree
 
                         robust_rmtree(staged, ignore_errors=True)
@@ -832,7 +830,8 @@ class GitCache:
 
                 robust_rmtree(staged, ignore_errors=True)
                 raise
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056).
+            except (subprocess.SubprocessError, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
 
                 robust_rmtree(staged, ignore_errors=True)
