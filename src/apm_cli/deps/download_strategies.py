@@ -437,6 +437,9 @@ class DownloadDelegate:
         max_archive_bytes = int(os.environ.get("ARTIFACTORY_MAX_ARCHIVE_MB", "500")) * 1024 * 1024
 
         last_error = None
+        # A 200 archive that fails validation is a more useful cause than a
+        # later 404 from a fallback URL, so report it unless a later URL succeeds.
+        archive_error = None
         for url in archive_urls:
             _debug(f"Trying Artifactory archive: {url}")
             resp = None
@@ -467,9 +470,11 @@ class DownloadDelegate:
                     _debug(last_error)
             except ArchiveError as e:
                 last_error = f"Unsafe zip archive from {url}: {e}"
+                archive_error = archive_error or last_error
                 _debug(last_error)
             except zipfile.BadZipFile:
                 last_error = f"Invalid zip archive from {url}"
+                archive_error = archive_error or last_error
                 _debug(last_error)
             except requests.RequestException as e:
                 last_error = str(e)
@@ -478,9 +483,10 @@ class DownloadDelegate:
                 if resp is not None:
                     _close_response(resp, "artifactory archive")
 
+        detail = f"Archive error: {archive_error}" if archive_error else f"Last error: {last_error}"
         raise RuntimeError(
             f"Failed to download package {owner}/{repo}#{ref} from Artifactory "
-            f"({host}/{prefix}). Last error: {last_error}"
+            f"({host}/{prefix}). {detail}"
         )
 
     def download_file_from_artifactory(
