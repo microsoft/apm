@@ -263,7 +263,7 @@ try {
     $state.ChildPid = $process.Id
     $state.ChildStartTicks = $process.StartTime.ToUniversalTime().Ticks.ToString()
     Write-State $state
-    if (-not $process.WaitForExit(480000)) { throw 'Native subject exceeded its eight-minute timeout.' }
+    if (-not $process.WaitForExit(1440000)) { throw 'Native subject exceeded its 24-minute timeout.' }
     $process.Refresh()
     $state.ChildExit = $process.ExitCode
     Write-State $state
