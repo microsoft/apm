@@ -13,7 +13,7 @@ source "$(dirname "$0")/generic-checks.sh"
 check "python3 is on PATH" \
     command -v python3
 
-check "python3 meets minimum version (3.10+)" \
-    bash -c "python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'"
+check "python3 meets minimum version (3.11+)" \
+    bash -c "python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'"
 
 reportResults
