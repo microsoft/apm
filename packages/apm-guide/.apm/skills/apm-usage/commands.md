@@ -7,6 +7,22 @@ checkouts, including forks and worktrees, show their revision when Git can
 verify it; otherwise the SHA is omitted.
 Standalone `apm --version` does not require Git to be installed.
 
+## User metadata root
+
+`APM_HOME` is the root for APM-owned user metadata: `apm.yml`,
+`apm.lock.yaml`, `apm_modules/`, `config.json`, `marketplaces.json`, lifecycle
+trust, logs, lock, and deployment receipts. It defaults to `~/.apm` (empty
+counts as unset); every `~/.apm` path below describes that default. Global
+install, update, uninstall, deps, lock, compile, marketplace, lifecycle, and
+config commands honor it. Target deployments do not: target-specific home
+variables take precedence for their own destinations, with the operating-system
+home as the fallback. Runtimes (`~/.apm/runtimes/`), the `--global`
+`.apm-local/` identity in your home, and the download cache stay outside it.
+A relative `APM_HOME` resolves against the starting directory (APM errors if that directory is gone). State-changing
+commands also hold `~/.apm-local/.apm-lifecycle.lock`, so different `APM_HOME`
+values serialize instead of racing on shared projects or target directories.
+APM does not migrate an existing `~/.apm`.
+
 ## Project setup
 
 | Command | Purpose | Key flags |
@@ -84,7 +100,7 @@ Fix unreadable sources before retrying, not by resetting the lockfile. See
 
 Loose-skill updates use local receipts of successful final rendered writes, not
 the checked-out lock as proof of the previous local deployment. Keep the ignored
-`.apm-local/` identity and `~/.apm/deployment-receipts/` local; do not commit or
+`.apm-local/` identity and `$APM_HOME/deployment-receipts/` local; do not commit or
 share them. The identity lives in the project root, or your home for `--global`;
 configured external skill roots retain the same ownership and receipt checks.
 On Linux and macOS a receipt survives a reboot or remount that changes only the

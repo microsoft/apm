@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; a relative value resolves against the starting directory; target deployment destinations are unchanged, and state-changing commands still serialize across `APM_HOME` values. -- by @WilliamK112 (#3614)
 - `apm install` for Codex now warns, naming the agent, when an agent's `model` is a Claude alias (`opus`, `sonnet`, `haiku`, `inherit`) or `claude-*` id; the value is still written to the Codex TOML exactly as declared. Rebuilt from #3481 by @xubenqiang. (#3650)
 - `apm --help` shows the `apm view` summary in full again instead of wrapping it at 80 columns. (#3651)
 - `apm install` again resolves transitive `git:` + `path:` dependencies from private GitHub monorepos on Git older than 2.36: a sparse checkout whose anonymous file fetch was rejected is no longer cached as an empty package (which failed `Not a valid APM package`). APM now retries it with credentials and rebuilds incomplete cached checkouts left by 0.29.1 and later, so `APM_NO_CACHE=1` is no longer needed. -- with credit to @jiteshjadav-rogers (#3602)

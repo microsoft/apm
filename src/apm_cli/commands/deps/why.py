@@ -190,7 +190,7 @@ _HELP = (
     "global_",
     is_flag=True,
     default=False,
-    help="Resolve against the user-scope lockfile (~/.apm/apm.lock.yaml).",
+    help="Resolve against the lockfile in the APM user home.",
 )
 @click.option(
     "--json",

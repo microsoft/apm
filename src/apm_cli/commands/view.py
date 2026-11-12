@@ -361,7 +361,7 @@ def _display_registry_versions(
     owner = "/".join(parts[:-1]) if len(parts) > 2 else parts[0]
     repo = parts[-1]
 
-    # Build the merged registries map (config.json + ~/.apm/apm.yml + project).
+    # Build the merged registries map (config.json + $APM_HOME/apm.yml + project).
     project_registries = None
     project_default = None
     try:
@@ -701,7 +701,7 @@ _VIEW_HELP = (
     "global_",
     is_flag=True,
     default=False,
-    help="Inspect package from user scope (~/.apm/)",
+    help="Inspect a package from the APM user home",
 )
 @click.option(
     "--registry",
