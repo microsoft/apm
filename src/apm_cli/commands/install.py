@@ -931,7 +931,10 @@ def _handle_mcp_install(  # noqa: PLR0913
 @click.option(
     "--trust-transitive-mcp",
     is_flag=True,
-    help="Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
+    help=(
+        "Trust MCP servers from transitive packages that are self-defined or set "
+        "their own registry or configuration (skip re-declaration requirement)"
+    ),
 )
 @click.option(
     "--parallel-downloads",

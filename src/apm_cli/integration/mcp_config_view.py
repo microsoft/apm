@@ -662,16 +662,16 @@ def _collect_locked_dependencies(
                 dependency, authored_declarations[mcp_dependency.name]
             )
             fingerprints.setdefault(mcp_dependency.name, fingerprint)
-            if mcp_dependency.is_self_defined and dependency.depth > 1:
+            if mcp_dependency.requires_transitive_trust and dependency.depth > 1:
                 refusable.add(mcp_dependency.name)
             if not include_dependency_mcp:
                 omissions.setdefault(
                     mcp_dependency.name, {"declaration": fingerprint, "reason": "only-apm"}
                 )
                 continue
-            if mcp_dependency.is_self_defined:
+            if mcp_dependency.requires_transitive_trust:
                 if dependency.depth == 1:
-                    if logger is not None:
+                    if logger is not None and mcp_dependency.is_self_defined:
                         logger.progress(
                             f"Trusting direct dependency MCP '{mcp_dependency.name}' "
                             f"from '{declarer}'"
@@ -697,11 +697,7 @@ def _collect_locked_dependencies(
                         mcp_dependency.name,
                         {"declaration": fingerprint, "reason": "untrusted-transitive"},
                     )
-                    message = (
-                        f"Transitive package '{declarer}' declares self-defined MCP server "
-                        f"'{mcp_dependency.name}' (registry: false). Re-declare it in your "
-                        "apm.yml or use --trust-transitive-mcp."
-                    )
+                    message = _untrusted_transitive_mcp_message(declarer, mcp_dependency)
                     if diagnostics is not None:
                         diagnostics.warn(message)
                     elif logger is not None:
@@ -715,6 +711,20 @@ def _collect_locked_dependencies(
                 )
             )
     return collected, problems, fingerprints, omissions, refusable, pending_packages
+
+
+def _untrusted_transitive_mcp_message(declarer: str, dependency: MCPDependency) -> str:
+    """Return the warning for a transitive MCP declaration skipped without trust."""
+    if dependency.is_self_defined:
+        detail = "self-defined MCP server"
+        suffix = " (registry: false)"
+    else:
+        detail = "MCP server"
+        suffix = " with a custom registry or configuration overlay"
+    return (
+        f"Transitive package '{declarer}' declares {detail} '{dependency.name}'{suffix}. "
+        "Re-declare it in your apm.yml or use --trust-transitive-mcp."
+    )
 
 
 def _collect_unlocked_compat(
@@ -736,12 +746,8 @@ def _collect_unlocked_compat(
         # Only collect prod MCP from packages; devDependencies.mcp are scoped to
         # the package author's own environment (#2340).
         for dependency in package.get_mcp_dependencies():
-            if dependency.is_self_defined and not trust_transitive_self_defined:
-                message = (
-                    f"Transitive package '{declarer}' declares self-defined MCP server "
-                    f"'{dependency.name}' (registry: false). Re-declare it in your apm.yml "
-                    "or use --trust-transitive-mcp."
-                )
+            if dependency.requires_transitive_trust and not trust_transitive_self_defined:
+                message = _untrusted_transitive_mcp_message(declarer, dependency)
                 if diagnostics is not None:
                     diagnostics.warn(message)
                 elif logger is not None:

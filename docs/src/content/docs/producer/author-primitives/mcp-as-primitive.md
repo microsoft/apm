@@ -152,7 +152,11 @@ consumer. If your package is pulled in transitively, APM warns and
 Implications for producers:
 
 - Registry-resolved servers (form 1 above) flow through transitively
-  without a trust prompt -- they are vetted by the registry.
+  without a trust prompt only as plain references to the consumer's
+  registry. A transitive entry that sets its own `registry:` URL or any
+  `env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys is
+  skipped like a self-defined server unless the consumer passes
+  `--trust-transitive-mcp`.
 - Self-defined `stdio` and remote servers should be reserved for
   things the consumer would expect from a direct dependency.
 - Document any self-defined MCP server in your README so a transitive

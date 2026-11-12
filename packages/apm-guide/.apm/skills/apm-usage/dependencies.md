@@ -739,7 +739,11 @@ devDependencies:
 The root project activates both sections during `apm install`. Direct
 and transitive dependency packages contribute only `dependencies.mcp`;
 their development MCP entries do not enter the consumer's target config
-or `mcp_config_provenance`.
+or `mcp_config_provenance`. A transitive package's MCP entry is admitted
+without `--trust-transitive-mcp` only as a plain reference to the
+consumer's registry; self-defined entries and entries that set their own
+`registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or
+extra keys are skipped until re-declared or trusted.
 
 At user scope, Claude MCP entries are written to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a

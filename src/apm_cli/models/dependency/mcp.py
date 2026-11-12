@@ -246,6 +246,21 @@ class MCPDependency:
         return self.registry is False
 
     @property
+    def requires_transitive_trust(self) -> bool:
+        """True when a transitive declaration is more than a registry reference.
+
+        A transitive package may name a server from the consumer's configured
+        registry. A self-defined server, a per-dependency ``registry`` URL,
+        or any value overlay (``env``, ``headers``, ``args``, ``url``,
+        ``command``, ``cwd``, ``extra``) supplies configuration the consumer's
+        registry did not provide, so it needs the same explicit trust.
+        """
+        if self.is_self_defined or isinstance(self.registry, str):
+            return True
+        overlays = (self.env, self.headers, self.args, self.url, self.command, self.cwd, self.extra)
+        return any(value not in (None, "", {}, []) for value in overlays)
+
+    @property
     def has_enabled(self) -> bool:
         """Whether the manifest explicitly supplied OpenCode's ``enabled`` value."""
         return self.enabled is not _ENABLED_UNSET
@@ -359,6 +374,12 @@ class MCPDependency:
                 f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
         if self.url is not None:
+            if has_parser_dependent_url_chars(self.url):
+                raise ValueError(
+                    f"Invalid MCP url {self.url!r}: backslashes, whitespace and "
+                    f"control characters are not allowed. Use a plain "
+                    f"http:// or https:// URL."
+                )
             scheme = urlparse(self.url).scheme.lower()
             if scheme not in _ALLOWED_URL_SCHEMES:
                 raise ValueError(
@@ -374,12 +395,6 @@ class MCPDependency:
                     raise ValueError(
                         f"Invalid header '{k_str}={v_str}': control characters "
                         f"(CR/LF) not allowed in keys or values"
-            if has_parser_dependent_url_chars(self.url):
-                raise ValueError(
-                    f"Invalid MCP url {self.url!r}: backslashes, whitespace and "
-                    f"control characters are not allowed. Use a plain "
-                    f"http:// or https:// URL."
-                )
                     )
         if self.command is not None:
             if not isinstance(self.command, str):

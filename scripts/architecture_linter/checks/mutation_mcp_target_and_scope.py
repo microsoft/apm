@@ -336,6 +336,17 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
             )
         )
     if not _span_has_fixed(
+        facts, locked_span, "mcp_dependency.requires_transitive_trust"
+    ) or not _span_has_fixed(facts, unlocked_span, "dependency.requires_transitive_trust"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "dependency collectors must gate transitive declarations through "
+                "MCPDependency.requires_transitive_trust",
+            )
+        )
+    if not _span_has_fixed(
         facts, derive_span, "active_package_keys=active_package_keys,"
     ) or not _span_has_fixed(
         facts,
