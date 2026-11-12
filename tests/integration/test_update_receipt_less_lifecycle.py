@@ -12,13 +12,13 @@ the working tree and lockfile exactly as before.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -48,7 +48,14 @@ class _Update:
 
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:
     return subprocess.run(
-        ("git", *args), cwd=cwd, env=env, capture_output=True, text=True, check=True, timeout=60
+        ("git", *args),
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        timeout=60,
     ).stdout
 
 
@@ -96,10 +103,11 @@ def _package_v050(root: Path) -> None:
 
 def _evict_machine_state(isolated: IsolatedApmEnvironment) -> None:
     """Emulate a fresh CI runner: no receipts and no download cache."""
+    # Git packs are read-only on Windows; robust_rmtree clears the attribute.
     for receipts in (isolated.home / ".apm").glob("deployment-receipts*"):
-        shutil.rmtree(receipts)
+        robust_rmtree(receipts)
     if isolated.cache_root.exists():
-        shutil.rmtree(isolated.cache_root)
+        robust_rmtree(isolated.cache_root)
     isolated.cache_root.mkdir(parents=True)
 
 

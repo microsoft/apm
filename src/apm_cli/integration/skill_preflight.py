@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Literal
 
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
-from apm_cli.integration.skill_adoption import skill_tree_baselines
+from apm_cli.integration.skill_adoption import (
+    is_skill_dir_identical_to_source,
+    skill_tree_baselines,
+)
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
@@ -197,6 +200,7 @@ def find_unmanaged_conflicts(
     session = integrator._materialization_session
     replay_owners = integrator._replay_owners
     adopted: dict[tuple[Path, Path], dict[Path, str]] = {}
+    unchanged: dict[tuple[Path, Path], bool] = {}
 
     def claimed(path: Path, destination: Path) -> bool:
         entry = deployed_path_entry(path, project_root, targets)
@@ -256,11 +260,17 @@ def find_unmanaged_conflicts(
                     if not resolver_ready:
                         integrator.init_link_resolver(package_info, project_root)
                         resolver_ready = True
-                    if _matches_deployed_file(integrator, source, path, source_root):
+                    identical = _matches_deployed_file(integrator, source, path, source_root)
+                    if unmanaged and identical:
                         continue
                     if not unmanaged:
                         key = (source_root, destination)
                         if key not in adopted:
+                            # Copies keep identical members only for a raw-identical sub-skill.
+                            unchanged[key] = (
+                                source_root != selection.native_root
+                                and is_skill_dir_identical_to_source(source_root, destination)
+                            )
                             adopted[key] = skill_tree_baselines(
                                 integrator,
                                 source_root,
@@ -272,7 +282,7 @@ def find_unmanaged_conflicts(
                                 owner=owner,
                                 targets=targets,
                             )
-                        if path in adopted[key]:
+                        if path in adopted[key] or (identical and unchanged[key]):
                             continue
                     conflicts.append(
                         SkillConflict(

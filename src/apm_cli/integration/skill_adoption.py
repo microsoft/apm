@@ -147,7 +147,7 @@ class LockedSkillSources:
     def __init__(self, fetch: Callable[[str, Path], Any]) -> None:
         self._fetch = fetch
         self._scratch: Path | None = None
-        self._plans: dict[str, DeployableSourcePlan | None] = {}
+        self._plans: dict[str, tuple[DeployableSourcePlan, Any] | None] = {}
 
     def plan(
         self, owner: str, current: DeployableSourcePlan, targets: Sequence[Any]
@@ -155,11 +155,36 @@ class LockedSkillSources:
         """Return the locked source authorized like *current*, or ``None``."""
         if owner not in self._plans:
             self._plans[owner] = self._materialize(owner, current, targets)
-        return self._plans[owner]
+        materialized = self._plans[owner]
+        return materialized[0] if materialized is not None else None
+
+    def resolve_links(self, owner: str, current: Any) -> ResolveLinks | None:
+        """Render locked members as the deployment of that version rendered them.
+
+        Links resolve against the locked package but project into *current*'s
+        deployment frame, where the previous version was installed.
+        """
+        materialized = self._plans.get(owner)
+        if materialized is None or current is None:
+            return None
+        from dataclasses import replace
+
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        package = materialized[1]
+        renderer = BaseIntegrator()
+        renderer.init_link_resolver(
+            replace(
+                package,
+                deployment_package_root=current.deployment_package_root or current.package_root,
+            ),
+            current.base_dir,
+        )
+        return renderer.resolve_links if renderer.link_resolver is not None else None
 
     def _materialize(
         self, owner: str, current: DeployableSourcePlan, targets: Sequence[Any]
-    ) -> DeployableSourcePlan | None:
+    ) -> tuple[DeployableSourcePlan, Any] | None:
         from apm_cli.config import get_apm_temp_dir
         from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 
@@ -172,7 +197,7 @@ class LockedSkillSources:
             if package is None:
                 return None
             names = current.selected_skill_names
-            return DeployableSourcePlan.create(
+            plan = DeployableSourcePlan.create(
                 package,
                 list(targets),
                 skill_subset=tuple(sorted(names)) if names is not None else None,
@@ -181,6 +206,7 @@ class LockedSkillSources:
                 skip_bin=False,
                 package_name=owner,
             )
+            return plan, package
         except (OSError, RuntimeError, ValueError):
             return None
 
@@ -191,6 +217,33 @@ class LockedSkillSources:
         if self._scratch is not None:
             robust_rmtree(self._scratch, ignore_errors=True)
             self._scratch = None
+
+
+def locked_skill_sources(ctx: Any) -> LockedSkillSources | None:
+    """Fetch currently locked sources on demand, only for ``apm update`` runs."""
+    if not ctx.update_refs or ctx.existing_lockfile is None or ctx.downloader is None:
+        return None
+    from apm_cli.drift import build_download_ref
+
+    lockfile = ctx.existing_lockfile
+    downloader = ctx.downloader
+
+    def fetch(owner: str, destination: Path) -> Any:
+        locked = lockfile.get_dependency(owner)
+        if locked is None or locked.source in ("local", "registry"):
+            return None
+        reference = build_download_ref(
+            locked.to_dependency_ref(),
+            lockfile,
+            update_refs=False,
+            ref_changed=False,
+            require_locked=True,
+        )
+        if reference.reference != locked.resolved_commit:
+            return None
+        return downloader.download_package(reference, destination)
+
+    return LockedSkillSources(fetch)
 
 
 def skill_tree_baselines(
@@ -218,13 +271,8 @@ def skill_tree_baselines(
     plan = plan or integrator._skill_source_plan
     owner = owner or integrator._skill_current_owner
     targets = targets if targets is not None else integrator._skill_targets or ()
-    compare = partial(
-        adoption_baselines,
-        walk_source=integrator.walk_source_tree,
-        resolve_links=integrator.resolve_links,
-        owned=owned,
-    )
-    adopted = compare(source, destination, ignore=ignore)
+    compare = partial(adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned)
+    adopted = compare(source, destination, ignore=ignore, resolve_links=integrator.resolve_links)
     locked_sources: LockedSkillSources | None = session.locked_sources
     rebased = getattr(ignore, "rebased", None)
     if adopted or locked_sources is None or plan is None or owner is None or rebased is None:
@@ -237,4 +285,11 @@ def skill_tree_baselines(
     locked_source = locked.source_root / relative if locked is not None else None
     if locked_source is None or locked_source.is_symlink() or not locked_source.is_dir():
         return {}
-    return compare(locked_source, destination, ignore=rebased(locked))
+    current = integrator.link_resolver
+    resolve_links = locked_sources.resolve_links(owner, current) if current is not None else None
+    return compare(
+        locked_source,
+        destination,
+        ignore=rebased(locked),
+        resolve_links=resolve_links or integrator.resolve_links,
+    )

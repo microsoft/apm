@@ -327,3 +327,31 @@ def test_managed_file_without_trusted_baseline_is_refused_before_writes(
     else:
         assert conflicts == ()
     assert target.exists() is (case != "absent")
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("layout", "extra", "refused"),
+    [
+        ("native", False, False),
+        ("native", True, True),
+        ("subskills", True, True),
+    ],
+)
+def test_identical_member_needs_a_baseline_unless_copy_keeps_it(
+    tmp_path: Path, layout: str, extra: bool, refused: bool
+) -> None:
+    """Identical bytes are refused when copying would still require a baseline."""
+    info = _package(tmp_path, layout)
+    root = tmp_path / "consumer"
+    skill = KNOWN_TARGETS["copilot"].skills_deploy_path(root) / "review"
+    skill.mkdir(parents=True)
+    source = info.install_path / ("" if layout == "native" else ".apm/skills/review")
+    (skill / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+    entry = (skill / "SKILL.md").relative_to(root).as_posix()
+    if extra:
+        (skill / "guide.md").write_bytes(b"Locally edited guide removed upstream.\n")
+    conflicts = _session_conflicts(info, root, {entry}, baseline=None)
+    assert [conflict.path for conflict in conflicts if conflict.untrusted] == (
+        [entry] if refused else []
+    )

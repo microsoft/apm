@@ -109,7 +109,7 @@ def test_baselines_require_every_member_to_be_claimed(tmp_path: Path) -> None:
     assert baselines == {path: compute_file_hash(path) for path in _members(source, destination)}
 
 
-def _locked_update(tmp_path: Path):
+def _locked_update(tmp_path: Path, old_body: bytes = b"v1\n", new_body: bytes = b"v2\n"):
     """Return an integrator, plan and paths for a v1 -> v2 skill update (#3625)."""
     from types import SimpleNamespace
 
@@ -124,6 +124,8 @@ def _locked_update(tmp_path: Path):
         skill = root / ".apm/skills/alpha"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_bytes(b"---\nname: alpha\n---\n" + body)
+        (root / "docs").mkdir()
+        (root / "docs/guide.md").write_bytes(b"Guide.\n")
         for file_name in extra:
             (skill / file_name).write_bytes(b"Added.\n")
         return PackageInfo(
@@ -132,8 +134,8 @@ def _locked_update(tmp_path: Path):
             package_type=PackageType.APM_PACKAGE,
         )
 
-    new = package("new", b"v2\n", "added.md")
-    old = package("old", b"v1\n")
+    new = package("new", new_body, "added.md")
+    old = package("old", old_body)
     destination = tmp_path / "deployed/alpha"
     shutil.copytree(old.install_path / ".apm/skills/alpha", destination)
     targets = [KNOWN_TARGETS["copilot"]]
@@ -151,6 +153,7 @@ def _locked_update(tmp_path: Path):
         has_receipt=lambda _path: False, locked_sources=LockedSkillSources(fetch)
     )
     return SimpleNamespace(
+        new=new,
         integrator=integrator,
         plan=plan,
         targets=targets,
@@ -235,3 +238,23 @@ def test_locked_sources_close_removes_private_scratch(tmp_path: Path) -> None:
     assert scratch and scratch[0].is_dir()
     sources.close()
     assert not scratch[0].exists()
+
+
+@pytest.mark.windows_compat
+def test_locked_links_render_into_the_current_deployment_frame(tmp_path: Path) -> None:
+    """Links to package assets outside the skill render like the earlier deployment."""
+    link = b"See [guide](../../../docs/guide.md).\n"
+    update = _locked_update(tmp_path, old_body=link, new_body=b"v2\n" + link)
+    project = tmp_path / "project"
+    project.mkdir()
+    update.integrator.init_link_resolver(update.new, project)
+    anchor = update.destination / "SKILL.md"
+    rendered, count = update.integrator.resolve_links(
+        anchor.read_text(encoding="utf-8"),
+        update.source / "SKILL.md",
+        anchor,
+        preserved_source_root=update.source,
+    )
+    assert count == 1
+    anchor.write_bytes(rendered.encode("utf-8"))
+    assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
