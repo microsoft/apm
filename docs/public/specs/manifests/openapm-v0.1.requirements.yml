@@ -320,7 +320,7 @@ requirements:
     keyword: MUST
     section: "6.3.1"
     conformance_class: governance
-    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged; clause (g): a first pattern segment containing a dot and not beginning with one names a host matched exactly (ASCII case-folded, port ignored on both sides) against the written or default effective host, while hostless patterns (including ./ and ../ local-path patterns) match every host"
+    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged; clause (g): a first pattern segment containing a dot and not beginning with one names a host matched exactly (ASCII case-folded, numeric port and one trailing dot ignored on both sides) against the written or implementation-default effective host, while hostless patterns (including ./ and ../ local-path patterns) match every host; dependencies.require is not host-qualified"
   - id: req-pl-019
     keyword: MUST
     section: "6.8.1"
