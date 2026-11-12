@@ -228,3 +228,22 @@ def test_entries_unsafe_on_windows_are_rejected_before_any_write(tmp_path: Path,
     with pytest.raises(PathTraversalError, match="not portable to every host"):
         _materialize(checkout, ["pkg"])
     assert not (tmp_path / "outside.txt").exists()
+
+
+def test_target_git_does_not_check_out_fails_instead_of_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An out-of-cone target Git leaves unwritten raises; nothing is guessed."""
+    checkout = _checkout(tmp_path, sparse=True)
+    real_output = git_sparse._git_output
+
+    def output(git_exe: str, repo_dir: Path, args: list[str], **kwargs: object) -> bytes:
+        if "checkout-index" in args:
+            return b""
+        return real_output(git_exe, repo_dir, args, **kwargs)
+
+    monkeypatch.setattr(git_sparse, "_git_output", output)
+
+    with pytest.raises(RuntimeError, match=r"did not check out '.+' as a regular file"):
+        _materialize(checkout, ["pkg"])
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"CLAUDE.md"

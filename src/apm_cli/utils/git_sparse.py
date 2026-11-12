@@ -439,7 +439,11 @@ class _CheckoutBytes:
             loaded: dict[str, bytes] = {}
             for source in sources:
                 path = tree / source
-                if not stat.S_ISREG(path.lstat().st_mode):
+                try:
+                    regular = stat.S_ISREG(path.lstat().st_mode)
+                except FileNotFoundError:
+                    regular = False
+                if not regular:
                     raise RuntimeError(f"Git did not check out '{source}' as a regular file.")
                 loaded[source] = path.read_bytes()
             return loaded
