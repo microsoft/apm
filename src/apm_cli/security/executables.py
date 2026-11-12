@@ -295,6 +295,8 @@ def _is_content_bound_key(package_key: str) -> bool:
     return "@sha256:" in package_key
 
 
+# Placeholder tokens let glob deny patterns pass through DependencyReference
+# parsing; they are plain lowercase words that never occur in real identities.
 _GLOB_PLACEHOLDERS = (("*", "apmglobstar"), ("?", "apmglobqmark"))
 
 
@@ -397,7 +399,9 @@ def _deny_glob_match(name: str, patterns: Any) -> bool:
     if name in patterns:
         return True
     return any(
-        fnmatch.fnmatchcase(name, p) or name.startswith(f"{str(p).rstrip('/')}/") for p in patterns
+        fnmatch.fnmatchcase(name, p) or name.startswith(f"{str(p).rstrip('/')}/")
+        for p in patterns
+        if str(p).rstrip("/")
     )
 
 

@@ -1027,6 +1027,7 @@ def integrate_local_bundle(
                 _known_deploy_prefixes,
                 target=target,
                 hooks_approved=_hooks_approved_bundle,
+                canvas_approved=_canvas_enabled and _canvas_approved_bundle,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -1035,6 +1036,7 @@ def integrate_local_bundle(
                     _known_deploy_prefixes,
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
+                    canvas_approved=_canvas_enabled and _canvas_approved_bundle,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))

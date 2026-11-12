@@ -93,11 +93,12 @@ def bundle_deploy_relative_path(
     *,
     target: TargetProfile | None = None,
     hooks_approved: bool = True,
+    canvas_approved: bool = True,
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root.
 
-    Only primitive files the target deploys are routed. Target-rooted hook
-    files additionally require *hooks_approved*.
+    Only primitive files the target deploys are routed. Hook and canvas files
+    additionally require *hooks_approved* / *canvas_approved*.
     """
     validate_path_segments(rel_path, context="bundle deploy path")
     if _is_plugin_hook_path(rel_path):
@@ -105,7 +106,7 @@ def bundle_deploy_relative_path(
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
-    if not hooks_approved and _is_hook_deploy_path(deploy_rel):
+    if _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
         return None
     return _lower_to_target(deploy_rel, target)
 
@@ -117,6 +118,7 @@ def bundle_deploy_skip_warning(
     *,
     target: TargetProfile | None = None,
     hooks_approved: bool = True,
+    canvas_approved: bool = True,
 ) -> str | None:
     """Return an explicit warning for a deliberately skipped bundle path."""
     validate_path_segments(rel_path, context="bundle deploy path")
@@ -129,10 +131,10 @@ def bundle_deploy_skip_warning(
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
-    if not hooks_approved and _is_hook_deploy_path(deploy_rel):
+    if kind := _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
         return (
-            f"Skipped packed bundle hook file {rel_path!r}: hooks from this bundle "
-            "are not approved for its exact content. Run 'apm policy explain' "
+            f"Skipped packed bundle {kind} file {rel_path!r}: {kind} from this bundle "
+            "is not approved for its exact content. Run 'apm policy explain' "
             "and approve the bundle only if policy permits."
         )
     target_name = target.name if target is not None else "this target"
@@ -190,11 +192,18 @@ def _deploy_relative_candidate(
     return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
 
 
-def _is_hook_deploy_path(deploy_rel: str) -> bool:
-    """Return whether a target-relative bundle path lands in a hooks directory."""
+def _unapproved_executable_kind(
+    deploy_rel: str, hooks_approved: bool, canvas_approved: bool
+) -> str | None:
+    """Return the executable kind of a target-relative path that lacks approval."""
     from ..bundle.plugin_layout import PLUGIN_LAYOUT
 
-    return deploy_rel.split("/", 1)[0] == PLUGIN_LAYOUT["hooks"].plugin_dir
+    head = deploy_rel.split("/", 1)[0]
+    if not hooks_approved and head == PLUGIN_LAYOUT["hooks"].plugin_dir:
+        return "hooks"
+    if not canvas_approved and head == PLUGIN_LAYOUT["extensions"].plugin_dir:
+        return "canvas"
+    return None
 
 
 def _is_primitive_deploy_path(deploy_rel: str, target: TargetProfile) -> bool:
