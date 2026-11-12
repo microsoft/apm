@@ -119,8 +119,9 @@ you use the generated registration.
 | `--ssh` | off | Prefer SSH transport for shorthand (`owner/repo`) deps. Mutually exclusive with `--https`. |
 | `--https` | off | Prefer HTTPS transport for shorthand deps. Mutually exclusive with `--ssh`. |
 | `--allow-protocol-fallback` | off | Restore the legacy permissive HTTPS<->SSH fallback chain. Env: `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
+| `--auth-first` | off | Skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves (no credential: anonymous last resort). Env: `APM_GITHUB_AUTH_FIRST=1`. |
 
-Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`.
+Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`. Credential-order env var: `APM_GITHUB_AUTH_FIRST=1` mirrors `--auth-first` (not a transport selector -- see [Authentication: TLS-inspecting proxy blocks the anonymous attempt](../../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt)).
 
 ### Skill subset
 
@@ -297,6 +298,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `~/.config/opencode/skills/`. Run `apm compile -g` to refresh
   `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
+- **Local edit hint.** Before re-syncing a project install, `apm install` compares the managed files of the remote dependencies being installed with the hashes recorded at deployment. When some were edited locally, it prints one `[i]` hint that this install may overwrite them; run [`apm export-patch`](../export-patch/) before the next install to keep such edits as upstream patches. The install still proceeds. `--dry-run`, global installs, and `apm lock` skip the check.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed only when recorded hashes match (user-edited files are kept with a warning). The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`.
   Narrowing one dependency's `targets:` also reconciles its removed targets
   within the current install scope, even when the consumer still enables those

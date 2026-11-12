@@ -15,6 +15,8 @@ from apm_cli.marketplace.models import (
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.resolver import (
+    _dependency_reference_from_packed_source,
+    _extract_in_repo_path_and_ref,
     _resolve_git_subdir_source,
     _resolve_github_source,
     _resolve_relative_source,
@@ -254,6 +256,80 @@ class TestResolveGitSubdirSource:
             {"repo": "owner/primary", "url": "owner/fallback", "subdir": "pkg"}
         )
         assert result == "owner/primary/pkg"
+
+
+class TestSourceShaPin:
+    """A ``sha`` pins the source, and wins over ``ref`` as it does in Claude Code."""
+
+    SHA = "c27b5b42c0fa3300d71d17d44e838f0f974ea145"
+
+    def test_github_source_uses_sha(self):
+        source = {"type": "github", "repo": "owner/repo", "sha": self.SHA}
+        assert _resolve_github_source(source) == f"owner/repo#{self.SHA}"
+
+    def test_github_source_sha_wins_over_ref(self):
+        source = {"type": "github", "repo": "owner/repo", "ref": "main", "sha": self.SHA}
+        assert _resolve_github_source(source) == f"owner/repo#{self.SHA}"
+
+    def test_url_source_uses_sha(self):
+        source = {"type": "url", "url": "https://github.com/owner/repo", "sha": self.SHA}
+        assert _resolve_url_source(source) == f"owner/repo#{self.SHA}"
+
+    def test_git_subdir_source_uses_sha(self):
+        source = {"type": "git-subdir", "repo": "owner/repo", "subdir": "x", "sha": self.SHA}
+        assert _resolve_git_subdir_source(source) == f"owner/repo/x#{self.SHA}"
+
+    def test_packed_source_uses_sha(self):
+        plugin = MarketplacePlugin(
+            name="demo",
+            source={"type": "url", "url": "https://gitlab.example.com/owner/repo", "sha": self.SHA},
+        )
+        dependency = _dependency_reference_from_packed_source(plugin)
+        assert dependency.reference == self.SHA
+
+    @pytest.mark.parametrize("bad", ["abc123", "z" * 40, 12345])
+    @pytest.mark.parametrize(
+        "resolve, source",
+        [
+            (_resolve_github_source, {"type": "github", "repo": "owner/repo"}),
+            (_resolve_url_source, {"type": "url", "url": "https://github.com/owner/repo"}),
+            (
+                _resolve_git_subdir_source,
+                {"type": "git-subdir", "repo": "owner/repo", "subdir": "x"},
+            ),
+        ],
+    )
+    def test_malformed_sha_is_rejected(self, resolve, source, bad):
+        with pytest.raises(ValueError, match="40-character commit SHA"):
+            resolve({**source, "ref": "main", "sha": bad})
+
+    def test_empty_sha_falls_back_to_ref(self):
+        source = {"type": "github", "repo": "owner/repo", "ref": "v1.0.0", "sha": ""}
+        assert _resolve_github_source(source) == "owner/repo#v1.0.0"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            {"type": "github", "path": "plugins/demo"},
+            {"type": "git-subdir", "subdir": "plugins/demo"},
+            {"type": "gitlab", "path": "plugins/demo"},
+        ],
+    )
+    @pytest.mark.parametrize("ref", [None, "main"])
+    def test_in_marketplace_source_uses_sha(self, source, ref):
+        source = {**source, "sha": self.SHA}
+        if ref is not None:
+            source["ref"] = ref
+        plugin = MarketplacePlugin(name="demo", source=source)
+        assert _extract_in_repo_path_and_ref(plugin) == ("plugins/demo", self.SHA)
+
+    def test_in_marketplace_source_rejects_malformed_sha(self):
+        plugin = MarketplacePlugin(
+            name="demo",
+            source={"type": "github", "path": "plugins/demo", "ref": "main", "sha": "abc123"},
+        )
+        with pytest.raises(ValueError, match="40-character commit SHA"):
+            _extract_in_repo_path_and_ref(plugin)
 
 
 class TestResolveRelativeSource:
