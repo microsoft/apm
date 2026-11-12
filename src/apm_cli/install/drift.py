@@ -529,6 +529,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     CacheMissError
         Surfaced verbatim when a locked dep cannot be materialized.
     """
+    from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
@@ -737,12 +738,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 **identity,
                             )
                     if result.get("native_claude_plugin"):
-                        from apm_cli.claude_plugins.registrar import verify_claude_native_cache
-
                         verify_claude_native_cache(
-                            modules_dir=live_modules_dir,
-                            locked=lock_dep,
-                            source_root=install_path,
+                            modules_dir=live_modules_dir, locked=lock_dep, source_root=install_path
                         )
                     replayed_count += 1
     finally:
