@@ -259,3 +259,36 @@ def test_native_replay_stays_nonmutating(tmp_path: Path) -> None:
     assert config.read_text() == '{"alwaysThinkingEnabled":false}'
     assert not (scratch / ".claude/settings.json").exists()
     native.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("retained", "refused"),
+    [
+        ({".claude/commands/review.md": "h1"}, True),
+        ({".claude/skills/review/SKILL.md": None}, True),
+        ({".codex/skills/review/SKILL.md": "h1", ".agents/skills/review/SKILL.md": "h2"}, False),
+        ({}, False),
+    ],
+)
+def test_retained_loose_claude_files_block_native_registration(
+    retained: dict[str, str | None], refused: bool
+) -> None:
+    """Edited package-owned loose Claude files must not load beside the intact plugin."""
+    from types import SimpleNamespace
+
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.install.phases.claude_plugins import _refuse_retained_loose_claude_files
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    claude = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+    ctx = SimpleNamespace(
+        targets=[claude, KNOWN_TARGETS["codex"].for_scope(user_scope=True)],
+        claude_native_plugins={"owner/hooks": object()},
+        package_cleanup_retained={"owner/hooks": retained, "owner/other": {".claude/x.md": None}},
+    )
+    if refused:
+        with pytest.raises(ClaudeNativePluginError, match="loose Claude files") as error:
+            _refuse_retained_loose_claude_files(ctx)
+        assert next(iter(retained)) in str(error.value)
+    else:
+        _refuse_retained_loose_claude_files(ctx)

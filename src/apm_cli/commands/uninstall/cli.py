@@ -4,6 +4,8 @@ import builtins
 import contextlib
 import sys
 import traceback
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import click
@@ -71,6 +73,14 @@ def _collect_deployed_cleanup_state(
     return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
 
 
+@dataclass(frozen=True)
+class _LockPersistence:
+    """Outcome of the survivor lock save that gates native reconciliation."""
+
+    saved: bool
+    removal_pending: bool
+
+
 def _persist_uninstall_lockfile(
     lockfile,
     lockfile_path,
@@ -78,12 +88,12 @@ def _persist_uninstall_lockfile(
     integration_cleanup: IntegrationCleanupOutcome,
     *,
     defer_empty_removal: bool = True,
-) -> bool:
+) -> _LockPersistence:
     """Bind actual survivor writes only after final lock persistence succeeds.
 
     With ``defer_empty_removal``, an empty lock is written instead of removed so
     an interrupted last-package native cleanup can retry from authoritative
-    survivors; the caller removes it afterwards. Returns whether that is pending.
+    survivors; the caller removes it afterwards (``removal_pending``).
     """
     from ...deps.lockfile import LockfileSymlinkError
     from .lockfile_state import lockfile_has_persisted_state
@@ -105,15 +115,30 @@ def _persist_uninstall_lockfile(
         logger.warning(
             "Failed to update lockfile -- it may be out of sync with uninstalled packages."
         )
+        saved = False
     else:
         if integration_cleanup.materialization_session is not None:
             integration_cleanup.materialization_session.bind_committed_claims(lockfile)
-    return removal_pending
+        saved = True
+    return _LockPersistence(saved=saved, removal_pending=removal_pending)
+
+
+def _hold_native_registration(modules_dir, logger: CommandLogger) -> None:
+    """Report that Claude ownership waits for a durable survivor lock."""
+    from ...claude_plugins.registrar import LEDGER_RELATIVE
+
+    if modules_dir is not None and (Path(modules_dir) / LEDGER_RELATIVE).exists():
+        logger.warning(
+            "Claude native plugin registrations were left unchanged because the lockfile "
+            "update did not complete. Resolve the errors above, then run "
+            "'apm install --global' to reconcile them."
+        )
 
 
 def _persist_lock_then_resync_native(
     *,
-    persist: bool,
+    lock_changed: bool,
+    persist_allowed: bool,
     lockfile,
     lockfile_path,
     logger: CommandLogger,
@@ -126,10 +151,15 @@ def _persist_lock_then_resync_native(
 
     An empty last-package lock stays on disk until Claude native cleanup
     converges, so an interrupted removal can retry from authoritative survivors.
+    Native state never runs ahead of the lock: a withheld or failed required
+    save leaves registrations unchanged; an unchanged lock still reconciles.
     """
-    empty = persist and bool(
-        _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
-    )
+    saved = None
+    if lock_changed and persist_allowed:
+        saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    if lock_changed and (saved is None or not saved.saved):
+        _hold_native_registration(modules_dir, logger)
+        return
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
@@ -137,7 +167,7 @@ def _persist_lock_then_resync_native(
         lockfile=lockfile,
         logger=logger,
     )
-    if empty:
+    if saved is not None and saved.removal_pending:
         lockfile_path.unlink(missing_ok=True)
 
 
@@ -927,12 +957,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Persist survivors, then rebuild APM-owned native plugin registrations
         # from that locked state: only APM's own rows disappear, user bytes never do.
         _persist_lock_then_resync_native(
-            persist=bool(
-                lockfile
-                and (lockfile_updated or profile_lock_updated)
-                and lockfile_ready
-                and mcp_cleanup_error is None
-            ),
+            lock_changed=bool(lockfile and (lockfile_updated or profile_lock_updated)),
+            persist_allowed=bool(lockfile_ready and mcp_cleanup_error is None),
             lockfile=lockfile,
             lockfile_path=lockfile_path,
             logger=logger,

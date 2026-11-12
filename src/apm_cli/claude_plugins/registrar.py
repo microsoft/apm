@@ -210,6 +210,9 @@ def synchronize_claude_plugins(
     previous = _read_ledger(ledger, modules_dir)
     if catalog.exists() and not ledger.exists():
         raise ClaudeNativePluginError("Claude marketplace catalog is not owned by APM.")
+    if not plugins and not previous:
+        # Nothing owned or desired: never require the Claude client.
+        return
 
     desired: dict[str, dict[str, str]] = {}
     for plugin in plugins:
@@ -357,6 +360,7 @@ def resync_claude_plugins(
     scope: Any,
     lockfile: Any,
     targets: list[Any] | None = None,
+    retained_targets: list[Any] | None = None,
     prepared: dict[str, ClaudeNativePlugin] | None = None,
     allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any = None,
@@ -366,6 +370,9 @@ def resync_claude_plugins(
 
     Install supplies freshly admitted plans. Uninstall retains only identities
     already owned, intersected with the surviving lockfile and its trust state.
+    Owned identities that were not freshly admitted are retained against
+    ``targets`` plus ``retained_targets`` (the declared universe), so a one-shot
+    ``--target`` narrowing never retires them; ``None`` preserves Claude.
     """
     from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -382,14 +389,16 @@ def resync_claude_plugins(
     ledger = modules_dir / LEDGER_RELATIVE
     if not prepared and not ledger.exists():
         return
+    if has_symlink_component(modules_dir, ledger):
+        raise ClaudeNativePluginError("Refusing symlinked native Claude ownership ledger.")
+    previous = _read_ledger(ledger, modules_dir)
+    if not prepared and not previous:
+        return
     if lockfile is None:
         raise ClaudeNativePluginError(
             "Native Claude reconciliation requires a readable canonical lockfile. "
             "Repair the lockfile before changing native registration."
         )
-    if has_symlink_component(modules_dir, ledger):
-        raise ClaudeNativePluginError("Refusing symlinked native Claude ownership ledger.")
-    previous = _read_ledger(ledger, modules_dir)
     if any(
         entry["dependency_key"] in lockfile.dependencies
         and not (modules_dir / entry["source"]).is_dir()
@@ -400,6 +409,22 @@ def resync_claude_plugins(
             "before retrying; existing native ownership was preserved."
         )
     known_keys = {entry["dependency_key"] for entry in previous.values()} | set(prepared or {})
+    active_targets = targets if targets is not None else [KNOWN_TARGETS["claude"]]
+    retention_targets = list(
+        {
+            target.name: target
+            for target in reversed(
+                [
+                    *active_targets,
+                    *(
+                        retained_targets
+                        if retained_targets is not None
+                        else [KNOWN_TARGETS["claude"]]
+                    ),
+                ]
+            )
+        }.values()
+    )
     plans: list[ClaudeNativePlugin] = []
     for candidate in candidates_from_lockfile(lockfile, modules_dir):
         key = candidate.dependency_key
@@ -415,9 +440,8 @@ def resync_claude_plugins(
             dependency_ref=locked.to_dependency_ref(),
             package_type=PackageType(locked.package_type),
         )
-        resolved_targets = targets if targets is not None else [KNOWN_TARGETS["claude"]]
         selection = resolve_effective_package_targets(
-            resolved_targets,
+            active_targets if prepared and key in prepared else retention_targets,
             candidate.target_subset,
             info,
             None,

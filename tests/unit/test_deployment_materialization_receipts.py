@@ -497,10 +497,11 @@ def test_empty_uninstall_lock_is_kept_only_when_removal_is_deferred(
 
     lock_path = tmp_path / "apm.lock.yaml"
     lock_path.write_text("stale\n", encoding="utf-8")
-    pending = _persist_uninstall_lockfile(
+    outcome = _persist_uninstall_lockfile(
         LockFile(), lock_path, MagicMock(), _empty_cleanup_outcome(), defer_empty_removal=defer
     )
-    assert pending is defer
+    assert outcome.saved is True
+    assert outcome.removal_pending is defer
     assert lock_path.exists() is defer
     if defer:
         assert not LockFile.read(lock_path).dependencies
@@ -529,7 +530,8 @@ def test_empty_uninstall_lock_is_removed_only_after_native_resync_converges(
     )
     with expectation:
         cli._persist_lock_then_resync_native(
-            persist=True,
+            lock_changed=True,
+            persist_allowed=True,
             lockfile=LockFile(),
             lockfile_path=lock_path,
             logger=MagicMock(),
@@ -539,6 +541,43 @@ def test_empty_uninstall_lock_is_removed_only_after_native_resync_converges(
             scope=InstallScope.USER,
         )
     assert lock_path.exists() is native_fails
+
+
+@pytest.mark.parametrize("case", ["withheld", "write_failed", "unchanged"])
+def test_native_resync_never_runs_ahead_of_the_survivor_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """A withheld or failed required save leaves Claude registrations unchanged."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.claude_plugins.registrar import LEDGER_RELATIVE
+    from apm_cli.commands.uninstall import cli
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        cli, "_resync_native_registration_after_uninstall", lambda **kw: calls.append(kw)
+    )
+    modules = tmp_path / "apm_modules"
+    (modules / LEDGER_RELATIVE).parent.mkdir(parents=True)
+    (modules / LEDGER_RELATIVE).write_text("{}", encoding="utf-8")
+    lock = LockFile()
+    if case == "write_failed":
+        monkeypatch.setattr(lock, "write", MagicMock(side_effect=OSError("disk full")))
+    logger = MagicMock()
+    cli._persist_lock_then_resync_native(
+        lock_changed=case != "unchanged",
+        persist_allowed=case != "withheld",
+        lockfile=lock,
+        lockfile_path=tmp_path / "apm.lock.yaml",
+        logger=logger,
+        integration_cleanup=_empty_cleanup_outcome(),
+        deploy_root=tmp_path,
+        modules_dir=modules,
+        scope=InstallScope.USER,
+    )
+    assert bool(calls) is (case == "unchanged")
+    held = [c for c in logger.warning.call_args_list if "left unchanged" in str(c)]
+    assert bool(held) is (case != "unchanged")
 
 
 @pytest.mark.windows_compat

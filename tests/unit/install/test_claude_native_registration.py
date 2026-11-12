@@ -734,3 +734,49 @@ def test_source_changed_after_admission_never_reaches_native_synchronization(
         )
     assert native["calls"] == []
     assert not (modules / LEDGER_RELATIVE).exists()
+
+
+def test_empty_native_ownership_never_requires_the_claude_client(
+    tmp_path: Path, native, monkeypatch
+) -> None:
+    """After the last removal, unrelated global operations must not need Claude."""
+    from apm_cli.deps.lockfile import LockFile
+
+    _sync(tmp_path, ["alpha"])
+    _sync(tmp_path, [])
+    assert json.loads((tmp_path / LEDGER_RELATIVE).read_text())["plugins"] == {}
+
+    def unavailable(self, *args):
+        raise ClaudeNativePluginError("Claude is not on PATH")
+
+    monkeypatch.setattr(ClaudePluginCLI, "run", unavailable)
+    _sync(tmp_path, [])
+    resync_claude_plugins(modules_dir=tmp_path, scope=InstallScope.USER, lockfile=None)
+    resync_claude_plugins(modules_dir=tmp_path, scope=InstallScope.USER, lockfile=LockFile())
+
+
+@pytest.mark.parametrize(
+    ("declared", "retained"),
+    [(None, True), (["claude", "codex"], True), (["codex"], False)],
+)
+def test_target_narrowing_retires_native_plugins_only_when_claude_is_undeclared(
+    tmp_path: Path, native, declared: list[str] | None, retained: bool
+) -> None:
+    """A one-shot --target codex keeps declared Claude registrations and consent."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    modules, lock, plan = _locked_native_fixture(tmp_path / "project", native)
+    kwargs = {"modules_dir": modules, "scope": InstallScope.USER, "lockfile": lock}
+    resync_claude_plugins(**kwargs, prepared={plan.dependency_key: plan})
+    plugin_id = f"{plan.name}@{MARKETPLACE_NAME}"
+    native["plugins"][plugin_id]["enabled"] = True
+    resync_claude_plugins(
+        **kwargs,
+        targets=[KNOWN_TARGETS["codex"]],
+        retained_targets=None if declared is None else [KNOWN_TARGETS[n] for n in declared],
+        prepared={},
+    )
+    assert (plugin_id in native["plugins"]) is retained
+    if retained:
+        assert native["plugins"][plugin_id]["enabled"] is True
+    assert all(call[1:2] not in (("enable",), ("disable",)) for call in native["calls"])
