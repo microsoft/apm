@@ -355,9 +355,11 @@ class TestResolveDepAuthCtx:
 class TestBackwardCompatStubs:
     def test_get_artifactory_headers_delegates(self, downloader: GitHubPackageDownloader) -> None:
         downloader._strategies.get_artifactory_headers = MagicMock(return_value={"X": "Y"})
-        result = downloader._get_artifactory_headers()
+        result = downloader._get_artifactory_headers(scheme="https", host="art.example.com")
         assert result == {"X": "Y"}
-        downloader._strategies.get_artifactory_headers.assert_called_once()
+        downloader._strategies.get_artifactory_headers.assert_called_once_with(
+            scheme="https", host="art.example.com"
+        )
 
     def test_download_artifactory_archive_delegates(
         self, downloader: GitHubPackageDownloader

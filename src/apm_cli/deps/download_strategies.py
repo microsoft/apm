@@ -339,16 +339,17 @@ class DownloadDelegate:
     # Artifactory helpers
     # ------------------------------------------------------------------
 
-    def get_artifactory_headers(self) -> dict[str, str]:
-        """Build HTTP headers for registry/Artifactory requests."""
+    def get_artifactory_headers(self, *, scheme: str, host: str) -> dict[str, str]:
+        """Build registry auth headers for a request to ``scheme://host``.
+
+        The registry token is scoped to the configured ``PROXY_REGISTRY_URL``
+        origin (see :meth:`RegistryConfig.headers_for`); requests to any
+        other origin carry no registry credential.
+        """
         cfg = self._host.registry_config
-        if cfg is not None:
-            return cfg.get_headers()
-        # Fallback: direct artifactory_token attribute (legacy path)
-        headers: dict[str, str] = {}
-        if self._host.artifactory_token:
-            headers["Authorization"] = f"Bearer {self._host.artifactory_token}"
-        return headers
+        if cfg is None:
+            return {}
+        return cfg.headers_for(scheme, host)
 
     def _stream_artifactory_archive(
         self,
@@ -431,7 +432,7 @@ class DownloadDelegate:
         from ..config import get_apm_temp_dir
 
         archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
-        headers = self.get_artifactory_headers()
+        headers = self.get_artifactory_headers(scheme=scheme, host=host)
 
         # Guard: reject unreasonably large archives (default 500 MB)
         max_archive_bytes = int(os.environ.get("ARTIFACTORY_MAX_ARCHIVE_MB", "500")) * 1024 * 1024
@@ -531,7 +532,7 @@ class DownloadDelegate:
                 file_path,
                 ref,
                 scheme=scheme,
-                headers=self.get_artifactory_headers(),
+                headers=self.get_artifactory_headers(scheme=scheme, host=host),
                 resilient_get=artifactory_get,
             )
         if content is not None:
@@ -542,7 +543,7 @@ class DownloadDelegate:
         import zipfile
 
         archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
-        headers = self.get_artifactory_headers()
+        headers = self.get_artifactory_headers(scheme=scheme, host=host)
 
         for url in archive_urls:
             try:

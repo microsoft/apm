@@ -496,9 +496,9 @@ class GitHubPackageDownloader:
 
     # --- Artifactory VCS archive download support ---
 
-    def _get_artifactory_headers(self) -> dict[str, str]:
+    def _get_artifactory_headers(self, *, scheme: str, host: str) -> dict[str, str]:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.get_artifactory_headers()
+        return self._strategies.get_artifactory_headers(scheme=scheme, host=host)
 
     def _download_artifactory_archive(
         self,

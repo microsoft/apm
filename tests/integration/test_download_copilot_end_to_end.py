@@ -453,27 +453,27 @@ class TestGetArtifactoryHeaders:
     """Artifactory header construction delegates to registry_config or fallback."""
 
     def test_uses_registry_config_headers(self) -> None:
-        """Delegates to registry_config.get_headers() when available."""
+        """Delegates to registry_config.headers_for() for the target origin."""
         cfg = MagicMock()
-        cfg.get_headers.return_value = {"Authorization": "Bearer reg-token"}
+        cfg.headers_for.return_value = {"Authorization": "Bearer reg-token"}
         host = _make_host(registry_config=cfg)
         delegate = DownloadDelegate(host)
-        hdrs = delegate.get_artifactory_headers()
+        hdrs = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert hdrs == {"Authorization": "Bearer reg-token"}
-        cfg.get_headers.assert_called_once()
+        cfg.headers_for.assert_called_once_with("https", "art.example.com")
 
-    def test_falls_back_to_artifactory_token(self) -> None:
-        """Falls back to direct artifactory_token when no registry_config."""
+    def test_artifactory_token_without_registry_config_is_not_attached(self) -> None:
+        """A token without a configured registry origin is never attached."""
         host = _make_host(artifactory_token="direct-token", registry_config=None)
         delegate = DownloadDelegate(host)
-        hdrs = delegate.get_artifactory_headers()
-        assert hdrs == {"Authorization": "Bearer direct-token"}
+        hdrs = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
+        assert hdrs == {}
 
     def test_empty_headers_when_no_token_or_config(self) -> None:
         """Returns empty dict when no token and no registry_config."""
         host = _make_host(artifactory_token=None, registry_config=None)
         delegate = DownloadDelegate(host)
-        hdrs = delegate.get_artifactory_headers()
+        hdrs = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert hdrs == {}
 
 

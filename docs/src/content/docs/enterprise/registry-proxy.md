@@ -76,7 +76,7 @@ export PROXY_REGISTRY_ONLY=1                 # block direct VCS fallback
 | Variable | Purpose |
 |---|---|
 | `PROXY_REGISTRY_URL` | Full proxy base including any path prefix. When set, all GitHub archives route here. |
-| `PROXY_REGISTRY_TOKEN` | Bearer token sent on proxy requests. Independent of `GITHUB_APM_PAT`. |
+| `PROXY_REGISTRY_TOKEN` | Bearer token sent on proxy requests. Independent of `GITHUB_APM_PAT`. Sent only to the scheme and host of `PROXY_REGISTRY_URL`; explicit-FQDN dependencies on any other host get no proxy token. |
 | `PROXY_REGISTRY_ONLY` | `1` blocks direct VCS fallback at runtime and on lockfile replay. |
 | `PROXY_REGISTRY_ALLOW_HTTP` | `1` silences the plaintext-token warning when the proxy is on `http://`. Use only inside an isolated network. |
 

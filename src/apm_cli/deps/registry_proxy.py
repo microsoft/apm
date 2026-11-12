@@ -179,6 +179,24 @@ class RegistryConfig:
             return {"Authorization": f"Bearer {self.token}"}
         return {}
 
+    def serves(self, scheme: str, host: str) -> bool:
+        """Return whether ``scheme://host`` is this registry's own origin."""
+        return (scheme or "").lower() == self.scheme.lower() and (
+            host or ""
+        ).lower() == self.host.lower()
+
+    def headers_for(self, scheme: str, host: str) -> dict:
+        """Return registry auth headers only for this registry's own origin.
+
+        A dependency may name any Artifactory-style host (explicit FQDN form
+        or a lockfile ``host`` field); the registry token is scoped to the
+        configured ``PROXY_REGISTRY_URL`` origin and is never attached to a
+        request for a different scheme or host.
+        """
+        if not self.serves(scheme, host):
+            return {}
+        return self.get_headers()
+
     def get_client(self) -> RegistryClient:
         """Return a :class:`RegistryClient` for this configuration.
 
