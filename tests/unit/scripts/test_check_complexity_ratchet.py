@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 RATCHET_TEST_SCOPE = "fixture"
 
@@ -241,6 +244,77 @@ def test_bootstrap_without_base_baseline_skips_growth_check(tmp_path: Path) -> N
 
     assert result.returncode == 0, result.stderr
     assert "no complexity baseline at HEAD" in result.stdout
+
+
+def test_changed_limits_against_base_ref_are_rejected(tmp_path: Path) -> None:
+    _scaffold(tmp_path)
+    _write_module(tmp_path, CLEAN_MODULE)
+    baseline = _write_baseline(tmp_path, {})
+    base = json.loads(baseline.read_text(encoding="utf-8"))
+    base["limits"]["max-args"] = 10
+    baseline.write_text(json.dumps(base), encoding="utf-8")
+    _commit_all(tmp_path)
+
+    # The PR changes the limits and re-baselines to match its own constants.
+    _write_baseline(tmp_path, {})
+
+    result = _run(tmp_path, "--base-ref", "HEAD")
+
+    assert result.returncode == 2
+    assert "invalid complexity baseline at HEAD: limits must remain exact" in result.stderr
+
+
+def test_unreadable_base_baseline_fails_closed(tmp_path: Path) -> None:
+    _scaffold(tmp_path)
+    _write_module(tmp_path, CLEAN_MODULE)
+    _write_baseline(tmp_path, {})
+    _commit_all(tmp_path)
+    blob = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", f"HEAD:{BASELINE_RELATIVE}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    obj = tmp_path / ".git" / "objects" / blob[:2] / blob[2:]
+    obj.chmod(0o644)
+    obj.unlink()
+
+    result = _run(tmp_path, "--base-ref", "HEAD")
+
+    assert result.returncode == 2
+    assert "cannot read complexity baseline at HEAD" in result.stderr
+    assert "skipping baseline growth check" not in result.stdout
+
+
+def _load_ratchet_baseline():
+    spec = importlib.util.spec_from_file_location(
+        "ratchet_baseline_under_test", REPO_ROOT / "scripts" / "ratchet_baseline.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_load_baseline_at_ref_contract(tmp_path: Path) -> None:
+    ratchet_baseline = _load_ratchet_baseline()
+    _scaffold(tmp_path)
+    _commit_all(tmp_path)
+    baseline = tmp_path / BASELINE_RELATIVE
+
+    assert ratchet_baseline.load_baseline_at_ref(tmp_path, baseline, "HEAD", label="t") is None
+
+    _write_baseline(tmp_path, GRANDFATHERED)
+    _commit_all(tmp_path)
+    loaded = ratchet_baseline.load_baseline_at_ref(tmp_path, baseline, "HEAD", label="t")
+    assert loaded == _payload(GRANDFATHERED)
+
+    with pytest.raises(ratchet_baseline.BaselineError, match="unknown git ref"):
+        ratchet_baseline.load_baseline_at_ref(tmp_path, baseline, "no-such-ref", label="t")
+    with pytest.raises(ratchet_baseline.BaselineError, match="is outside"):
+        ratchet_baseline.load_baseline_at_ref(
+            tmp_path, tmp_path.parent / "elsewhere.json", "HEAD", label="t"
+        )
 
 
 def test_loosened_limits_are_rejected(tmp_path: Path) -> None:

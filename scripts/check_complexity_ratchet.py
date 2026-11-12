@@ -174,17 +174,25 @@ def _report(message: str, entries: set[Entry] | None = None) -> None:
         print(_format(entries), file=sys.stderr)
 
 
+def _limits_text() -> str:
+    return f"Stage 2 limits are {json.dumps(LIMITS, sort_keys=True)}."
+
+
 def _check_base_growth(root: Path, baseline: Path, ref: str, current: set[Entry]) -> bool:
     """Return True when the working baseline adds entries absent at ``ref``."""
     base_payload = load_baseline_at_ref(root, baseline, ref, label=LABEL)
     if base_payload is None:
         print(f"[i] no {LABEL} baseline at {ref}; skipping baseline growth check")
         return False
+    # The base copy must carry the same LIMITS, RULES and SCOPE as this script,
+    # so a change cannot loosen the constants and re-baseline in one step. A
+    # deliberate limit change therefore fails here (exit 2) and needs its own
+    # reviewed baseline regeneration.
     added = current - _validated_entries(base_payload, f" at {ref}")
     if added:
         _report(
             f"{LABEL} baseline grew against {ref}. Bring these functions within the "
-            "Stage 2 limits instead of grandfathering them:",
+            f"Stage 2 limits instead of grandfathering them. {_limits_text()}",
             added,
         )
     return bool(added)
@@ -230,10 +238,7 @@ def _run(args: argparse.Namespace) -> int:
     if new:
         for path, qualname, rule in sorted(new):
             _report(f"new complexity violation: {path}::{qualname} {rule}")
-        _report(
-            f"Stage 2 limits are {json.dumps(LIMITS, sort_keys=True)}. Simplify the "
-            "listed function(s); do not expand the baseline."
-        )
+        _report(f"{_limits_text()} Simplify the listed function(s); do not expand the baseline.")
         if args.update_baseline:
             _report(f"refusing to update {LABEL} baseline with new violations")
         return 1
@@ -241,7 +246,10 @@ def _run(args: argparse.Namespace) -> int:
         return 1
     if stale and not args.update_baseline:
         _report(f"{LABEL} baseline is stale; these violations are fixed:", stale)
-        _report(f"Review the reductions, then run '{UPDATE_COMMAND} --update-baseline'.")
+        print(
+            f"[i] Review the reductions, then run '{UPDATE_COMMAND} --update-baseline'.",
+            file=sys.stderr,
+        )
         return 1
     if stale:
         updated: dict[str, object] = {

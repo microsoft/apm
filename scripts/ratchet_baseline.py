@@ -60,6 +60,21 @@ def load_baseline_at_ref(
     )
     if verify.returncode != 0:
         raise BaselineError(f"unknown git ref for {label} baseline: {ref}")
+    # Only a path absent from the ref's tree means "no baseline yet"; any other
+    # git failure must fail closed instead of skipping the growth check.
+    listed = subprocess.run(  # noqa: S603 - fixed git operation, no shell
+        [git, "-C", str(root), "ls-tree", "--name-only", ref, "--", relative],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if listed.returncode != 0:
+        raise BaselineError(
+            f"cannot list {label} baseline at {ref}: {listed.stderr.strip() or 'git ls-tree failed'}"
+        )
+    if relative not in listed.stdout.splitlines():
+        return None
     shown = subprocess.run(  # noqa: S603 - fixed git operation, no shell
         [git, "-C", str(root), "show", f"{ref}:{relative}"],
         capture_output=True,
@@ -68,7 +83,9 @@ def load_baseline_at_ref(
         check=False,
     )
     if shown.returncode != 0:
-        return None
+        raise BaselineError(
+            f"cannot read {label} baseline at {ref}: {shown.stderr.strip() or 'git show failed'}"
+        )
     try:
         payload = json.loads(shown.stdout)
     except JSONDecodeError as error:
