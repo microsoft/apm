@@ -612,11 +612,21 @@ def _auto_detect_description(project_name):
 
 def _get_default_config(project_name):
     """Get default configuration for new projects with auto-detection."""
+    config = _get_bootstrap_config(project_name)
+    config["author"] = _auto_detect_author()
+    return config
+
+
+def _get_bootstrap_config(project_name):
+    """Default config for an apm.yml auto-created by ``apm install``.
+
+    Omits ``author``: whoever first runs install is not necessarily the
+    project's author, so the local git identity must not be recorded.
+    """
     return {
         "name": project_name,
         "version": "1.0.0",
         "description": _auto_detect_description(project_name),
-        "author": _auto_detect_author(),
     }
 
 
@@ -673,7 +683,8 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     """Create minimal apm.yml file with auto-detected metadata.
 
     Args:
-        config: dict with name, version, description, author keys.
+        config: dict with name, version, description keys and an optional
+            author key (omitted for install auto-bootstrap).
             Optional 'target' key: CSV string of targets to pin.
         plugin: if True, include a devDependencies section.
         target_path: explicit file path to write (defaults to cwd/apm.yml).
@@ -683,8 +694,9 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         "name": config["name"],
         "version": config["version"],
         "description": config["description"],
-        "author": config["author"],
     }
+    if "author" in config:
+        apm_yml_data["author"] = config["author"]
 
     # Add targets field if present in config (plural list form -- canonical).
     # Older callers may still pass a singular CSV "target" string; honor that
