@@ -540,7 +540,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             else:
                 data = {}
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
-            path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            self._write_json_config(path, data, shared=True)
             return True
         except OSError:
             return False

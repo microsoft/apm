@@ -718,6 +718,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="MCP config view stops deriving scope from the aggregated declaration owner.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-json-config-write",
+        rule_id="mutation_writes.mcp_json_config_write",
+        path="src/apm_cli/adapters/client/vscode.py",
+        old="self._write_json_config(Path(config_path), new_config, shared=True)",
+        new='open(config_path, "w").write(json.dumps(new_config))',
+        intent="An adapter serializes MCP JSON straight to a file instead of the owner writer.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-omission-evidence",
         rule_id="mutation_writes.mcp_omission_evidence",
         path="src/apm_cli/integration/mcp_config_view.py",

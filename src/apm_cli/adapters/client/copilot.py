@@ -134,24 +134,17 @@ class CopilotClientAdapter(MCPClientAdapter):
 
         Args:
             config_updates (dict): Configuration updates to apply.
+
+        Returns ``False`` without writing when the existing file cannot be
+        rewritten safely.
         """
-        current_config = self.get_current_config()
-
-        # Ensure servers section exists and is a dict (guard against malformed config).
-        if not isinstance(current_config.get(self.mcp_servers_key), dict):
-            current_config[self.mcp_servers_key] = {}
-
-        # Apply updates
-        current_config[self.mcp_servers_key].update(config_updates)
-
-        # Write back to file
         config_path = Path(self.get_config_path())
-
-        # Ensure directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(config_path, "w") as f:
-            json.dump(current_config, f, indent=2)
+        current_config = self._parse_json_config_for_update(config_path)
+        if current_config is None:
+            return False
+        current_config.setdefault(self.mcp_servers_key, {}).update(config_updates)
+        self._write_json_config(config_path, current_config, shared=not self.user_scope)
+        return True
 
     def get_current_config(self):
         """Get the current Copilot CLI MCP configuration.
@@ -212,7 +205,8 @@ class CopilotClientAdapter(MCPClientAdapter):
             config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Update configuration using the chosen key
-            self.update_config({config_key: server_config})
+            if self.update_config({config_key: server_config}) is False:
+                return False
 
             self._record_env_diagnostics(config_key, server_config, previously_baked)
             return True

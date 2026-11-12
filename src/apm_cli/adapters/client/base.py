@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
-from ...utils.atomic_io import atomic_write_text
+from ...utils.atomic_io import atomic_write_text, umask_file_mode
 from ...utils.console import _rich_error, _rich_warning
 from ...utils.path_security import has_symlink_component
 
@@ -455,6 +455,17 @@ class MCPClientAdapter(ABC):
                 symbol="warning",
             )
             return None
+        return self._parse_json_config_for_update(config_path)
+
+    def _parse_json_config_for_update(self, config_path: Path) -> dict | None:
+        """Parse *config_path* for a merge-and-write without the symlink policy.
+
+        Adapters whose user-scope file may live outside ``$HOME`` (for
+        example ``CLAUDE_CONFIG_DIR`` or ``COPILOT_HOME``) use this half of
+        :meth:`_read_json_config_for_update`. Same contract: ``{}`` for a
+        missing or blank file, ``None`` after a warning when a rewrite could
+        lose data.
+        """
         try:
             raw = config_path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -491,13 +502,19 @@ class MCPClientAdapter(ABC):
         return config
 
     @staticmethod
-    def _write_json_config(config_path: Path, config: dict) -> None:
+    def _write_json_config(config_path: Path, config: dict, *, shared: bool = False) -> None:
         """Atomically write *config* as JSON and keep the file owner-only.
 
-        Entries can carry env values resolved at install time.
+        Entries can carry env values resolved at install time. ``shared``
+        marks a committed project config file: it keeps its existing or
+        umask mode instead.
         """
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(config_path, json.dumps(config, indent=2), new_file_mode=0o600)
+        payload = json.dumps(config, indent=2)
+        if shared:
+            atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
+            return
+        atomic_write_text(config_path, payload, new_file_mode=0o600)
         os.chmod(config_path, 0o600)
 
     @abstractmethod

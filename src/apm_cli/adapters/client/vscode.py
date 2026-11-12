@@ -98,10 +98,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
         config_path = self.get_config_path(logger=logger)
 
         try:
-            # Write the updated config
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(new_config, f, indent=2)
-
+            self._write_json_config(Path(config_path), new_config, shared=True)
             return True
         except Exception as e:
             if logger:
@@ -187,7 +184,11 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
             # Get current config before formatting so optional registry fields
             # that the user already edited can be preserved on reinstall.
-            current_config = self.get_current_config(logger=logger)
+            current_config = self._parse_json_config_for_update(
+                Path(self.get_config_path(logger=logger))
+            )
+            if current_config is None:
+                return False
             existing_servers = current_config.get("servers")
             if not isinstance(existing_servers, dict):
                 existing_servers = {}

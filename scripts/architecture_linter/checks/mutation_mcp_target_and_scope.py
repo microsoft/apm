@@ -13,6 +13,8 @@ Ports three of the owner guards recorded in
   fields and harness aliases.
 * ``hooks-integrations-jetbrains-mcp-path`` -- AC28 JetBrains Copilot MCP
   path.
+* ``hooks-integrations-mcp-json-config-write`` -- MCP JSON config
+  parse-for-update and atomic write owned by MCPClientAdapter.
 """
 
 from __future__ import annotations
@@ -780,6 +782,39 @@ def _check_jetbrains_mcp_path(provider: FactsProvider) -> Iterable[Violation]:
     return tuple(findings)
 
 
+def _check_mcp_json_config_write(provider: FactsProvider) -> Iterable[Violation]:
+    """MCP JSON config merge-writes must route through the base adapter owner.
+
+    ``MCPClientAdapter`` owns parse-for-update (refuse to rewrite a file it
+    cannot parse) and the atomic writer; no other adapter may serialize JSON
+    straight into a config file handle.
+    """
+    rule_id = "mutation_writes.mcp_json_config_write"
+    facts, failures = checked_facts(provider, _MCP_ADAPTER_BASE, rule_id, require_python=True)
+    findings: list[Violation] = list(failures)
+    if not failures:
+        for owner in ("_parse_json_config_for_update", "_write_json_config"):
+            findings.extend(
+                _require(
+                    _count_regex_lines(facts, rf"^\s+def {owner}\(") == 1,
+                    rule_id,
+                    _MCP_ADAPTER_BASE,
+                    f"{owner} must be defined exactly once on MCPClientAdapter",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=r"json\.dump\(|write_text\(\s*json\.dumps|open\([^)]*[\"']w[\"']",
+            message="MCP JSON config writes must use MCPClientAdapter._write_json_config",
+            exempt=True,
+        )
+    )
+    return tuple(findings)
+
+
 def _check_mcp_ownership_migration(provider: FactsProvider) -> Iterable[Violation]:
     """Legacy MCP target ownership migration must stay owned by one module.
 
@@ -950,6 +985,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-jetbrains-mcp-path",),
         description="JetBrains Copilot MCP config paths must come from the IntelliJ adapter.",
         check=_check_jetbrains_mcp_path,
+    ),
+    Rule(
+        id="mutation_writes.mcp_json_config_write",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-json-config-write",),
+        description="MCP JSON config merge-writes must route through the base adapter owner.",
+        check=_check_mcp_json_config_write,
     ),
 )
 
