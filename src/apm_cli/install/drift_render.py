@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
-from apm_cli.install.local_edits import local_edit_hint
+from apm_cli.install.local_edits import count_exportable_findings, local_edit_hint
 from apm_cli.utils.console import STATUS_SYMBOLS
 
 if TYPE_CHECKING:
+    from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.drift import DriftFinding
 
 _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
@@ -74,8 +75,16 @@ def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
     return ""
 
 
-def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> str:
-    """Render drift findings as grouped terminal text."""
+def render_drift_text(
+    findings: list[DriftFinding],
+    verbose: bool = False,
+    *,
+    lockfile: LockFile | None = None,
+) -> str:
+    """Render drift findings as grouped terminal text.
+
+    *lockfile* lets the export-patch hint skip local-path packages.
+    """
     if not findings:
         return f"{STATUS_SYMBOLS['check']} No drift detected"
 
@@ -103,10 +112,9 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
                 lines.append(f"      {item.inline_diff}")
         lines.append("")
 
-    # Project-local content ("." owner) has no upstream package to patch.
-    local_edits = [item for item in by_kind.get("modified", []) if item.package != "."]
-    if local_edits:
-        lines.append(f"  {STATUS_SYMBOLS['info']} {local_edit_hint(len(local_edits))}")
+    exportable = count_exportable_findings(findings, lockfile)
+    if exportable:
+        lines.append(f"  {STATUS_SYMBOLS['info']} {local_edit_hint(exportable)}")
 
     if by_kind.get("unmanaged-conflict"):
         lines.append(

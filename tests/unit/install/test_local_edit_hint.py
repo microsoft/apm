@@ -20,8 +20,15 @@ import pytest
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import DriftFinding, render_drift_text
-from apm_cli.install.local_edits import count_local_edits, local_edit_hint
+from apm_cli.install.local_edits import (
+    count_exportable_findings,
+    count_local_edits,
+    is_upstream_package,
+    local_edit_hint,
+)
 from apm_cli.utils.content_hash import compute_file_hash
+
+pytestmark = pytest.mark.component
 
 _ORIGINAL = b"# Standard\n\nrule one\n"
 _EDITED = b"# Standard\n\nrule one\nrule two\n"
@@ -63,8 +70,9 @@ class TestLocalEditHint:
 
     def test_install_wording_names_this_install(self) -> None:
         text = local_edit_hint(1, installing=True)
-        assert text.startswith("1 local edit(s) to managed files")
+        assert text.startswith("1 local edit(s) to managed files may be overwritten")
         assert "this install" in text
+        assert "next time" in text
         assert "run 'apm export-patch'" in text
         assert text.isascii()
 
@@ -127,6 +135,30 @@ class TestCountLocalEdits:
         assert count_local_edits(tmp_path, LockFile(), []) == 0
 
 
+class TestUpstreamOwnership:
+    def test_project_local_and_local_path_owners_are_not_upstream(self, tmp_path: Path) -> None:
+        lock = _lockfile(tmp_path, **{".github/a.md": (_ORIGINAL, _EDITED)})
+        key = next(iter(lock.dependencies))
+        assert is_upstream_package(key, lock)
+        assert not is_upstream_package(".", lock)
+        assert not is_upstream_package("unknown/pkg", lock)
+        assert is_upstream_package("", lock)
+        lock.dependencies[key].local_path = "../pkg"
+        assert not is_upstream_package(key, lock)
+
+    def test_count_exportable_findings_matches_export_scope(self, tmp_path: Path) -> None:
+        lock = _lockfile(tmp_path, **{".github/a.md": (_ORIGINAL, _EDITED)})
+        key = next(iter(lock.dependencies))
+        findings = [
+            DriftFinding(path=".github/a.md", kind="modified", package=key),
+            DriftFinding(path="AGENTS.md", kind="modified", package="."),
+            DriftFinding(path=".github/b.md", kind="unintegrated", package=key),
+        ]
+        assert count_exportable_findings(findings, lock) == 1
+        lock.dependencies[key].source = "local"
+        assert count_exportable_findings(findings, lock) == 0
+
+
 class TestDriftTextHint:
     def test_modified_findings_add_export_hint(self) -> None:
         out = render_drift_text(
@@ -138,6 +170,15 @@ class TestDriftTextHint:
         assert local_edit_hint(2) in out
         # The hint must precede the re-sync advice that would overwrite edits.
         assert out.index("apm export-patch") < out.index("Run 'apm install'")
+
+    def test_local_path_package_findings_get_no_hint(self, tmp_path: Path) -> None:
+        lock = _lockfile(tmp_path, **{".github/a.md": (_ORIGINAL, _EDITED)})
+        key = next(iter(lock.dependencies))
+        lock.dependencies[key].local_path = "../pkg"
+        out = render_drift_text(
+            [DriftFinding(path=".github/a.md", kind="modified", package=key)], lockfile=lock
+        )
+        assert "apm export-patch" not in out
 
     def test_project_local_and_unintegrated_findings_get_no_hint(self) -> None:
         out = render_drift_text(
@@ -215,7 +256,6 @@ def _hint_calls(logger: MagicMock) -> list[str]:
     ]
 
 
-@pytest.mark.component
 class TestInstallPipelineHint:
     def test_project_install_shows_hint_once(self, tmp_path: Path) -> None:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT)

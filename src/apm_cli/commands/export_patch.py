@@ -47,6 +47,7 @@ import click
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+from ..utils.content_hash import _EXCLUDED_DIRS
 from ..utils.normalization import _normalize
 
 if TYPE_CHECKING:
@@ -58,10 +59,6 @@ if TYPE_CHECKING:
 # candidates. Managed primitives are small text files; a larger blob is
 # noise at best and a memory hazard at worst.
 _MAX_INDEXED_BYTES = 2 * 1024 * 1024
-
-# Mirror of utils/content_hash.py walk exclusions: these can appear in a
-# materialized package tree but are never package content.
-_EXCLUDED_DIRS = {".git", "__pycache__"}
 
 # Windows reserved device names cannot be used as file stems.
 _RESERVED_STEMS = (
@@ -185,13 +182,20 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
     stay accurate.
     """
     from ..install.cache_pin import MARKER_FILENAME
+    from ..utils.path_security import PathTraversalError, ensure_path_within_resolved
 
     by_digest: dict[str, list[str]] = {}
     unindexed: list[str] = []
+    resolved_root = source_root.resolve()
     for path in sorted(source_root.rglob("*")):
         if path.is_symlink():
             continue
         if not path.is_file():
+            continue
+        # rglob follows symlinked directories before Python 3.13.
+        try:
+            ensure_path_within_resolved(path, resolved_root)
+        except PathTraversalError:
             continue
         rel_parts = path.relative_to(source_root).parts
         if any(part in _EXCLUDED_DIRS for part in rel_parts):
@@ -361,6 +365,7 @@ def build_patch_export(
     """
     from ..deps.lockfile import _SELF_KEY
     from ..install.drift import CacheMissError, _materialize_install_path
+    from ..install.local_edits import is_upstream_package
 
     result_exported: list[ExportedEdit] = []
     result_skipped: list[SkippedEdit] = []
@@ -386,11 +391,11 @@ def build_patch_export(
             continue
 
         dep = lockfile.get_dependency(key)
-        if key == _SELF_KEY or dep is None:
-            skip_group("project-local content; the source already lives in this project")
-            continue
-        if dep.source == "local" or dep.local_path:
-            skip_group(f"local package ({dep.local_path}); edit the source file directly")
+        if not is_upstream_package(key, lockfile):
+            if key == _SELF_KEY or dep is None:
+                skip_group("project-local content; the source already lives in this project")
+            else:
+                skip_group(f"local package ({dep.local_path}); edit the source file directly")
             continue
 
         try:
@@ -528,10 +533,10 @@ def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
     auto-detection alone would skip declared targets whose root
     directory does not exist, silently hiding their findings.
     """
-    from ..install.drift import _read_apm_yml_target
+    from ..core.target_detection import read_manifest_target
     from ..integration.targets import resolve_targets
 
-    return resolve_targets(project_root, explicit_target=_read_apm_yml_target(project_root))
+    return resolve_targets(project_root, explicit_target=read_manifest_target(project_root))
 
 
 @click.command(
@@ -626,12 +631,9 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
         logger.error("--out must not point inside apm_modules/ (the install cache).")
         sys.exit(1)
 
-    remote_deps = [
-        dep
-        for dep in lockfile.dependencies.values()
-        if dep.source != "local" and not dep.local_path
-    ]
-    if not remote_deps:
+    from ..install.local_edits import is_upstream_package
+
+    if not any(is_upstream_package(key, lockfile) for key in lockfile.dependencies):
         logger.success(
             "All dependencies are project-local or local-path packages; "
             "their sources already live on disk, so there is nothing to "

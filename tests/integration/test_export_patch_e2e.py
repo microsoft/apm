@@ -179,3 +179,61 @@ class TestExportPatchE2E:
         output = " ".join(result.output.split())
         assert "1 local edit(s) to managed files" in output, result.output
         assert "run 'apm export-patch'" in output
+
+
+class _StopBeforeDownload(Exception):
+    pass
+
+
+def test_install_points_local_edits_at_export_patch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real 'apm install' shows the hint once before it re-syncs files.
+
+    The download phase is stubbed to stop the run right after the hint so
+    the test stays hermetic; the edit must survive the aborted install.
+    """
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    proj = tmp_path / "proj"
+    (proj / ".github").mkdir(parents=True)
+    (proj / "apm.yml").write_bytes(
+        yaml.safe_dump(
+            {
+                "name": "proj",
+                "version": "1.0.0",
+                "target": "copilot",
+                "dependencies": {"apm": ["testorg/testpkg"]},
+            }
+        ).encode()
+    )
+    pkg_src = proj / "apm_modules" / "testorg" / "testpkg"
+    _write(pkg_src / "apm.yml", yaml.safe_dump({"name": "testpkg", "version": "1.0.0"}).encode())
+    _write(pkg_src / _SOURCE_REL, _ORIGINAL)
+    write_marker(pkg_src, _COMMIT)
+    _write(proj / _DEPLOYED, _ORIGINAL)
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="testorg/testpkg",
+            host="github.com",
+            resolved_commit=_COMMIT,
+            version="1.0.0",
+            deployed_files=[_DEPLOYED],
+            deployed_file_hashes={_DEPLOYED: compute_file_hash(proj / _DEPLOYED)},
+        )
+    )
+    lock.write(get_lockfile_path(proj))
+    (proj / _DEPLOYED).write_bytes(_EDITED)
+    monkeypatch.chdir(proj)
+
+    def _stop(ctx) -> None:
+        raise _StopBeforeDownload("stop before download")
+
+    monkeypatch.setattr("apm_cli.install.phases.download.run", _stop)
+    result = CliRunner().invoke(cli, ["install", "--frozen"])
+
+    output = " ".join(result.output.split())
+    assert output.count("apm export-patch") == 1, result.output
+    assert "1 local edit(s) to managed files may be overwritten by this install" in output
+    assert (proj / _DEPLOYED).read_bytes() == _EDITED
