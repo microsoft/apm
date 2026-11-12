@@ -19,15 +19,16 @@ function unescapeHtml(str) {
 }
 
 // Returns the escaped URL when its scheme is allowed (or it has none), else null.
-// Browsers drop ASCII whitespace and control characters before detecting the
-// scheme, so the check strips them too and fails closed on anything unexpected.
+// The scheme is checked on exactly the string that is returned. Any whitespace
+// or control character fails closed, because browsers strip some of them
+// before detecting the scheme.
 export function safeUrl(escapedUrl, allowedSchemes) {
   if (!escapedUrl) return null;
-  const compact = unescapeHtml(escapedUrl).replace(/[\u0000-\u0020\u007f-\u009f]/g, "");
-  if (!compact) return null;
-  const scheme = compact.match(/^([a-zA-Z][a-zA-Z0-9+.\-]*):/);
+  const url = escapedUrl.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "");
+  if (!url || /[\s\u0000-\u001f\u007f-\u009f\ufeff]/.test(url)) return null;
+  const scheme = unescapeHtml(url).match(/^([a-zA-Z][a-zA-Z0-9+.\-]*):/);
   if (scheme && !allowedSchemes.has(scheme[1].toLowerCase())) return null;
-  return escapedUrl.trim();
+  return url;
 }
 
 export function renderMarkdown(text) {

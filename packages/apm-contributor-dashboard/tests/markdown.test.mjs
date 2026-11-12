@@ -189,6 +189,16 @@ describe("renderMarkdown", () => {
     "vbscript:msgbox(1)",
     "data:text/html,<script>alert(1)</script>",
     "file:///etc/passwd",
+    "\u00a0javascript:alert%281%29",
+    "\u1680javascript:alert%281%29",
+    "\u2000javascript:alert%281%29",
+    "\u200ajavascript:alert%281%29",
+    "\u2028javascript:alert%281%29",
+    "\u2029javascript:alert%281%29",
+    "\u202fjavascript:alert%281%29",
+    "\u205fjavascript:alert%281%29",
+    "\u3000javascript:alert%281%29",
+    "\ufeffjavascript:alert%281%29",
   ];
 
   for (const url of unsafeUrls) {
