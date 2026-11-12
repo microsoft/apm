@@ -1,6 +1,7 @@
 """Unit tests for content scanning during bundle unpack."""
 
 import os  # noqa: F401
+import shutil
 from pathlib import Path
 from typing import Union  # noqa: F401
 
@@ -171,3 +172,68 @@ class TestUnpackSecurity:
         assert len(result.files) == 2
         assert result.security_warnings == 0
         assert result.security_critical == 0
+
+
+class TestUnpackDestinationContainment:
+    """Bundle files land only under managed integration directories."""
+
+    def test_unmanaged_destination_refused_before_any_write(self, tmp_path):
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {".github/prompts/p.prompt.md": "body\n", ".git/config.d": "[core]\n"},
+        )
+        output = tmp_path / "project"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match="outside managed integration directories"):
+            unpack_bundle(bundle, output)
+
+        assert not any(output.rglob("*"))
+
+    def test_linked_bundle_directory_is_not_read(self, tmp_path):
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {".github/prompts/p.prompt.md": "body\n", ".claude/notes.md": "inside\n"},
+        )
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "notes.md").write_text("outside\n", encoding="utf-8")
+        shutil.rmtree(bundle / ".claude")
+        try:
+            (bundle / ".claude").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+        output = tmp_path / "project"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output)
+
+        assert result.skipped_count == 1
+        assert (output / ".github/prompts/p.prompt.md").is_file()
+        assert not (output / ".claude/notes.md").exists()
+
+    def test_directory_entry_does_not_merge_through_linked_destination(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, {".agents/skills/review/refs/a.md": "body\n"})
+        lockfile = LockFile.read(bundle / "apm.lock.yaml")
+        lockfile.dependencies.clear()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".agents/skills/review"],
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        output = tmp_path / "project"
+        (output / ".agents/skills/review").mkdir(parents=True)
+        try:
+            (output / ".agents/skills/review/refs").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+
+        with pytest.raises(ValueError, match="symlinked path in the output directory"):
+            unpack_bundle(bundle, output)
+
+        assert not any(outside.iterdir())
