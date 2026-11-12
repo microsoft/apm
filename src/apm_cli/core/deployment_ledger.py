@@ -1418,6 +1418,18 @@ class DeploymentLedgerCodec:
         return "project"
 
     @staticmethod
+    def locator_in_scope(locator: DeploymentLocator, scope: str) -> bool:
+        """Return whether a persisted deployment row belongs to *scope*.
+
+        Rows rebuilt from compatibility views carry the scope
+        :meth:`legacy_scope` infers from the path, which cannot tell a
+        user-scope ``.claude/`` path from a project one. That inferred value
+        is not scope evidence; only a recorded scope that differs from the
+        inference places a row in another scope.
+        """
+        return locator.scope in (scope, DeploymentLedgerCodec.legacy_scope(locator.value))
+
+    @staticmethod
     def legacy_value(locator: DeploymentLocator) -> str:
         """Return the canonical compatibility value for any locator kind."""
         return locator.value

@@ -577,6 +577,29 @@ class TestUserScope:
         assert "matches the recorded deployed hash" in out
         assert _snapshot(tmp_path) == before
 
+    def test_global_reads_path_inferred_rows_written_by_user_install(self, tmp_path, monkeypatch):
+        # `apm install -g` persists rows whose scope is inferred from the path,
+        # so only `.copilot/` rows say `user`; `.claude/` rows say `project`.
+        home = tmp_path / "home"
+        _set_home(monkeypatch, home)
+        monkeypatch.chdir(tmp_path)
+        rel = ".claude/skills/alpha/SKILL.md"
+        skill_hash = _write(home, rel, "user\n")
+        _write_lock(
+            home / ".apm",
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [
+                    _row(rel, ["acme/skills"], content_hash=skill_hash, target="claude")
+                ],
+            },
+        )
+        result, out = _run("--file", str(home / rel), "-g")
+        assert result.exit_code == 0, result.output
+        assert f"{rel} (user scope" in out
+        assert "Owner: acme/skills [active writer]" in out
+        assert "matches the recorded deployed hash" in out
+
     def test_global_legacy_rows_keep_inferred_scope_compatibility(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
         _set_home(monkeypatch, home)

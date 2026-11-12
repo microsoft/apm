@@ -334,7 +334,7 @@ def lookup_file_provenance(
     matched: list[tuple[str, DeploymentRecord, tuple[Path, str]]] = []
     target_matches: dict[str, tuple[Path, str] | None] = {}
     for key, record in ledger.records.items():
-        if canonical and record.locator.scope != scope_value:
+        if canonical and not DeploymentLedgerCodec.locator_in_scope(record.locator, scope_value):
             continue
         kind = record.locator.kind
         value = record.locator.value.rstrip("/")

@@ -1127,7 +1127,33 @@ def _legacy_scope_findings(provider: FactsProvider, rule_id: str) -> list[Violat
                 "Legacy user deployment scope must route through DeploymentLedgerCodec",
             )
         ]
-    return []
+    return _row_scope_findings(provider, rule_id)
+
+
+_RAW_ROW_SCOPE = re.compile(r"locator\.scope\s*(?:==|!=)")
+
+
+def _row_scope_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Deployment-row scope membership must route through DeploymentLedgerCodec."""
+    message = "Deployment row scope membership must route through DeploymentLedgerCodec"
+    provenance, provenance_fail = _facts_for(
+        provider, "src/apm_cli/deps/file_provenance.py", rule_id
+    )
+    if provenance_fail:
+        return list(provenance_fail)
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _DEPLOYMENT_LEDGER:
+            continue
+        facts = provider.file_facts(path)
+        if getattr(facts, "read_error", None) is not None:
+            continue
+        findings.extend(
+            _line_findings(facts, path, rule_id, _RAW_ROW_SCOPE, message, respect_exempt=True)
+        )
+    if not _present(provenance, "DeploymentLedgerCodec.locator_in_scope("):
+        findings.append(_summary(rule_id, _DEPLOYMENT_LEDGER, message))
+    return findings
 
 
 def _local_bundle_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
