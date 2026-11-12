@@ -27,8 +27,8 @@
     },
     {
       "id": "marketplace-source-admission",
-      "decision": "Marketplace source admission and transport identity",
-      "owner": "marketplace/source_identity.py (parse_marketplace_source); marketplace/registration.py (parse_registration_source) owns the registration SOURCE grammar (#ref fragment, ref precedence, direct-URL classification) for marketplace add and the user-manifest marketplaces reconcile",
+      "decision": "Marketplace source admission, transport identity, and repository-relative catalog path",
+      "owner": "marketplace/source_identity.py (parse_marketplace_source, admit_marketplace_catalog_path); marketplace/registration.py (parse_registration_source) owns the registration SOURCE grammar (#ref fragment, ref precedence, direct-URL classification) for marketplace add and the user-manifest marketplaces reconcile",
       "selectors": [
         "src/apm_cli/marketplace/source_identity.py",
         "src/apm_cli/marketplace/registration.py"

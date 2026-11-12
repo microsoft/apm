@@ -19,6 +19,7 @@ from apm_cli.integration.targets import (
     active_targets,
     active_targets_user_scope,
     apply_legacy_skill_paths,
+    scoped_profile_or_none,
 )
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.validation import validate_apm_package
@@ -111,7 +112,7 @@ def _managed_paths(consumer: Path, root: Path) -> set[Path]:
             continue
         profile = KNOWN_TARGETS.get(record.locator.target, next(iter(KNOWN_TARGETS.values())))
         if record.locator.kind is LocatorKind.TARGET_RELATIVE:
-            profile = profile.for_scope(user_scope=True)
+            profile = scoped_profile_or_none(profile, user_scope=True)
             if profile is None:
                 continue
         candidate = DeploymentLedgerCodec.resolve_locator(

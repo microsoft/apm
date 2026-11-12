@@ -228,3 +228,46 @@ def test_entries_unsafe_on_windows_are_rejected_before_any_write(tmp_path: Path,
     with pytest.raises(PathTraversalError, match="not portable to every host"):
         _materialize(checkout, ["pkg"])
     assert not (tmp_path / "outside.txt").exists()
+
+
+def test_target_git_does_not_check_out_fails_instead_of_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An out-of-cone target Git leaves unwritten raises; nothing is guessed."""
+    checkout = _checkout(tmp_path, sparse=True)
+    real_output = git_sparse._git_output
+
+    def output(git_exe: str, repo_dir: Path, args: list[str], **kwargs: object) -> bytes:
+        if "checkout-index" in args:
+            return b""
+        return real_output(git_exe, repo_dir, args, **kwargs)
+
+    monkeypatch.setattr(git_sparse, "_git_output", output)
+
+    with pytest.raises(RuntimeError, match=r"did not check out '.+' as a regular file"):
+        _materialize(checkout, ["pkg"])
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"CLAUDE.md"
+
+
+def test_out_of_cone_checkout_scratch_honors_apm_temp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restricted hosts configure APM_TEMP_DIR; the scratch work tree uses it."""
+    checkout = _checkout(tmp_path, sparse=True)
+    configured = tmp_path / "apm-temp"
+    configured.mkdir()
+    monkeypatch.setenv("APM_TEMP_DIR", str(configured))
+    real_mkdtemp = git_sparse.tempfile.mkdtemp
+    used: list[str | None] = []
+
+    def mkdtemp(*args: object, **kwargs: object) -> str:
+        used.append(kwargs.get("dir"))
+        return real_mkdtemp(*args, **kwargs)
+
+    monkeypatch.setattr(git_sparse.tempfile, "mkdtemp", mkdtemp)
+
+    _materialize(checkout, ["pkg"])
+
+    assert used == [str(configured)]
+    assert list(configured.iterdir()) == []
+    assert tree_bytes(checkout / "pkg") == EXPECTED_PKG

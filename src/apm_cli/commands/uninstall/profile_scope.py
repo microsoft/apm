@@ -1,10 +1,11 @@
 """Selected-profile uninstall for targets whose user root a variable selects.
 
-Claude (``CLAUDE_CONFIG_DIR``) and Hermes (``HERMES_HOME``) profiles share
-one user manifest and lockfile. A global uninstall removes a package only
-from the selected profile: when lockfile rows of the package remain under
-another profile root, the manifest entry, ``apm_modules/`` copy, and those
-rows stay so the other profile keeps working (#3425).
+Claude (``CLAUDE_CONFIG_DIR``), Hermes (``HERMES_HOME``) and Codex
+(``CODEX_HOME``) profiles share one user manifest and lockfile. A global
+uninstall removes a package only from the selected profile: when lockfile
+rows of the package remain under another profile root, the manifest entry,
+``apm_modules/`` copy, and those rows stay so the other profile keeps
+working (#3425).
 """
 
 from __future__ import annotations

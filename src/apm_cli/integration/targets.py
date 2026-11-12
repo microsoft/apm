@@ -56,11 +56,23 @@ on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 USER_ROOT_ENV_VARS: dict[str, str] = {
     "claude": "CLAUDE_CONFIG_DIR",
     "hermes": "HERMES_HOME",
+    "codex": "CODEX_HOME",
 }
 """Targets whose user-scope root an environment variable selects.
 
 Each value of the variable is a separate profile of the same runtime, and
 all of them share one user lockfile.
+"""
+
+_TOOL_RESOLVED_USER_ROOTS: dict[str, str] = {
+    "codex": "Codex CLI",
+}
+"""Targets whose user-root variable follows the tool's own resolver, by tool label.
+
+A nonblank value is used verbatim (not trimmed) and must be absolute; a
+relative value raises :class:`PathTraversalError` instead of resolving
+against the working directory. The Codex MCP adapter reads ``CODEX_HOME``
+the same way, so compiled files and MCP config share one root.
 """
 
 
@@ -545,24 +557,32 @@ class TargetProfile:
         if self.name == "copilot":
             generated_files = ()
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
-        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
-        # `apm install -g` lands where the tool reads.
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
+        # honors HERMES_HOME (default ~/.hermes) and Codex honors CODEX_HOME
+        # (default ~/.codex); mirror that at user scope so `apm install -g`
+        # and `apm compile --global` land where the tool reads.
         if self.name in USER_ROOT_ENV_VARS:
             import os
-            from pathlib import Path
 
-            env = os.environ.get(USER_ROOT_ENV_VARS[self.name], "").strip()
-            if env:
+            env_var = USER_ROOT_ENV_VARS[self.name]
+            raw = os.environ.get(env_var, "")
+            tool_label = _TOOL_RESOLVED_USER_ROOTS.get(self.name)
+            if raw.strip():
+                expanded = Path(raw if tool_label else raw.strip()).expanduser()
+                if tool_label and not expanded.is_absolute():
+                    raise PathTraversalError(
+                        f"{env_var} is set to a non-absolute path; cannot locate the "
+                        f"{tool_label} configuration directory."
+                    )
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = Path(env).expanduser().resolve(strict=False)
+                abs_path = expanded.resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
+                    # Fallback: when the user-root variable points outside $HOME we
                     # store an absolute path. ``pathlib.Path / <absolute>`` is
                     # ``<absolute>`` so deploy + cleanup write to the right
                     # place. The lockfile path translator treats an absolute
@@ -735,7 +755,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
-    # Instructions are compile-only (AGENTS.md) -- not installed.
+    # Instructions are compile-only (AGENTS.md) -- not installed.  At user
+    # scope the root honors CODEX_HOME (default ~/.codex) via for_scope().
     "codex": TargetProfile(
         capability=TARGET_CAPABILITIES["codex"],
         root_dir=".codex",
@@ -1205,7 +1226,7 @@ def skills_root_prefixes() -> frozenset[str]:
         if not profile.supports("skills") or profile.user_root_resolver is not None:
             continue
         roots.add(profile.skills_rel_root)
-        user_profile = profile.for_scope(user_scope=True)
+        user_profile = scoped_profile_or_none(profile, user_scope=True)
         if user_profile is not None and user_profile.supports("skills"):
             roots.add(user_profile.skills_rel_root)
     return frozenset(roots)
@@ -1380,16 +1401,36 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
 def selected_user_profiles() -> dict[str, TargetProfile]:
     """Return the user-scope profile each :data:`USER_ROOT_ENV_VARS` target selects.
 
-    Without the variable the default root (``~/.claude``, ``~/.hermes``) is
-    the selected profile.
+    Without the variable the default root (``~/.claude``, ``~/.hermes``,
+    ``~/.codex``) is the selected profile. A target whose variable cannot
+    select a root (a relative ``CODEX_HOME``) is omitted so other targets'
+    cleanup keeps working; commands that deploy to it still fail clearly.
     """
     profiles: dict[str, TargetProfile] = {}
     for name in USER_ROOT_ENV_VARS:
         base = KNOWN_TARGETS.get(name)
-        scoped = base.for_scope(user_scope=True) if base is not None else None
+        scoped = scoped_profile_or_none(base, user_scope=True) if base is not None else None
         if scoped is not None:
             profiles[name] = scoped
     return profiles
+
+
+def scoped_profile_or_none(profile: TargetProfile, *, user_scope: bool) -> TargetProfile | None:
+    """Return ``profile.for_scope()`` for a scan that may include inactive targets.
+
+    A tool-resolved user-root variable that cannot select a root (a relative
+    ``CODEX_HOME``) makes only that target unresolvable: scans over
+    :data:`KNOWN_TARGETS` or lockfile rows skip it, so Claude-only installs,
+    uninstalls and skill cleanup keep working. Paths that deploy to the target
+    (``resolve_targets``, ``apm compile --global``) call ``for_scope``
+    directly and still fail clearly.
+    """
+    try:
+        return profile.for_scope(user_scope=user_scope)
+    except PathTraversalError:
+        if profile.name not in _TOOL_RESOLVED_USER_ROOTS:
+            raise
+        return None
 
 
 def is_other_profile_path(profile: TargetProfile, value: str) -> bool:

@@ -528,7 +528,8 @@ class DeploymentReconciler:
         """Decide whether an unrefreshed row lost its target this run.
 
         A row of an active target is stale unless it lies under another
-        profile root of that target (``CLAUDE_CONFIG_DIR``, ``HERMES_HOME``).
+        profile root of that target (``CLAUDE_CONFIG_DIR``, ``HERMES_HOME``,
+        ``CODEX_HOME``).
         A row of a known target dropped from the declared set is stale too.
         """
         if not intent.authoritative_targets:

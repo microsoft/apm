@@ -263,8 +263,8 @@ def _split_selected_profile_packages(
 ) -> tuple[list, list]:
     """Split requested packages into full removals and selected-profile removals.
 
-    A package still deployed to another Claude/Hermes profile is removed only
-    from the selected profile and stays declared (#3425).
+    A package still deployed to another Claude/Hermes/Codex profile is removed
+    only from the selected profile and stays declared (#3425).
     """
     if not user_scope or not lockfile:
         return packages_to_remove, []

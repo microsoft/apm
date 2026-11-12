@@ -47,6 +47,10 @@ class MarketplaceManifestNotFoundError(MarketplaceError):
         )
 
 
+class MarketplaceCatalogPathError(MarketplaceError):
+    """Raised when an explicit catalog path (``--path``) cannot be used."""
+
+
 @dataclass(frozen=True)
 class ParsedSource:
     """A SOURCE argument parsed through the canonical marketplace parser."""
@@ -120,7 +124,13 @@ def local_source_points_to_file(source: MarketplaceSource) -> bool:
 
 
 def probe_registration(
-    name: str, url: str, ref: str, *, is_direct_url: bool, offline: bool = False
+    name: str,
+    url: str,
+    ref: str,
+    *,
+    is_direct_url: bool,
+    offline: bool = False,
+    explicit_path: str | None = None,
 ) -> tuple[MarketplaceSource, MarketplaceManifest]:
     """Locate and fetch the marketplace manifest behind a parsed source.
 
@@ -129,6 +139,8 @@ def probe_registration(
 
     Raises:
         MarketplaceManifestNotFoundError: No manifest at any probed path.
+        MarketplaceCatalogPathError: ``explicit_path`` (an already admitted,
+            repository-relative catalog path) is missing or not applicable.
         MarketplaceError: Fetching or parsing the manifest failed.
     """
     from . import client
@@ -141,8 +153,23 @@ def probe_registration(
         path="" if is_direct_url else "marketplace.json",
     )
     if is_direct_url or local_source_points_to_file(probe_source):
+        if explicit_path is not None:
+            raise MarketplaceCatalogPathError(
+                "--path is not supported when SOURCE is a marketplace.json file. "
+                "Pass the repository directory as SOURCE instead."
+            )
         detected_path: str | None = ""
         discovered_manifest = None
+    elif explicit_path is not None:
+        discovered_manifest = client._fetch_file(probe_source, explicit_path)
+        if discovered_manifest is None:
+            at_ref = "" if probe_source.kind == "local" else f" at ref '{effective_ref}'"
+            raise MarketplaceCatalogPathError(
+                f"No marketplace catalog found at '{explicit_path}' in "
+                f"'{probe_source.display_source}'{at_ref}. Check that --path is "
+                "relative to the repository root and that the file exists."
+            )
+        detected_path = explicit_path
     else:
         detected_path, discovered_manifest = client._auto_detect_path_with_payload(probe_source)
     if detected_path is None:
