@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import click
 import pytest
@@ -66,7 +67,9 @@ def test_checker_walker_finds_every_visible_subcommand() -> None:
     runner = CliRunner()
     problems: list[str] = []
     for path, group in _groups(cli):
-        result = runner.invoke(cli, [*path, "--help"], terminal_width=80)
+        # Nested --help runs the root callback; keep the update check offline.
+        with patch("apm_cli.cli._check_and_notify_updates"):
+            result = runner.invoke(cli, [*path, "--help"], terminal_width=80)
         assert result.exit_code == 0, result.output
         parsed = subprocess.run(
             ["awk", program],
