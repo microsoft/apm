@@ -51,8 +51,15 @@ def lockfile_parent_identity(
     dependency: DependencyReference | LockedDependency,
     replacements: Sequence[object] | None,
 ) -> str:
-    """Encode exact original parent keys for v3, retaining legacy repo-url parents."""
-    return dependency.get_unique_key() if replacements is not None else dependency.repo_url
+    """Encode exact original parent keys for v3, retaining legacy repo-url parents.
+
+    Legacy parents use the canonical repository identity, so a parent declared
+    with different casing (``Owner/Repo``) still names its locked entry. A lock
+    written before this rule self-heals on the next install that records it.
+    """
+    return (
+        dependency.get_unique_key() if replacements is not None else dependency.canonical_repo_url
+    )
 
 
 def _copy_extension_map(value: object) -> dict[str, Any]:
@@ -482,6 +489,11 @@ class LockedDependency:
         self.materialization_repo_url = (
             materialization_repo_url if materialization_repo_url != canonical_repo_url else None
         )
+
+    @property
+    def canonical_repo_url(self) -> str:
+        """Return the repository identity; ``__post_init__`` already canonicalised it."""
+        return self.repo_url
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
