@@ -19,10 +19,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.integration.hook_file_routing import (
+    legacy_hook_file_selection as _filter_hook_files_for_target,
+)
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,
     HookIntegrator,
-    _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
 )
 from apm_cli.integration.hook_native_formats import (
