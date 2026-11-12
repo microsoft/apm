@@ -53,7 +53,15 @@ read; use `apm marketplace migrate` to fold them into `apm.yml`.
 
 ### `apm marketplace add`
 
-Register a marketplace from a source reference. Accepted forms:
+Register a marketplace from a source reference.
+
+**Declare instead of add.** To register the same marketplaces on every
+machine, list them under `marketplaces:` in the user manifest
+(`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and run
+`apm install -g`. Manual registrations always win a name conflict. See
+[Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+
+Accepted forms:
 
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
@@ -146,11 +154,6 @@ APM rejects `/tfs/` prefixes. APM tries the Azure DevOps Items API first,
 then subprocess git. See
 [Authentication](../../../getting-started/authentication/#azure-devops).
 
-**Declare instead of add.** To register the same marketplaces on every
-machine, list them under `marketplaces:` in `~/.apm/apm.yml` and run
-`apm install -g`. Manual registrations always win a name conflict. See
-[Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
-
 ### `apm marketplace list`
 
 List every registered marketplace with its source URL and tracked
@@ -183,7 +186,7 @@ apm marketplace update awesome-agents  # refresh one
 
 Unregister a marketplace. A marketplace declared in the user manifest's
 `marketplaces:` list is registered again by the next `apm install -g`;
-remove its entry from `~/.apm/apm.yml` to drop it for good.
+remove its entry from the user manifest to drop it for good.
 
 | Flag | Description |
 |---|---|

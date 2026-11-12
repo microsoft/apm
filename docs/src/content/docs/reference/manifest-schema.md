@@ -422,7 +422,7 @@ and untested clients are not qualified. See the
 |---|---|
 | **Type** | `list<MarketplaceEntry>` |
 | **Required** | OPTIONAL |
-| **Scope** | Only the user manifest (`~/.apm/apm.yml`). A project or package `apm.yml` that contains the key fails to parse with an error naming the user manifest. |
+| **Scope** | Only the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`). A project or package `apm.yml` that contains the key fails to parse with an error naming the user manifest. |
 | **Description** | Marketplaces that `apm install -g` registers for discovery. It registers missing entries, updates changed ones, and removes entries it registered earlier that are no longer listed. Registrations made with `apm marketplace add` are never overwritten or removed. |
 
 ```yaml
@@ -437,7 +437,7 @@ marketplaces:
 | Sub-key | Type | Required | Constraint |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Letters, digits, `.`, `_` and `-`; unique (case-insensitive) in the list. Used as `PKG@NAME`. |
-| `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). |
+| `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). No `--host` equivalent; use a full URL for non-default hosts. |
 | `ref` | `string` | OPTIONAL | Same as `--ref`. Cannot be combined with a `#ref` in `source`. |
 
 Unknown entry keys are rejected. Registering a marketplace does not install

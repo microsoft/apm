@@ -258,11 +258,12 @@ dependencies. Remote `marketplace.json` installs record `source_url` and
 ## Declare marketplaces in your user manifest
 
 Instead of running `apm marketplace add` on every machine, list your
-marketplaces in the user manifest (`~/.apm/apm.yml`) and run
-`apm install -g`:
+marketplaces once in the user manifest (`$APM_HOME/apm.yml`, default
+`~/.apm/apm.yml`; see the [`APM_HOME` path contract](../../reference/environment-variables/#apm_home-path-contract))
+and run `apm install -g`:
 
 ```yaml
-# ~/.apm/apm.yml
+# $APM_HOME/apm.yml (default ~/.apm/apm.yml)
 name: me
 version: 1.0.0
 marketplaces:
@@ -273,8 +274,10 @@ marketplaces:
     ref: v3.0.0
 ```
 
-Each entry takes a `name` and a `source` in any form `apm marketplace add`
-accepts, plus an optional `ref` that works like `--ref`. `apm install -g`
+Each entry takes a `name` and a `source` in any SOURCE form
+`apm marketplace add` accepts, plus an optional `ref` that works like
+`--ref`. There is no `--host` equivalent: use a full URL for hosts other
+than the default. `apm install -g`
 then:
 
 - registers declared marketplaces that are missing, and re-registers
@@ -283,12 +286,12 @@ then:
   list;
 - keeps marketplaces you added with `apm marketplace add`. If a declared
   `name` matches one of them, APM reports the conflict and leaves your
-  manual registration alone. Run `apm marketplace remove NAME` to hand it
-  over to the manifest.
+  manual registration alone. Run `apm marketplace remove NAME` and re-run
+  `apm install -g` to hand it over to the manifest.
 
 The output lists each marketplace registered, updated, removed or kept.
-If an entry cannot be fetched, or the user manifest is not valid YAML,
-`apm install -g` exits with an error and removes nothing.
+If an entry cannot be fetched, or the user manifest or an entry is
+invalid, `apm install -g` exits with an error and removes nothing.
 `apm install -g --dry-run` previews the changes without fetching or
 writing. Registering a marketplace only makes it searchable with
 `apm search QUERY@NAME` and installable with `apm install PKG@NAME`. It

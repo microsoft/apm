@@ -702,7 +702,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
-| `apm install -g` (with `marketplaces:` in `~/.apm/apm.yml`) | Reconcile declared marketplaces before installing: registers missing entries, updates changed ones, removes entries it registered earlier that are no longer listed, and never touches registrations made with `apm marketplace add` (name conflicts are reported). Each entry is `name` + `source` (any `apm marketplace add` SOURCE form) + optional `ref`. A project or package `apm.yml` containing `marketplaces:` fails with an error naming the user manifest. Registration is discovery only, never install or trust. | `--dry-run` previews without fetching or writing |
+| `apm install -g` (with `marketplaces:` in `$APM_HOME/apm.yml`) | Reconcile the user manifest `marketplaces:` list (`name`, `source`, optional `ref`) before installing: register, update, or remove entries it added. Manual `apm marketplace add` registrations always win. Discovery only. See dependencies.md. | `--dry-run` previews without fetching or writing |
 
 ## Marketplace authoring
 

@@ -361,7 +361,8 @@ Unknown keys in a marketplace entry are rejected.
 
 The `marketplace` value names a marketplace registered with
 `apm marketplace add` or declared in the user manifest's `marketplaces:`
-list (`~/.apm/apm.yml`, reconciled by `apm install -g`). Dependencies and
+list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
+`apm install -g`). Dependencies and
 project manifests cannot declare `marketplaces:`.
 
 For object-form declarations, `apm audit --ci` uses recorded
