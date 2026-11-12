@@ -16,6 +16,9 @@ Resolution flow:
 On every cache HIT:
 - Run integrity check (verify HEAD == expected SHA)
 - Mismatch -> evict shard, fall through to fresh fetch, log warning
+- Sparse (promisor) shards with tracked files missing from the worktree
+  are rebuilt; a fresh promisor checkout that leaves files missing raises
+  ``IncompleteCheckoutError`` so the auth fallback can retry (#3071)
 - Refresh the SHA directory's access timestamp after successful validation
 
 Concurrency:
@@ -58,6 +61,19 @@ class CachePruneError(OSError):
         self.pruned = pruned
         self.failures = tuple(failures)
         super().__init__(f"Pruned {pruned} SHA group(s); {len(failures)} failed.")
+
+
+class IncompleteCheckoutError(RuntimeError):
+    """A checkout exited 0 but left tracked files unmaterialized (#3071).
+
+    Git before 2.36 ignores a failed promisor blob fetch during a non-forced
+    checkout. ``stderr`` keeps Git's diagnostics so the anonymous-first auth
+    fallback can classify the rejection and retry with credentials.
+    """
+
+    def __init__(self, message: str, *, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
 
 
 def _safe_git_args() -> list[str]:
@@ -146,6 +162,45 @@ def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     return _checkout_pins_autocrlf_false(checkout_dir) and (
         values.get(key.split(".", 1)[1]) == value
     )
+
+
+def _unmaterialized_paths(git_exe: str, checkout_dir: Path, *, env: dict[str, str]) -> list[str]:
+    """Return tracked paths the working tree is missing (skip-worktree excluded)."""
+    result = subprocess.run(
+        [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "ls-files", "--deleted", "-z"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    return [path for path in result.stdout.split("\0") if path]
+
+
+def _sparse_checkout_is_complete(
+    checkout_dir: Path,
+    sparse_paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+) -> bool:
+    """Return whether a cached sparse shard materialized every tracked file.
+
+    Only promisor-backed sparse shards can lose blobs silently, so full
+    shards skip the probe. Probe failures count as incomplete so the shard
+    is rebuilt rather than trusted.
+    """
+    if not sparse_paths:
+        return True
+    from ..utils.git_env import get_git_executable, git_subprocess_env
+
+    try:
+        missing = _unmaterialized_paths(
+            get_git_executable(), checkout_dir, env=git_subprocess_env(env)
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return False
+    return not missing
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -269,11 +324,14 @@ class GitCache:
         if not self._refresh and checkout_dir.is_dir():
             sha_ok = verify_checkout_sha(checkout_dir, sha)
             if sha_ok and _checkout_has_materialization_pins(checkout_dir):
-                _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
-                    return self._record_checkout_access(
-                        self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
-                    )
+                    # An incomplete shard falls through to _create_checkout,
+                    # which rebuilds it under the same lock (#3071).
+                    if _sparse_checkout_is_complete(checkout_dir, sparse_paths, env=env):
+                        _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
+                        return self._record_checkout_access(
+                            self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
+                        )
             elif not sha_ok:
                 # Integrity failure -- evict
                 _log.warning(
@@ -712,7 +770,11 @@ class GitCache:
             # rule out a poisoned half-write (atomic_land guards
             # against that, but we re-check defensively).
             existing_ok = final_dir.is_dir() and verify_checkout_sha(final_dir, sha)
-            if existing_ok and _checkout_has_materialization_pins(final_dir):
+            if (
+                existing_ok
+                and _checkout_has_materialization_pins(final_dir)
+                and _sparse_checkout_is_complete(final_dir, sparse_paths, env=env)
+            ):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
                     _sanitize_url(url),
@@ -724,7 +786,7 @@ class GitCache:
                 )
             if existing_ok:
                 _log.info(
-                    "[*] Rematerializing git checkout missing materialization pins: %s @ %s [%s]",
+                    "[*] Rematerializing incomplete or unpinned git checkout: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
                     variant,
@@ -863,6 +925,21 @@ class GitCache:
                         staged,
                         sparse_paths,
                         env=env,
+                    )
+                # Old Git exits 0 when a promisor blob fetch fails, leaving
+                # an empty tree that would be cached as valid (#3071).
+                missing = (
+                    _unmaterialized_paths(git_exe, staged, env=subprocess_env)
+                    if promisor_url
+                    else []
+                )
+                if missing:
+                    raise IncompleteCheckoutError(
+                        f"Incomplete checkout for {_sanitize_url(url)} @ {sha[:12]}: "
+                        f"{len(missing)} tracked file(s) not materialized "
+                        f"(first: {missing[0]}). Git could not fetch file contents; "
+                        "the repository may require credentials.",
+                        stderr=checkout.stderr or "",
                     )
             except (RuntimeError, ValueError):
                 from ..utils.file_ops import robust_rmtree

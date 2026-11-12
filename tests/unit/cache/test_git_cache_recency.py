@@ -134,6 +134,11 @@ def test_failed_sparse_validation_does_not_refresh_access(
         raise error_type("Invalid sparse symlink")
 
     monkeypatch.setattr(cache, "_ensure_bare_repo", MagicMock())
+    # The fixture shard is not a real worktree; treat it as fully materialized
+    # so the finalize rejection below is what decides the hit (#3071 probe).
+    monkeypatch.setattr(
+        "apm_cli.cache.git_cache._sparse_checkout_is_complete", lambda *a, **k: True
+    )
     monkeypatch.setattr(cache, "_finalize_sparse_checkout", reject_sparse)
     record_access = MagicMock(wraps=cache._record_checkout_access)
     monkeypatch.setattr(cache, "_record_checkout_access", record_access)
