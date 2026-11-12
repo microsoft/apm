@@ -2,6 +2,13 @@
   "version": 1,
   "owners": [
     {
+      "id": "local-authoring-catalog",
+      "decision": "Live local authoring catalog interpretation without generation",
+      "owner": "marketplace/authoring_source.py coordinates yml_schema, MarketplaceBuilder and resolver path authority",
+      "selectors": ["src/apm_cli/marketplace/authoring_source.py", "src/apm_cli/marketplace/client.py"],
+      "guards": ["marketplace-integrations-authoring-source"]
+    },
+    {
       "id": "marketplace-locked-selection",
       "decision": "Marketplace requested-ref consistency against locked selection evidence",
       "owner": "drift.py (marketplace_ref_mismatch); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence",
