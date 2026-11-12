@@ -22,6 +22,7 @@ Covers branches not hit by existing test_drift.py / test_drift_perf.py:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -155,14 +156,49 @@ class TestMaterializeInstallPath:
         with pytest.raises(CacheMissError, match="local source missing"):
             _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
 
-    def test_local_dep_existing_directory_returns_path(self, tmp_path: Path) -> None:
+    def test_local_dep_replays_a_scratch_copy_not_the_source(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import _materialize_install_path
 
         local_pkg = tmp_path / "local_pkg"
         local_pkg.mkdir()
+        (local_pkg / "apm.yml").write_text("name: local_pkg\n", encoding="utf-8")
         dep = LockedDependency(repo_url="./local_pkg", source="local", local_path="./local_pkg")
-        result = _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
-        assert result.exists()
+        modules = tmp_path / "scratch" / "apm_modules"
+        result = _materialize_install_path(dep, tmp_path, modules, cache_only=True)
+        assert result.is_relative_to(modules)
+        assert (result / "apm.yml").read_text(encoding="utf-8") == "name: local_pkg\n"
+
+    def test_unadmittable_local_dir_fails_like_install(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import _materialize_install_path
+        from apm_cli.install.phases.local_content import LocalPackageError
+
+        (tmp_path / "local_pkg").mkdir()
+        dep = LockedDependency(repo_url="./local_pkg", source="local", local_path="./local_pkg")
+        with pytest.raises(LocalPackageError, match="not a valid APM package"):
+            _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
+
+    @pytest.mark.skipif(os.name == "nt", reason="creates OS symlinks")
+    def test_local_dep_with_contained_link_replays_dereferenced_copy(self, tmp_path: Path) -> None:
+        """#3667: replay uses install's image, where in-package links are bytes."""
+        from apm_cli.install.drift import _materialize_install_path
+
+        local_pkg = tmp_path / "local_pkg"
+        (local_pkg / "shared").mkdir(parents=True)
+        (local_pkg / "apm.yml").write_text("name: local_pkg\n", encoding="utf-8")
+        (local_pkg / "shared" / "s.md").write_text("shared\n", encoding="utf-8")
+        (local_pkg / "rules").mkdir()
+        (local_pkg / "rules" / "linked.md").symlink_to("../shared/s.md")
+        dep = LockedDependency(
+            repo_url="_local/local_pkg", source="local", local_path="./local_pkg"
+        )
+        modules = tmp_path / "scratch" / "apm_modules"
+
+        result = _materialize_install_path(dep, tmp_path, modules, cache_only=True)
+
+        copied = result / "rules" / "linked.md"
+        assert not copied.is_symlink()
+        assert copied.read_text(encoding="utf-8") == "shared\n"
+        assert (local_pkg / "rules" / "linked.md").is_symlink()
 
     def test_remote_dep_no_commit_raises_cache_miss(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import _materialize_install_path
@@ -195,11 +231,7 @@ class TestLegacyPluginReplayNormalization:
             local_path="./native",
         )
 
-        result = _normalize_legacy_local_plugin_for_replay(
-            dependency,
-            plugin,
-            tmp_path / "apm_modules",
-        )
+        result = _normalize_legacy_local_plugin_for_replay(dependency, plugin)
 
         assert result == plugin
         assert not (tmp_path / "apm_modules").exists()
@@ -222,11 +254,7 @@ class TestLegacyPluginReplayNormalization:
             package_type="apm_package",
         )
 
-        result = _normalize_legacy_local_plugin_for_replay(
-            dependency,
-            package,
-            tmp_path / "apm_modules",
-        )
+        result = _normalize_legacy_local_plugin_for_replay(dependency, package)
 
         assert result == package
         assert not (tmp_path / "apm_modules").exists()

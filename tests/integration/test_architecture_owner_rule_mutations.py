@@ -974,14 +974,12 @@ MUTATIONS: tuple[MutationCase, ...] = (
         rule_id="install-deployment-single-file-materialization",
         path="src/apm_cli/install/phases/local_content.py",
         old=(
-            "    try:\n"
-            "        source = read_local_package_source(dep_ref, base_dir)\n"
-            "    except LocalPackageError as exc:"
+            "    source = read_local_package_source(dep_ref, base_dir)\n"
+            "    install_path.parent.mkdir(parents=True, exist_ok=True)"
         ),
         new=(
-            "    try:\n"
-            "        source = bypass_local_package_source(dep_ref, base_dir)\n"
-            "    except LocalPackageError as exc:"
+            "    source = bypass_local_package_source(dep_ref, base_dir)\n"
+            "    install_path.parent.mkdir(parents=True, exist_ok=True)"
         ),
         intent="Local copying bypasses the canonical single-file admission authority.",
     ),

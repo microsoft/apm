@@ -3,8 +3,8 @@
   "owners": [
     {
       "id": "single-file-package-materialization",
-      "decision": "Single-file dependency package layout and local source admission for replacement, audit replay and frozen hash images",
-      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, compute_local_package_hash, materialize_local_file_for_replay); DependencyReference owns suffix vocabulary",
+      "decision": "Single-file dependency package layout, local source admission and the local package image shared by install, uninstall refresh and audit replay",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay); DependencyReference owns suffix vocabulary",
       "selectors": [
         "src/apm_cli/deps/virtual_file.py",
         "src/apm_cli/deps/github_downloader.py",

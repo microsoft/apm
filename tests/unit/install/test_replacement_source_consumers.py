@@ -344,11 +344,12 @@ def test_retained_request_alias_does_not_reassign_the_owned_slot(tmp_path: Path)
 def test_local_replacement_audit_reads_source_not_upstream_cache(tmp_path: Path) -> None:
     source = tmp_path.parent / f"{tmp_path.name}-local"
     source.mkdir()
+    (source / "apm.yml").write_text("name: local\nversion: 1.0.0\n", encoding="ascii")
     _, locked, lock = _locked(tmp_path, {"path": str(source)})
-    assert (
-        _materialize_install_path(locked, tmp_path, tmp_path / "scratch", True, lockfile=lock)
-        == source
-    )
+    replay = _materialize_install_path(locked, tmp_path, tmp_path / "scratch", True, lockfile=lock)
+    # Replay copies the selected source through install's local package image.
+    assert replay.is_relative_to(tmp_path / "scratch")
+    assert (replay / "apm.yml").read_bytes() == (source / "apm.yml").read_bytes()
 
 
 def test_native_local_replacement_audit_uses_current_selected_source_bytes(tmp_path: Path) -> None:
