@@ -210,7 +210,11 @@ rewritten for the generated agent's location. Supplied string values for `model`
 as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
 Omitted fields remain absent; APM does not translate model names, choose
 defaults, or validate which models and effort values your Codex supports.
-Non-string values are dropped with a warning naming the field.
+Non-string values are dropped with a warning naming the field. The one
+model check is by name only: a Claude model alias (`opus`, `sonnet`,
+`haiku`, `inherit`) or `claude-*` id is still kept as written, with a
+warning naming the agent, because Codex does not recognize it; use a
+Codex-specific agent source or remove `model`.
 
 Other frontmatter fields are dropped with a warning that APM does not
 translate them for Codex. This includes other native Codex settings and
