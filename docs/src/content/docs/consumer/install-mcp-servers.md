@@ -213,7 +213,7 @@ the existing `true` default. APM does not validate or coerce explicit values;
 OpenCode interprets them. Other targets ignore this OpenCode-only field.
 Reinstall applies changes to `enabled`, including its JSON type; removing
 the field restores `true`. For the OpenCode 2 layout, see
-[OpenCode v2 configuration](#opencode-v2-configuration).
+[OpenCode 2 configuration](#opencode-2-configuration).
 
 Global Cursor and OpenCode installs preserve your personal servers, including
 ones that share a name with a package-declared server. Reinstalling and
@@ -228,12 +228,13 @@ it, even on a no-op reinstall. Fix the reported config and rerun the original
 command with `--global` and the same `--target` selection. A home-directory
 alias itself remains supported.
 
-### OpenCode v2 configuration
+### OpenCode 2 configuration
 
-OpenCode 1 and OpenCode 2 read the same `opencode.json` files, but only
-OpenCode 2 understands its native layout, which nests servers under
-`mcp.servers`. APM therefore chooses the layout from the target file
-itself:
+APM supports OpenCode 1, which reads servers directly under `mcp`, and
+OpenCode 2, which also reads that layout and adds the native
+[`mcp.servers` layout](https://opencode.ai/docs/mcp-servers/). Both read the
+same `opencode.json` files, but OpenCode 1 cannot read `mcp.servers`, so APM
+chooses the layout from the target file itself:
 
 - If the file declares an `mcp.servers` object, APM writes each server
   there in the OpenCode 2 format.
@@ -264,8 +265,8 @@ APM does not convert configuration it did not write. When it switches to
 entry is unchanged from what APM wrote; an edited entry stays in place with
 a warning, and OpenCode 2 uses the `mcp.servers` entry. Your own servers,
 `mcp.timeout` and other settings are preserved, and pruning removes only
-entries APM wrote. Remove `mcp.servers` before running OpenCode 1 against
-the same file, since OpenCode 1 cannot read it.
+entries APM wrote. To go back to OpenCode 1, delete `mcp.servers` and run
+`apm install` again; APM rewrites its servers in the OpenCode 1 layout.
 
 ## MCP servers from Claude plugins
 
