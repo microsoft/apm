@@ -131,7 +131,8 @@ The tool reads current policy from the default branch. Until the new roster
 format is deployed there, it deliberately reports a policy error rather than
 using a feature branch as authority. A snapshot cannot recover deleted
 withdrawals. The issue delivery worker may treat a current unedited
-roster-authored record as its grant.
+roster-authored record as its grant when no review-contact confirmation
+is pending.
 Other manual automation still requires fresh responsible-human
 confirmation of the bounded issue scope. No historical acceptance is restored.
 

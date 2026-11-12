@@ -54,7 +54,10 @@ reviewers.
   `status/needs-triage`, `status/needs-design`, `status/accepted`.
   Exception: PR triage writes `status/deferred` when the PR has no
   same-repo linked issue labelled `status/accepted`. Do not overwrite
-  `status/accepted` on the PR.
+  `status/accepted` on the PR. Exception: `autopilot-issue-accept`
+  adds `status/accepted` (and clears `status/deferred` and
+  `status/needs-triage`) only after a roster human approves and posts
+  the scope comment.
 - Labels, comments, and silence are not authorization.
 - Each canonical skill emits an Enter card before work and an Exit
   receipt after. Missing field = stop. Schedulers are `write: off`.
@@ -120,8 +123,8 @@ bounded accept), including bot-authored issues once accepted.
 Selector `bugs` also requires `type/bug`. `triage/recommended`
 is not authorization. Workers re-check
 `scripts/governance/eligibility.cjs`. A current `record-present`
-scope comment is the grant, including unattended runs. Other
-eligibility states stop.
+scope comment with no pending review-contact confirmation is the
+grant, including unattended runs. Other eligibility states stop.
 
 ### `autopilot-issue-delivery-worker`
 
@@ -176,7 +179,8 @@ requests the implementer as a reviewer.
 GitHub only. CODEOWNERS may accept, defer, or apply `panel-review`,
 then spawn the canonical isolated schedulers and workers. The canvas
 never assigns, never requests reviewers, never merges, and never
-runs skill logic itself. Merge-worker spawn needs an extra confirm.
+runs skill logic itself. Issue Accept starts `autopilot-issue-accept`;
+PR Accept applies the label. Merge-worker spawn needs an extra confirm.
 Agentic Workflows never open the canvas. CLI and Cloud still invoke
 skills by name.
 

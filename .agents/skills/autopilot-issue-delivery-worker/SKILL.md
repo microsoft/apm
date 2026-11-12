@@ -130,16 +130,19 @@ any type.
 Then re-check human-scope evidence. Do not create another
 parser or roster; `authority.cjs` alone interprets the record.
 If the caller did not pass `APPROVAL_URL`, discover it from the
-complete comment history. Take the latest comment by a `User`
-whose body starts with `<!-- apm-scope:v1 -->` and has the line
-`Decision: approve`:
+complete comment history. Take the latest comment (by
+`created_at`) by a `User` whose body starts with
+`<!-- apm-scope:v1 -->` (leading whitespace allowed, as the parser
+allows) and has the line `Decision: approve`. This is a locator
+only; `scripts/governance/authority.cjs` owns the record format, so
+update this filter if its marker changes:
 
 ```
-gh api --paginate repos/microsoft/apm/issues/N/comments \
-  --jq '.[] | select(.user.type == "User"
-    and (.body | startswith("<!-- apm-scope:v1 -->"))
-    and (.body | test("(?m)^Decision: approve\\r?$")))
-    | .html_url' | tail -n 1
+gh api --paginate --slurp repos/microsoft/apm/issues/N/comments \
+  | jq -r 'add | map(select(.user.type == "User"
+      and (.body | test("^\\s*<!-- apm-scope:v1 -->"))
+      and (.body | test("(?m)^Decision: approve\\r?$"))))
+    | sort_by(.created_at, .id) | last | .html_url // empty'
 ```
 
 No candidate or a failed read -- STOP (`needs-evidence`). Do not

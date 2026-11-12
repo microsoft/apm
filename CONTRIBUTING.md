@@ -95,7 +95,8 @@ The eligibility report is **always neutral**, even when it finds a record.
 It cannot judge whether code fits the issue or reconstruct a deleted withdrawal.
 It does not itself grant implementation. The issue delivery worker may treat
 a current unedited roster-authored record as its grant, including an
-unattended run. Other automation still needs its own human checkpoint.
+unattended run, when its review contact is the approver or has confirmed.
+Other automation still needs its own human checkpoint.
 A missing, edited, or withdrawn record stops delivery. API failures are
 reported as unknown/error, never as approval.
 

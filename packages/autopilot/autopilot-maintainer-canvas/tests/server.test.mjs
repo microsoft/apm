@@ -204,6 +204,20 @@ describe("server handler", () => {
         });
     });
 
+    it("spawns the issue-accept worker without a confirm or label write", async () => {
+        await withServer({}, async ({ baseUrl, sessionCalls, ghCalls }) => {
+            const ok = await postJson(baseUrl, "/spawn", {
+                action: "worker-issue-accept",
+                number: 42,
+            });
+            assert.equal(ok.json.ok, true);
+            assert.match(ok.json.skill, /autopilot-issue-accept/);
+            assert.match(sessionCalls[0].prompt, /Issue accept #42/);
+            assert.match(sessionCalls[0].prompt, /chat_approval: exact-text/);
+            assert.equal(ghCalls.length, 0);
+        });
+    });
+
     it("has no archive endpoint", async () => {
         await withServer({}, async ({ baseUrl, sessionCalls }) => {
             const { res, json } = await postJson(baseUrl, "/archive", {

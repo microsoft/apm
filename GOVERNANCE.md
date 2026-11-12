@@ -80,7 +80,8 @@ It distinguishes a present record, withdrawal, missing evidence, and read
 errors, but never grants implementation permission. GitHub's current comment
 snapshot cannot prove that a withdrawal was not deleted. The issue delivery
 worker may still treat a current unedited roster-authored issue record as
-its grant. That worker policy is not a second authority implementation.
+its grant (see [CONTRIBUTING](CONTRIBUTING.md#scope-record-format)). The
+eligibility tool stays neutral; that grant is delivery-worker policy.
 No persistent authorization ledger, required check, or automatic
 closing/acceptance policy is introduced.
 

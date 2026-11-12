@@ -299,7 +299,9 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "ORIGIN `unattended` never claims a missing record is approval" in worker
     assert "`contact_confirmation_needed: false`" in worker
     assert "ORIGIN `unattended` STOPs (`blocked`)" in worker
-    assert '(.body | startswith("<!-- apm-scope:v1 -->"))' in worker
+    assert '(.body | test("^\\\\s*<!-- apm-scope:v1 -->"))' in worker
+    assert '(.body | test("(?m)^Decision: approve\\\\r?$"))' in worker
+    assert "sort_by(.created_at, .id) | last" in worker
     assert "Do not fall back to an older record when the latest one fails" in worker
     delivery = _ascii(SCHEDULER_CODE)
     assert "Workers re-check `scripts/governance/eligibility.cjs`" in delivery

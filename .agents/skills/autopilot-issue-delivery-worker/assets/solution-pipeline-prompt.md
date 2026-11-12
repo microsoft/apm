@@ -42,8 +42,9 @@ receipt or a previous wave's snapshot as permission for the next wave.
    ISSUE_WORKTREE, a contributor branch, or an installed substitute.
    `authority.cjs` alone interprets the record and trusted roster; do not
    create another parser or roster. Require a complete `state: record-present`
-   result with `authorizes_implementation: false`. That result is evidence,
-   never permission; current snapshots cannot detect deleted withdrawals.
+   result with `authorizes_implementation: false`. That result is evidence;
+   the tool stays neutral and step 2 is the worker grant. Current snapshots
+   cannot detect deleted withdrawals.
 2. Treat a complete `state: record-present` result for this same
    APPROVAL_URL with `contact_confirmation_needed: false` as the grant
    for this wave, including ORIGIN `unattended`.
