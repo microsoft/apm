@@ -673,10 +673,10 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path, or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. | `-n NAME`, `-r REF`, `--host HOST` |
+| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path (including a local `apm.yml` read as a live catalog), or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. | `-n NAME`, `-r REF`, `--host HOST`, `--offline` (local `apm.yml` only) |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs | `--offline` (local YAML only) |
-| `apm marketplace update [NAME]` | Update marketplace index | -- |
+| `apm marketplace update [NAME]` | Update marketplace index; reread live local `apm.yml` catalogs | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
 | `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |

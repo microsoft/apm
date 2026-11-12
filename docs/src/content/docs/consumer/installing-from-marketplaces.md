@@ -35,16 +35,12 @@ who enable both outputs reach every runtime from one repo.
 
 ## Local authoring previews through APM
 
-Register an explicitly selected local authoring file with
-`apm marketplace add ./apm.yml --name alice-dev`, then browse it with
-`apm marketplace browse alice-dev` or select a package with
-`apm install my-tool@alice-dev`. APM rereads the file on later explicit
-operations; registration does not install its inventory or publish anything.
-Relative package sources resolve from the file's directory. Remote entries
-install through their actual dependency source and existing lock machinery;
-locked replay does not require the author's preview file. Local entries still
-require their local directories. See the [marketplace CLI reference](../../reference/cli/marketplace/)
-for validation and offline behavior.
+To preview an author's catalog before it is published, run
+`apm marketplace add ./apm.yml --name alice-dev`, then
+`apm install my-tool@alice-dev`. APM rereads the file on each command;
+registration does not install its inventory or publish anything. See
+[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
+for offline and locked-replay rules.
 
 ## Codex compatibility bundles through APM
 

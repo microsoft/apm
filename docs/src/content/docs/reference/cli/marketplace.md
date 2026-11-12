@@ -83,7 +83,8 @@ apm view my-tool@alice-dev
 apm install my-tool@alice-dev
 ```
 
-The selected file must contain a valid `marketplace:` declaration. APM uses
+SOURCE must be a path to a file named `apm.yml` that contains a valid
+`marketplace:` declaration; a directory is still probed for `marketplace.json`. APM uses
 the existing authoring parser, ref resolver and catalog composer in memory;
 it does not run `apm pack` or write generated catalogs. Relative package
 sources are anchored to the authoring file's directory, with the existing
@@ -93,15 +94,12 @@ snapshot; later explicit browse, view, update or selected-install operations
 reread the file. A failed registration leaves an existing registration unchanged.
 
 Registration and browsing do not install inventory, activate plugins, execute
-package hooks or publish packages. Remote tags and version ranges may require
-Git network access to resolve. Cosmetic remote package metadata is not fetched.
-For this local YAML workflow, `add --offline` and `browse --offline` use the
-existing cached-ref resolver: local entries and explicit commit SHAs work
-without network; an uncached tag or range fails with an actionable error.
-Ref caches are in memory for one invocation; an earlier online registration
-does not make tags or ranges available in a later offline invocation. Pin
-remote entries to full commit SHAs for an offline authoring preview.
-These flags do not add offline support to JSON, Git or HTTPS catalog sources.
+package hooks or publish packages. APM does not download remote package
+manifests to fill in descriptions. Remote tags and version ranges need Git
+network access to resolve. `add --offline` and `browse --offline` work only for
+this source type: local entries and remote entries pinned to full commit SHAs
+resolve without network, and tags or ranges fail with an actionable error.
+JSON, Git and HTTPS catalog sources reject `--offline`.
 
 Installing a remote entry records its actual package dependency and existing
 locked resolution. Locked replay does not require the preview file or its

@@ -21,15 +21,11 @@ apm marketplace add ./apm.yml --name alice-dev
 apm marketplace browse alice-dev
 ```
 
-This registers a live local discovery source. Later explicit operations reread
-the file, resolving relative package paths from its directory. Registration
-does not build, install inventory, execute hooks or publish packages. Use
-`--offline` with `add` or `browse` for local entries or remote entries pinned to
-full commit SHAs; remote tags and ranges need fresh resolution in a new CLI
-invocation. Continue using `apm pack`
-for native generated outputs and publication. A local package path is not a
-portable distribution source. See the [CLI reference](../../reference/cli/marketplace/)
-for resolution and locked replay semantics.
+APM rereads the file on each command and resolves relative package paths from
+its directory. It does not build, install, run hooks or publish. Keep using
+`apm pack` for generated outputs and publication. See
+[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
+for offline and locked-replay rules.
 
 For the operational concerns that surround a marketplace, see:
 
