@@ -369,7 +369,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry")
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             from apm_cli.install.mcp.ownership import mcp_native_hash

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -206,3 +207,25 @@ def test_uninstall_last_writer_records_actual_survivor_materialization(
     assert all(path.is_file() for path in deployed), result.stdout + result.stderr
     assert [path.read_bytes() for path in deployed] == [replacement] * 2
     scenario.run("audit", "--ci")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows root identity is not rebound")
+@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
+def test_device_only_root_change_is_rebound_by_installed_cli(
+    tmp_path: Path, apm_binary_path: Path, user_scope: bool
+) -> None:
+    """#3421: a reboot/remount renumbering only st_dev must not strand the receipt."""
+    from tests.integration.test_shared_skill_preservation_lifecycle import _scenario
+
+    scenario = _scenario(tmp_path, apm_binary_path, user_scope)
+    scenario.install("a")
+    receipts = list((scenario.environment.home / ".apm/deployment-receipts").glob("*.json"))
+    assert len(receipts) == 1
+    data = json.loads(receipts[0].read_text(encoding="utf-8"))
+    metadata = Path(data["root"]).stat()
+    actual = [metadata.st_dev, metadata.st_ino]
+    assert data["root_identity"] == actual
+    data["root_identity"] = [actual[0] + 1, actual[1]]
+    receipts[0].write_text(json.dumps(data), encoding="utf-8")
+    scenario.install(target=None)
+    assert json.loads(receipts[0].read_text(encoding="utf-8"))["root_identity"] == actual

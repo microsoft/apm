@@ -191,7 +191,7 @@ def test_triage_panel_lock_pins_copilot_cli_version() -> None:
 
 
 def test_scheduled_sweep_prefetch_and_model_are_scoped_and_compiled() -> None:
-    """Pre-agent evidence and model pin must not alter explicit issue requests."""
+    """Pre-agent evidence must not alter explicit issue requests; no model pin."""
     source = LOCK_PATH.with_suffix("").with_suffix(".md").read_text()
     frontmatter = yaml.safe_load(source.split("---", 2)[1])
     condition = (
@@ -207,13 +207,9 @@ def test_scheduled_sweep_prefetch_and_model_are_scoped_and_compiled() -> None:
     assert prefetch["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert "--scheduled-sweep --repo" in prefetch["run"]
     assert frontmatter["timeout-minutes"] == 30
-    model = frontmatter["engine"]["env"]["COPILOT_MODEL"]
-    assert model == (
-        "${{ github.job == 'detection' && 'detection' || (github.event_name == 'schedule' "
-        "|| (github.event_name == 'workflow_dispatch' && inputs.issue_number == '')) "
-        "&& 'grok-4.7' "
-        "|| vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'auto' }}"
-    )
+    # A hard-coded model broke every scheduled sweep once it became inaccessible.
+    assert "COPILOT_MODEL" not in frontmatter["engine"].get("env", {})
+    model = "${{ vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'auto' }}"
     lock = yaml.safe_load(LOCK_PATH.read_text())
     steps = lock["jobs"]["agent"]["steps"]
     compiled = next(step for step in steps if step.get("name") == prefetch["name"])
@@ -233,7 +229,7 @@ def test_scheduled_sweep_prefetch_and_model_are_scoped_and_compiled() -> None:
     assert "uv run --frozen --no-dev python" in compiled["run"]
     detection_steps = lock["jobs"]["detection"]["steps"]
     detection = next(step for step in detection_steps if "COPILOT_MODEL" in step.get("env", {}))
-    assert detection["env"]["COPILOT_MODEL"] == model
+    assert detection["env"]["COPILOT_MODEL"] == "detection"
 
 
 def test_triage_source_and_compiled_writers_are_advisory_only() -> None:
