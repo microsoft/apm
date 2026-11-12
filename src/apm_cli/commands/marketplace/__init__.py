@@ -465,10 +465,16 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
 
         if detected_path is None:
+            hint = (
+                " To register a local authoring catalog, pass the apm.yml file "
+                "itself (for example ./my-catalog/apm.yml)."
+                if probe_source.kind == "local"
+                else ""
+            )
             logger.error(
                 f"No marketplace.json found in '{probe_source.display_source}'. "
                 f"Checked: marketplace.json, .github/plugin/marketplace.json, "
-                f".claude-plugin/marketplace.json",
+                f".claude-plugin/marketplace.json.{hint}",
                 symbol="error",
             )
             sys.exit(1)
@@ -485,7 +491,7 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             # Reuse the catalog response the probe above just fetched from
             # the same url/ref/path instead of re-fetching it (apm#3283).
             discovery_payload=discovered_manifest,
-            **({"offline": True} if offline else {}),
+            offline=offline,
         )
         plugin_count = len(manifest.plugins)
 
@@ -743,9 +749,7 @@ def browse(name, verbose, offline=False):
         source = get_marketplace_by_name(name)
         logger.start(f"Fetching plugins from '{name}'...", symbol="search")
 
-        manifest = fetch_marketplace(
-            source, force_refresh=True, **({"offline": True} if offline else {})
-        )
+        manifest = fetch_marketplace(source, force_refresh=True, offline=offline)
 
         if not manifest.plugins:
             logger.warning(f"Marketplace '{name}' has no plugins")

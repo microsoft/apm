@@ -149,11 +149,61 @@ def test_pinned_remote_commit_needs_no_ref_or_metadata_network(tmp_path):
     assert manifest.plugins[0].source["sha"] == sha
 
 
+def _isolated_registry(tmp_path, monkeypatch):
+    monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(tmp_path / "config/config.json"))
+    monkeypatch.setattr(registry, "_registry_cache", None)
+
+
 def test_offline_repository_registration_fails_before_any_probe():
-    with patch("apm_cli.marketplace.client._auto_detect_path", side_effect=AssertionError):
+    with patch("apm_cli.marketplace.client._fetch_file", side_effect=AssertionError):
         result = CliRunner().invoke(marketplace, ["add", "alice/catalog", "--offline"])
     assert result.exit_code == 1
     assert "requires an explicitly selected local apm.yml" in result.output
+
+
+@pytest.mark.parametrize(
+    "registered",
+    [
+        MarketplaceSource(name="hosted", url="https://example.com/marketplace.json"),
+        MarketplaceSource(name="hosted", url="https://github.com/alice/catalog"),
+    ],
+)
+def test_browse_offline_rejects_non_authoring_source_without_fetching(
+    tmp_path, monkeypatch, registered
+):
+    _isolated_registry(tmp_path, monkeypatch)
+    registry.add_marketplace(registered)
+    with (
+        patch("apm_cli.marketplace.client._fetch_file", side_effect=AssertionError),
+        patch("apm_cli.marketplace.client._fetch_url_direct", side_effect=AssertionError),
+    ):
+        result = CliRunner().invoke(marketplace, ["browse", "hosted", "--offline"])
+    assert result.exit_code == 1
+    assert "--offline is supported here only for explicitly selected local apm.yml" in (
+        " ".join(result.output.split())
+    )
+    assert registry.get_marketplace_by_name("hosted") == registered
+
+
+def test_missing_authoring_file_reports_missing_path(tmp_path, monkeypatch):
+    _isolated_registry(tmp_path, monkeypatch)
+    path = tmp_path / "apm.yml"
+    write_catalog(path)
+    assert CliRunner().invoke(marketplace, ["add", str(path), "--name", "preview"]).exit_code == 0
+    path.unlink()
+    result = CliRunner().invoke(marketplace, ["browse", "preview", "--offline"])
+    assert result.exit_code == 1
+    assert "Check that the file exists at that path" in " ".join(result.output.split())
+
+
+def test_directory_without_catalog_points_to_apm_yml(tmp_path, monkeypatch):
+    _isolated_registry(tmp_path, monkeypatch)
+    write_catalog(tmp_path / "apm.yml")
+    result = CliRunner().invoke(marketplace, ["add", str(tmp_path), "--name", "preview"])
+    assert result.exit_code == 1
+    assert "pass the apm.yml file itself" in " ".join(result.output.split())
+    assert registry.get_registered_marketplaces() == []
 
 
 @pytest.mark.parametrize("relative_source", ["./tools/nested/one", "./one"])

@@ -1257,8 +1257,7 @@ def fetch_marketplace(
     if is_local_authoring_source(source):
         from .authoring_source import load_authoring_catalog
 
-        data = load_authoring_catalog(source, offline=offline, auth_resolver=auth_resolver)
-        return parse_marketplace_json(data, source.name)
+        return load_authoring_catalog(source, offline=offline, auth_resolver=auth_resolver)
     if offline:
         raise MarketplaceFetchError(
             source.name,

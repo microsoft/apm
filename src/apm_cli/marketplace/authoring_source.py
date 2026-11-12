@@ -8,7 +8,7 @@ import click
 
 from .builder import BuildOptions, MarketplaceBuilder
 from .errors import MarketplaceError, MarketplaceFetchError, OfflineMissError
-from .models import MarketplaceSource, parse_marketplace_json
+from .models import MarketplaceManifest, MarketplaceSource, parse_marketplace_json
 from .resolver import resolve_local_plugin_path
 from .yml_schema import load_marketplace_from_apm_yml
 
@@ -18,7 +18,7 @@ def load_authoring_catalog(
     *,
     offline: bool = False,
     auth_resolver: object | None = None,
-) -> dict:
+) -> MarketplaceManifest:
     """Resolve and compose one snapshot per Click invocation, rereading next time.
 
     Only the user-selected local ``apm.yml`` enters this path. Native output
@@ -57,15 +57,21 @@ def load_authoring_catalog(
         if manifest.structural_errors:
             raise ValueError("; ".join(manifest.structural_errors))
     except (MarketplaceError, OSError, ValueError) as exc:
-        retry_hint = (
-            "Retry without --offline to resolve remote refs, or pin remote entries to full commit SHAs."
-            if isinstance(exc, OfflineMissError)
-            else "Check the marketplace section, package paths and refs in that file, then retry."
-        )
+        if isinstance(exc, OfflineMissError):
+            retry_hint = (
+                "Retry without --offline to resolve remote refs, "
+                "or pin remote entries to full commit SHAs."
+            )
+        elif not path.is_file():
+            retry_hint = "Check that the file exists at that path, then retry."
+        else:
+            retry_hint = (
+                "Check the marketplace section, package paths and refs in that file, then retry."
+            )
         raise MarketplaceFetchError(
             source.name,
             f"cannot load marketplace declaration from {path}: {exc}",
             retry_hint=retry_hint,
         ) from exc
-    snapshots[key] = document
-    return document
+    snapshots[key] = manifest
+    return manifest
