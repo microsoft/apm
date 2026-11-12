@@ -50,7 +50,7 @@ CI_FINGERPRINTS: dict[str, str] = {
     "ci.yml:test-architecture-contracts": "b242c6a03d7dbb56a1a3cc1932fa8431ebe8dbd7d75401417d045a7609c2f62b",
     "ci.yml:build-and-test-shard": "5bcbeefcc68988f4624189cb087175b29f395698e22900649e94f39ce9ef37e5",
     "ci.yml:apm-self-check": "8830b9010c5de649e63c20f89b77d1994ea8778617db5a883613218f97308706",
-    "ci.yml:lifecycle-smoke-shard-1": "31dfab3f9373b96c46b4941fe9d8d6cbd7dbeb6bb97defc08ffe44519a481ae9",
+    "ci.yml:lifecycle-smoke-shard-1": "328a8680f30db3780d4d4619851f6990474765e9e1d4612c5ec8dc22f3cd8891",
     "ci.yml:lifecycle-smoke-shard-2": "f6b95c6a774e37ab6159c271ce6e92ebbd1185284a6691c269cff03675e7368f",
     "spec-conformance.yml:spec-conformance": "920860630499bab79c30540c3f1327b74faea3a7917ec4556a2186f7a353e358",
 }
