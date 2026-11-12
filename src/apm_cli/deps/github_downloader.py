@@ -66,6 +66,7 @@ from .github_rate_limit import GitHubThrottleError
 from .transport_selection import (
     ProtocolPreference,
     TransportSelector,
+    initial_transport_scheme,
 )
 from .virtual_file import materialize_virtual_file_package
 
@@ -298,12 +299,31 @@ class GitHubPackageDownloader:
 
         return GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
 
-    def _cache_git_env(self, dep_ref: DependencyReference) -> dict[str, str]:
+    def _persistent_cache_remote(self, dep_ref: DependencyReference, repository_url: str) -> str:
+        """Return the remote the persistent Git cache contacts for ``dep_ref``.
+
+        An SSH-declared dependency on a non-GitHub, non-ADO host keeps its
+        declared SSH transport so a cold cache never tries HTTPS first (#3513).
+        Every other dependency keeps the canonical ``repository_url``.
+        """
+        from .host_backends import backend_for
+
+        if dep_ref.artifactory_prefix or initial_transport_scheme(dep_ref) != "ssh":
+            return repository_url
+        backend = backend_for(dep_ref, self.auth_resolver)
+        if backend.is_github_family or backend.kind == "ado":
+            return repository_url
+        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref, token="")
+
+    def _cache_git_env(
+        self, dep_ref: DependencyReference, remote_url: str | None = None
+    ) -> dict[str, str]:
         """Return the subprocess environment for persistent Git cache operations.
 
         Plaintext HTTP repositories must not inherit ambient credential helpers:
         GitCache performs network fetches as well as local checkout operations, so
         it needs the same credential-suppression fence as direct HTTP transport.
+        ``remote_url`` selects the transport policy; it defaults to HTTPS.
         """
         from .git_auth_env import GitAuthEnvBuilder
 
@@ -321,13 +341,14 @@ class GitHubPackageDownloader:
             )
 
         auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-        remote_url = self._build_repo_url(
-            dep_ref.repo_url,
-            use_ssh=False,
-            dep_ref=dep_ref,
-            token="",
-            auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
-        )
+        if remote_url is None:
+            remote_url = self._build_repo_url(
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token="",
+                auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
+            )
         if auth_ctx is None:
             auth_ctx = self.auth_resolver.resolve_for_remote(
                 dep_ref.host or default_host(),
@@ -391,11 +412,15 @@ class GitHubPackageDownloader:
             )
 
         else:
+            cache_remote = self._persistent_cache_remote(dep_ref, repository_url)
             checkout = cache.get_checkout(
-                repository_url,
+                cache_remote,
                 ref,
                 locked_sha=locked_sha,
-                env=self._cache_git_env(dep_ref),
+                env=self._cache_git_env(
+                    dep_ref,
+                    remote_url=None if cache_remote == repository_url else cache_remote,
+                ),
                 sparse_paths=sparse_paths,
             )
         resolver = getattr(self, "_tiered_resolver", None)
