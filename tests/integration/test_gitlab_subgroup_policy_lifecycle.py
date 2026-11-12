@@ -137,6 +137,14 @@ _HIERARCHIES = {
         [_COMPANY, _DEPT, _TEAM],
     ),
     "empty-child": ({_COMPANY: _COMPANY_POLICY, _TEAM: "name: team\n"}, [_COMPANY, _TEAM]),
+    "extends-plus-ancestry": (
+        {
+            _COMPANY: _COMPANY_POLICY,
+            _DEPT: _policy("dept", deny="dept/blocked") + "extends: org\n",
+            _TEAM: _TEAM_POLICY + "extends: org\n",
+        },
+        [_COMPANY, _DEPT, _TEAM],
+    ),
     "weaker-child": ({_COMPANY: _COMPANY_POLICY, _TEAM: _WEAKER_TEAM}, [_COMPANY, _TEAM]),
 }
 
@@ -240,4 +248,4 @@ def test_cached_composition_enforces_offline(tmp_path: Path, apm_binary_path: Pa
     _assert_install_denies(online)
     _assert_install_denies(cached)
     assert cached_requests == []
-    assert "(chain: gitlab.com/acme/apm-policy -> " in " ".join(cached.stdout.split())
+    assert "(extends chain: gitlab.com/acme/apm-policy)" in " ".join(cached.stdout.split())

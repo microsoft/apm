@@ -357,8 +357,8 @@ class TestPolicyResolved:
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_subgroup_scoped_visible_non_verbose_warn(self, mock_info):
-        """#2753: a composed GitLab subgroup policy names its ordered source
-        chain at info even in non-verbose warn mode."""
+        """#2753: a composed GitLab subgroup policy names its ordered extends
+        chain (ancestors, root first) at info even in non-verbose warn mode."""
         chain = [
             "gitlab.com/acme/apm-policy",
             "gitlab.com/acme/dept-a/apm-policy",
@@ -374,15 +374,28 @@ class TestPolicyResolved:
         mock_info.assert_called_once()
         msg = mock_info.call_args[0][0]
         match = re.fullmatch(
-            r"Policy: (?P<source>\S+) \(chain: (?P<chain>[^)]*)\) -- enforcement=warn", msg
+            r"Policy: (?P<source>\S+) \(extends chain: (?P<chain>[^)]*)\) -- enforcement=warn",
+            msg,
         )
         assert match is not None, msg
         assert self._coordinate(match["source"]) == ("gitlab.com", "/acme/dept-a/apm-policy")
         assert [self._coordinate(ref) for ref in match["chain"].split(" -> ")] == [
             ("gitlab.com", "/acme/apm-policy"),
-            ("gitlab.com", "/acme/dept-a/apm-policy"),
         ]
         assert mock_info.call_args[1].get("symbol") == "info"
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_subgroup_scoped_off_stays_silent_non_verbose(self, mock_info):
+        """An ``off`` composed policy needs no action: silent without --verbose."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/dept-a/apm-policy",
+            cached=False,
+            enforcement="off",
+            subgroup_scoped=True,
+            chain=["gitlab.com/acme/apm-policy", "gitlab.com/acme/dept-a/apm-policy"],
+        )
+        mock_info.assert_not_called()
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_top_level_scope_stays_silent_non_verbose_warn(self, mock_info):

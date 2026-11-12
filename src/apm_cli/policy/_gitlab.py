@@ -139,7 +139,10 @@ def _gitlab_parent_coordinates(
     # that does not match the leaf -- or carries a malformed port -- is a
     # cross-host/invalid ref and is rejected, never silently folded into the
     # namespace. A bare single-label first segment is a namespace segment
-    # (GitLab nested subgroups, see #2753) and is left in place.
+    # (GitLab nested subgroups, see #2753) and is left in place. A top-level
+    # group whose name contains a dot (``acme.tools/...``) is therefore read
+    # as a host and rejected (fail closed); the docs prescribe the
+    # host-qualified spelling for it.
     if len(parts) >= 3 and ("." in parts[0] or ":" in parts[0]):
         try:
             explicit = urlsplit(f"//{parts[0]}")

@@ -443,7 +443,8 @@ at every namespace from the top-level group down to the project's own subgroup
 and combines them in that order with the tighten-only merge: a team policy can add
 restrictions but never drop an ancestor's, even without `extends:`. The nearest
 discovered policy is the leaf that `policy.hash` pins; a non-404 failure at any
-level fails closed instead of applying a partial chain. A flat `<group>/<project>`
+level while another level has a policy fails closed instead of applying a partial
+chain (a complete cached chain follows the stale-cache rules). A flat `<group>/<project>`
 remote probes only `<group>/apm-policy`. GitLab 404s a private project the token
 cannot read, so an unreadable `apm-policy` is left out of the chain -- grant the
 token read access to every ancestor `apm-policy`.

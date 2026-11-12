@@ -89,7 +89,7 @@ The effective policy is company, then department, then team. A team can add rest
 
 `apm install`, `apm audit --ci` (the `policy.chain` field in JSON and SARIF output) and `apm policy status` (the extends chain) show the ordered, redacted list of sources. Up to five distinct policies can be combined, counting both discovered namespaces and `extends:` parents; a policy that two levels both reach is used once.
 
-The **nearest** discovered policy is the one that `policy.hash` in `apm.yml` pins -- the pin covers that policy's bytes, not the combined result. If a closer team policy is published (or the pinned one is removed), the nearest policy changes and a pinned project fails closed until you update `policy.hash`. APM never re-pins on its own.
+The **nearest** discovered policy is the one that `policy.hash` in `apm.yml` pins -- the pin covers that policy's bytes, not the combined result. If a closer team policy is published (or the pinned one is removed), the nearest policy changes and a pinned project fails closed until you update `policy.hash`. APM never re-pins on its own. Changes to farther ancestor policies are not covered by the pin: they apply through the normal cache refresh and the tighten-only merge. Run `apm policy status` in CI to see the composed chain.
 
 If any namespace returns an error other than 404 (an access error, a server or network failure, or an invalid policy) while another level has a policy, discovery fails closed instead of applying a partial chain, even when `fetch_failure_default` is `warn`. A complete cached chain from a previous run can still be used under the normal stale-cache rules, and offline (cache-only) installs use only that complete cached chain.
 

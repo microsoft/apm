@@ -476,7 +476,7 @@ There are 21 policy checks.
 ## Inheritance
 
 :::note[Discovery vs. `extends:` -- two different concepts]
-On GitHub and Azure DevOps, APM auto-discovers exactly **one** policy file per project, derived from the git remote (for example `<org>/.github/apm-policy.yml`). On GitLab it discovers the `apm-policy` project at every namespace of the project's group ancestry and combines them, top-level group first, with the same tighten-only merge (see [Policy Files](./apm-policy/#where-it-lives)). There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
+On GitHub and Azure DevOps, APM auto-discovers exactly **one** policy file per project, derived from the git remote (for example `<org>/.github/apm-policy.yml`). On GitLab it discovers the `apm-policy` project at every namespace of the project's group ancestry and combines them, top-level group first, with the same tighten-only merge (see [Policy Files](../apm-policy/#where-it-lives)). There is no automatic per-repo or per-enterprise discovery. `extends:` adds parents to a discovered policy (and that parent's parent), up to `MAX_CHAIN_DEPTH=5` distinct policies in total, counting GitLab-discovered ancestors. On GitHub and Azure DevOps, model an enterprise -> org -> team chain with `extends:`; on GitLab, publishing `apm-policy` in each group does it without `extends:`.
 :::
 
 Policies can inherit from a parent using `extends`. This enables a three-level chain:
@@ -852,7 +852,7 @@ Compute the digest from the canonical org-policy file:
 shasum -a 256 .github/apm-policy.yml | awk '{print "sha256:" $1}'
 ```
 
-When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility.
+When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility. On GitLab the leaf is the nearest discovered `apm-policy`, and discovered ancestor policies are also outside the pin -- use `apm policy status` to check the composed chain (see [Policy Files](../apm-policy/#where-it-lives)).
 
 A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. Only SHA-256, SHA-384, and SHA-512 are supported.
 
