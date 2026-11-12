@@ -102,3 +102,19 @@ def test_timeout_in_middle_isolated(apm_home: Path, tmp_path: Path) -> None:
     s1, s3, raised = _run_batch(middle, apm_home, tmp_path)
     assert s1.exists() and s3.exists(), "neighbours must run despite a timeout"
     assert not raised, "fire() must not raise on a timeout"
+
+
+def test_pre_compile_failure_stays_isolated(apm_home: Path, tmp_path: Path) -> None:
+    """A failing pre-compile script never raises or stops its neighbours."""
+    s1 = tmp_path / "S1"
+    s3 = tmp_path / "S3"
+    runner = LifecycleScriptRunner(
+        scripts=[
+            make_command_entry(touch_cmd(s1), event="pre-compile"),
+            make_command_entry(f'{PYEXE} -c "import sys; sys.exit(3)"', event="pre-compile"),
+            make_command_entry(touch_cmd(s3), event="pre-compile"),
+        ]
+    )
+    event = LifecycleEvent.create(event="pre-compile", working_directory="/tmp")
+    runner.fire("pre-compile", event)
+    assert s1.exists() and s3.exists()
