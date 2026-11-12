@@ -130,6 +130,32 @@ def test_transitive_denial_install_chain_is_atomic(tmp_path: Path, apm_binary_pa
 
 
 @pytest.mark.lifecycle_smoke
+def test_audit_ci_agrees_with_install_on_denied_transitive(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """audit --ci judges the locked transitive set install refuses (#3658)."""
+    world, child, parent, _other, project = _world(tmp_path)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("install",), cwd=project, env=env, step="1-install")
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="2-audit-allowed")
+        world.publish_policy(_deny(child.slug))
+        world.clear_policy_cache()
+        before = tree_snapshot(project)
+        r = run_step(runner, ("install",), cwd=project, env=env, step="3-install", expected=1)
+        assert "pkg-child" in output(r), output(r)
+        r = run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="4-audit", expected=1)
+        assert "pkg-child" in output(r), output(r)
+        assert "dependency-denylist" in output(r), output(r)
+        assert tree_snapshot(project) == before
+
+        # Removing the parent clears the transitive verdict for both gates.
+        run_step(runner, ("uninstall", parent.slug), cwd=project, env=env, step="5-uninstall")
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="6-audit-clean")
+
+
+@pytest.mark.lifecycle_smoke
 def test_audit_no_cache_fetches_fresh_auto_discovered_policy(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
