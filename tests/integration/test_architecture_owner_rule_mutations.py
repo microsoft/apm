@@ -76,6 +76,24 @@ OWNERS_DIR = ROOT / ".apm/architecture/owners"
             'Path("apm_modules")',
             id="canonical-layout",
         ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "lock.dependencies[_SELF_KEY] = lock.project_self_entry()",
+            'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
+            id="replay-inline-self-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "and _project_has_root_primitives(project_root)",
+            'and (project_root / ".apm").is_dir()',
+            id="replay-root-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "lock.dependencies[_SELF_KEY] = lock.project_self_entry()",
+            'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
+            id="load-inline-self-entry",
+        ),
     ],
 )
 def test_audit_replay_scope_projection_cannot_bypass_owner(
