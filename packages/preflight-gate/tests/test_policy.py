@@ -99,9 +99,18 @@ def test_lane_specific_checks() -> None:
     assert _ids(["packages/apm-contributor-dashboard/x.mjs"])["T1"] == [
         "dashboard.node",
         "apm.self-check",
+        "apm.lock-snapshots",
     ]
     assert _ids([".github/workflows/ci.yml"])["T1"] == ["arch.contracts"]
-    assert _ids(["apm.yml"])["T1"] == ["apm.self-check"]
+    assert _ids(["apm.yml"])["T1"] == ["apm.self-check", "apm.lock-snapshots"]
+
+
+def test_package_edits_verify_lockfile_snapshot_hashes() -> None:
+    # Regression trap: a packages/ edit with a stale apm.lock.yaml content_hash
+    # passed preflight but failed CI's test_local_package_snapshots_match_lockfile.
+    ids = _ids(["packages/preflight-gate/.apm/hooks/scripts/preflight_policy.py"])
+    assert "apm.lock-snapshots" in ids["T1"]
+    assert "test_local_package_snapshots_match_lockfile" in policy.APM_LOCK_SNAPSHOTS
 
 
 def test_unit_mapping_finds_tests_for_modules_and_scripts() -> None:

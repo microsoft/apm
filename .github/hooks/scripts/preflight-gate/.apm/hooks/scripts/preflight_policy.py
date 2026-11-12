@@ -173,6 +173,12 @@ DASHBOARD_NODE = (
 )
 
 APM_SELF_CHECK = "uv run --frozen apm audit --ci"
+# apm audit does not verify local-package snapshot hashes in apm.lock.yaml;
+# this unit test does, and CI runs it in the unit shards.
+APM_LOCK_SNAPSHOTS = (
+    "uv run --frozen --extra dev pytest -q -p no:cacheprovider"
+    " tests/unit/test_triage_advisory.py::test_local_package_snapshots_match_lockfile"
+)
 
 SPEC_ORPHAN = "uv run --frozen --extra dev python -m tests.spec_conformance.orphan_check"
 SPEC_MODE_B = "bash tests/spec_conformance/mode_b_detector.sh"
@@ -443,6 +449,7 @@ def _t1_checks(ctx: Context) -> list[Check]:
         checks.append(Check("dashboard.node", "T1", cmd=DASHBOARD_NODE))
     if any(_is_self_check(p) for p in ctx.changed):
         checks.append(Check("apm.self-check", "T1", cmd=APM_SELF_CHECK))
+        checks.append(Check("apm.lock-snapshots", "T1", cmd=APM_LOCK_SNAPSHOTS))
     if any(_is_spec(p) for p in ctx.changed):
         checks.append(Check("spec.orphans", "T1", cmd=SPEC_ORPHAN))
         # CI tests the merge commit, whose version is the latest release, so its
