@@ -45,7 +45,7 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
-from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
+from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
@@ -353,19 +353,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
-def _refuse_unwritable_lockfile_before_update(ctx, lock_path, early_lockfile, update_plan):
-    """Refuse an unwritable lockfile before an update deploys or cleans anything."""
-    from apm_cli.deps.lockfile import refuse_lockfile_before_mutation
-
-    if update_plan is None:
-        update_plan = build_resolved_update_plan(ctx, early_lockfile)
-    refuse_lockfile_before_mutation(
-        early_lockfile,
-        lock_path,
-        would_mutate=update_plan.has_changes,
-    )
-
-
 @transactional_pipeline
 def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     apm_package: APMPackage,
@@ -617,20 +604,11 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # write directly to stdout / call ``click.confirm`` without
     # collision.
     # ------------------------------------------------------------------
-    update_plan = None
-    if plan_callback is not None:
-        update_plan = build_resolved_update_plan(ctx, _early_lockfile)
-        proceed = plan_callback(update_plan)
-        if not proceed:
-            transaction.rollback()
-            return InstallResult(
-                disposition=InstallDisposition.CANCELLED,
-                target_decision=target_decision,
-            )
-
-    if update_refs and apm_dir and not (ctx.frozen or ctx.dry_run or lockfile_only):
-        _refuse_unwritable_lockfile_before_update(
-            ctx, get_lockfile_path(apm_dir), _early_lockfile, update_plan
+    if not confirm_update_plan(ctx, _early_lockfile, plan_callback):
+        transaction.rollback()
+        return InstallResult(
+            disposition=InstallDisposition.CANCELLED,
+            target_decision=target_decision,
         )
 
     if target_decision.value is None and scope is InstallScope.PROJECT and not lockfile_only:

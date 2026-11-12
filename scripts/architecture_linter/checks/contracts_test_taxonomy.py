@@ -466,7 +466,7 @@ def check_lockfile_symlink_write_guard(provider: FactsProvider) -> tuple[Violati
     # is_symlink() logic.
     _LOCKFILE_SYMLINK_CONSUMERS = (
         "src/apm_cli/commands/uninstall/cli.py",
-        "src/apm_cli/install/pipeline.py",
+        "src/apm_cli/install/helpers/plan_inputs.py",
     )
     for path in _LOCKFILE_SYMLINK_CONSUMERS:
         facts, failures = _facts_for(provider, path, rule_id)
