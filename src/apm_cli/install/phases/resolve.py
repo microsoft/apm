@@ -491,7 +491,7 @@ def _resolve_dependencies(
                     update_refs=update_refs,
                     package_path=install_path,
                     update_keys=update_keys,
-                ):
+                ) or (dep_ref.is_local and staging_session.owns_path(install_path)):
                     return install_path
             replacement_path = staging_session.prepare_replacement(install_path)
             # Emit progress only after the cache fast path decides to fetch.
