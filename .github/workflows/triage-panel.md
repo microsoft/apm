@@ -101,9 +101,11 @@ safe-outputs:
     target: "*"
   add-labels:
     allowed:
-      - "theme/governance"
-      - "theme/portability"
-      - "theme/security"
+      - "pillar/consume"
+      - "pillar/ecosystem"
+      - "pillar/foundations"
+      - "pillar/govern"
+      - "pillar/produce"
       - "area/audit-policy"
       - "area/ci-cd"
       - "area/cli"
@@ -318,7 +320,7 @@ item or override governance.
    and useful proposed classification labels ONLY when present in both
    the contract allowlist and the repository's existing label definitions.
    Send plain label strings, never intent metadata. For each dimension
-   (`type/`, `theme/`, `area/`), if ANY existing label or legacy alias
+   (`type/`, `pillar/`, `area/`), if ANY existing label or legacy alias
    occupies it, do not add another label in that dimension. Put conflicts
    in the comment. Never replace/remove classification or human state.
    No bot acceptance, priority, help-wanted/good-first invitation, or

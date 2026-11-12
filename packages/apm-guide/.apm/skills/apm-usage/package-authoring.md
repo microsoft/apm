@@ -451,7 +451,11 @@ target-specific YAML arrays/lists (under `paths:` / `globs:` /
 `fileMatchPattern:`) across Claude, Windsurf, and Kiro.
 For Cursor, APM emits one comma-joined scalar rather than a YAML list
 (`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
-characters are escaped. Descriptions keep printable non-ASCII text readable
+characters are escaped.
+When `applyTo` resolves to exactly one universal `**` (scalar, padded, or
+single-item list), Cursor instead gets `alwaysApply: true` and no `globs:`;
+mixed `**` plus scoped patterns keep `globs:`, and an absent, empty, or null
+`applyTo` emits neither key. Descriptions keep printable non-ASCII text readable
 and are quoted when needed to preserve their value. For Antigravity, APM
 emits `trigger: glob` plus one double-quoted comma-joined string
 (`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
