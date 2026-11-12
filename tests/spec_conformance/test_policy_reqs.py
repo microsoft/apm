@@ -395,6 +395,64 @@ def test_policy_host_qualified_patterns_match_effective_host(monkeypatch):
 
 
 @pytest.mark.req("req-pl-018")
+def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
+    """Clause (g): leading-dot paths stay hostless, numeric ports and one
+    trailing dot are removed on both sides, require is not host-qualified,
+    and audit gates locked transitive dependencies."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.policy_checks import (
+        _check_dependency_allowlist,
+        _check_dependency_denylist,
+        _check_required_packages,
+        run_policy_checks,
+    )
+    from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+
+    def denied(raw: str, *patterns: str) -> bool:
+        dep = DependencyReference.parse(raw)
+        return not _check_dependency_denylist([dep], DependencyPolicy(deny=patterns)).passed
+
+    assert denied("./packages/x", "./packages/**")
+    assert denied("../shared/lib", "../shared/**")
+    assert denied("ghes.corp.example/team/repo", "ghes.corp.example:99999/**")
+    assert denied("ghes.corp.example/team/repo", "ghes.corp.example./**")
+
+    monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example.")
+    assert denied("team/repo", "ghes.corp.example/**")
+    monkeypatch.delenv("GITHUB_HOST")
+
+    shorthand = [DependencyReference.parse("contoso/repo")]
+    require = DependencyPolicy(require=("github.com/contoso/repo",))
+    assert not _check_required_packages(shorthand, require).passed
+
+    (tmp_path / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - example-org/app\n",
+        encoding="utf-8",
+    )
+    lock = LockFile()
+    lock.add_dependency(LockedDependency(repo_url="example-org/app", host="github.com", depth=1))
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="example-org/lib",
+            host="ghes.unapproved.example",
+            depth=2,
+            resolved_by="example-org/app",
+        )
+    )
+    lock.write(tmp_path / "apm.lock.yaml")
+    policy = ApmPolicy(dependencies=DependencyPolicy(allow=("github.com/**",)))
+    result = run_policy_checks(tmp_path, policy, fail_fast=False)
+    allowlist = next(c for c in result.checks if c.name == "dependency-allowlist")
+    assert not allowlist.passed
+    assert _check_dependency_allowlist(
+        [DependencyReference.parse("github.com/example-org/app")], policy.dependencies
+    ).passed
+
+
+@pytest.mark.req("req-pl-018")
 def test_policy_identity_casing_matches_dependency_source_semantics():
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency import DependencyReference

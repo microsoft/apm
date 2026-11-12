@@ -974,9 +974,10 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics"
       ]
     },
