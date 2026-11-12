@@ -20,8 +20,11 @@ def test_marketplace_source_admission_has_single_owner() -> None:
     rule = _RULES_BY_ID[_RULE_ID]
 
     assert owner.count("def parse_marketplace_source(") == 1
+    assert owner.count("def admit_marketplace_catalog_path(") == 1
     assert "identity = parse_marketplace_source(source, host_flag)" in command
+    assert "explicit_path = admit_marketplace_catalog_path(catalog_path)" in command
     assert "identity = parse_marketplace_source(self.url)" in model
+    assert "admit_marketplace_catalog_path(self.path)" in model
     assert "def _host_from_url(" not in client
     assert "host = source.host" in client
     assert "is_valid_fqdn" not in command
