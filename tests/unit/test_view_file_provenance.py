@@ -77,12 +77,17 @@ def _snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
     return state
 
 
+def _set_home(monkeypatch, home: Path) -> None:
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     root = tmp_path / "proj"
     root.mkdir()
     monkeypatch.chdir(root)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _set_home(monkeypatch, tmp_path / "home")
     return root
 
 
@@ -370,7 +375,7 @@ class TestUserScope:
         home = tmp_path / "home"
         cwd = tmp_path / "somewhere"
         cwd.mkdir()
-        monkeypatch.setenv("HOME", str(home))
+        _set_home(monkeypatch, home)
         monkeypatch.chdir(cwd)
         rel = ".copilot/skills/alpha/SKILL.md"
         skill_hash = _write(home, rel, "user\n")
@@ -395,7 +400,7 @@ class TestUserScope:
         home = tmp_path / "home"
         project = tmp_path / "proj"
         project.mkdir()
-        monkeypatch.setenv("HOME", str(home))
+        _set_home(monkeypatch, home)
         monkeypatch.chdir(project)
         rel = ".copilot/skills/alpha/SKILL.md"
         _write_lock(
