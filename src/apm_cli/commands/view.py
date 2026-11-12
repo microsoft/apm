@@ -673,17 +673,28 @@ _VIEW_HELP = (
     "    apm view org/repo versions --registry   # From the default registry\n"
     "    apm view org/repo versions --registry myreg  # From a named registry\n"
     "    apm view https://github.com/org/repo versions  # Force the git path\n"
-    "    apm view org/repo -g                    # From user scope"
+    "    apm view org/repo -g                    # From user scope\n"
+    "    apm view --file .agents/skills/x/SKILL.md  # Who deployed this file?\n\n"
+    "With --file PATH, reports the recorded owner(s) of one deployed file from\n"
+    "the lockfile (read-only, exact path). Exit 0 when provenance is recorded,\n"
+    "1 when it is unrecorded or an owner is unresolved, 2 on usage or state errors."
 )
 
 
 @click.command(
     name="view",
     help=_VIEW_HELP,
-    short_help="View package metadata or list remote versions",
+    short_help="View package metadata, list remote versions, or trace a file's owner",
 )
-@click.argument("package", required=True)
+@click.argument("package", required=False, default=None)
 @click.argument("field", required=False, default=None)
+@click.option(
+    "--file",
+    "file_path",
+    default=None,
+    metavar="PATH",
+    help="Show which package deployed this exact file (read-only reverse lookup).",
+)
 @click.option(
     "--global",
     "-g",
@@ -702,11 +713,29 @@ _VIEW_HELP = (
     help="List versions from a registry (bare to use the default, or name one). "
     "Use a full git URL to force the git path instead.",
 )
-def view(package: str, field: str | None, global_: bool, registry: str | None):
+def view(
+    package: str | None,
+    field: str | None,
+    file_path: str | None,
+    global_: bool,
+    registry: str | None,
+):
     """View package metadata or list remote versions."""
     from ..core.scope import InstallScope, get_apm_dir
 
     logger = CommandLogger("view")
+
+    if file_path is not None:
+        if package is not None or field is not None:
+            raise click.UsageError("Use either PACKAGE [FIELD] or --file PATH, not both.")
+        if registry is not None:
+            raise click.UsageError("--registry cannot be combined with --file.")
+        from .view_file import view_file
+
+        view_file(file_path, global_=global_, logger=logger)
+        return
+    if package is None:
+        raise click.UsageError("Missing argument 'PACKAGE'. Or pass --file PATH.")
 
     # Warn if --registry is supplied without the versions field (flag is ignored).
     if registry is not None and field != "versions":
