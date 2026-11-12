@@ -510,8 +510,9 @@ class TestSuppressLockfileWrites:
         lock = _build_lockfile([_locked([".claude/skills/a/SKILL.md"])])
 
         with suppress_lockfile_writes() as withheld:
-            lock.write(path)
+            persisted = lock.write(path)
 
+        assert persisted is False, "a withheld write must not be reported as persisted"
         assert not path.exists(), "frozen mode must not create the lockfile"
         assert len(withheld) == 1
         assert ".claude/skills/a/SKILL.md" in withheld[0]
@@ -534,8 +535,8 @@ class TestSuppressLockfileWrites:
 
         with suppress_lockfile_writes():
             pass
-        lock.write(path)
 
+        assert lock.write(path) is True
         assert path.exists(), "suppression must not leak past its context"
 
 

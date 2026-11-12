@@ -6,7 +6,9 @@ deployed files follow in one run and ``--frozen`` replays from a cold cache.
 
 Uninstalling the only production parent of a dependency that a
 devDependency also needs keeps that dependency installed and resolved by the
-devDependency.
+devDependency, and writes it ``is_dev`` exactly as install would, so the next
+install is a no-op (#3669).  ``install --frozen`` never claims it updated
+the lockfile it withheld.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration._dependency_graph_world import NO_POLICY, World, remote, set_deps
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
@@ -86,3 +89,31 @@ def test_uninstalling_prod_parent_keeps_dev_reachable_dep(
     assert world.locked()["test/e"]["resolved_by"] == "test/dev"
     assert world.deployed() == {"dev.instructions.md", "e.instructions.md"}
     world.cross_check(present={"test/dev", "test/e"}, absent=frozenset({"test/c"}))
+
+
+def test_uninstall_writes_the_lock_install_would_write(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _dev_world(tmp_path, apm_binary_path)
+    world.apm("uninstall", "test/c")
+    assert world.locked()["test/e"]["is_dev"] is True
+    lock_before = world.lock_bytes()
+    result = world.apm("install", NO_POLICY)
+    assert "Updated apm.lock.yaml" not in result.stdout
+    assert world.lock_bytes() == lock_before
+
+
+def test_frozen_install_never_reports_a_withheld_lock_write(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _dev_world(tmp_path, apm_binary_path)
+    lock = world.lock()
+    for dep in lock["dependencies"]:
+        if dep["repo_url"] == "test/dev":
+            dep.pop("is_dev")
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+    lock_before = world.lock_bytes()
+
+    result = world.apm("install", NO_POLICY, "--frozen")
+    assert "Updated apm.lock.yaml" not in result.stdout
+    assert world.lock_bytes() == lock_before

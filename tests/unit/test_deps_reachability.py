@@ -564,3 +564,38 @@ def test_manifestless_skill_survivor_is_a_leaf_not_unverifiable(tmp_path):
 
     assert result.complete is True
     assert gone not in result.reachable
+
+
+def test_dev_only_marks_keys_reached_solely_through_dev_refs(tmp_path):
+    """#3669: production paths win, exactly like the install resolver's is_dev."""
+    apm_modules_dir = tmp_path / "apm_modules"
+    manifests = {
+        "prod": "name: prod\nversion: 1.0.0\ndependencies:\n  apm:\n    - acme/both\n",
+        "dev": (
+            "name: dev\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - acme/both\n    - acme/devonly\n"
+        ),
+        "both": "name: both\nversion: 1.0.0\n",
+        "devonly": "name: devonly\nversion: 1.0.0\n",
+    }
+    lockfile = LockFile()
+    for name, manifest in manifests.items():
+        (apm_modules_dir / "acme" / name).mkdir(parents=True)
+        (apm_modules_dir / "acme" / name / "apm.yml").write_text(manifest)
+        lockfile.add_dependency(LockedDependency(repo_url=f"acme/{name}", resolved_commit="c"))
+    both = _shared_key(lockfile, "acme/both")
+    devonly = _shared_key(lockfile, "acme/devonly")
+
+    result = compute_forward_reachable_keys(
+        lockfile,
+        tmp_path,
+        apm_modules_dir,
+        [DependencyReference.parse("acme/prod")],
+        frozenset({both, devonly}),
+        dev_refs=[DependencyReference.parse("acme/dev")],
+    )
+
+    assert result.complete is True
+    assert {both, devonly} <= result.reachable
+    assert devonly in result.dev_only
+    assert both not in result.dev_only

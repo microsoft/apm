@@ -1343,12 +1343,13 @@ class LockFile:
         path: Path,
         *,
         existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
-    ) -> None:
+    ) -> bool:
         """Write lock file to disk, preserving legacy timestamp behavior.
 
         Inside :func:`suppress_lockfile_writes` (``apm install --frozen``,
         req-lk-006) the serialised content is recorded for the caller and
-        the file on disk is left byte-for-byte untouched.
+        the file on disk is left byte-for-byte untouched.  Returns whether
+        the file was persisted, so callers never report a withheld write.
 
         New lockfiles omit ``generated_at``.  When the on-disk lockfile already
         carries the field, keep it stable for semantic no-ops and refresh it for
@@ -1362,7 +1363,7 @@ class LockFile:
         suppressed = _suppressed_writes.get()
         if suppressed is not None:
             suppressed.append(self.to_yaml())
-            return
+            return False
         ensure_lockfile_writable(path)
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
@@ -1403,6 +1404,7 @@ class LockFile:
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
+        return True
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
@@ -1517,9 +1519,9 @@ class LockFile:
         path: Path,
         *,
         existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
-    ) -> None:
-        """Save lock file to disk (alias for write)."""
-        self.write(path, existing_lockfile=existing_lockfile)
+    ) -> bool:
+        """Save lock file to disk (alias for write); return whether it persisted."""
+        return self.write(path, existing_lockfile=existing_lockfile)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP/LSP servers, and configs.

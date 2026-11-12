@@ -322,13 +322,14 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     correct post-removal survivor set, mirroring the identity
     matching ``_validate_uninstall_packages`` already uses.
 
-    Returns an empty list -- never raises -- if *apm_yml_path* is ``None``,
+    Returns ``(production_refs, dev_refs)`` so the walk can apply install's
+    ``is_dev`` rule. Returns empty lists -- never raises -- if *apm_yml_path* is ``None``,
     missing, or malformed; the project's own manifest is a Step-1/3
     concern here, not part of this walk's fail-closed contract, which
     covers the manifests visited DURING the walk, not this seed step.
     """
     if apm_yml_path is None:
-        return []
+        return [], []
 
     removed_identities = builtins.set()
     for pkg in packages_to_remove:
@@ -344,18 +345,18 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     try:
         data = load_yaml(apm_yml_path) or {}
     except (FileNotFoundError, yaml.YAMLError):
-        return []
+        return [], []
 
-    refs = []
-    for section_name in ("dependencies", "devDependencies"):
+    refs: dict[str, list] = {"dependencies": [], "devDependencies": []}
+    for section_name, section_refs in refs.items():
         for dep_entry in data.get(section_name, {}).get("apm", []) or []:
             try:
                 ref = _parse_dependency_entry(dep_entry)
             except (ValueError, TypeError, AttributeError, KeyError):
                 continue
             if ref.get_identity() not in removed_identities:
-                refs.append(ref)
-    return refs
+                section_refs.append(ref)
+    return refs["dependencies"], refs["devDependencies"]
 
 
 def _warn_reachability_incomplete(reachability, logger):
@@ -412,9 +413,10 @@ def _compute_actual_orphans(
         A ``(actual_orphans, repairs)`` tuple. *actual_orphans* is the
         frozenset of keys safe to delete this run, unchanged in meaning
         from before this docstring update. *repairs* maps each RESCUED
-        candidate's key to the ``(parent_repo_url, local_path)`` of the
-        surviving node that rescued it (see
-        ``ReachabilityResult.reachable_via``) -- a rescued candidate's
+        candidate's key to the ``(parent_repo_url, local_path, dev_only)`` of
+        the surviving node that rescued it (see
+        ``ReachabilityResult.reachable_via`` and ``dev_only``, which keeps
+        ``is_dev`` what install would write) -- a rescued candidate's
         ``resolved_by``/``local_path`` are otherwise left pointing at a
         parent that may no longer exist in the lockfile, which would
         silently defeat the NEXT uninstall's backward orphan-candidate
@@ -428,10 +430,10 @@ def _compute_actual_orphans(
     if not orphans:
         return builtins.frozenset(), {}
 
-    direct_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
 
     remaining_deps = builtins.set()
-    for ref in direct_refs:
+    for ref in (*direct_refs, *dev_refs):
         remaining_deps.add(ref.get_unique_key())
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
@@ -449,7 +451,7 @@ def _compute_actual_orphans(
 
     project_root = apm_yml_path.parent if apm_yml_path else Path(".")
     reachability = compute_forward_reachable_keys(
-        lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans
+        lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans, dev_refs=dev_refs
     )
     if not reachability.complete:
         if lockfile.replacements is not None:
@@ -468,7 +470,9 @@ def _compute_actual_orphans(
 
     rescued = candidate_orphans & reachability.reachable
     repairs = {
-        key: reachability.reachable_via[key] for key in rescued if key in reachability.reachable_via
+        key: (*reachability.reachable_via[key], key in reachability.dev_only)
+        for key in rescued
+        if key in reachability.reachable_via
     }
     return candidate_orphans - reachability.reachable, repairs
 
@@ -925,11 +929,12 @@ def _cleanup_transitive_orphans(
     # fail-closes any later reachability walk needing to re-resolve this
     # same entry's on-disk directory (see _compute_actual_orphans'
     # docstring). Real removal path only -- --dry-run never reaches here.
-    for rescued_key, (new_parent_repo_url, new_local_path) in resolved_by_repairs.items():
+    for rescued_key, (new_parent, new_local_path, dev_only) in resolved_by_repairs.items():
         rescued_dep = lockfile.get_dependency(rescued_key)
         if rescued_dep is None:
             continue
-        rescued_dep.resolved_by = new_parent_repo_url
+        rescued_dep.resolved_by = new_parent
+        rescued_dep.is_dev = dev_only
         if new_local_path is not None:
             rescued_dep.local_path = new_local_path
 
