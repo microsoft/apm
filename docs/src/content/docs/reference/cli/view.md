@@ -45,25 +45,25 @@ For git packages, output is a table with name, type (`tag` or `branch`), and sho
 
 ### `apm view --file PATH`
 
-Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`~/.apm/apm.lock.yaml` with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings.
+Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`~/.apm/apm.lock.yaml` with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. Unlike [`apm find`](../find/), which lists package names from `deployed_files`, it reports the active writer, the source and the current file status, with exit codes for scripting.
 
 For each matching record it prints:
 
 - **Owner** -- every recorded owner. On a shared path, the last writer is marked `active writer` and the others `surviving owner`.
 - **Kind** -- this project (project-self), a local bundle, a direct dependency, or a transitive dependency and its parent.
-- **Source, Ref, Commit** -- for dependencies, as recorded in the lockfile. Credentials are redacted.
-- **Current file** -- kept separate from provenance: `matches the recorded deployed hash`, `modified since deployment`, `missing`, or `unverifiable` (for example no recorded hash, not a regular file, or a path through a symlink, which is not followed).
+- **Source, Ref, Commit** -- for dependencies, as recorded in the lockfile. A replaced dependency shows the replacement source it installs from. Credentials and control characters are removed.
+- **Current file** -- kept separate from provenance: `matches the recorded deployed hash`, `modified since deployment`, `missing`, or `unverifiable` (for example no recorded hash, not a regular file, or a path through a symlink, including a symlinked home or project root, which is not followed).
 
 A modified or missing file still shows its recorded owner. That is recorded provenance, not proof of what upstream ships today.
 
-`PATH` may be relative to the current directory or absolute. It must sit under the project root, or under your home directory with `-g`. The command makes no network calls and writes nothing: no lockfile migration, repair or ownership adoption.
+Run from the project root. `PATH` may be relative to it or absolute, and must sit under it (under your home directory with `-g`). Only records for the selected scope are matched. The command makes no network calls and writes nothing: no lockfile migration, repair or ownership adoption.
 
 Exit codes:
 
 | Code | Meaning |
 | ---- | ------- |
 | `0`  | Provenance recorded for this exact path |
-| `1`  | No recorded provenance, or the recorded owner has no dependency record. The file's origin is unknown; do not treat it as project-owned or safe to edit |
+| `1`  | No recorded provenance, or a recorded owner (active writer or surviving owner) has no dependency record. The file's origin is unknown or incomplete; do not treat it as project-owned or safe to edit |
 | `2`  | Usage error, path outside the scope root, or missing or unreadable lockfile |
 
 Before editing an installed skill, run this command. If the owner is a dependency, edit that package's source; `apm install` can overwrite edits made to the deployed copy. This is advice only: APM does not block writes.
@@ -170,4 +170,5 @@ apm view code-review@acme-plugins
 
 - [`apm outdated`](../outdated/) -- compare locked versions against remote tags
 - [`apm install`](../install/) -- add a package to `apm.yml` and install it
+- [`apm find`](../find/) -- list the packages whose `deployed_files` include a path
 - [Skills](../../../producer/author-primitives/skills/#skill-names-and-provenance) -- skill names and provenance

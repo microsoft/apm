@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm view --file PATH` (with `-g` for user scope) reports which package deployed one installed file, such as a skill's `SKILL.md` or a bundled resource: recorded owners (active writer and surviving owners), project-self or local-bundle ownership, and dependency source, ref and commit, matched by exact path from the lockfile's deployment records. Whether the file still matches its recorded hash is shown separately. Unrecorded files exit `1`. It is read-only: no network, no writes, no lockfile migration. The skills guide now states that APM keeps skill names and folders unchanged and never prefixes them. (#3608)
+- `apm view --file PATH` (`-g` for user scope) shows which package deployed one installed file, such as a skill's `SKILL.md`: its recorded owners, source, ref and commit, and whether the file still matches. Read-only; exits `1` when provenance is unrecorded or an owner is unresolved. (#3608)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
 - A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)

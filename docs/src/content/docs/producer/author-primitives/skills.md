@@ -151,8 +151,7 @@ apm view --file .agents/skills/<name>/SKILL.md
 ```
 
 If the owner is a dependency, edit that package's source rather than the
-deployed copy. Teams that want agents to follow this can add that instruction
-to their own agent guidance. See [`apm view --file`](../../../reference/cli/view/#apm-view---file-path).
+deployed copy. See [`apm view --file`](../../../reference/cli/view/#apm-view---file-path).
 
 ## Preview before you commit
 
