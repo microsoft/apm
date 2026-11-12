@@ -984,82 +984,53 @@ def effective_exec_map_for_project(
     )
 
 
-def effective_allow_executables(
-    project_allow_executables: dict[str, dict[str, bool]] | None,
-) -> dict[str, dict[str, bool]] | None:
-    """Return the effective allow-map for an install run (deny-wins).
-
-    Back-compat shim around :func:`build_effective_exec_map`: the historical
-    ``{**project, **user}`` user-wins merge is replaced by the #1873 deny-wins
-    precedence. Callers that only have the legacy ``allowExecutables`` block
-    (no org policy) reach the resolver through here; the install template uses
-    :func:`build_effective_exec_map` directly so the org-deny ceiling applies.
-
-    Returns ``None`` when the gate is disabled (no block), preserving the
-    backward-compatible "deploy everything" behaviour.
-    """
-    if isinstance(project_allow_executables, dict):
-        data: dict[str, Any] = {"allowExecutables": project_allow_executables}
-    else:
-        # ``allow_executables`` is ``dict | None`` by contract; any other shape
-        # (an absent/unparsed in-memory signal) means "no project layer".
-        data = {}
-    return build_effective_exec_map(policy=None, project_data=data)
-
-
-def _filter_service_dependencies_by_allow_executables(
-    dependencies: list,
-    project_allow_execs: dict | None,
-    logger: Any,
+def resolve_project_exec_allow_map(
+    project_root: Path,
+    apm_package: Any,
     *,
-    exec_type: str,
-    service_label: str,
-) -> list:
-    """Filter named service dependencies through the executable approval map."""
-    if project_allow_execs is None or not dependencies:
-        return dependencies
-    _allow_execs = effective_allow_executables(project_allow_execs)
-    if _allow_execs is None:
-        return dependencies
-    _filtered = []
-    for _dep in dependencies:
-        _slug = _dep.name
-        # Fail-closed: keep a server only when it carries a name AND that name
-        # is approved.  A falsy/missing name is treated as NOT approved so an
-        # unnamed dep can never slip past the gate.
-        if _slug and is_package_approved(_allow_execs, _slug, exec_type):
-            _filtered.append(_dep)
-        elif _slug:
-            logger.verbose_detail(
-                f"Skipping {service_label} server from '{_slug}': executables not trusted yet. "
-                f"Run 'apm approve {_slug}' to trust it."
-            )
-        else:
-            logger.verbose_detail(
-                f"Skipping an unnamed {service_label} server: executables not trusted yet. "
-                "Identify it in apm.yml and run 'apm approve <package>' to trust it."
-            )
-    if len(_filtered) < len(dependencies):
-        logger.warning(
-            f"Filtered {len(dependencies) - len(_filtered)} {service_label} server(s) whose "
-            "executables are not trusted yet.",
-            symbol="warning",
-        )
-    return _filtered
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
+    no_policy: bool = False,
+    logger: Any | None = None,
+) -> dict[str, dict[str, bool]] | None:
+    """Return the deny-wins executables map for one project command.
+
+    Reuses a map the caller already resolved (``executable_context`` is
+    ``(map, resolved)``); otherwise resolves org policy (unless disabled),
+    project, and user layers through :func:`effective_exec_map_for_project`.
+    """
+    allow_map, resolved = executable_context
+    if resolved:
+        return allow_map
+    policy = None
+    if not no_policy:
+        from apm_cli.policy.discovery import discover_policy_with_chain
+
+        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+    return effective_exec_map_for_project(
+        project_root,
+        policy=policy,
+        fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+        logger=logger,
+    )
 
 
 def filter_mcp_by_allow_executables(
     mcp_deps: list,
-    project_allow_execs: dict | None,
+    effective_allow_execs: dict | None,
     logger: Any,
 ) -> list:
-    """Filter MCP deps not approved in allowExecutables."""
-    return _filter_service_dependencies_by_allow_executables(
+    """Filter package-declared self-defined MCP servers by their package's decision.
+
+    Root-declared servers and registry servers pass; a self-defined server
+    from a dependency passes only when its declaring package is approved.
+    """
+    return _filter_declared_services(
         mcp_deps,
-        project_allow_execs,
+        effective_allow_execs,
         logger,
         exec_type=EXEC_TYPE_MCP,
         service_label="MCP",
+        gated=lambda dependency: bool(getattr(dependency, "is_self_defined", False)),
     )
 
 
@@ -1069,15 +1040,38 @@ def filter_lsp_by_allow_executables(
     logger: Any,
 ) -> list:
     """Filter transitive LSP deps by their declaring package's decision."""
-    if effective_allow_execs is None or not lsp_deps:
-        return lsp_deps
+    return _filter_declared_services(
+        lsp_deps,
+        effective_allow_execs,
+        logger,
+        exec_type=EXEC_TYPE_LSP,
+        service_label="LSP",
+    )
+
+
+def _filter_declared_services(
+    dependencies: list,
+    effective_allow_execs: dict | None,
+    logger: Any,
+    *,
+    exec_type: str,
+    service_label: str,
+    gated: Any = None,
+) -> list:
+    """Keep root-declared services and services whose declaring package is approved."""
+    if effective_allow_execs is None or not dependencies:
+        return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
-    for dependency in lsp_deps:
+    for dependency in dependencies:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
-        if owner is None or any(
-            is_package_approved(effective_allow_execs, key, EXEC_TYPE_LSP) for key in approval_keys
+        if (
+            owner is None
+            or (gated is not None and not gated(dependency))
+            or any(
+                is_package_approved(effective_allow_execs, key, exec_type) for key in approval_keys
+            )
         ):
             filtered.append(dependency)
             continue
@@ -1085,18 +1079,18 @@ def filter_lsp_by_allow_executables(
         dependency_name = getattr(dependency, "name", "(unnamed)")
         if approval_keys:
             logger.verbose_detail(
-                f"Skipping LSP server '{dependency_name}' from '{owner}': "
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
                 f"executables not trusted. Run 'apm policy explain {owner}'; "
                 f"if policy permits, run 'apm approve {owner}'."
             )
         else:
             logger.verbose_detail(
-                f"Skipping LSP server '{dependency_name}' from '{owner}': package "
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
                 "identity cannot be verified without lock state. Run 'apm install' "
                 "to regenerate apm.lock.yaml, then approve the package."
             )
-    if len(filtered) < len(lsp_deps):
-        skipped_count = len(lsp_deps) - len(filtered)
+    if len(filtered) < len(dependencies):
+        skipped_count = len(dependencies) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
@@ -1119,7 +1113,7 @@ def filter_lsp_by_allow_executables(
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
         logger.warning(
-            f"Filtered {skipped_count} LSP {noun} from {owners}: "
+            f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
             f"{package_clause} not trusted yet.{remediation}",
             symbol="warning",
         )

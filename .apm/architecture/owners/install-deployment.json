@@ -177,7 +177,7 @@
     {
       "id": "executable-trust-context",
       "decision": "Executable trust context and per-package approval",
-      "owner": "security/executables.py (exec_trust_context_for_project, resolve_exec_decision)",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision)",
       "selectors": ["src/apm_cli/security/executables.py"],
       "guards": ["install-deployment-executable-trust-context"]
     },

@@ -293,6 +293,7 @@ def _run_mcp_lsp_integration(
             explicit_target=effective_target,
             target_decision=target_decision,
             scope=scope,
+            executable_context=(effective_allow_executables, effective_allow_resolved),
         )
     except PolicyBlockError:
         logger.error(

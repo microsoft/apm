@@ -727,40 +727,48 @@ class _RecordingLogger:
 
 
 class TestFilterMcpFailClosed:
-    """filter_mcp_by_allow_executables stays fail-closed under v1 deny-wins.
+    """Self-defined MCP servers from dependencies follow their package's decision."""
 
-    The v1 resolver drives the effective map from the project-level
-    ``executables`` block (personal consent merges in elsewhere); these
-    tests confirm the gate filters unapproved and unnamed deps regardless.
-    """
+    @staticmethod
+    def _dep(name, *, owner=None, keys=(), self_defined=True):
+        dep = _FakeMcpDep(name, resolved_by=owner, approval_keys=keys)
+        dep.is_self_defined = self_defined
+        return dep
 
     def test_none_gate_passes_all(self) -> None:
-        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
+        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
         logger = _RecordingLogger()
         assert filter_mcp_by_allow_executables(deps, None, logger) == deps
         assert logger.warnings == []
 
-    def test_unapproved_filtered_out(self) -> None:
-        deps = [_FakeMcpDep("a")]
+    def test_unapproved_package_server_filtered_out(self) -> None:
+        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
         logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {}, logger)
-        assert result == []
-        assert logger.warnings  # surfaced a remediation warning
-
-    def test_project_allowed_slug_passes(self) -> None:
-        deps = [_FakeMcpDep("a")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
-        assert result == deps
-        assert logger.warnings == []
-
-    def test_unnamed_dep_is_fail_closed(self) -> None:
-        # A falsy/missing name must never bypass the gate.
-        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
-        assert result == []
+        assert filter_mcp_by_allow_executables(deps, {}, logger) == []
         assert logger.warnings
+
+    def test_approved_package_passes_regardless_of_server_name(self) -> None:
+        deps = [self._dep("srv", owner="o/a", keys=("o/a",))]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger)
+        assert result == deps
+
+    def test_server_name_matching_an_approved_key_is_not_enough(self) -> None:
+        deps = [self._dep("o/a", owner="o/b", keys=("o/b",))]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
+
+    def test_package_server_without_lock_identity_is_fail_closed(self) -> None:
+        deps = [self._dep("a", owner="o/a", keys=())]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
+        assert logger.warnings
+
+    def test_root_and_registry_servers_pass(self) -> None:
+        root = self._dep("root-srv")
+        registry = self._dep("io.github.x/y", owner="o/a", keys=("o/a",), self_defined=False)
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables([root, registry], {}, logger) == [root, registry]
 
 
 class TestFilterLspFailClosed:

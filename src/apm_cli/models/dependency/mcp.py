@@ -2,7 +2,7 @@
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
@@ -35,6 +35,7 @@ _KNOWN_DICT_KEYS = frozenset(
         # the serialized config. Only current-source derivation may set it.
         # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
+        "approval_keys",
     }
 )
 
@@ -151,6 +152,9 @@ class MCPDependency:
     # ``to_dict`` so it never leaks into the lockfile ``mcp_configs`` values or
     # the config-drift comparison (#2081).
     resolved_by: str | None = None
+    # Executable-approval keys of the declaring locked package; empty for
+    # root-declared servers. Never serialized and not part of equality.
+    approval_keys: tuple[str, ...] = field(default=(), compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":

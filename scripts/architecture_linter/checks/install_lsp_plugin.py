@@ -33,6 +33,8 @@ _MANIFEST_IO = "src/apm_cli/models/manifest_io.py"
 _COMMAND_HELPERS = "src/apm_cli/commands/_helpers.py"
 _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 _ADOPT_MANIFEST_EDIT = "src/apm_cli/adopt/manifest_edit.py"
+_MCP_PIPELINE = "src/apm_cli/install/mcp/integration.py"
+_MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 
 
 def _missing_tokens(
@@ -66,6 +68,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
         {
             _EXECUTABLES: (
                 "def exec_trust_context_for_project(",
+                "def resolve_project_exec_allow_map(",
                 "def locked_dependency_approval_keys(",
                 "def dependency_approval_key(",
                 "def local_bundle_approval_key(",
@@ -79,16 +82,16 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _EXEC_GATE: ("return dependency_approval_key(dep_ref)",),
             _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
             _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
-            _LSP_PIPELINE: (
-                "effective_allow_executables = effective_exec_map_for_project(",
-                "if not effective_allow_resolved:",
-            ),
+            _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
+            _MCP_PIPELINE: ("allow_map = resolve_project_exec_allow_map(",),
+            _MCP_VIEW: ("approval_keys=locked_dependency_approval_keys(dependency)",),
             _LOCAL_BUNDLE: (
                 "bundle_approval_key = local_bundle_approval_key(",
                 "approval_key=bundle_approval_key,",
             ),
             _INSTALL_SERVICES: (
                 "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
+                "_is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)",
             ),
         },
     )

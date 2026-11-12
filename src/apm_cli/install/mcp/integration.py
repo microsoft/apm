@@ -41,11 +41,17 @@ def prepare_mcp_integration(
     trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
+    project_root: Path | None = None,
+    executable_context: tuple[dict | None, bool] = (None, False),
+    no_policy: bool = False,
 ) -> PreparedMcpIntegration:
     """Collect and filter once, without native writes or ownership adoption."""
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
-    from apm_cli.security.executables import filter_mcp_by_allow_executables
+    from apm_cli.security.executables import (
+        filter_mcp_by_allow_executables,
+        resolve_project_exec_allow_map,
+    )
 
     current_view = None
     omissions = None
@@ -70,10 +76,17 @@ def prepare_mcp_integration(
         if transitive_count:
             logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
         mcp_deps = list(current_view.dependencies)
+    allow_map = None
+    if any(dep.resolved_by is not None and dep.is_self_defined for dep in mcp_deps):
+        allow_map = resolve_project_exec_allow_map(
+            project_root or apm_package.package_path or Path.cwd(),
+            apm_package,
+            executable_context=executable_context,
+            no_policy=no_policy,
+            logger=logger,
+        )
     return PreparedMcpIntegration(
-        filter_mcp_by_allow_executables(
-            mcp_deps, getattr(apm_package, "allow_executables", None), logger
-        ),
+        filter_mcp_by_allow_executables(mcp_deps, allow_map, logger),
         current_view if should_install else None,
         omissions,
     )
@@ -220,6 +233,7 @@ def run_mcp_integration(  # noqa: PLR0913
     trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     prepared: PreparedMcpIntegration | None = None,
     active_package_keys: frozenset[str] | None = None,
+    executable_context: tuple[dict | None, bool] = (None, False),
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -290,6 +304,9 @@ def run_mcp_integration(  # noqa: PLR0913
         diagnostics=diagnostics,
         trusted_transitive_configs=trusted_transitive_configs,
         active_package_keys=active_package_keys,
+        project_root=project_root,
+        executable_context=executable_context,
+        no_policy=no_policy,
     )
     mcp_deps, current_view = prepared.dependencies, prepared.current_view
 

@@ -26,6 +26,7 @@ from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.validation import PackageType, detect_package_type
+from apm_cli.security.executables import locked_dependency_approval_keys
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -706,7 +707,13 @@ def _collect_locked_dependencies(
                     elif logger is not None:
                         logger.warning(message)
                     continue
-            collected.append(replace(mcp_dependency, resolved_by=declarer))
+            collected.append(
+                replace(
+                    mcp_dependency,
+                    resolved_by=declarer,
+                    approval_keys=locked_dependency_approval_keys(dependency),
+                )
+            )
     return collected, problems, fingerprints, omissions, refusable, pending_packages
 
 
