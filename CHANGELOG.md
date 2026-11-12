@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The anonymous-first `github.com` HTTPS attempt now inherits `http.sslBackend`/`http.sslCAInfo` from the real (non-isolated) git config (including the credentialed retry and `--auth-first` bypass), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip that attempt entirely as an escape hatch for networks behind a TLS-inspecting proxy whose intercepting CA chain has no revocation info at all. (#2545)
+- `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
 
 ### Changed
 

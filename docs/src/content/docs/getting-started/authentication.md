@@ -14,9 +14,9 @@ Installing or updating the CLI queries public release metadata authenticated-fir
 
 Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.
 
-The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. APM preserves caller-supplied Git config, including URL rewrites, CA settings, and non-credential HTTP headers, while removing credential-bearing headers and helpers. It also inherits `http.sslBackend`/`http.sslCAInfo` from your real (non-isolated) Git config, so a corporate TLS trust store or `sslBackend` setting still applies to the anonymous attempt. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
+The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. APM preserves caller-supplied Git config, including URL rewrites, CA settings, and non-credential HTTP headers, while removing credential-bearing headers and helpers. It also inherits `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath` from your user and system Git config, so a corporate CA configured there still applies to the anonymous attempt. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
 
-If your network sits behind a TLS-inspecting proxy whose intercepting CA chain carries no revocation info at all, the anonymous attempt's isolated environment can still fail a TLS handshake even with that inheritance. `--auth-first` / `APM_GITHUB_AUTH_FIRST=1` / `apm config set github-auth-first true` skip the anonymous attempt entirely for exact-host `github.com` and go straight to your resolved credentials/environment. See [TLS-inspecting proxy blocks the anonymous attempt](#tls-inspecting-proxy-blocks-the-anonymous-attempt).
+If the anonymous attempt still fails at TLS, `--auth-first` skips it for exact-host `github.com`. See [TLS-inspecting proxy blocks the anonymous attempt](#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 For individual-file dependencies, confirmed API throttling can select the existing sparse-Git fallback. If that separate Git attempt receives an authentication challenge, APM uses the credential chain below, including an existing `gh` login; a new PAT is not required. The API throttle itself never triggers credential rotation or an authenticated API retry. If Git also fails, the diagnostic retains both failures.
 
@@ -136,7 +136,7 @@ For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentic
 | `GITHUB_HOST` | Default host for bare package names (e.g., GHES hostname) |
 | `ADO_HOST` | One on-prem Azure DevOps Server FQDN, without a port or path (e.g., `ado.company.com`) |
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, without ports or paths |
-| `APM_GITHUB_AUTH_FIRST` | `1`/`true` skips the anonymous-first HTTPS attempt for exact-host `github.com` (also: `--auth-first`, `apm config set github-auth-first true`). See [TLS-inspecting proxy blocks the anonymous attempt](#tls-inspecting-proxy-blocks-the-anonymous-attempt) |
+| `APM_GITHUB_AUTH_FIRST` | `1`/`true` skips the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves (also: `--auth-first`, `apm config set github-auth-first true`). See [TLS-inspecting proxy blocks the anonymous attempt](#tls-inspecting-proxy-blocks-the-anonymous-attempt) |
 
 ## Multi-org setup
 
@@ -528,11 +528,11 @@ For subdirectory packages in public github.com repositories (for example nested 
 
 ### TLS-inspecting proxy blocks the anonymous attempt
 
-APM's anonymous-first attempt for `github.com` inherits `http.sslBackend`/`http.sslCAInfo` from your real (non-isolated) Git config, so a corporate TLS trust store usually works out of the box. If your network sits behind a TLS-inspecting proxy (e.g. Netskope) whose intercepting CA chain has **no CRL Distribution Point and no Authority Information Access (OCSP) extension at all** -- not just unreachable, genuinely absent -- the isolated attempt may still fail the TLS handshake even with that inheritance, while a plain `git clone` on the same machine succeeds because it also uses your credential helper.
+The anonymous `github.com` attempt inherits your Git TLS backend and CA settings, so a corporate CA usually works. If the inherited settings are not enough (for example, a proxy CA without revocation info under Schannel), the isolated attempt can fail at TLS while a plain `git clone` that reads your full Git config succeeds.
 
 Symptoms: `apm install` fails with a network/TLS-classified error (e.g. `CRYPT_E_NO_REVOCATION_CHECK` on Windows, or a hang) rather than an authentication error, and `--allow-protocol-fallback` jumps straight to SSH, which may also be blocked.
 
-Skip the anonymous attempt and use your resolved credentials/environment from the first HTTPS attempt:
+Use your resolved credentials from the first HTTPS attempt:
 
 ```bash
 apm install --auth-first
@@ -542,7 +542,7 @@ export APM_GITHUB_AUTH_FIRST=1
 apm config set github-auth-first true
 ```
 
-This trades the anonymous-first credential-isolation property for environment-inheriting behavior; APM prints a one-time `[!]` warning when it is active. `--auth-first` only affects exact-host `github.com`; GHE Cloud, GHES, ADO, GitLab, and generic hosts already resolve credentials first.
+When a credential resolves, APM sends it on the first attempt and prints a one-time `[!]` warning; with no credential, it still tries anonymously as a last resort. Only exact-host `github.com` is affected; other hosts already resolve credentials first. Undo with `apm config unset github-auth-first` or by unsetting `APM_GITHUB_AUTH_FIRST`.
 
 ### SSO-protected organizations
 
@@ -573,7 +573,7 @@ flowchart TD
     A[Dependency Reference] --> HC{Host class?}
 
     HC -->|github.com HTTPS| AF{auth-first opt-out?}
-    AF -->|"No: default"| ANON["Anonymous attempt<br/>tokens and helpers fenced<br/>real http.sslBackend/sslCAInfo inherited"]
+    AF -->|"No: default"| ANON["Anonymous attempt<br/>tokens and helpers fenced<br/>Git TLS settings inherited"]
     ANON -->|Success| L[Success]
     ANON -->|401 / 403 / 404<br/>or Git auth failure| B{Per-org env var?}
     ANON -->|DNS / TLS / timeout<br/>or rate limit| Q[Surface non-auth failure]

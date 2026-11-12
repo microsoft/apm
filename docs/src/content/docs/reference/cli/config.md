@@ -71,7 +71,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH -> HTTPS or HTTPS -> SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
 | `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
-| `github-auth-first` | boolean | `false` | Skip the anonymous-first HTTPS attempt for exact-host `github.com` and resolve credentials/environment immediately. Escape hatch for TLS-inspecting proxies whose intercepting CA chain has no revocation info. Equivalent to `--auth-first` or `APM_GITHUB_AUTH_FIRST=1`. |
+| `github-auth-first` | boolean | `false` | Skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. Equivalent to `--auth-first` or `APM_GITHUB_AUTH_FIRST=1`. See [Authentication](../../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 | `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
 | `audit-on-install` | enum | `off` | Default content-audit mode for `apm install`: `off` / `warn` / `block`. `warn` records findings in the install summary; `block` halts on critical findings. Overridable per-install with `--audit` / `--no-audit`; an org policy `security.audit.on_install` floor can raise it. Requires the `external-scanners` experimental flag for `set`. |
 | `external.<name>.llm` | boolean | unset | Opt a SARIF scanner into LLM-powered analysis (`<name>` validated against supported scanners). SkillSpector default is offline. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. Overridable per-run with `--external-llm` / `--no-external-llm`. Requires the `external-scanners` experimental flag. |
@@ -198,7 +198,7 @@ apm config set allow-protocol-fallback true
 apm config get allow-protocol-fallback
 ```
 
-Persist the github.com auth-first opt-out (for networks behind a TLS-inspecting proxy whose intercepting CA chain has no revocation info):
+Persist the github.com auth-first opt-out:
 
 ```bash
 apm config set github-auth-first true
