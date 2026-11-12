@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,13 @@ class TestIsTlsFailure:
 
 
 class TestLogTlsFailure:
+    @pytest.fixture(autouse=True)
+    def _default_trust_selection(self, monkeypatch):
+        """Pin the unrecorded trust selection whose guidance these tests assert."""
+        import apm_cli.core.tls_trust as tls
+
+        monkeypatch.setattr(tls, "_LAST_TLS_SELECTION", None)
+
     def test_non_verbose_emits_single_warning(self) -> None:
         from apm_cli.install.validation import _log_tls_failure
 
