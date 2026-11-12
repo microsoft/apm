@@ -1138,6 +1138,7 @@ def _sync_integrations_after_uninstall(
     from ...install.target_filter import resolve_effective_package_targets
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
+    from ...integration.hook_reintegration import preflight_survivor_hooks
     from ...integration.targets import resolve_targets
     from ...primitives.discovery import clear_discovery_cache
 
@@ -1198,6 +1199,11 @@ def _sync_integrations_after_uninstall(
         for target in target_selection.targets:
             authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
+
+    # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
+    # their known-good merged settings (#3226).
+    _allow_executables = getattr(apm_package, "allow_executables", None)
+    preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only
     # installations without a lockfile may need legacy orphan detection.
@@ -1391,7 +1397,6 @@ def _sync_integrations_after_uninstall(
     from ...utils.diagnostics import DiagnosticCollector
 
     _rebuild_scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    _allow_executables = getattr(apm_package, "allow_executables", None)
     reintegration_diagnostics = DiagnosticCollector()
     materialization_session = (
         DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)

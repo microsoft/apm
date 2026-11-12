@@ -1,5 +1,7 @@
 """Build security-checked source plans for hook survivor reintegration."""
 
+from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -35,3 +37,30 @@ def build_hook_reintegration_source_plan(
             "authorized source contains critical hidden characters"
         )
     return source_plan
+
+
+def preflight_survivor_hooks(
+    survivors: Iterable[tuple[Any, Any, list[Any]]],
+    allow_executables: dict[str, dict[str, bool]] | None,
+) -> None:
+    """Refuse survivor hooks a rebuild would reject, before any destructive wipe.
+
+    Uninstall clears APM-owned merged hook settings before it rebuilds
+    survivors. A survivor that relied on retired filename routing, or that
+    declares a Claude event without a native pair, would fail that rebuild
+    after its working hooks were already gone (#3226). Each entry is
+    ``(dep_ref, package_info, authorized_targets)``.
+    """
+    from apm_cli.integration.hook_integrator import _HOOK_EVENT_MAP, HookIntegrator
+
+    finder = HookIntegrator()
+    for dep_ref, package_info, targets in survivors:
+        if not any("hooks" in getattr(target, "primitives", {}) for target in targets):
+            continue
+        if not finder.find_hook_files(Path(package_info.install_path)):
+            continue
+        selection = build_hook_reintegration_source_plan(
+            dep_ref, package_info, list(targets), allow_executables
+        ).hook_source_selection
+        if selection is not None:
+            selection.require_deployable(package_info, _HOOK_EVENT_MAP)

@@ -232,7 +232,8 @@ that had its own file. That routing is removed.
 If removing it would give a target a hook file the old names kept from it,
 `apm install` fails for that package with a message naming the target and
 files, and installs no hooks from it. APM does not guess the intended target.
-To migrate:
+Until the package is migrated, `apm uninstall` of another package also stops
+with the same message before it changes any hook settings. To migrate:
 
 1. Move each target's hook files into a package whose `apm.yml` declares
    that target, for example `target: codex`.
