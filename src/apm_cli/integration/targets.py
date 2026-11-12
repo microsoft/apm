@@ -31,6 +31,7 @@ from apm_cli.core.target_catalog import (
     expand_all,
     normalize_target_name,
 )
+from apm_cli.utils.file_ops import obstructed_path_message
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -1610,6 +1611,14 @@ def active_targets(
     return [KNOWN_TARGETS["copilot"]]
 
 
+class TargetRootObstructedError(PathTraversalError):
+    """A project target root exists but is not a directory APM can deploy into.
+
+    Shares the ``PathTraversalError`` family with a symlinked target root, so
+    install surfaces it verbatim instead of as a resolution failure.
+    """
+
+
 def _validate_project_target_root(project_root: Path, profile: TargetProfile) -> Path:
     """Return a contained project target root without following symlinks."""
     deploy_path = profile.deploy_path(project_root)
@@ -1670,6 +1679,10 @@ def materialize_project_target_profiles(
         if profile is None:
             continue
         deploy_path = _validate_project_target_root(project_root, profile)
+        if deploy_path.exists() and not deploy_path.is_dir():
+            raise TargetRootObstructedError(
+                obstructed_path_message(deploy_path, project_root, blocker="file")
+            )
         # Skills-only roots are created by the skill integrator on first write,
         # so an install that deploys nothing leaves no empty directory behind.
         if not deploy_path.is_dir() and not profile.skills_only:

@@ -335,8 +335,7 @@ class BaseIntegrator:
                     continue
                 if target_file.exists() and not target_file.is_file():
                     raise IsADirectoryError(
-                        f"Cannot deploy {entry}: destination is not a regular file. "
-                        "Move the blocking directory before reinstalling."
+                        errno.EISDIR, os.strerror(errno.EISDIR), str(target_file)
                     )
                 if (
                     unchanged

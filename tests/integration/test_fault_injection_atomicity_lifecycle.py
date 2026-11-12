@@ -69,7 +69,10 @@ def test_target_root_replaced_by_file_fails_without_writes(
     result = world.install()
 
     assert result.returncode != 0, evidence(result)
-    assert ".cursor" in result.stdout + result.stderr, evidence(result)
+    output = " ".join((result.stdout + result.stderr).split())
+    assert ".cursor is a file that blocks an APM-managed path" in output, output
+    assert "Move it aside" in output, output
+    assert "resolve" not in output.lower(), output
     assert cursor.read_text(encoding="ascii") == "user notes\n"
     assert world.lockfile_bytes() == lock
     for snapshot, root in zip(before, (".github", ".claude", ".agents"), strict=True):
@@ -98,7 +101,14 @@ def test_obstructed_deployed_path_keeps_user_bytes(
     for command in (("install", "--no-policy"), ("install", "--no-policy", "--force")):
         result = world.apm(*command)
         assert result.returncode != 0, evidence(result)
-        assert "alpha" in result.stdout + result.stderr, evidence(result)
+        output = " ".join((result.stdout + result.stderr).split())
+        if obstruction == "directory":
+            blocked = ".claude/rules/alpha.md is a directory that blocks an APM-managed path"
+            assert blocked in output, output
+            assert "Move it aside" in output, output
+            assert "Errno" not in output, output
+        else:
+            assert "alpha" in output, output
         assert world.lockfile_bytes() == lock
         assert linked.read_text(encoding="ascii") == "unrelated content\n"
         if obstruction == "directory":
@@ -128,7 +138,8 @@ def test_compile_output_write_failure_keeps_every_output(
         result = world.apm("compile")
 
     assert result.returncode != 0, evidence(result)
-    assert "Permission denied" in result.stdout + result.stderr, evidence(result)
+    output = result.stdout + result.stderr
+    assert output.count("Failed to write distributed output batch") == 1, output
     after = world.snapshot(".")
     diff = before.diff(after)
     assert not (diff.added | diff.removed | diff.changed), diff

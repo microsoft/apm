@@ -1199,12 +1199,15 @@ def _resolve_target_runtimes(
         and target_decision is not None
         and target_decision.canonical_targets is not None
     ):
-        from apm_cli.integration.targets import materialize_project_target_profiles
+        from apm_cli.integration.targets import (
+            TargetRootObstructedError,
+            materialize_project_target_profiles,
+        )
 
         root = Path(project_root) if project_root is not None else Path.cwd()
         try:
             materialize_project_target_profiles(root, target_decision.canonical_targets)
-        except OSError as exc:
+        except (OSError, TargetRootObstructedError) as exc:
             raise RequiredIntegrationError(
                 f"Cannot prepare target configuration directory: {exc}. "
                 "Check directory permissions, then retry."
