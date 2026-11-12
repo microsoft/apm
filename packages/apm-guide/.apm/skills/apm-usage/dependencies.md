@@ -427,7 +427,7 @@ Object-form fields:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `id` | yes | `owner/repo` identity at the registry |
-| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry. Ranges skip pre-releases unless the range names a pre-release on the same `major.minor.patch` |
 | `registry` | no | Name from the merged registry map; defaults to the effective default |
 | `path` | no | Sub-path to a file or directory within the published package |
 | `alias` | no | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |
