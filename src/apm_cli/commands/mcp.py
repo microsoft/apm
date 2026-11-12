@@ -97,8 +97,8 @@ def mcp():
     pass
 
 
-# ``apm install`` parameters that ``apm mcp install`` declares as real options.
-# Only the selection lives here: flags, type, choices, metavar and help text are
+# ``apm install`` parameters that ``apm mcp install`` shows in its help. Only
+# the selection lives here: flags, type, choices, metavar and help text are
 # borrowed from the ``apm install`` command itself, so help, validation and
 # shell completion cannot drift from it.
 _FORWARDED_INSTALL_PARAMS: tuple[str, ...] = (
@@ -117,6 +117,8 @@ _FORWARDED_INSTALL_PARAMS: tuple[str, ...] = (
     "verbose",
     "no_policy",
 )
+# Supplied by the alias itself, so it stays an unknown pass-through token.
+_ALIAS_OWNED_INSTALL_PARAMS = frozenset({"mcp_name"})
 _FORWARDED_RAW_KEY = "apm_cli.commands.mcp.forwarded_install_args"
 
 
@@ -127,6 +129,23 @@ class _ForwardedInstallOption(click.Option):
     ``apm install``), but the raw command-line value is recorded so it can be
     re-emitted verbatim to ``apm install``.
     """
+
+    @classmethod
+    def from_install_option(cls, source, *, hidden=False):
+        """Clone an ``apm install`` option; ``__init__`` is never called.
+
+        A shallow copy keeps every attribute of ``source`` (flags, type,
+        help, metavar), and the class swap adds only this class's methods, so
+        subclass state must not depend on ``__init__``.
+        """
+        if source.nargs != 1:
+            raise TypeError(f"Cannot forward multi-value install option {source.name!r}")
+        clone = copy.copy(source)
+        clone.__class__ = cls
+        # Values are forwarded raw; the alias callback never receives them.
+        clone.expose_value = False
+        clone.hidden = hidden or source.hidden
+        return clone
 
     def consume_value(self, ctx, opts):
         value, source = super().consume_value(ctx, opts)
@@ -146,21 +165,25 @@ class _ForwardedInstallOption(click.Option):
 
 
 def _borrow_install_options():
-    """Clone the forwarded options from the ``apm install`` command."""
+    """Clone every ``apm install`` option the alias forwards.
+
+    The selected options are shown in help and completion. The rest are
+    hidden but still parsed with install's own arity, so a pass-through
+    value such as ``--root --dry-run`` is never split from its option.
+    """
     from .install import install as install_command
 
-    by_name = {param.name: param for param in install_command.params}
-    borrowed = []
-    for name in _FORWARDED_INSTALL_PARAMS:
-        source = by_name[name]
-        if source.nargs != 1:
-            raise TypeError(f"Cannot forward multi-value install option {name!r}")
-        clone = copy.copy(source)
-        clone.__class__ = _ForwardedInstallOption
-        # Values are forwarded raw; the alias callback never receives them.
-        clone.expose_value = False
-        borrowed.append(clone)
-    return borrowed
+    by_name = {
+        param.name: param
+        for param in install_command.params
+        if isinstance(param, click.Option) and param.name not in _ALIAS_OWNED_INSTALL_PARAMS
+    }
+    shown = [by_name[name] for name in _FORWARDED_INSTALL_PARAMS]
+    hidden = [param for name, param in by_name.items() if name not in _FORWARDED_INSTALL_PARAMS]
+    return [
+        *(_ForwardedInstallOption.from_install_option(param) for param in shown),
+        *(_ForwardedInstallOption.from_install_option(param, hidden=True) for param in hidden),
+    ]
 
 
 class _InstallAliasCommand(click.Command):
@@ -202,8 +225,9 @@ class _InstallAliasCommand(click.Command):
         "Examples:\n\n"
         "  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n"
         "  apm mcp install api --transport http --url https://example.com/mcp\n\n"
-        "The forwarded install options below are defined by 'apm install'. "
-        "Other 'apm install' options are passed through unchanged; see "
+        "The forwarded install options below are defined by 'apm install'; "
+        "'--mcp NAME' is implied, so their '(requires --mcp)' notes are already "
+        "met. Other 'apm install' options are passed through unchanged; see "
         "'apm install --help' for the full list."
     ),
 )
