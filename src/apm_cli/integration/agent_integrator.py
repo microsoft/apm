@@ -7,6 +7,7 @@ See skill-strategy.md for the full architectural rationale (T5).
 
 from __future__ import annotations
 
+import functools
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,6 +29,8 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -273,13 +276,15 @@ class AgentIntegrator(BaseIntegrator):
                 continue
 
             if mapping.format_id == "codex_agent":
-                self._write_codex_agent(
+                links_resolved = self._write_codex_agent(
                     source_file,
                     target_path,
                     diagnostics=diagnostics,
                     package_name=package_info.package.name,
+                    resolve_body_links=functools.partial(
+                        self.resolve_links, source=source_file, target=target_path
+                    ),
                 )
-                links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
                     self._warn_opencode_frontmatter(
@@ -553,11 +558,19 @@ class AgentIntegrator(BaseIntegrator):
         *,
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
-    ) -> None:
+        resolve_body_links: Callable[[str], tuple[str, int]] | None = None,
+    ) -> int:
         """Transform an ``.agent.md`` file to Codex ``.toml`` format.
 
         Preserves ``name``, ``description``, and native model settings;
         uses the markdown body as ``developer_instructions``.
+
+        *resolve_body_links* rewrites source-relative Markdown links in the
+        body for the generated agent's location before serialization (the
+        shared :meth:`resolve_links` owner, #2966).
+
+        Returns:
+            int: Number of links resolved in ``developer_instructions``.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -659,6 +672,10 @@ class AgentIntegrator(BaseIntegrator):
                     "repair the frontmatter, then rerun 'apm install'",
                 )
 
+        links_resolved = 0
+        if resolve_body_links is not None:
+            body, links_resolved = resolve_body_links(body)
+
         doc = {
             "name": name,
             "description": description,
@@ -666,6 +683,7 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))
+        return links_resolved
 
     # ------------------------------------------------------------------
     # Kiro agent transformer (MD -> filtered MD)

@@ -201,7 +201,8 @@ all -- APM fails closed. Kiro may warn and fall back if the specified
 validation.
 
 Codex receives `name`, `description`, and the Markdown body as
-`developer_instructions`. Supplied string values for `model` and
+`developer_instructions`, with [package-relative links](../../package-relative-links/)
+rewritten for the generated agent's location. Supplied string values for `model` and
 `model_reasoning_effort` become top-level keys in the generated agent TOML,
 as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
 Omitted fields remain absent; APM does not translate model names, choose

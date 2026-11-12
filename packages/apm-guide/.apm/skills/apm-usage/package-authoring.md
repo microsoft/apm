@@ -608,7 +608,9 @@ authority for the preserved metadata.
 #### Codex target: native model settings
 
 Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
-`description`, and the Markdown body as `developer_instructions`.
+`description`, and the Markdown body as `developer_instructions`
+(package-relative Markdown links are rewritten for the generated file's
+location, as for other agent targets).
 String `model` and `model_reasoning_effort` frontmatter values are
 preserved as top-level TOML keys:
 
