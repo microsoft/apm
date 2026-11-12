@@ -996,4 +996,6 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not pipeline_completed:
             from .failure_residue import report_failed_install_residue
 
-            report_failed_install_residue(ctx)
+            # Never let the advisory report mask the failure being raised.
+            with contextlib.suppress(Exception):
+                report_failed_install_residue(ctx)

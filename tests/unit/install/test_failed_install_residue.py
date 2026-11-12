@@ -149,6 +149,21 @@ class TestPipelineFailureExits:
 
         logger.failed_install_residue.assert_called_once_with(_EXPECTED_PARTIAL)
 
+    def test_report_failure_never_masks_the_original_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        logger = MagicMock()
+        logger.failed_install_residue.side_effect = OSError("console closed")
+
+        def _integrate(ctx: InstallContext) -> None:
+            _record_partial_deploy(ctx)
+            ctx.direct_dep_failed = True
+
+        with pytest.raises(DirectDependencyError):
+            _run_pipeline_with_integrate(tmp_path, monkeypatch, _integrate, logger)
+
+        logger.failed_install_residue.assert_called_once()
+
     def test_failed_result_reports_every_deployed_path(self, tmp_path: Path, monkeypatch) -> None:
         logger = InstallLogger()
 
