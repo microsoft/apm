@@ -91,23 +91,16 @@ apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch
 apm mcp install api --transport http --url https://example.com/mcp
 ```
 
-Forwarded install options (see `apm install --help` for the full
-list):
+`apm mcp install --help` lists these forwarded install options under
+"Forwarded install options". Their help text, accepted values, and shell
+completion come from `apm install` itself, so they always match
+[`apm install`](../install/):
 
-| Flag | Description |
-|---|---|
-| `--transport [stdio\|http\|sse\|streamable-http]` | Transport type. |
-| `--url URL` | Server URL for remote transports. |
-| `--env KEY=VALUE` | Environment variable. Repeatable. |
-| `--header KEY=VALUE` | HTTP header. Repeatable. |
-| `--registry URL` | Custom registry URL for this install; persisted on the dependency in `apm.yml`. |
-| `--mcp-version VER` | Pin the registry entry to a specific version. |
-| `--dev` | Add to `devDependencies`. |
-| `--dry-run` | Resolve and print without writing `apm.yml`. |
-| `--force` | Overwrite an existing entry. |
-| `-g`, `--global` | Install through `~/.apm/apm.yml` into global-capable runtimes. |
-| `--no-policy` | Skip policy checks. |
-| `--verbose`, `-v` | Verbose output. |
+`--transport`, `--url`, `--env`, `--header`, `-t`/`--target`, `--registry`,
+`--mcp-version`, `-g`/`--global`, `--trust-transitive-mcp`, `--dev`,
+`--dry-run`, `--force`, `-v`/`--verbose`, `--no-policy`.
+
+Other `apm install` options are passed through unchanged.
 
 ## Environment variables
 
