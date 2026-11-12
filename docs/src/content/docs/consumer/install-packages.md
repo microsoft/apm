@@ -99,8 +99,11 @@ The pipeline is deterministic. Each phase must pass before the next runs.
 
 On a fresh clone or CI runner without local deployment receipts, a committed
 skill is kept and its receipts are recorded when every file in its directory
-matches what the install would write and is recorded in `apm.lock.yaml`. The
-lockfile hashes are not used as proof. If any file differs, or another existing
+matches what the install would write and is recorded in `apm.lock.yaml`. On
+`apm update`, a committed skill that matches what the currently locked version
+renders (fetched from its locked commit) is replaced with the new version; if
+one of its files was edited, the update fails before writing any file or the
+lockfile. The lockfile hashes are not used as proof. If any file differs, or another existing
 skill cannot be overwritten because its local deployment receipt is missing,
 install exits nonzero before stale-file cleanup and lockfile replacement. The
 refused files and prior lock contents are preserved, including during cold
