@@ -66,7 +66,7 @@ def plan_batch(data: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]
         occupied = {label.split("/", 1)[0] for label in normalized}
         proposed = set(issue.get("proposed_labels", [])) & allowed
         additions = {label for label in proposed if label.split("/", 1)[0] not in occupied}
-        for dimension in ("type", "theme"):
+        for dimension in ("type", "pillar"):
             values = sorted(label for label in additions if label.startswith(f"{dimension}/"))
             if len(values) > 1:
                 raise ValueError(f"Conflicting proposed {dimension} labels")

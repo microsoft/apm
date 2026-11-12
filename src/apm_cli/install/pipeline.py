@@ -107,6 +107,7 @@ def _run_phase(name: str, phase, ctx):
 def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.integration.skill_adoption import locked_skill_sources
 
     from .phases import integrate as _integrate_phase
 
@@ -115,15 +116,22 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
         if ctx.lockfile_only or ctx.dry_run
         else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
     )
-    with (
-        contextlib.nullcontext()
-        if ctx.lockfile_only
-        else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
-            materialization_session=session,
-        )
-    ):
-        _run_phase("integrate", _integrate_phase, ctx)
+    locked = locked_skill_sources(ctx) if session is not None else None
+    if session is not None:
+        session.locked_sources = locked
+    try:
+        with (
+            contextlib.nullcontext()
+            if ctx.lockfile_only
+            else ctx.integrators["skill"].ownership_snapshot(
+                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                materialization_session=session,
+            )
+        ):
+            _run_phase("integrate", _integrate_phase, ctx)
+    finally:
+        if locked is not None:
+            locked.close()
     return session
 
 

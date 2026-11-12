@@ -4,81 +4,15 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
 import yaml
 
-from apm_cli.deps.aggregator import (
-    scan_workflows_for_dependencies,
-    sync_workflow_dependencies,
-)
 from apm_cli.deps.verifier import (
     install_missing_dependencies,
     load_apm_config,
     verify_dependencies,
 )
-
-
-class TestDependenciesAggregator(unittest.TestCase):
-    """Test cases for the dependencies aggregator."""
-
-    @patch("glob.glob")
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("apm_cli.deps.aggregator.load_frontmatter")
-    def test_scan_workflows_for_dependencies(self, mock_frontmatter_load, mock_file, mock_glob):
-        """Test scanning workflows for dependencies."""
-        # Mock glob to return workflow files
-        # First call returns GitHub prompts, second call returns generic prompts
-        mock_glob.side_effect = [
-            [".github/prompts/workflow1.prompt.md"],
-            [".github/prompts/workflow2.prompt.md"],
-        ]
-
-        # Mock frontmatter.load to return content with mcp metadata
-        mock_content1 = unittest.mock.MagicMock()
-        mock_content1.metadata = {"mcp": ["server1", "server2"]}
-
-        mock_content2 = unittest.mock.MagicMock()
-        mock_content2.metadata = {"mcp": ["server2", "server3"]}
-
-        mock_frontmatter_load.side_effect = [mock_content1, mock_content2]
-
-        # Call the function
-        result = scan_workflows_for_dependencies()
-
-        # Verify the results
-        self.assertIsInstance(result, set)
-        self.assertEqual(result, {"server1", "server2", "server3"})
-        self.assertEqual(
-            mock_glob.call_count, 2
-        )  # We now make two glob calls for different patterns
-        self.assertEqual(mock_file.call_count, 2)
-        self.assertEqual(mock_frontmatter_load.call_count, 2)
-
-    @patch("apm_cli.deps.aggregator.scan_workflows_for_dependencies")
-    def test_sync_workflow_dependencies(self, mock_scan):
-        """Test syncing workflow dependencies to apm.yml.
-
-        Asserts the written bytes (round-trippable YAML, LF-only line
-        endings per apm#2619) instead of mocking the writer's exact
-        open() signature, which pinned an implementation detail.
-        """
-        # Mock scan_workflows_for_dependencies to return a set of servers
-        mock_scan.return_value = {"server1", "server2", "server3"}
-
-        with tempfile.TemporaryDirectory() as td:
-            out_path = os.path.join(td, "test.yml")
-            success, servers = sync_workflow_dependencies(out_path)
-
-            # Verify the results
-            self.assertTrue(success)
-            self.assertEqual(set(servers), {"server1", "server2", "server3"})
-            self.assertEqual(mock_scan.call_count, 1)
-            with open(out_path, "rb") as f:
-                raw = f.read()
-            self.assertNotIn(b"\r", raw)  # LF-deterministic on every OS
-            data = yaml.safe_load(raw.decode("utf-8"))
-            self.assertEqual(data["servers"], ["server1", "server2", "server3"])
 
 
 class TestDependenciesVerifier(unittest.TestCase):

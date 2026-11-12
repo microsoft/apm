@@ -301,3 +301,10 @@ def stamp_plugin_version(
     data = load_yaml(apm_yml_path) or {}
     data["version"] = short_sha
     dump_yaml(data, apm_yml_path)
+
+    # The file content just changed: drop stale from_apm_yml cache entries
+    # so other cache keys (different source_path anchors) cannot keep
+    # serving the pre-stamp instance (apm#2619 migration fallout).
+    from ..models.apm_package import invalidate_apm_yml_cache_entry
+
+    invalidate_apm_yml_cache_entry(apm_yml_path)

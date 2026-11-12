@@ -165,6 +165,7 @@ def add_plugin_entry(
     ref: str | None = None,
     subdir: str | None = None,
     tag_pattern: str | None = None,
+    category: str | None = None,
     tags: list[str] | None = None,
     include_prerelease: bool = False,
 ) -> str:
@@ -221,6 +222,8 @@ def add_plugin_entry(
         new_entry["subdir"] = subdir
     if tag_pattern is not None:
         new_entry["tag_pattern"] = tag_pattern
+    if category is not None:
+        new_entry["category"] = category
     if include_prerelease:
         new_entry["include_prerelease"] = True
     if tags is not None and len(tags) > 0:
@@ -267,7 +270,7 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
             del entry["version"]
 
     # Simple scalar fields.
-    _SIMPLE_FIELDS = ("subdir", "tag_pattern")
+    _SIMPLE_FIELDS = ("subdir", "tag_pattern", "category")
     for key in _SIMPLE_FIELDS:
         if key in fields and fields[key] is not None:
             if key == "subdir":
