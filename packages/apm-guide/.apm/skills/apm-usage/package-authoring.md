@@ -645,6 +645,25 @@ agent may inherit all project/session MCP servers. Remove `tools` only
 if unrestricted access is intentional; otherwise do not use the generated
 agent with Codex.
 
+#### Per-harness model values
+
+Agent files and model ids belong to each harness vendor. APM writes a
+string `model` verbatim to every agent target (a Claude `sonnet` also
+lands in the Codex TOML); a warning for Claude-specific values in Codex output is
+tracked in #3477. APM does not add a per-target model map or `codex:`
+override block (#3324). Workarounds:
+
+1. Omit `model` from the shared agent so each harness uses its default.
+2. Split by target: a package per harness with its own `target:` and
+   `model:`, plus a common package for shared content.
+3. A `post-install` / `post-update` lifecycle script in the consuming
+   project's `apm.yml` (trusted with `apm lifecycle trust`; a dependency
+   cannot ship one) that sets `model` in `.codex/agents/*.toml`. It edits APM-managed output, so
+   `apm audit --ci` reports drift and the script must run on every
+   install; not recommended for CI-gated teams.
+
+For a portable fix, raise it upstream with Claude Code or Codex.
+
 #### OpenCode target: frontmatter constraints
 
 OpenCode (`target: opencode`, deploys to `.opencode/agents/`) parses
