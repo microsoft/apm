@@ -720,6 +720,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Config mutation stops routing through the canonical lifecycle lock.",
     ),
     MutationCase(
+        guard_id="install-deployment-lock-parent-placement",
+        rule_id="install-deployment-lock-parent-placement",
+        path="src/apm_cli/deps/why_walker.py",
+        old="    legacy = lockfile.replacements is None\n",
+        new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
+        intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",
@@ -1831,6 +1839,20 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     old = "return _find_orphaned_packages(installed, expected)"
     assert source.count(old) == 1
     mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
+    """Targeted-install module removal cannot bypass the shared selector (#3502)."""
+    path = "src/apm_cli/install/phases/cleanup.py"
+    source = _source(path)
+    old = "for relative in _find_orphaned_packages("
+    assert source.count(old) == 1
+    mutated = source.replace(old, "for relative in sorted(", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-orphan-selection"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})

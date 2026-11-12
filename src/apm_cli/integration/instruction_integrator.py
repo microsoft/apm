@@ -809,28 +809,30 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_antigravity_rules(content: str) -> str:
         """Convert APM instruction content to Antigravity CLI rules format.
 
-        Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
-        ``trigger: glob`` + ``globs`` frontmatter.
+        Parses existing YAML frontmatter and maps ``applyTo`` to
+        ``trigger: glob`` plus ONE double-quoted, comma-separated ``globs``
+        string (Antigravity rejects a YAML sequence). Each segment is
+        re-escaped before joining to preserve APM's literal-comma and
+        backslash boundaries. Instructions without ``applyTo`` become
+        ``trigger: always_on`` rules, since Antigravity discards rule files
+        lacking a valid ``trigger``.
+
+        Ref: https://antigravity.google/docs/rules
         """
         metadata, body = InstructionIntegrator._parse_frontmatter(content)
         apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
         safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
         globs = parse_apply_to(safe_apply_to)
 
-        # Build Antigravity rules frontmatter
         parts = ["---"]
         if globs:
+            joined = ", ".join(escape_apply_to_segment(g) for g in globs)
             parts.append("trigger: glob")
-            if len(globs) == 1:
-                parts.append(f"globs: {yaml_double_quote(globs[0])}")
-            else:
-                parts.append("globs:")
-                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
-            parts.append("---")
-            return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
-
-        # No applyTo -> unconditional rule, return body without frontmatter
-        return body.lstrip("\r\n")
+            parts.append(f"globs: {yaml_double_quote(joined)}")
+        else:
+            parts.append("trigger: always_on")
+        parts.append("---")
+        return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.

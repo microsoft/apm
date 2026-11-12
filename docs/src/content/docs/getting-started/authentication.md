@@ -468,6 +468,7 @@ With `PROXY_REGISTRY_ONLY=1`, APM will:
 1. Validate the existing `apm.lock.yaml` at startup and exit with an error if any entry is locked to a direct VCS source (no `registry_prefix`)
 2. Skip the download cache for entries that have no `registry_prefix` (forcing a fresh proxy download)
 3. Raise an error for any package reference that does not route through the configured proxy
+4. Skip ref and version enumeration against the upstream host: semver ranges and `apm view <pkg> versions` fail, so pin exact tags. See [Version enumeration and semver ranges](../../enterprise/registry-proxy/#version-enumeration-and-semver-ranges)
 
 ### Deprecated Artifactory env vars
 

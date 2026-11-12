@@ -314,7 +314,10 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 ```
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly.
+never contacts GitHub directly. The proxy has no tag listing, so semver
+ranges (`#^1.2.0`) and `apm view <pkg> versions` fail with an actionable
+error and `apm outdated` reports git deps as unknown; pin the exact upstream
+tag (`#v1.2.3`).
 
 ## Registry tokens (experimental)
 
