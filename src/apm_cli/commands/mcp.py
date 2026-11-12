@@ -1,9 +1,11 @@
 """APM mcp command group."""
 
 import builtins
+import copy
 import sys
 
 import click
+from click.core import ParameterSource
 
 from ..core.command_logger import CommandLogger
 from ._helpers import _get_console
@@ -95,26 +97,114 @@ def mcp():
     pass
 
 
+# ``apm install`` parameters that ``apm mcp install`` declares as real options.
+# Only the selection lives here: flags, type, choices, metavar and help text are
+# borrowed from the ``apm install`` command itself, so help, validation and
+# shell completion cannot drift from it.
+_FORWARDED_INSTALL_PARAMS: tuple[str, ...] = (
+    "transport",
+    "url",
+    "env_pairs",
+    "header_pairs",
+    "target",
+    "registry_url",
+    "mcp_version",
+    "global_",
+    "trust_transitive_mcp",
+    "dev",
+    "dry_run",
+    "force",
+    "verbose",
+    "no_policy",
+)
+_FORWARDED_RAW_KEY = "apm_cli.commands.mcp.forwarded_install_args"
+
+
+class _ForwardedInstallOption(click.Option):
+    """An ``apm install`` option re-declared on ``apm mcp install``.
+
+    Click still converts and validates the value here (same errors as
+    ``apm install``), but the raw command-line value is recorded so it can be
+    re-emitted verbatim to ``apm install``.
+    """
+
+    def consume_value(self, ctx, opts):
+        value, source = super().consume_value(ctx, opts)
+        if source is ParameterSource.COMMANDLINE:
+            ctx.meta.setdefault(_FORWARDED_RAW_KEY, {})[self.name] = value
+        return value, source
+
+    def to_install_args(self, raw):
+        """Rebuild the ``apm install`` tokens for a raw command-line value."""
+        flag = next((opt for opt in self.opts if opt.startswith("--")), self.opts[0])
+        if self.is_flag:
+            if raw == self.flag_value:
+                return [flag]
+            return self.secondary_opts[:1]
+        values = raw if self.multiple else [raw]
+        return [token for value in values for token in (flag, value)]
+
+
+def _borrow_install_options():
+    """Clone the forwarded options from the ``apm install`` command."""
+    from .install import install as install_command
+
+    by_name = {param.name: param for param in install_command.params}
+    borrowed = []
+    for name in _FORWARDED_INSTALL_PARAMS:
+        source = by_name[name]
+        if source.nargs != 1:
+            raise TypeError(f"Cannot forward multi-value install option {name!r}")
+        clone = copy.copy(source)
+        clone.__class__ = _ForwardedInstallOption
+        # Values are forwarded raw; the alias callback never receives them.
+        clone.expose_value = False
+        borrowed.append(clone)
+    return borrowed
+
+
+class _InstallAliasCommand(click.Command):
+    """``apm mcp install``: borrows its forwarded options from ``apm install``.
+
+    The borrowed options load on first use so ``apm`` startup keeps
+    ``apm install`` lazily imported.
+    """
+
+    _forwarded_loaded = False
+
+    def get_params(self, ctx):
+        if not self._forwarded_loaded:
+            self.params.extend(_borrow_install_options())
+            self._forwarded_loaded = True
+        return super().get_params(ctx)
+
+    def format_options(self, ctx, formatter):
+        own, forwarded = [], []
+        for param in self.get_params(ctx):
+            record = param.get_help_record(ctx)
+            if record is not None:
+                is_forwarded = isinstance(param, _ForwardedInstallOption)
+                (forwarded if is_forwarded else own).append(record)
+        if own:
+            with formatter.section("Options"):
+                formatter.write_dl(own)
+        if forwarded:
+            with formatter.section("Forwarded install options"):
+                formatter.write_dl(forwarded)
+
+
 @mcp.command(
     name="install",
+    cls=_InstallAliasCommand,
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
     help=(
         "Add an MCP server to apm.yml. Alias for 'apm install --mcp'.\n\n"
         "Examples:\n\n"
         "  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n"
         "  apm mcp install api --transport http --url https://example.com/mcp\n\n"
-        "\b\n"
-        "Forwarded install options (see 'apm install --help' for the full list):\n"
-        "  --transport [stdio|http|sse|streamable-http]\n"
-        "  --url URL              Server URL for remote transports\n"
-        "  --env KEY=VALUE        Environment variable (repeatable)\n"
-        "  --header KEY=VALUE     HTTP header (repeatable)\n"
-        "  -t, --target TARGET    Agent target(s) to deploy to\n"
-        "  --registry URL         Custom registry URL\n"
-        "  --mcp-version VER      Pin registry entry to a specific version\n"
-        "  -g, --global           Install to user scope (~/.apm/)\n"
-        "  --trust-transitive-mcp Trust MCP servers from transitive dependencies\n"
-        "  --dev / --dry-run / --force / --verbose / --no-policy"
+        "The forwarded install options below are defined by 'apm install'. "
+        "Other 'apm install' options are passed through unchanged; see "
+        "'apm install --help' for the full list."
     ),
 )
 @click.argument("name", required=True)
@@ -137,12 +227,19 @@ def mcp_install(ctx, name):
     # ``-y`` would be re-parsed as Click options when forwarded to
     # ``cli.main()``.  Re-insert the boundary by inspecting the raw
     # process argv (same seam the ``install`` command uses).
+    raw_values = ctx.meta.get(_FORWARDED_RAW_KEY, {})
+    option_args = [
+        token
+        for param in ctx.command.get_params(ctx)
+        if isinstance(param, _ForwardedInstallOption) and param.name in raw_values
+        for token in param.to_install_args(raw_values[param.name])
+    ]
     _, post_dd = _split_argv_at_double_dash(_get_invocation_argv())
     if post_dd:
         pre_args = ctx.args[: len(ctx.args) - len(post_dd)]
-        forwarded = ["install", "--mcp", name, *pre_args, "--", *post_dd]
+        forwarded = ["install", "--mcp", name, *option_args, *pre_args, "--", *post_dd]
     else:
-        forwarded = ["install", "--mcp", name, *ctx.args]
+        forwarded = ["install", "--mcp", name, *option_args, *ctx.args]
 
     try:
         cli.main(args=forwarded, standalone_mode=False)
