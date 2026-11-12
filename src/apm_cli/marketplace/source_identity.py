@@ -94,12 +94,15 @@ def admit_marketplace_catalog_path(path: str) -> str:
     repository (Claude Code's ``path`` field on ``github``/``git`` marketplace
     sources). It must stay inside the repository: no absolute or drive paths,
     no ``.``/``..`` segments (including percent-encoded ones), no backslashes,
-    and it must name a ``.json`` file. A single leading ``./`` is dropped.
+    no URL query or fragment characters (``?``, ``#``), and it must name a
+    ``.json`` file. A single leading ``./`` is dropped.
 
     Raises:
-        ValueError: The path is empty, escapes the repository, or does not
-            name a JSON file.
+        ValueError: The path is not a string, is empty, escapes the
+            repository, or does not name a JSON file.
     """
+    if path is not None and not isinstance(path, str):
+        raise ValueError("catalog path must be a string")
     raw = (path or "").strip()
     if not raw:
         raise ValueError("catalog path is empty")
@@ -107,6 +110,8 @@ def admit_marketplace_catalog_path(path: str) -> str:
         raise ValueError("catalog path contains control characters")
     if "\\" in raw:
         raise ValueError("catalog path must use forward slashes")
+    if "?" in raw or "#" in raw:
+        raise ValueError("catalog path must not contain '?' or '#'")
     if raw.startswith("/") or (len(raw) >= 2 and raw[0].isalpha() and raw[1] == ":"):
         raise ValueError("catalog path must be relative to the repository root")
     if raw.startswith("./"):

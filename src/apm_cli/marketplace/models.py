@@ -201,7 +201,7 @@ class MarketplaceSource:
             identity = parse_marketplace_source(self.url)
             object.__setattr__(self, "url", identity.url)
         # An empty path marks a direct manifest (hosted URL or local file).
-        if self.path:
+        if self.path or not isinstance(self.path, (str, type(None))):
             from apm_cli.marketplace.source_identity import admit_marketplace_catalog_path
 
             object.__setattr__(self, "path", admit_marketplace_catalog_path(self.path))
