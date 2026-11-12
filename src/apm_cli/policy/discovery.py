@@ -625,7 +625,7 @@ def _resolve_and_persist_chain(
     leaf_source = fetch_result.source
     leaf_cache_ref = fetch_result.cache_ref or _strip_source_prefix(leaf_source)
     leaf_host, leaf_port = _derive_leaf_identity(leaf_source, project_root)
-    ancestry = fetch_result.ancestry_parents
+    ancestry = getattr(fetch_result, "ancestry_parents", None)
     # Composition levels run farthest ancestor first, so the chain is root-first.
     levels = [*reversed(ancestry or ()), fetch_result]
     discovered = {level.source: level for level in levels}
