@@ -16,9 +16,9 @@ apm init --discover [OPTIONS]
 
 Creates a minimal `apm.yml` in the current directory or in a new
 `PROJECT_NAME` subdirectory. Auto-detects name, author, and description
-so you can start running `apm install` immediately. Use `--name`,
-`--description`, `--version`, and `--author` to set those fields without
-prompts.
+so you can start running `apm install` immediately. With `--yes`,
+`--name`, `--description`, `--version`, and `--author` set those `apm.yml`
+fields without prompts.
 
 With `--discover`, inventories existing skill and package
 directories in recognized layouts. It
@@ -85,6 +85,9 @@ Scripted init with explicit metadata, in the current directory:
 
 ```bash
 $ apm init --yes --name my-app --description "Team agent setup" --version 0.1.0 --author "Jane Dev"
+[+] APM project initialized successfully!
+Created Files
+  * apm.yml  Project configuration
 ```
 
 Plugin authoring project (creates `plugin.json` plus `apm.yml` with

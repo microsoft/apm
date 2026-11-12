@@ -27,6 +27,7 @@ from ..utils.console import (
     _rich_panel,
 )
 from ._helpers import (
+    ERROR,
     INFO,
     RESET,
     _create_minimal_apm_yml,
@@ -117,7 +118,7 @@ def _invalid_project_name_message(name: str) -> str:
 @click.option(
     "--version",
     default=None,
-    help="Project version (default: 1.0.0, or 0.1.0 with --plugin)",
+    help="Project version (default: 1.0.0, or 0.1.0 with --plugin --yes)",
 )
 @click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -197,10 +198,10 @@ def _init_scaffold(
     target_flag,
     verbose,
     *,
-    name=None,
-    description=None,
-    version=None,
-    author=None,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
 ):
     """Keep the pre-existing init flow serialized, outside read-only discovery."""
     # Soft deprecation warnings -- legacy flags still work.
@@ -240,10 +241,10 @@ def _perform_init(
     marketplace_flag,
     target_flag,
     verbose,
-    name=None,
-    description=None,
-    version=None,
-    author=None,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
     source="init",
     plugin_mode: str | None = None,
 ):
@@ -296,7 +297,10 @@ def _perform_init(
 
         # apm.yml requires a non-empty version string.
         if version is not None and not version:
-            logger.error("Invalid project version: --version must not be empty or whitespace-only.")
+            logger.error(
+                "Invalid project version: --version must not be empty or whitespace-only. "
+                "Provide a version such as '1.0.0', or omit --version to use the default."
+            )
             sys.exit(1)
 
         # Determine project directory and name
@@ -393,6 +397,7 @@ def _perform_init(
             _confirm_setup_summary(config, logger)
 
         # Plugin mode uses 0.1.0 as default version, unless --version set one.
+        # Check the raw flag, not config["version"], so an explicit value wins.
         if plugin and yes and version is None:
             config["version"] = "0.1.0"
 
@@ -655,11 +660,7 @@ def _interactive_project_setup(
             name = Prompt.ask("Project name", default=default_name).strip()
             if _validate_project_name(name):
                 break
-            console.print(
-                f"[error]Invalid project name '{name}': "
-                "project names must not be empty or whitespace-only and must not contain "
-                "path separators ('/' or '\\\\') or be '..'.[/error]"
-            )
+            console.print(f"[error]{_invalid_project_name_message(name)}[/error]")
 
         version = Prompt.ask("Version", default=auto_version).strip()
         description = Prompt.ask("Description", default=auto_description).strip()
@@ -673,11 +674,7 @@ def _interactive_project_setup(
             name = click.prompt("Project name", default=default_name).strip()
             if _validate_project_name(name):
                 break
-            click.echo(
-                f"{ERROR}Invalid project name '{name}': "
-                f"project names must not be empty or whitespace-only and must not contain "
-                f"path separators ('/' or '\\\\') or be '..'.{RESET}"
-            )
+            click.echo(f"{ERROR}{_invalid_project_name_message(name)}{RESET}")
 
         version = click.prompt("Version", default=auto_version).strip()
         description = click.prompt("Description", default=auto_description).strip()

@@ -1316,6 +1316,7 @@ class TestInitMetadataFlags:
 
                 assert result.exit_code == 1
                 assert "Invalid project version" in result.output
+                assert "omit --version" in " ".join(result.output.split())
                 assert not Path("apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)

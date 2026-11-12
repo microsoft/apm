@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm init` accepts `--name`, `--description`, `--version` and `--author`, so `apm init --yes` (or piped input) writes a finished `apm.yml` without prompts or hand-editing; `--name` names an in-place project and is reported as ignored when a positional project directory is given. -- by @atulya-singh (#2231)
+- `apm init --yes` accepts `--name`, `--description`, `--version` and `--author`, so one command writes a finished `apm.yml` with no prompts or hand-editing; without `--yes` the flags seed the prompt defaults. -- by @atulya-singh (#2231)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
 - A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
