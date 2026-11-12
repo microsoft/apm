@@ -37,7 +37,7 @@ import os
 import platform
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
@@ -112,7 +112,7 @@ class LifecycleEvent:
             event=event,
             packages=packages or [],
             scope=scope,
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )

@@ -30,7 +30,7 @@ import stat
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlsplit, urlunsplit
@@ -557,7 +557,7 @@ def _append_to_script_log(
         log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         _rotate_log_if_large(log_path)
 
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         safe_target = _escape_header_field(_neutralize_newlines(_redact_secrets(target)))
         lines = [
             f"[{ts}] event={event_name} type={script_type} target={safe_target} status={status}"
@@ -974,16 +974,28 @@ def _build_guarded_session():
 def _environ_proxies_for(url: str) -> dict:
     """Return the operator's env-configured proxies for *url*, or ``{}``.
 
-    A non-empty result is the corporate-egress case: the environment mandates
-    an outbound proxy for this destination (honoring ``NO_PROXY``), exactly as
-    curl / pip / npm / git resolve proxies. Returns ``{}`` (direct egress) when
-    no proxy applies or on any resolution error -- fail-closed to the DNS-pinned
+    A non-empty result is the corporate-egress case: a proxy would actually be
+    selected for this destination (honoring ``NO_PROXY``), exactly as curl /
+    pip / npm / git resolve proxies. Returns ``{}`` (direct egress) when no
+    proxy applies or on any resolution error -- fail-closed to the DNS-pinned
     direct path rather than guessing a proxy.
+
+    ``get_environ_proxies`` alone is not a sufficient decision: with
+    ``NO_PROXY`` exported but no proxy variables set (common in containers,
+    CI runners and macOS shells), it returns a bare ``{'no': ...}`` mapping,
+    and ``requests``' own ``select_proxy`` picks no proxy for any URL from
+    such a mapping. Classifying that as corporate egress would route the
+    dispatch onto the unpinned capturing session and silently drop the
+    resolve-and-pin DNS defense, so the decision re-uses requests' proxy
+    selection for the URL instead of truthiness.
     """
     try:
         import requests
 
-        return requests.utils.get_environ_proxies(url, no_proxy=None) or {}
+        raw = requests.utils.get_environ_proxies(url, no_proxy=None) or {}
+        if requests.utils.select_proxy(url, raw) is None:
+            return {}
+        return raw
     except Exception:
         return {}
 

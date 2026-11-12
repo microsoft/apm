@@ -333,7 +333,7 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
 
     if explicit is not None:
         try:
-            dt = datetime.fromisoformat(_normalize_utc_designator(explicit))
+            dt = datetime.fromisoformat(explicit)
         except (ValueError, TypeError):
             dt = None
         if dt is None or dt.tzinfo is None:
@@ -345,11 +345,6 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
             )
         return dt.isoformat()
     return resolve_reproducible_timestamp(None, lockfile_generated_at)
-
-
-def _normalize_utc_designator(value: str) -> str:
-    """Normalize ISO 8601 UTC syntax for Python 3.10 ``fromisoformat``."""
-    return f"{value[:-1]}+00:00" if value.endswith("Z") else value
 
 
 __all__ = ["lock"]

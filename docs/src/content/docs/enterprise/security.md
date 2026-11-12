@@ -44,7 +44,7 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 APM resolves `git` and `gh` from explicit `PATH` directories outside the
 current repository or APM project. Project-local executables and symlinks
 resolving back into that project are excluded. On Windows, discovery also
-checks `PATHEXT` extensions such as `.EXE`, including on Python 3.10 and 3.11,
+checks `PATHEXT` extensions such as `.EXE`, including on Python 3.11,
 without adding the current directory to the search.
 
 This check applies to APM's executable selection, not to searches performed
