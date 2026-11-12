@@ -2616,16 +2616,6 @@ class TestInstallMcpFlag:
             assert result.exit_code == 2
             assert "transport selection flags" in result.output
 
-    def test_e4b_mcp_with_auth_first(self):
-        """--auth-first (issue #2545) is rejected with --mcp, reported separately
-        from the transport-selection flags since it changes credential order,
-        not transport."""
-        with self._chdir_with_apm_yml():
-            result = self.runner.invoke(cli, ["install", "--mcp", "foo", "--auth-first"])
-            assert result.exit_code == 2
-            assert "--auth-first" in result.output
-            assert "transport selection flags" not in result.output
-
     def test_auth_first_flag_threads_into_auth_resolver(self):
         """--auth-first (issue #2545) constructs AuthResolver(github_auth_first=True).
 

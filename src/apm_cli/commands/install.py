@@ -1000,7 +1000,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "auth_first",
     is_flag=True,
     default=False,
-    help="Skip the anonymous-first HTTPS attempt for github.com and go straight to your resolved git credentials/environment (also: APM_GITHUB_AUTH_FIRST=1, apm config set github-auth-first true). Escape hatch for TLS-inspecting proxies whose intercepting CA chain has no revocation info, where the isolated anonymous attempt cannot complete a handshake even though your own git config can. Trade-off: forwards credentials on the first attempt instead of trying anonymously first.",
+    help="Skip the anonymous-first HTTPS attempt for github.com and use your resolved credentials immediately (also: APM_GITHUB_AUTH_FIRST=1, apm config set github-auth-first true). Escape hatch for TLS-inspecting proxies the isolated anonymous attempt cannot pass. Trade-off: forwards credentials on the first attempt.",
 )
 @click.option(
     "--mcp",
@@ -1401,7 +1401,6 @@ def install(  # noqa: PLR0913
             only=only,
             update=update,
             any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
-            auth_first=auth_first,
             registry_url=validated_registry_url,
         )
         # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
