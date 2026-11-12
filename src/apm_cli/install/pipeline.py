@@ -61,7 +61,8 @@ from .errors import (
     FrozenInstallError,
     InstallFailureAlreadyRendered,
 )
-from .failure_residue import record_install_outcome, report_failed_install_residue
+from .failure_residue import record_install_outcome
+from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
 from .transaction import InstallTransaction, transactional_pipeline
 
@@ -995,8 +996,4 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
-        from .phases import copilot_plugins as _copilot_plugins_cleanup
-
-        _copilot_plugins_cleanup.deactivate(ctx)
-        ctx.tui.__exit__()
-        report_failed_install_residue(ctx)
+        close_pipeline_attempt(ctx)
