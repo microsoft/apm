@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
+from ..models.dependency.materialization import nested_materialization_pairs
 from ..models.dependency.replacement import build_replacement_index
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
@@ -790,6 +791,18 @@ class APMDependencyResolver:
                 processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
+
+        nested = nested_materialization_pairs((item[0] for item in processing_queue), modules_dir)
+        for outer, inner in nested:
+            tree.resolution_errors.append(
+                f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
+                "cannot both be declared in apm.yml: the subdirectory package would be "
+                "installed inside the repository package. Keep only one of them."
+            )
+        if nested:
+            # Structural manifest error: report it before fetching anything, even
+            # if other root declarations would also fail during the walk.
+            return tree
 
         # Process dependencies breadth-first with level-batched parallelism.
         #
