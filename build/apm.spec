@@ -166,7 +166,6 @@ hiddenimports = [
     'apm_cli.core.safe_installer',
     'apm_cli.core.token_manager',
     'apm_cli.deps',
-    'apm_cli.deps.aggregator',
     'apm_cli.deps.verifier',
     'apm_cli.deps.apm_resolver',
     'apm_cli.deps.github_downloader',
@@ -189,10 +188,6 @@ hiddenimports = [
     'apm_cli.runtime.manager',  # Add runtime manager
     'apm_cli.utils',
     'apm_cli.utils.helpers',
-    'apm_cli.workflow',
-    'apm_cli.workflow.runner',
-    'apm_cli.workflow.parser', 
-    'apm_cli.workflow.discovery',
     # Common dependencies
     'yaml',
     'click',

@@ -216,14 +216,15 @@ Add and edit packages without leaving the shell:
 
 ```bash
 apm marketplace package add acme-org/another-pkg --version "^2.0.0"
-apm marketplace package set example-package --version "^1.2.0"
+apm marketplace package set example-package --version "^1.2.0" --category developer-tools
 apm marketplace package remove pinned-package
 ```
 
 Marketplace output targets use a map-form pattern. The legacy list
 form (`outputs: [claude, codex]`) still parses with a deprecation
 warning. When `codex` is selected, every package must define
-`category`. Codex output maps local entries to `source: local`,
+`category` (set it with `--category` on `package add` or `package set`).
+Codex output maps local entries to `source: local`,
 remote entries to `source: url`, and remote subdirectory entries to
 `source: git-subdir`. Claude output also emits `category` on any
 package where it is set, even though only `codex` requires it.

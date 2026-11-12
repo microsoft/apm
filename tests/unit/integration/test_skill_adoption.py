@@ -107,3 +107,154 @@ def test_baselines_require_every_member_to_be_claimed(tmp_path: Path) -> None:
     )
     baselines = adoption_baselines(source, destination, owned=lambda _path: True, **options)
     assert baselines == {path: compute_file_hash(path) for path in _members(source, destination)}
+
+
+def _locked_update(tmp_path: Path, old_body: bytes = b"v1\n", new_body: bytes = b"v2\n"):
+    """Return an integrator, plan and paths for a v1 -> v2 skill update (#3625)."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
+
+    def package(name: str, body: bytes, *extra: str) -> PackageInfo:
+        root = tmp_path / name
+        skill = root / ".apm/skills/alpha"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_bytes(b"---\nname: alpha\n---\n" + body)
+        (root / "docs").mkdir()
+        (root / "docs/guide.md").write_bytes(b"Guide.\n")
+        for file_name in extra:
+            (skill / file_name).write_bytes(b"Added.\n")
+        return PackageInfo(
+            package=APMPackage(name="pkg", version="1.0.0", package_path=root),
+            install_path=root.resolve(),
+            package_type=PackageType.APM_PACKAGE,
+        )
+
+    new = package("new", new_body, "added.md")
+    old = package("old", old_body)
+    destination = tmp_path / "deployed/alpha"
+    shutil.copytree(old.install_path / ".apm/skills/alpha", destination)
+    targets = [KNOWN_TARGETS["copilot"]]
+    plan = DeployableSourcePlan.create(
+        new, targets, skill_subset=None, hooks_approved=False, canvas_approved=False, skip_bin=True
+    )
+    fetched: list[str] = []
+
+    def fetch(owner: str, _scratch: Path) -> PackageInfo:
+        fetched.append(owner)
+        return old
+
+    integrator = SkillIntegrator()
+    integrator._materialization_session = SimpleNamespace(
+        has_receipt=lambda _path: False, locked_sources=LockedSkillSources(fetch)
+    )
+    return SimpleNamespace(
+        new=new,
+        integrator=integrator,
+        plan=plan,
+        targets=targets,
+        source=new.install_path / ".apm/skills/alpha",
+        destination=destination,
+        fetched=fetched,
+    )
+
+
+def _locked_baselines(update, **overrides) -> dict[Path, str]:
+    from apm_cli.integration.skill_adoption import skill_tree_baselines
+    from apm_cli.integration.skill_integrator import _build_deployable_copy_ignore
+
+    options = {
+        "ignore": _build_deployable_copy_ignore(skip_bin=True, source_plan=update.plan),
+        "owned": lambda _path: True,
+        "force": False,
+        "plan": update.plan,
+        "owner": "org/pkg",
+        "targets": update.targets,
+    }
+    options.update(overrides)
+    return skill_tree_baselines(update.integrator, update.source, update.destination, **options)
+
+
+@pytest.mark.windows_compat
+def test_update_adopts_tree_identical_to_locked_version(tmp_path: Path) -> None:
+    update = _locked_update(tmp_path)
+    baselines = _locked_baselines(update)
+    anchor = update.destination / "SKILL.md"
+    assert baselines == {anchor: compute_file_hash(anchor)}
+    assert _locked_baselines(update) == baselines
+    assert update.fetched == ["org/pkg"]
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("change", ["edited", "extra", "unclaimed", "receipt", "force"])
+def test_update_never_adopts_a_differing_or_owned_elsewhere_tree(
+    tmp_path: Path, change: str
+) -> None:
+    update = _locked_update(tmp_path)
+    overrides: dict = {}
+    if change == "edited":
+        (update.destination / "SKILL.md").write_bytes(b"Local edits.\n")
+    elif change == "extra":
+        (update.destination / "personal.md").write_bytes(b"Mine.\n")
+    elif change == "unclaimed":
+        overrides["owned"] = lambda _path: False
+    elif change == "receipt":
+        update.integrator._materialization_session.has_receipt = lambda _path: True
+    else:
+        overrides["force"] = True
+    assert _locked_baselines(update, **overrides) == {}
+
+
+@pytest.mark.windows_compat
+def test_update_without_locked_source_keeps_refusal(tmp_path: Path) -> None:
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    update = _locked_update(tmp_path)
+
+    def unavailable(_owner: str, _scratch: Path):
+        raise RuntimeError("locked commit no longer reachable")
+
+    update.integrator._materialization_session.locked_sources = LockedSkillSources(unavailable)
+    assert _locked_baselines(update) == {}
+    update.integrator._materialization_session.locked_sources = None
+    assert _locked_baselines(update) == {}
+
+
+def test_locked_sources_close_removes_private_scratch(tmp_path: Path) -> None:
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    update = _locked_update(tmp_path)
+    scratch: list[Path] = []
+
+    def record(_owner: str, destination: Path):
+        scratch.append(destination.parent)
+
+    sources = LockedSkillSources(record)
+    assert sources.plan("org/pkg", update.plan, update.targets) is None
+    assert scratch and scratch[0].is_dir()
+    sources.close()
+    assert not scratch[0].exists()
+
+
+@pytest.mark.windows_compat
+def test_locked_links_render_into_the_current_deployment_frame(tmp_path: Path) -> None:
+    """Links to package assets outside the skill render like the earlier deployment."""
+    link = b"See [guide](../../../docs/guide.md).\n"
+    update = _locked_update(tmp_path, old_body=link, new_body=b"v2\n" + link)
+    project = tmp_path / "project"
+    project.mkdir()
+    update.integrator.init_link_resolver(update.new, project)
+    anchor = update.destination / "SKILL.md"
+    rendered, count = update.integrator.resolve_links(
+        anchor.read_text(encoding="utf-8"),
+        update.source / "SKILL.md",
+        anchor,
+        preserved_source_root=update.source,
+    )
+    assert count == 1
+    anchor.write_bytes(rendered.encode("utf-8"))
+    assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}

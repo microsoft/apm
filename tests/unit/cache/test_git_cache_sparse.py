@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -76,47 +75,21 @@ def test_auth_failure_is_not_classified_as_filter_rejection() -> None:
     assert _partial_clone_filter_unsupported(failure) is False
 
 
-@pytest.mark.parametrize("dependency_count", (1, 10))
-def test_sparse_cache_hit_defers_promisor_network_environment(
-    tmp_path: Path,
-    dependency_count: int,
-) -> None:
-    """A clean sparse hit performs no Git configuration probe."""
-    cache = GitCache(tmp_path / "cache")
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    env = {"PATH": os.environ["PATH"]}
-    validated_env = {"VALIDATED": "1"}
+def test_sparse_cache_hit_runs_no_link_materialization(tmp_path: Path) -> None:
+    """A clean sparse hit was materialized at creation; it reuses the shard as is."""
+    from tests.utils.git_link_fixture import build_link_origin
 
-    with (
-        patch(
-            "apm_cli.utils.git_env.git_network_env",
-            return_value=validated_env,
-        ) as validate,
-        patch(
-            "apm_cli.cache.git_cache.repair_dangling_cone_symlinks",
-            return_value=None,
-        ) as repair,
-    ):
-        for _ in range(dependency_count):
-            result = cache._finalize_sparse_checkout(
-                "https://git.example.com/acme/repo",
-                checkout,
-                ["skills/acme"],
-                env=env,
+    origin, sha = build_link_origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    first = cache.get_checkout(str(origin), sha, locked_sha=sha, sparse_paths=["pkg"])
+
+    with patch("apm_cli.cache.git_cache.materialize_tracked_symlinks") as materialize:
+        for _ in range(10):
+            assert (
+                cache.get_checkout(str(origin), sha, locked_sha=sha, sparse_paths=["pkg"]) == first
             )
 
-    assert result == checkout
-    validate.assert_not_called()
-    assert repair.call_count == dependency_count
-    assert repair.call_args.kwargs["env"]["PATH"] == env["PATH"]
-    repair_env_factory = repair.call_args.kwargs["repair_env_factory"]
-    assert repair_env_factory() == validated_env
-    validate.assert_called_once_with(
-        "https://git.example.com/acme/repo",
-        env,
-        worktree=checkout,
-    )
+    materialize.assert_not_called()
 
 
 def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
@@ -469,57 +442,17 @@ def _build_repo_with_out_of_cone_symlink_target(tmp_path: Path) -> tuple[Path, s
 class TestDanglingSymlinkRepair:
     """#2707: GitCache's sparse-cone checkout must not ship a dangling symlink."""
 
-    def test_dangling_symlink_in_cone_is_repaired(self, tmp_path: Path, monkeypatch):
-        """A symlink whose target sits outside the requested cone must
-        still resolve after ``get_checkout`` returns.
+    def test_out_of_cone_link_resolves_without_widening(self, tmp_path: Path) -> None:
+        """A link whose target sits outside the cone resolves from Git objects."""
+        from tests.utils.git_link_fixture import EXPECTED_PKG, build_link_origin, tree_bytes
 
-        This box can't create a real symlink (WinError 1314) and a real
-        checkout here writes a mode-120000 entry as a plain file
-        (``core.symlinks`` defaults to false on this filesystem), so the
-        ``ref.md`` stand-in is monkeypatched to LOOK dangling the way a
-        real symlink pointing at ``../../shared/ref.md`` would on a
-        filesystem that honors ``core.symlinks`` -- same technique as
-        tests/unit/utils/test_git_sparse.py and
-        tests/unit/deps/test_bare_cache_sparse.py.
-        """
-        bare, sha = _build_repo_with_out_of_cone_symlink_target(tmp_path)
-        cache_root = tmp_path / "cache"
-        cache = GitCache(cache_root)
+        origin, sha = build_link_origin(tmp_path)
+        cache = GitCache(tmp_path / "cache")
 
-        checkout_dir = cache_root / "git" / "checkouts_v1"
-        url = bare.as_uri()
+        result = cache.get_checkout(str(origin), "main", locked_sha=sha, sparse_paths=["pkg"])
 
-        # The variant shard path isn't known until after get_checkout
-        # resolves the sha/variant key, but the fake symlink's parent
-        # (alpha/skill/ref.md) is deterministic once we know the shard
-        # root, so match on the relative suffix instead.
-        real_islink = os.path.islink
-        rel_suffix = Path("alpha") / "skill" / "ref.md"
-
-        def fake_islink(path):
-            p = Path(path)
-            return True if p.parts[-3:] == rel_suffix.parts else real_islink(path)
-
-        def fake_exists(path):
-            p = Path(path)
-            if p.parts[-3:] == rel_suffix.parts:
-                return (p.parents[2] / "shared" / "ref.md").exists()
-            return os.path.lexists(path)
-
-        monkeypatch.setattr(os.path, "islink", fake_islink)
-        monkeypatch.setattr(os.path, "exists", fake_exists)
-        monkeypatch.setattr(
-            "apm_cli.utils.git_sparse._tracked_symlinks",
-            lambda *args, **kwargs: [Path(args[1]) / "alpha" / "skill" / "ref.md"],
-        )
-
-        result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha/skill"])
-
-        assert checkout_dir in result.parents
-        # The repair must have actually widened the tree: the previously
-        # cone-excluded sibling holding the symlink's target now exists.
-        assert (result / "shared" / "ref.md").is_file()
-        assert (result / "shared" / "ref.md").read_text() == "the real target content\n"
+        assert tree_bytes(result / "pkg") == EXPECTED_PKG
+        assert not (result / "shared").exists()
 
     def test_no_dangling_symlink_cone_stays_narrow(self, tmp_path: Path):
         bare, sha = _build_repo_with_out_of_cone_symlink_target(tmp_path)

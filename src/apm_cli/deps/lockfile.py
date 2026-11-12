@@ -1064,6 +1064,22 @@ class LockFile:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
 
+    def project_self_entry(self) -> LockedDependency:
+        """Build the virtual self-entry for the project's own local content.
+
+        The entry is an in-memory normalization of ``local_deployed_files``;
+        it is never serialized as a dependency row.
+        """
+        return LockedDependency(
+            repo_url="<self>",
+            source="local",
+            local_path=_SELF_KEY,
+            is_dev=True,
+            depth=0,
+            deployed_files=list(self.local_deployed_files),
+            deployed_file_hashes=dict(self.local_deployed_file_hashes),
+        )
+
     def _needs_v2(self) -> bool:
         """Whether the resolved graph requires lockfile schema v2.
 
@@ -1263,15 +1279,7 @@ class LockFile:
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
         if lock.local_deployed_files:
-            lock.dependencies[_SELF_KEY] = LockedDependency(
-                repo_url="<self>",
-                source="local",
-                local_path=".",
-                is_dev=True,
-                depth=0,
-                deployed_files=list(lock.local_deployed_files),
-                deployed_file_hashes=dict(lock.local_deployed_file_hashes),
-            )
+            lock.dependencies[_SELF_KEY] = lock.project_self_entry()
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
         if "deployments" in data:
