@@ -157,8 +157,8 @@ def test_compile_placement_and_file_inclusion_parity(tmp_path: Path, monkeypatch
     }
 
     first_artifacts = _agents_snapshot(project_root)
-    # Generated AGENTS.md files count as project files, so remove them first.
-    for path in first_artifacts:
-        (project_root / path).unlink()
-    _compile(project_root)
+    first_directories = set(optimizer._directory_cache)
+    # Repeated compile over the first run's outputs must reproduce them exactly.
+    rerun_optimizer = _compile(project_root)[-1]
+    assert set(rerun_optimizer._directory_cache) == first_directories
     assert _agents_snapshot(project_root) == first_artifacts
