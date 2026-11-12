@@ -64,8 +64,9 @@ when **all** hold (`src/apm_cli/compilation/link_resolver.py:400-545`):
    against symlink and `..` traversal).
 
 Anything else is passed through verbatim. This applies to
-**instructions, prompts, agents, and commands**. Skills are different
--- see below.
+**instructions, prompts, agents, and commands**, including the
+`developer_instructions` of agents converted to Codex TOML. Skills are
+different -- see below.
 
 `#fragment` and `?query` suffixes are preserved through the rewrite.
 

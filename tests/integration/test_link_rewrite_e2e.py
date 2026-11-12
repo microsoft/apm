@@ -24,6 +24,9 @@ Coverage matrix:
 6. **Multi-target install** (Copilot + Claude in one run): both
    deployed copies of the instruction get their links rewritten and
    both rewritten links resolve on disk.
+   Codex + Copilot agents (#2966): the converted Codex TOML's
+   ``developer_instructions`` link reaches the same installed skill as
+   the Copilot agent, and a reinstall is byte-identical.
 
 All tests use offline local-path fixtures (no network) so they are
 safe to run in CI without tokens.
@@ -442,3 +445,48 @@ class TestMultiTargetLinkRewriting:
                 f"Rewritten link in {deployed.relative_to(consumer)} does not "
                 f"resolve on disk: {link} -> {resolved}"
             )
+
+    def test_codex_and_copilot_agent_links_reach_same_installed_skill(
+        self, tmp_path, apm_binary_path
+    ):
+        """#2966: Codex developer_instructions links work from .codex/agents/."""
+        import tomllib
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        producer = ws / "producer"
+        _write_yaml(producer / "apm.yml", {"name": "producer", "version": "1.0.0"})
+        _write(
+            producer / ".apm" / "skills" / "guide" / "SKILL.md",
+            "---\nname: guide\ndescription: Guide skill\n---\n# Guide skill\n",
+        )
+        _write(
+            producer / ".apm" / "agents" / "reviewer.agent.md",
+            "---\nname: reviewer\ndescription: Review code\n---\n"
+            "Read the [guide](../skills/guide/SKILL.md#usage) first.\n",
+        )
+        consumer = _make_consumer(ws, targets=["copilot", "codex"])
+
+        result = _run_install(apm_binary_path, consumer, str(producer))
+        assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
+
+        codex_file = consumer / ".codex" / "agents" / "reviewer.toml"
+        copilot_file = consumer / ".github" / "agents" / "reviewer.agent.md"
+        codex_body = tomllib.loads(codex_file.read_text(encoding="utf-8"))["developer_instructions"]
+        resolved = set()
+        for deployed, body in (
+            (codex_file, codex_body),
+            (copilot_file, copilot_file.read_text(encoding="utf-8")),
+        ):
+            path, _, fragment = _link_target(body, "guide").partition("#")
+            assert fragment == "usage"
+            assert "apm_modules" in path, f"{deployed.name} link not rewritten: {path}"
+            target = (deployed.parent / path).resolve()
+            assert target.read_text(encoding="utf-8").endswith("# Guide skill\n")
+            resolved.add(target)
+        assert len(resolved) == 1, f"Codex and Copilot links diverge: {resolved}"
+
+        first = codex_file.read_bytes()
+        reinstall = _run_install(apm_binary_path, consumer, str(producer))
+        assert reinstall.returncode == 0, f"Reinstall failed:\n{reinstall.stderr}"
+        assert codex_file.read_bytes() == first

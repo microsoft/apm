@@ -32,6 +32,8 @@ import stat
 import sys
 import tempfile
 from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
@@ -100,11 +102,125 @@ class TLSConfigurationError(RuntimeError):
     """Raised when an explicitly selected TLS trust input is unusable."""
 
 
-def _record_tls_trust_status(message: str, *args: object) -> None:
-    """Cache and emit the selected trust source at debug level."""
-    global _LAST_TLS_STATUS
+class TLSTrustSource(Enum):
+    """Trust set selected by :func:`configure_tls_trust`."""
+
+    REPLACEMENT = "replacement"
+    OPT_OUT = "opt-out"
+    OS_STORE = "os-store"
+    OS_STORE_ADDITIVE = "os-store-additive"
+    CERTIFI_FALLBACK = "certifi-fallback"
+    CERTIFI_ADDITIVE = "certifi-additive"
+
+
+@dataclass(frozen=True)
+class TLSTrustSelection:
+    """Structured record of the trust mode :func:`configure_tls_trust` selected.
+
+    ``replacement_setting`` names the Requests/curl variable that won when
+    ``source`` is ``REPLACEMENT``. ``opt_out`` records that
+    ``APM_DISABLE_TRUSTSTORE`` was set; it can accompany a replacement.
+    """
+
+    source: TLSTrustSource
+    replacement_setting: str = ""
+    opt_out: bool = False
+
+
+_LAST_TLS_SELECTION: TLSTrustSelection | None = None
+
+_SSL_DOCS_HINT = "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+
+# Default guidance when the OS trust store is the selected (or default) source.
+_DEFAULT_TLS_FAILURE_GUIDANCE = (
+    "TLS verification failed -- APM uses the system trust store by default. "
+    "If you're behind a corporate proxy or firewall, make sure your "
+    "organisation's CA is installed in the OS trust store, or set "
+    f"{_EXTRA_CA_ENV_VAR} to a readable PEM bundle to add it while retaining "
+    "public trust. Use REQUESTS_CA_BUNDLE only to replace the complete "
+    "Requests trust set. "
+    f"{_SSL_DOCS_HINT}"
+)
+
+
+def _record_tls_trust_status(selection: TLSTrustSelection, message: str, *args: object) -> None:
+    """Cache the selected trust mode and emit its source at debug level."""
+    global _LAST_TLS_STATUS, _LAST_TLS_SELECTION
     _LAST_TLS_STATUS = (message, args)
+    _LAST_TLS_SELECTION = selection
     logger.debug(message, *args)
+
+
+def selected_tls_trust() -> TLSTrustSelection | None:
+    """Return the trust mode recorded by the last configuration, if any."""
+    return _LAST_TLS_SELECTION
+
+
+def _tls_failure_guidance_for(selection: TLSTrustSelection | None) -> str:
+    """Map a recorded trust selection to truthful next-step guidance.
+
+    Names the active setting and a safe next action. It never claims the
+    selected mode caused a particular verification failure, and never
+    recommends a trust source that the selected mode ignores.
+    """
+    if selection is None or selection.source is TLSTrustSource.OS_STORE:
+        return _DEFAULT_TLS_FAILURE_GUIDANCE
+    source = selection.source
+    if source is TLSTrustSource.REPLACEMENT:
+        setting = selection.replacement_setting or _EXPLICIT_CA_ENV_VARS[0]
+        fallback = (
+            f" If you unset {setting}, {_DISABLE_ENV_VAR} still applies and APM "
+            "verifies against its bundled CA set only."
+            if selection.opt_out
+            else ""
+        )
+        return (
+            f"TLS verification failed -- {setting} is set and replaces the "
+            "complete Requests trust set, so the OS trust store and "
+            f"{_EXTRA_CA_ENV_VAR} are not used. Make sure that bundle contains "
+            "your organisation's CA and every public CA you need, or unset "
+            f"{setting} if the replacement is unintended.{fallback} "
+            f"{_SSL_DOCS_HINT}"
+        )
+    if source is TLSTrustSource.OPT_OUT:
+        return (
+            f"TLS verification failed -- {_DISABLE_ENV_VAR} is set, so APM "
+            "verifies against its bundled CA set only; the OS trust store and "
+            f"{_EXTRA_CA_ENV_VAR} are not used. If the opt-out is unintended, "
+            f"unset {_DISABLE_ENV_VAR}. If it is intended, set "
+            "REQUESTS_CA_BUNDLE to a complete PEM bundle that includes your "
+            f"organisation's CA. {_SSL_DOCS_HINT}"
+        )
+    if source is TLSTrustSource.OS_STORE_ADDITIVE:
+        return (
+            "TLS verification failed -- APM verifies against the OS trust store "
+            f"plus the {_EXTRA_CA_ENV_VAR} certificates. Make sure your "
+            "organisation's CA, including any intermediate CA, is in the OS "
+            "trust store or in that bundle. Use REQUESTS_CA_BUNDLE only to "
+            f"replace the complete Requests trust set. {_SSL_DOCS_HINT}"
+        )
+    if source is TLSTrustSource.CERTIFI_ADDITIVE:
+        return (
+            "TLS verification failed -- OS trust-store integration is "
+            "unavailable in this environment, so APM verifies against its "
+            f"bundled CA set plus the {_EXTRA_CA_ENV_VAR} certificates. Make "
+            "sure that bundle contains your organisation's CA, including any "
+            "intermediate CA. Use REQUESTS_CA_BUNDLE only to replace the "
+            f"complete Requests trust set. {_SSL_DOCS_HINT}"
+        )
+    return (
+        "TLS verification failed -- OS trust-store integration is unavailable "
+        "in this environment, so APM verifies against its bundled CA set and "
+        f"does not read the OS trust store. Set {_EXTRA_CA_ENV_VAR} to a "
+        "readable PEM bundle to add your organisation's CA while retaining "
+        "public trust. Use REQUESTS_CA_BUNDLE only to replace the complete "
+        f"Requests trust set. {_SSL_DOCS_HINT}"
+    )
+
+
+def tls_failure_guidance() -> str:
+    """Return TLS failure guidance consistent with the selected trust mode."""
+    return _tls_failure_guidance_for(_LAST_TLS_SELECTION)
 
 
 def log_tls_trust_status() -> None:
@@ -125,6 +241,19 @@ def has_explicit_ca_override(env: Mapping[str, str] | None = None) -> bool:
     return any((environ.get(var) or "").strip() for var in _EXPLICIT_CA_ENV_VARS)
 
 
+def _explicit_ca_selection(env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """Return ``(variable, bundle)`` for the winning replacement, or empty strings.
+
+    Requests gives ``REQUESTS_CA_BUNDLE`` precedence over ``CURL_CA_BUNDLE``.
+    """
+    environ = os.environ if env is None else env
+    for var in _EXPLICIT_CA_ENV_VARS:
+        value = (environ.get(var) or "").strip()
+        if value:
+            return var, value
+    return "", ""
+
+
 def explicit_ca_bundle_path(env: Mapping[str, str] | None = None) -> str:
     """Return the Requests-compatible replacement bundle, or an empty string.
 
@@ -132,12 +261,7 @@ def explicit_ca_bundle_path(env: Mapping[str, str] | None = None) -> str:
     ``CURL_CA_BUNDLE``. Callers whose hardened Sessions set ``trust_env=False``
     use this helper to retain those replacement semantics explicitly.
     """
-    environ = os.environ if env is None else env
-    for var in _EXPLICIT_CA_ENV_VARS:
-        value = (environ.get(var) or "").strip()
-        if value:
-            return value
-    return ""
+    return _explicit_ca_selection(env)[1]
 
 
 def _safe_path_display(path: Path) -> str:
@@ -406,8 +530,13 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
         else ""
     )
     if has_explicit_ca_override(environ):
-        explicit_path = explicit_ca_bundle_path(environ)
+        explicit_setting, explicit_path = _explicit_ca_selection(environ)
         _record_tls_trust_status(
+            TLSTrustSelection(
+                TLSTrustSource.REPLACEMENT,
+                replacement_setting=explicit_setting,
+                opt_out=_env_flag(_DISABLE_ENV_VAR, environ),
+            ),
             "TLS: explicit CA bundle in use: %s%s",
             _safe_path_display(Path(explicit_path)),
             suppressed_extra,
@@ -416,7 +545,10 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
 
     if _env_flag(_DISABLE_ENV_VAR, environ):
         _record_tls_trust_status(
-            "TLS: OS trust-store injection disabled (%s)%s", _DISABLE_ENV_VAR, suppressed_extra
+            TLSTrustSelection(TLSTrustSource.OPT_OUT, opt_out=True),
+            "TLS: OS trust-store injection disabled (%s)%s",
+            _DISABLE_ENV_VAR,
+            suppressed_extra,
         )
         return False
 
@@ -455,20 +587,30 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
                     "Could not apply APM_EXTRA_CA_BUNDLE to the HTTPS client"
                 ) from fallback_exc
             _record_tls_trust_status(
+                TLSTrustSelection(TLSTrustSource.CERTIFI_ADDITIVE),
                 "TLS: verifying against bundled CA plus additive CA: %s (certifi fallback) [%s]",
                 extra_ca_display,
                 exc,
             )
             return False
-        _record_tls_trust_status("TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
+        _record_tls_trust_status(
+            TLSTrustSelection(TLSTrustSource.CERTIFI_FALLBACK),
+            "TLS: verifying against bundled CA (certifi fallback) [%s]",
+            exc,
+        )
         return False
 
     if extra_ca is not None:
         _record_tls_trust_status(
-            "TLS: verifying against OS trust store plus additive CA: %s", extra_ca_display
+            TLSTrustSelection(TLSTrustSource.OS_STORE_ADDITIVE),
+            "TLS: verifying against OS trust store plus additive CA: %s",
+            extra_ca_display,
         )
     else:
-        _record_tls_trust_status("TLS: verifying against OS trust store (truststore)")
+        _record_tls_trust_status(
+            TLSTrustSelection(TLSTrustSource.OS_STORE),
+            "TLS: verifying against OS trust store (truststore)",
+        )
     return True
 
 

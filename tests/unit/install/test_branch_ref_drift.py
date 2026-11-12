@@ -153,7 +153,7 @@ class TestBranchRefDriftDetection:
         # GitRepo() raises, then verify_package_hash() returns True.
         monkeypatch.setattr(
             "apm_cli.utils.content_hash.verify_package_hash",
-            lambda path, h: True,
+            lambda path, h, **_kwargs: True,
         )
 
         resolved_out, skip_download, locked_out, ref_changed = _resolve_download_strategy(
@@ -191,7 +191,7 @@ class TestBranchRefDriftDetection:
 
         monkeypatch.setattr(
             "apm_cli.utils.content_hash.verify_package_hash",
-            lambda path, h: True,
+            lambda path, h, **_kwargs: True,
         )
 
         _, skip_download, _, ref_changed = _resolve_download_strategy(ctx, dep_ref, install_path)
@@ -215,7 +215,7 @@ class TestBranchRefDriftDetection:
 
         monkeypatch.setattr(
             "apm_cli.utils.content_hash.verify_package_hash",
-            lambda path, h: True,
+            lambda path, h, **_kwargs: True,
         )
 
         _, skip_download, _, ref_changed = _resolve_download_strategy(ctx, dep_ref, install_path)
@@ -285,7 +285,7 @@ class TestSelfHealForUpgradingUsers:
 
         monkeypatch.setattr(
             "apm_cli.utils.content_hash.verify_package_hash",
-            lambda path, h: True,
+            lambda path, h, **_kwargs: True,
         )
 
         _, skip_download, _, ref_changed = _resolve_download_strategy(ctx, dep_ref, install_path)
@@ -324,7 +324,7 @@ class TestSelfHealForUpgradingUsers:
 
         monkeypatch.setattr(
             "apm_cli.utils.content_hash.verify_package_hash",
-            lambda path, h: True,
+            lambda path, h, **_kwargs: True,
         )
 
         _, skip_download, _, _ = _resolve_download_strategy(ctx, dep_ref, install_path)
@@ -347,7 +347,7 @@ class TestSelfHealForUpgradingUsers:
 
         monkeypatch.setattr(
             "apm_cli.utils.content_hash.verify_package_hash",
-            lambda path, h: True,
+            lambda path, h, **_kwargs: True,
         )
 
         _, skip_download, _, _ = _resolve_download_strategy(ctx, dep_ref, install_path)
