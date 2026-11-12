@@ -15,6 +15,16 @@ from apm_cli.utils.path_security import (
 )
 
 
+def read_hook_object(path: Path) -> dict[str, Any]:
+    """Read an optional native hook document without changing its contents."""
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise TypeError("native hook document must contain an object")
+    return data
+
+
 def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     """Restore sidecar ownership markers onto matching in-memory entries."""
     for event_name, sidecar_entries in sidecar_data.items():

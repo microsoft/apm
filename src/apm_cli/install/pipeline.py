@@ -45,6 +45,7 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
+from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
 
 from ..agent_plugins.errors import AgentPluginError
@@ -658,6 +659,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # can be admitted and resolving the capability would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
+            from .phases import claude_plugins as _claude_plugins_phase
             from .phases import codex_plugins, copilot_plugins
             from .phases import targets as _targets_phase
 
@@ -951,6 +953,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not lockfile_only:
             _run_phase("copilot_plugins", copilot_plugins, ctx)
             _run_phase("codex_plugins", codex_plugins, ctx)
+            _run_phase("claude_plugins", _claude_plugins_phase, ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
@@ -958,36 +961,21 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return _run_phase("finalize", _finalize_phase, ctx)
 
-    except (AgentPluginError, CodexNativeError):
-        # Preserve schema-routing and native-boundary diagnostics verbatim.
-        raise
-    except AuthenticationError:
-        # #1015: surface auth failures cleanly to the user. Same
-        # pattern as PolicyViolationError -- re-raise so the typed
-        # exception reaches commands/install.py for rendering with
-        # build_error_context diagnostics instead of being wrapped
-        # into "Failed to resolve APM dependencies: ...".
-        raise
-    except PolicyViolationError:
-        # #832: surface policy violations cleanly to the user.  The
-        # outer ``except Exception`` below would otherwise wrap the
-        # message into ``RuntimeError("Failed to resolve APM dependencies:
-        # Install blocked by org policy ...")`` and the caller in
-        # ``commands/install.py`` would wrap it AGAIN as
-        # ``"Failed to install APM dependencies: Failed to resolve APM
-        # dependencies: Install blocked by org policy ..."``.  Re-raising
-        # the typed exception lets the caller render the policy message
-        # as-is.
-        raise
-    except (DirectDependencyError, FrozenInstallError):
-        # #946: same pattern -- surface the message as-is instead of
-        # double-wrapping it through the generic RuntimeError below.
-        raise
-    except InstallFailureAlreadyRendered:
-        raise
-    except (PathTraversalError, MaterializationPathCollisionError, CopilotSettingsCollisionError):
-        # These actionable failures can occur after resolution and persistence.
-        # Preserve their diagnostics rather than misreporting a resolution error.
+    except (
+        AgentPluginError,
+        CodexNativeError,
+        AuthenticationError,
+        PolicyViolationError,
+        DirectDependencyError,
+        FrozenInstallError,
+        InstallFailureAlreadyRendered,
+        PathTraversalError,
+        MaterializationPathCollisionError,
+        CopilotSettingsCollisionError,
+        ClaudeNativePluginError,
+    ):
+        # Preserve actionable typed failures, including native registration
+        # after successful resolution, instead of misreporting them as resolution failures.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904

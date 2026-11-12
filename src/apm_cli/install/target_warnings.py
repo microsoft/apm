@@ -16,6 +16,52 @@ if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
+def log_hooks_skip(
+    package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
+) -> None:
+    """Warn about skipped hooks only when the package actually ships them.
+
+    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
+    ``*.json`` in ``.apm/hooks/`` and ``hooks/``.
+    """
+    _install = Path(package_info.install_path)
+    has_hooks = False
+    for hook_dir in [_install / ".apm" / "hooks", _install / "hooks"]:
+        if hook_dir.is_dir() and any(hook_dir.glob("*.json")):
+            has_hooks = True
+            break
+    if not has_hooks:
+        return
+    _pkg_label = package_name or getattr(package_info, "name", "unknown")
+    if logger:
+        logger.warning(
+            f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {_pkg_label}' to approve.",
+            symbol="warning",
+        )
+
+
+def log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
+    """Warn about skipped canvas extensions when the package ships them."""
+    _install = Path(package_info.install_path)
+    extensions_root = _install / ".apm" / "extensions"
+    try:
+        has_canvas = extensions_root.is_dir() and any(
+            (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
+        )
+    except OSError:
+        has_canvas = False
+    if not has_canvas:
+        return
+    _pkg_label = package_name or getattr(package_info, "name", "unknown")
+    if logger:
+        logger.warning(
+            f"{_pkg_label}: canvas extension(s) skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {_pkg_label}' to approve.",
+            symbol="warning",
+        )
+
+
 def warn_unsupported_primitives(
     package_info: Any,
     package_name: str,

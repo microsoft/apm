@@ -127,6 +127,17 @@
       "guards": ["marketplace-integrations-native-registration"]
     },
     {
+      "id": "claude-native-plugin-registration",
+      "decision": "Intact legacy Claude plugin admission, complete native fingerprint ownership and read-only verification, and native user marketplace lifecycle without automatic activation",
+      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (synchronize_claude_plugins, resync_claude_plugins, verify_claude_native_cache)",
+      "selectors": [
+        "src/apm_cli/claude_plugins/admission.py",
+        "src/apm_cli/claude_plugins/client.py",
+        "src/apm_cli/claude_plugins/registrar.py"
+      ],
+      "guards": ["marketplace-integrations-claude-ownership"]
+    },
+    {
       "id": "codex-native-plugin-lifecycle",
       "decision": "Qualified Codex compatibility-bundle admission, public native lifecycle, APM transport ownership and immutable source-pin integrity",
       "owner": "codex_plugins/registrar.py (synchronize_codex_plugins, verify_codex_source_identity), admission.py, client.py; utils/content_hash.py owns the opt-in native fingerprint",

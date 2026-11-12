@@ -15,7 +15,7 @@ Pick the form that matches the author's intent -- APM preserves it.
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` or `.apm/hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Register hooks and referenced resources for the selected targets |
-| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Artifact mapping; [eligible Claude user plugins](#plugin-collection-pluginjson) register intact |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
 | `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native registration with Codex CLI 0.163.0 or later at user scope only |
 | Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
@@ -256,11 +256,16 @@ metadata variant changes.
 
 ## Plugin collection (`plugin.json`)
 
-A Claude-native plugin layout. A `plugin.json` with no `$schema` field, or with
-an unrecognized `$schema`, is detected by its structure as this layout. APM
-dissects the plugin artifacts and maps them into runtime directories. An
-unrecognized schema is a warning, not a rejection; only the recognized Agent
-Plugins schema selects the portable Agent Plugin route.
+APM detects a Claude plugin collection by structure when `plugin.json` omits
+`$schema` or declares an unrecognized schema (a warning). Only the recognized
+Agent Plugins schema selects the portable Agent Plugin route.
+
+APM normally maps artifacts to runtime directories. Plugins installed globally
+for Claude use intact registration and require `.claude-plugin/plugin.json`,
+not root-only `plugin.json`. Native admission failures do not fall back to
+loose Claude files. See
+[APM-managed Claude user plugins](../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins)
+for client, capability and runtime qualification limits.
 
 ```
 my-plugin/
@@ -271,10 +276,15 @@ my-plugin/
     +-- search/SKILL.md
 ```
 
-**What gets installed:** each artifact listed in `plugin.json` is mapped to
-the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
-to cherry-pick plugin skills by leaf name or a source-relative path under
-`skills/`, such as `productivity/grill-me`.
+**What gets installed:** by default, APM maps declared artifacts to runtime
+directories; `--skill` selects skills by leaf name or source-relative path
+under `skills/` (for example, `productivity/grill-me`).
+
+With `--global --target claude`, APM retains complete plugin source without
+duplicate loose Claude commands or hooks. Partial skill selections are
+refused; `--skill '*'` resets to complete selection, not a subset. Project
+installs, standalone APM content and other selected targets keep their
+existing routes.
 
 A declared key is authoritative for its primitive: it replaces the default
 directory scan rather than adding to it. `"skills": ["./skills/search"]`

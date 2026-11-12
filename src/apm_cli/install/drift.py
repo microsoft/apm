@@ -529,6 +529,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     CacheMissError
         Surfaced verbatim when a locked dep cannot be materialized.
     """
+    from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
@@ -669,7 +670,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             install_path = _normalize_legacy_local_plugin_for_replay(
                                 lock_dep,
                                 install_path,
-                                apm_modules_dir,
+                                scratch_root / "normalized-local-sources",
                             )
 
                     if lock_dep.local_path == _SELF_KEY:
@@ -702,6 +703,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             package_name=dep_key,
                             logger=None,
                             scope=None,
+                            native_claude_user_scope=config.user_scope,
                             skill_subset=(
                                 tuple(package_info.dependency_ref.skill_subset or ()) or None
                                 if package_info.dependency_ref
@@ -715,7 +717,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     except AgentPluginTargetExcludedError:
                         continue
-                    if result.get("native_plugin"):
+                    if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,
                             install_path,
@@ -735,6 +737,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 records=codex_records,
                                 **identity,
                             )
+                    if result.get("native_claude_plugin"):
+                        verify_claude_native_cache(
+                            modules_dir=live_modules_dir, locked=lock_dep, source_root=install_path
+                        )
                     replayed_count += 1
     finally:
         if snapshot_started:

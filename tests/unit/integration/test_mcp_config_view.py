@@ -651,6 +651,44 @@ def test_removed_local_and_remote_declarations_are_lock_only(tmp_path: Path) -> 
     assert diff.lock_only == frozenset({"local-removed", "remote-removed"})
 
 
+@pytest.mark.parametrize("strict", [None, False])
+@pytest.mark.parametrize("shape", ["hooks", "mcp", "invalid", "wrong-lock-type"])
+def test_local_claude_source_is_never_mutated_or_waived_during_mcp_inspection(
+    tmp_path: Path, strict: bool | None, shape: str
+) -> None:
+    """Without the install-synthesized manifest, MCP stays uncollected and the source untouched."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "publisher"
+    manifest = source / ".claude-plugin/plugin.json"
+    manifest.parent.mkdir(parents=True)
+    data = {"name": "owned-plugin", "version": "1.0.0"}
+    if shape == "mcp":
+        data["mcpServers"] = {"owned-server": {"command": "DO_NOT_EXECUTE"}}
+    manifest.write_text("[" if shape == "invalid" else json.dumps(data), encoding="ascii")
+    hooks = source / "hooks/hooks.json"
+    hooks.parent.mkdir()
+    hooks.write_text('{"hooks": {}}', encoding="ascii")
+    before = ArtifactSnapshot.capture(source)
+    dependency = LockedDependency(
+        repo_url="_local/publisher",
+        source="local",
+        local_path=str(source),
+        package_type="apm_package" if shape == "wrong-lock-type" else "marketplace_plugin",
+    )
+    view = CurrentMcpConfigView.derive(
+        root,
+        _lock(dependency),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=True,
+        allow_pending=strict,
+    )
+    assert view.problems
+    assert view.configs == {}
+    assert_unchanged(before, ArtifactSnapshot.capture(source))
+    assert not (source / "apm.yml").exists()
+    assert not (source / ".apm").exists()
+
+
 def test_missing_package_manifest_records_problem(tmp_path: Path) -> None:
     """A locked package missing apm.yml cannot yield a vacuous pass."""
     root = _write_manifest(tmp_path, name="root")

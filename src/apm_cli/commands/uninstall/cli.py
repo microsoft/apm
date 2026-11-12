@@ -4,6 +4,8 @@ import builtins
 import contextlib
 import sys
 import traceback
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import click
@@ -71,21 +73,40 @@ def _collect_deployed_cleanup_state(
     return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
 
 
+@dataclass(frozen=True)
+class _LockPersistence:
+    """Outcome of the survivor lock save that gates native reconciliation."""
+
+    saved: bool
+    removal_pending: bool
+
+
 def _persist_uninstall_lockfile(
     lockfile,
     lockfile_path,
     logger: CommandLogger,
     integration_cleanup: IntegrationCleanupOutcome,
-) -> None:
-    """Bind actual survivor writes only after final lock persistence succeeds."""
+    *,
+    defer_empty_removal: bool = True,
+) -> _LockPersistence:
+    """Bind actual survivor writes only after final lock persistence succeeds.
+
+    With ``defer_empty_removal``, an empty lock is written instead of removed so
+    an interrupted last-package native cleanup can retry from authoritative
+    survivors; the caller removes it afterwards (``removal_pending``).
+    """
     from ...deps.lockfile import LockfileSymlinkError
     from .lockfile_state import lockfile_has_persisted_state
 
+    removal_pending = False
     try:
         if lockfile_has_persisted_state(lockfile):
             lockfile.write(lockfile_path)
         elif lockfile_path.is_symlink():
             raise LockfileSymlinkError(lockfile_path)
+        elif defer_empty_removal:
+            lockfile.write(lockfile_path)
+            removal_pending = True
         else:
             lockfile_path.unlink(missing_ok=True)
     except LockfileSymlinkError:
@@ -94,9 +115,60 @@ def _persist_uninstall_lockfile(
         logger.warning(
             "Failed to update lockfile -- it may be out of sync with uninstalled packages."
         )
+        saved = False
     else:
         if integration_cleanup.materialization_session is not None:
             integration_cleanup.materialization_session.bind_committed_claims(lockfile)
+        saved = True
+    return _LockPersistence(saved=saved, removal_pending=removal_pending)
+
+
+def _hold_native_registration(modules_dir, logger: CommandLogger) -> None:
+    """Report that Claude ownership waits for a durable survivor lock."""
+    from ...claude_plugins.registrar import LEDGER_RELATIVE
+
+    if modules_dir is not None and (Path(modules_dir) / LEDGER_RELATIVE).exists():
+        logger.warning(
+            "Claude native plugin registrations were left unchanged because the lockfile "
+            "update did not complete. Resolve the errors above, then run "
+            "'apm install --global' to reconcile them."
+        )
+
+
+def _persist_lock_then_resync_native(
+    *,
+    lock_changed: bool,
+    persist_allowed: bool,
+    lockfile,
+    lockfile_path,
+    logger: CommandLogger,
+    integration_cleanup: IntegrationCleanupOutcome,
+    deploy_root,
+    modules_dir,
+    scope,
+) -> None:
+    """Persist survivors, converge native registrations, then drop an empty lock.
+
+    An empty last-package lock stays on disk until Claude native cleanup
+    converges, so an interrupted removal can retry from authoritative survivors.
+    Native state never runs ahead of the lock: a withheld or failed required
+    save leaves registrations unchanged; an unchanged lock still reconciles.
+    """
+    saved = None
+    if lock_changed and persist_allowed:
+        saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    if lock_changed and (saved is None or not saved.saved):
+        _hold_native_registration(modules_dir, logger)
+        return
+    _resync_native_registration_after_uninstall(
+        deploy_root=deploy_root,
+        modules_dir=modules_dir,
+        scope=scope,
+        lockfile=lockfile,
+        logger=logger,
+    )
+    if saved is not None and saved.removal_pending:
+        lockfile_path.unlink(missing_ok=True)
 
 
 def _sync_integrations_for_manifest(
@@ -377,6 +449,7 @@ def _finish_selected_profile_uninstall(
             lockfile_path,
             logger,
             IntegrationCleanupOutcome(counts={}, deployed_files={}, failed_paths=[], error_count=0),
+            defer_empty_removal=False,
         )
     logger.success(
         f"Uninstall complete: removed {retained_count} package(s) from the selected profile only"
@@ -882,22 +955,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         lockfile_updated = lsp_lock_updated or lockfile_updated
 
-        if (
-            lockfile
-            and (lockfile_updated or profile_lock_updated)
-            and lockfile_ready
-            and mcp_cleanup_error is None
-        ):
-            _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
-
-        # Rebuild the APM-owned Copilot plugin registration from the surviving
-        # locked state: only APM's own rows disappear, user bytes never do.
-        _resync_native_registration_after_uninstall(
+        # Persist survivors, then rebuild APM-owned native plugin registrations
+        # from that locked state: only APM's own rows disappear, user bytes never do.
+        _persist_lock_then_resync_native(
+            lock_changed=bool(lockfile and (lockfile_updated or profile_lock_updated)),
+            persist_allowed=bool(lockfile_ready and mcp_cleanup_error is None),
+            lockfile=lockfile,
+            lockfile_path=lockfile_path,
+            logger=logger,
+            integration_cleanup=integration_cleanup,
             deploy_root=deploy_root,
             modules_dir=modules_dir,
             scope=scope,
-            lockfile=lockfile,
-            logger=logger,
         )
 
         # Final summary
@@ -975,11 +1044,26 @@ def _publish_native_registration(deploy_root, scope, manifest_path):
 def _resync_native_registration_after_uninstall(
     *, deploy_root, modules_dir, scope, lockfile, logger
 ) -> None:
-    """Rebuild APM-owned Copilot plugin rows from surviving locked state.
+    """Rebuild native plugin rows from surviving locked state.
 
-    Downgrades registration failures to a warning so an unrelated uninstall
-    is never bricked by a Copilot settings collision or a missing client.
+    Claude removal errors remain fatal; Copilot settings refresh is advisory.
     """
+    from ...claude_plugins.admission import ClaudeNativePluginError
+    from ...claude_plugins.registrar import resync_claude_plugins
+
+    try:
+        resync_claude_plugins(
+            modules_dir=modules_dir,
+            scope=scope,
+            lockfile=lockfile,
+            logger=logger,
+        )
+    except ClaudeNativePluginError as exc:
+        raise ClaudeNativePluginError(
+            "Package removal may already be complete, but Claude registration did not converge. "
+            f"{exc} Reconcile remaining declarations with 'apm install --global' and the "
+            "original --target selection; do not re-add the removed package."
+        ) from exc
     try:
         from ...agent_plugins.errors import AgentPluginError
         from ...copilot_plugins.registrar import resync_native_plugins

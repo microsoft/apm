@@ -111,7 +111,80 @@ compatibility overlay does not replace those formats. This route neither
 changes `apm pack` output nor translates Codex data for other targets, and
 does not also generate loose skill or MCP registrations.
 
+Selecting both Claude and Codex does not reinterpret a Codex compatibility
+bundle as a Claude plugin. Each native route retains its own admission,
+ownership and audit checks while sharing APM's source scan and native
+fingerprint utility. This does not extend either route's runtime qualification.
+
 ## What you give up with native installs
+
+### APM-managed Claude user plugins
+
+With Claude Code **2.1.291** on `PATH`, `apm install --global --target claude`
+prepares eligible intact Claude plugins through a local `apm-claude`
+marketplace. APM still owns dependency acquisition, the lockfile, source
+security checks, and the materialized package under `~/.apm/apm_modules`.
+Claude owns native registration and activation. It reads the package in place;
+do not remove or edit its source while Claude uses it.
+
+New plugins default **disabled**; updates preserve activation choices. Activation,
+onboarding and workspace trust remain user decisions; APM does not run hooks.
+
+:::note[Runtime qualification]
+Reported qualification covers only the metadata lifecycle on Claude Code
+**2.1.291**, macOS arm64. Runtime witnesses are **absent**: `SessionStart`,
+`SubagentStart` and `UserPromptSubmit` execution, distinct effective plugin
+roots/resources, and native command loading/invocation/namespacing remain
+unverified. Metadata and unit/mock results do not establish execution.
+:::
+
+APM preserves manifest selection, frontmatter, plugin-root expressions and sibling
+files, without duplicate loose Claude commands or hook-settings merges.
+Same-name personal loose Claude skills are preserved and do not block native
+registration. Standalone APM primitives, project installs and other selected
+targets are unchanged.
+
+Native ownership records fingerprint every publisher file, including
+`__pycache__` resources and the owner executable bit. Git transport metadata and
+the root `.apm-pin` marker are excluded; ordinary lockfile hashes are unchanged.
+Registration checks the admitted fingerprint again after metadata readback.
+Reinstalling the same remote revision cannot adopt changed bytes or modes.
+Freshly admitted revision updates and local-source updates remain supported.
+Audit checks the saved native fingerprint without invoking Claude or repairing
+the source or cache. An older ownership record without this baseline requires
+explicit global uninstall and reinstall with the original targets.
+
+To verify this user installation, run `apm audit --ci` from its manifest
+directory (normally `~/.apm`). Include `claude` in that manifest's `targets`,
+preserving any other targets; audit has no `--target` flag. This checks stored
+source integrity, not native activation or hook execution.
+
+For raw local Claude plugins, frozen install and audit inspect the original
+declarations in a temporary normalized copy; they do not add `apm.yml` to the
+publisher's source. The lock checks the pre-normalization source snapshot,
+while native ownership separately checks the complete installed plugin.
+
+If this package already owns loose Claude hooks, APM preserves them and refuses
+the native transition instead of deleting retained-target state or enabling both
+routes. Explicitly uninstall that package with `apm uninstall --global <package>`,
+then reinstall it with the original targets to choose the native route. Unreadable
+hook settings or ownership records must be repaired first; unrelated hooks remain
+untouched.
+
+This route requires `.claude-plugin/plugin.json` and accepts commands, skills,
+agents and approved hooks. It rejects partial skill subsets, symlinks, MCP/LSP,
+bin scripts and unqualified manifest capabilities. Missing or different clients
+also fail without loose fallback. Resolve the restriction or exclude Claude from
+that dependency's targets.
+
+Updates and global uninstalls reconcile native metadata; uninstall retains native
+plugin data. Interrupted operations retain ownership intent but do not roll back
+Claude-owned state. Repair the problem, then retry
+`apm install --global --target claude` for this Claude-only example. Mixed-target
+installs must retain their complete original target list. A conflicting
+`apm-claude` marketplace or plugin identity is never adopted or overwritten.
+
+### Direct native installs
 
 Native runtime commands install the plugin and stop there. They do
 not produce a project-scoped lockfile, do not run the APM security

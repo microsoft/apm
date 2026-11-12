@@ -15,11 +15,9 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It removes selected
-packages and unused transitive dependencies from APM-managed state,
-including `apm_modules/`, configured targets, the manifest, and the lockfile.
-
-The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
+`apm uninstall` removes selected packages and unused transitive dependencies.
+File cleanup uses the lockfile's `deployed_files` list, preserving hand-authored
+content. Global uninstalls also reconcile APM-owned Claude plugin registrations.
 
 ## Arguments
 
@@ -120,6 +118,9 @@ What gets removed, in order:
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
+8. For global uninstalls, reconcile APM-owned Claude plugin registrations after
+   lockfile processing: remove retired registrations, retain native plugin data,
+   and preserve surviving registrations and activation choices.
 
 When uninstall rebuilds a surviving package's loose skills, APM records those
 actual writes locally and binds them after the final lockfile update succeeds.
@@ -174,6 +175,16 @@ If safe LSP cleanup fails after package removal, uninstall exits nonzero,
 preserves the conflicting configuration, and tells you to repair the path or
 ownership conflict. Run `apm install` to reconcile project state, or
 `apm install --global` after a global uninstall.
+
+If Claude native reconciliation fails, uninstall exits nonzero; package and
+manifest removals may already have happened. The lockfile retains the surviving
+dependency set, including an empty set after the last removal, for retry.
+APM does not roll
+back Claude-owned metadata; it retains ownership intent for recovery. Repair
+the reported issue, then reconcile remaining declarations with
+`apm install --global --target claude` (Claude-only). For mixed targets, retain
+the full original `--target` list. Do not re-add removed package arguments. See
+[native registration and runtime qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 `_local/<name>` is resolved from the manifest and lockfile metadata that produced
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an

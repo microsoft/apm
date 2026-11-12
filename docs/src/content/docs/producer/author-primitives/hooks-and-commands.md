@@ -26,6 +26,17 @@ primary distribution path.
 
 ## Hooks
 
+For Claude plugins installed with `--global --target claude`, APM prepares
+native registration instead of merging hooks into loose settings. New
+registrations start disabled. APM leaves `CLAUDE_PLUGIN_ROOT` expressions and
+sibling resources intact for Claude to interpret. See
+[APM-managed Claude user plugins](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins)
+for client, capability and outstanding runtime qualification limits.
+Existing package-owned loose Claude hooks are preserved and block the native
+transition until the operator explicitly uninstalls that package.
+The loose-hook rules below still apply to standalone primitives and project
+deployments.
+
 Source layout. APM discovers hook JSON files in either of two
 directories at the package root:
 

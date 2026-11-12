@@ -672,6 +672,7 @@ install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-manifest
+marketplace-integrations-claude-ownership
 marketplace-integrations-codex-native-lifecycle
 marketplace-integrations-copilot-ownership
 marketplace-integrations-generated-bundle-lf-writers

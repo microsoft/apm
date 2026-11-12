@@ -372,8 +372,13 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 8,
       "tests": [
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[malformed-config]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[malformed-sidecar]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[non-object-sidecar]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[orphaned]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[owned]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_target_merge_hook_state_reconciled_fail_safe"

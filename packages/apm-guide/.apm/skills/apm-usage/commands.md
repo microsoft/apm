@@ -120,6 +120,34 @@ workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
 configuration.
 
+`apm install -g --target claude` registers Claude plugins natively;
+Claude Code exactly 2.1.291 must be on `PATH`. New plugins stay disabled;
+updates preserve activation choices. See [admission limits and outstanding
+runtime qualification](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins):
+registration is metadata-only, not runtime proof.
+
+Claude-native registration and read-only audit verify a separate complete-source
+fingerprint, including `__pycache__` resources and the owner executable bit.
+Ordinary lockfile hashes are unchanged. Same-revision remote cache edits are
+refused, not adopted; restore the pinned source. Native ownership records without
+this fingerprint require `apm uninstall --global <package>`, then reinstall with
+the original targets. Audit never invokes Claude or repairs its source/cache.
+Run it from the user manifest directory with Claude included in that manifest's
+targets; see the [user-plugin audit recipe](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+
+An existing package-owned loose Claude hook blocks native transition without
+changing hook settings or ownership. Explicitly uninstall the package with
+`apm uninstall --global <package>`, then reinstall with the original targets;
+repair unreadable settings or ownership records first. APM never automatically
+deletes retained-target hooks to migrate them.
+
+Global uninstall retains native plugin data; APM never takes over foreign
+marketplace/plugin ownership. APM's package-replacement rollback does not cover
+Claude-owned metadata; failures retain ownership intent. After repair, reconcile
+remaining declarations with `apm install --global --target claude` for
+Claude-only installs; for mixed targets, retain the full original `--target`
+list. Do not re-add removed package arguments.
+
 Cursor and OpenCode user configs are `~/.cursor/mcp.json` and
 `~/.config/opencode/opencode.json`. Global MCP cleanup removes only names
 recorded as APM-owned for that target; personal same-name entries stay intact.

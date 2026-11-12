@@ -946,6 +946,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Catalog-only marketplace manifest materialization loses its owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-claude-ownership",
+        rule_id="marketplace-integrations-claude-ownership",
+        path="src/apm_cli/claude_plugins/registrar.py",
+        old='"defaultEnabled": False',
+        new='"defaultEnabled": True',
+        intent="New Claude registrations silently activate without native user consent.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-codex-native-lifecycle",
         rule_id="marketplace-integrations-codex-native-lifecycle",
         path="src/apm_cli/codex_plugins/client.py",
@@ -1864,6 +1872,110 @@ def test_claude_cleanup_guard_preserves_unresolved_path_check() -> None:
     assert any(
         violation.rule_id == "mutation_writes.claude_mcp_paths" for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("dry_run=True,", "dry_run=False,"),
+        (
+            "_check_native_claude_transition(\n            reconcile_package_targets,",
+            "_ignore_native_claude_transition(\n            reconcile_package_targets,",
+        ),
+        (
+            'if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):',
+            'if reconcile_stats.get("errors"):',
+        ),
+    ],
+)
+def test_claude_native_transition_guard_requires_read_only_preservation(old: str, new: str) -> None:
+    path = "src/apm_cli/install/services.py"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "marketplace-integrations-claude-ownership"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/deployment_plan.py",
+            "if codex_native is not None\n        else plan_native_claude_plugin(",
+            "if False\n        else plan_native_claude_plugin(",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "native_claude_plugin = deployment_plan.claude_native",
+            "native_claude_plugin = None",
+        ),
+        (
+            "src/apm_cli/install/deployment_plan.py",
+            "return [target for target in targets if target.name not in native_target_names]",
+            "return targets",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "_verify_locked_source_hash(locked, lockfile, modules_dir, root, key)",
+            "pass",
+        ),
+        (
+            "src/apm_cli/integration/mcp_config_view.py",
+            "elif _is_local_claude_plugin_source(dependency, package_dir):",
+            "elif False:",
+        ),
+        (
+            "src/apm_cli/integration/mcp_config_view.py",
+            'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
+            "if not package_dir.is_dir():",
+        ),
+        (
+            "src/apm_cli/claude_plugins/admission.py",
+            "return compute_native_bundle_hash(root)",
+            "return compute_package_hash(root)",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "fingerprint_native_claude_source(root) != expected",
+            "False",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            'result["native_claude_plugin"] = True',
+            'result["native_claude_plugin"] = False',
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
+            'if result.get("native_plugin"):',
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'scratch_root / "normalized-local-sources"',
+            "apm_modules_dir",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "verify_claude_native_cache(",
+            "ignore_native_fingerprint(",
+        ),
+    ],
+)
+def test_claude_native_fingerprint_guard_cannot_fall_back_to_legacy_hash_or_mutate_cache(
+    path: str, old: str, new: str
+) -> None:
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "marketplace-integrations-claude-ownership"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 def test_orphan_selection_guard_rejects_warning_bypass() -> None:

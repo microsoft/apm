@@ -69,6 +69,30 @@ def filter_targets_for_dependency(
     return filtered_targets, allowed_dep_targets, True
 
 
+def warn_target_reconcile_failure(
+    diagnostics: DiagnosticCollector,
+    package_name: str,
+    reconcile_stats: dict,
+) -> None:
+    """Report incomplete hook cleanup alongside target restriction diagnostics."""
+    if not reconcile_stats.get("errors", 0):
+        return
+    failed_targets = reconcile_stats.get("failed_targets") or ["unknown"]
+    failed_paths = reconcile_stats.get("failed_paths") or ["unknown"]
+    if not isinstance(failed_targets, list):
+        failed_targets = ["unknown"]
+    if not isinstance(failed_paths, list):
+        failed_paths = ["unknown"]
+    diagnostics.warn(
+        "Could not fully reconcile hooks excluded by target restrictions",
+        package=package_name,
+        detail=(
+            f"targets: [{', '.join(failed_targets)}]; "
+            f"configs: [{', '.join(failed_paths)}]; run apm install again"
+        ),
+    )
+
+
 # A package declaring this target ships portable, cross-client skills.
 CROSS_CLIENT_SKILLS_TARGET = "agent-skills"
 
