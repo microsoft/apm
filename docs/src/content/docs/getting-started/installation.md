@@ -431,6 +431,29 @@ Replace `python3` with the owning interpreter when needed. Uninstall before swit
 
 Pip installs do not edit shell profiles or write native shell setup policy. If your shell cannot find `apm`, add the Python user bin directory to `PATH` manually.
 
+## Dev containers
+
+APM does not publish a Dev Container Feature. Install APM from `devcontainer.json` with the [standalone installer](#standalone-installer) (prebuilt Linux binaries need glibc 2.28+):
+
+```json
+{
+  "postCreateCommand": "curl -sSL https://aka.ms/apm-unix | sh"
+}
+```
+
+Or use [pip](#pip-install) on top of the official Python feature:
+
+```json
+{
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" }
+  },
+  "postCreateCommand": "python3 -m pip install apm-cli"
+}
+```
+
+A community feature, `ghcr.io/postfinance/devcontainer-features/apm`, is maintained outside this project.
+
 ## Manual binary install
 
 For Windows, download the archive from [GitHub Releases](https://github.com/microsoft/apm/releases/latest). For Unix, save the installer below.
