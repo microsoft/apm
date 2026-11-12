@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm mcp install --help` now lists its forwarded install options (`--transport`, `--url`, `--env`, `--header`, `--target`, `--registry`, `--mcp-version`, `--global`, `--trust-transitive-mcp`, `--dev`, `--dry-run`, `--force`, `--verbose`, `--no-policy`) with the same help text, accepted values and shell completion as `apm install`, instead of a hand-written summary that had drifted; forwarded installs behave as before. (#3633)
 - `apm compile` places scoped `applyTo` instructions much faster on large projects (about 41x on a ~10,000-directory benchmark) by caching resolved paths and computing placement scores once per run; matching, placement, symlink handling and generated output are unchanged. -- by @sekosen (#3379)
 - **BREAKING:** APM now requires Python 3.11 or newer (Python 3.10 reached end of life in October 2026); standalone installers are unaffected (#3562)
 - Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install --update` and other same-process re-downloads of a Claude marketplace plugin (no `apm.yml` of its own) now stamp the re-materialized tree with the short commit SHA, as the first download does, so the `content_hash` recorded in `apm.lock.yaml` matches the installed files and a later fresh install passes the integrity check. If a lockfile already recorded an unstamped hash, run `apm install --update` once to re-record it. -- by @McNultyyy (#2627)
+- `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses and forms keep absolute paths. -- by @Bronyal-lzx (#2944)
 - `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; the field is omitted. `apm init` still fills it in. (#3630)
 - HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells), instead of connecting without the pin that guards against DNS rebinding; an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
 - `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
