@@ -309,3 +309,39 @@ def test_new_closer_policy_never_silently_repins(project: Path) -> None:
 
     assert result.outcome == "hash_mismatch"
     assert result.policy is None
+
+
+def test_duck_typed_extends_result_without_ancestry_fields_still_resolves(
+    project: Path,
+) -> None:
+    """Results predating the ancestry fields keep resolving their extends chain."""
+    from types import SimpleNamespace
+
+    from apm_cli.policy.discovery import PolicyFetchResult
+    from apm_cli.policy.parser import load_policy
+
+    leaf_policy, _ = load_policy(_policy("leaf", deny="leaf/pkg", extends="org"))
+    parent_policy, _ = load_policy(_ACME)
+    leaf = SimpleNamespace(
+        policy=leaf_policy,
+        source="org:contoso/.github",
+        cache_ref=None,
+        cached=False,
+        cache_stale=False,
+        outcome="found",
+        warnings=[],
+        raw_bytes_hash=None,
+    )
+    parent = PolicyFetchResult(
+        policy=parent_policy, source="org:contoso/.github-parent", outcome="found"
+    )
+
+    with (
+        patch.object(discovery, "discover_policy", return_value=leaf),
+        patch.object(discovery, "_fetch_chain_parent", return_value=parent),
+    ):
+        result = discover_policy_with_chain(project)
+
+    assert result is leaf
+    assert _deny(result) == {"evil/pkg", "leaf/pkg"}
+    assert result.outcome == "found"
