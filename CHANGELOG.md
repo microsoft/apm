@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
 - When a direct `apm install --mcp NAME` finds no match, the error names the searched registry and shows how to search it or choose another with `--registry <URL>`; APM never falls back to another registry. New docs page: "Choosing an MCP registry". -- by @VedanthB (#2803)
 
+### Removed
+
+- The unpublished Dev Container Feature (`devcontainer/`) and its publish and nightly test workflows are gone; it was never released to GHCR. The installation guide now has a "Dev containers" section showing the installer and pip recipes. (#3642)
+
 ### Fixed
 
 - Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
