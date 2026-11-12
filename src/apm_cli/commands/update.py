@@ -59,7 +59,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
-from git.exc import GitCommandError
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
@@ -156,6 +155,8 @@ def _resolve_and_stage_revision_pin_updates(
     against the new SHAs after the user's consent decision while dry-run and
     decline paths leave the original manifest model untouched.
     """
+    from git.exc import GitCommandError
+
     only_set = set(only_packages) if only_packages is not None else None
     logger.progress("Checking upstream for revision-pin freshness...", symbol="running")
 

@@ -97,6 +97,42 @@ else
     exit 1
 fi
 
+# Enforce the glibc floor when APM_MAX_GLIBC is set. Release builds set 2.28 so
+# the binary runs on RHEL/Rocky/Alma 8. PyInstaller copies libpython and the
+# extension modules from the build interpreter, so the check reads every ELF file.
+if [ "$PLATFORM" = "linux" ] && [ -n "${APM_MAX_GLIBC:-}" ]; then
+    echo -e "${YELLOW}Checking that bundled ELF files need glibc <= ${APM_MAX_GLIBC}...${NC}"
+    if ! command -v objdump &> /dev/null; then
+        echo -e "${RED}objdump not found - install binutils to run the glibc check${NC}"
+        exit 1
+    fi
+    GLIBC_VIOLATIONS=""
+    GLIBC_CHECKED=0
+    while IFS= read -r -d '' elf; do
+        if ! symbols=$(objdump -T "$elf" 2>&1); then
+            echo -e "${RED}[x] Cannot inspect bundled ELF file: ${elf}${NC}" >&2
+            printf '%s\n' "$symbols" >&2
+            exit 1
+        fi
+        GLIBC_CHECKED=$((GLIBC_CHECKED + 1))
+        required=$(printf '%s\n' "$symbols" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+        if [ -n "$required" ] && [ "$(printf '%s\n%s\n' "$APM_MAX_GLIBC" "$required" | sort -V | tail -1)" != "$APM_MAX_GLIBC" ]; then
+            GLIBC_VIOLATIONS="${GLIBC_VIOLATIONS}  GLIBC_${required} ${elf}\n"
+        fi
+    done < <(find "dist/$BINARY_NAME" -type f \( -name 'apm' -o -name '*.so' -o -name '*.so.*' \) -print0)
+    if [ -n "$GLIBC_VIOLATIONS" ]; then
+        echo -e "${RED}[x] Bundled files require glibc newer than ${APM_MAX_GLIBC}:${NC}"
+        echo -e "$GLIBC_VIOLATIONS"
+        echo -e "${RED}Build with a Python targeting an older glibc (e.g. UV_PYTHON_PREFERENCE=only-managed)${NC}"
+        exit 1
+    fi
+    if [ "$GLIBC_CHECKED" -eq 0 ]; then
+        echo -e "${RED}[x] No ELF files found under dist/$BINARY_NAME${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[+] ${GLIBC_CHECKED} bundled ELF files work with glibc ${APM_MAX_GLIBC}${NC}"
+fi
+
 # Show binary info
 echo -e "${GREEN}✓ Build complete!${NC}"
 echo -e "${BLUE}Binary: ./dist/$BINARY_NAME/apm${NC}"

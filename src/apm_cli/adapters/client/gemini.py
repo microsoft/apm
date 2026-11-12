@@ -240,7 +240,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             config["args"] = ["-y", package_name] + processed_rt + processed_pkg  # noqa: RUF005
         elif registry_name == "docker":
             config["command"] = "docker"
-            runtime_args = processed_rt or ["run", "-i", "--rm"]
+            runtime_args = self._ensure_docker_run_args(processed_rt)
             docker_args = self._inject_env_vars_into_docker_args(
                 self._ensure_docker_image_arg(runtime_args, package_name), resolved_env
             )
@@ -297,12 +297,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry", symbol="error")
                 return False
 
-            if server_name:
-                config_key = server_name
-            elif "/" in server_url:
-                config_key = server_url.split("/")[-1]
-            else:
-                config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})

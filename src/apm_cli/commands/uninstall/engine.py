@@ -663,6 +663,7 @@ def _validate_uninstall_packages(
         )
 
     packages_to_remove = []
+    seen_entry_ids: set[int] = set()
     packages_not_found = []
 
     for package in packages:
@@ -702,7 +703,10 @@ def _validate_uninstall_packages(
         selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
-            if matched_dep not in packages_to_remove:
+            # Selection returns the original manifest object, including unhashable mappings.
+            entry_id = id(matched_dep)
+            if entry_id not in seen_entry_ids:
+                seen_entry_ids.add(entry_id)
                 packages_to_remove.append(matched_dep)
             if not log_matches:
                 continue
@@ -1111,6 +1115,7 @@ def _sync_integrations_after_uninstall(
     modules_dir: Path | None = None,
     survivor_plan: list[tuple[DependencyReference, object]] | None = None,
     deployed_file_hashes: dict[str, str] | None = None,
+    excluded_survivor_keys: frozenset[str] = frozenset(),
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1121,6 +1126,9 @@ def _sync_integrations_after_uninstall(
     lockfile (orphans already deleted). The on-disk lockfile is still
     stale at this point in the uninstall pipeline, so Phase 2 must not
     re-read it from disk.
+
+    Survivors in *excluded_survivor_keys* are not re-integrated, such as
+    packages just removed from the selected profile only.
     """
     from ...core.deployment_ledger import DeploymentMaterializationSession
     from ...install.services import (
@@ -1177,6 +1185,8 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
+        if dep_ref.get_unique_key() in excluded_survivor_keys:
+            continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             dep_ref.target_subset,

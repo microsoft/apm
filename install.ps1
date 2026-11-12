@@ -447,6 +447,31 @@ function Test-AntivirusBlockError {
     )
 }
 
+function Invoke-StagedBinaryTest {
+    # Runs the staged binary and returns Output plus Failure ($null on
+    # success). Windows PowerShell 5.1 turns the first native stderr line
+    # into a terminating error under ErrorActionPreference=Stop, which
+    # truncated a multi-line traceback to its first line. Run under
+    # Continue (as Install-ViaPip does) and judge by exit code. Launch
+    # failures (Access is denied, AV block) still throw and keep their text.
+    param([string]$Path, [string[]]$Arguments)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $Path @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } catch {
+        return [pscustomobject]@{ Output = $null; Failure = "$_" }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        $lines = @("exit code $exitCode") + @($output | ForEach-Object { "$_" })
+        return [pscustomobject]@{ Output = $null; Failure = ($lines -join [Environment]::NewLine) }
+    }
+    return [pscustomobject]@{ Output = "$output"; Failure = $null }
+}
+
 function Write-AppControlGuidance {
     param(
         [string]$Path,
@@ -902,13 +927,10 @@ try {
     }
 
     Write-Info "Testing binary..."
-    $testFailure = $null
-    try {
-        $testOutput = & $stagedExe --version 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE - $testOutput" }
-        Write-Success "Binary test successful: $testOutput"
-    } catch {
-        $testFailure = "$_"
+    $binaryTest = Invoke-StagedBinaryTest -Path $stagedExe -Arguments @('--version')
+    $testFailure = $binaryTest.Failure
+    if (-not $testFailure) {
+        Write-Success "Binary test successful: $($binaryTest.Output)"
     }
 
     if ($testFailure) {

@@ -40,6 +40,7 @@ from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
     is_azure_devops_hostname,
+    is_full_commit_sha,
     is_github_hostname,
     is_supported_git_host,
 )
@@ -457,7 +458,7 @@ def _extract_in_repo_path_and_ref(
         return None, None
 
     source_type = _coerce_dict_plugin_type(src)
-    ref_val = src.get("ref", "")
+    ref_val = _source_pin(src)
     ref: str | None = ref_val.strip() if isinstance(ref_val, str) and ref_val.strip() else None
 
     if source_type == "github":
@@ -532,13 +533,30 @@ def parse_marketplace_ref(
     return None
 
 
+def _source_pin(source: dict) -> str:
+    """Return the pin of a source: ``sha`` wins over ``ref``, as in Claude Code.
+
+    A declared ``sha`` must be a full 40-character commit SHA. Anything else
+    raises ``ValueError`` here, before install writes the manifest, lockfile
+    or any deployed file.
+    """
+    sha = source.get("sha")
+    if sha is None or sha == "":
+        return source.get("ref", "")
+    if not isinstance(sha, str) or not is_full_commit_sha(sha.strip()):
+        raise ValueError(
+            f"Invalid marketplace source sha {sha!r}: expected a full 40-character commit SHA."
+        )
+    return sha.strip()
+
+
 def _resolve_github_source(source: dict) -> str:
     """Resolve a ``github`` source type to ``owner/repo[/path][#ref]``.
 
     Accepts ``path`` field (Copilot CLI format) as a virtual subdirectory.
     """
     repo = source.get("repo", "") or source.get("repository", "")
-    ref = source.get("ref", "")
+    ref = _source_pin(source)
     path = source.get("path", "").strip("/")
     if not repo or "/" not in repo:
         raise ValueError(
@@ -575,8 +593,9 @@ def _resolve_url_source(source: dict) -> str:
         raise ValueError(f"Cannot resolve URL source '{url}': {exc}") from exc
     if dep.is_local:
         raise ValueError(f"URL source '{url}' resolves to a local path, not a Git coordinate.")
-    if dep.reference:
-        return f"{dep.repo_url}#{dep.reference}"
+    pin = _source_pin({"sha": source.get("sha"), "ref": dep.reference or ""})
+    if pin:
+        return f"{dep.repo_url}#{pin}"
     return dep.repo_url
 
 
@@ -589,7 +608,7 @@ def _resolve_git_subdir_source(source: dict) -> str:
             f"Invalid git-subdir source: expected 'owner/repo' but got a URL '{repo}'. "
             f"Use source type 'url' for full URL references."
         )
-    ref = source.get("ref", "")
+    ref = _source_pin(source)
     subdir = (source.get("subdir", "") or source.get("path", "")).strip("/")
     if not repo or "/" not in repo:
         raise ValueError(
@@ -642,7 +661,7 @@ def _dependency_reference_from_packed_source(
         path = source.get("subdir", "") or source.get("path", "")
         if path:
             entry["path"] = path
-    declared_ref = source.get("ref")
+    declared_ref = _source_pin(source)
     if declared_ref:
         entry["ref"] = declared_ref
     dependency = DependencyReference.parse_from_dict(entry)

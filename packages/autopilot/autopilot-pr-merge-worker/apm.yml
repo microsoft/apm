@@ -2,7 +2,7 @@ name: autopilot-pr-merge-worker
 version: 0.1.0
 description: Drive-to-merge engine for ONE selected pull request. Summoned by name. Never composed by autopilot-pr-review-scheduler.
 author: Microsoft
-license: MIT
+license: Apache-2.0
 type: skill
 
 # Composes the autopilot-pr-review-worker skill as its per-PR review primitive,

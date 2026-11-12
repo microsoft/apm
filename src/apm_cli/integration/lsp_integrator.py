@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.deps.lockfile import LockFile, LockfileSymlinkError, get_lockfile_path
 from apm_cli.integration._shared import (
     deduplicate_deps,
     resolve_locked_apm_yml_sources,
@@ -759,6 +759,8 @@ class LSPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
+                if isinstance(exc, LockfileSymlinkError):
+                    raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "LSP lockfile update failed. Check apm.lock.yaml permissions, then retry."
                 ) from exc
