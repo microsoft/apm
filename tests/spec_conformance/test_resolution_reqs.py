@@ -26,6 +26,7 @@ from apm_cli.deps.git_remote_ops import (
     validate_ls_remote_tag_output,
 )
 from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+from apm_cli.deps.registry.semver import pick_best
 from apm_cli.deps.revision_pins import (
     RevisionPinResolutionError,
     RevisionPinResolutionResult,
@@ -302,6 +303,35 @@ def test_resolver_honours_prerelease_inclusion_rules():
     oracle = load_json_fixture("resolution", "semver-dialect.json")
     pr = [c for c in oracle["cases"] if "prerelease" in c["id"] or "build" in c["id"]]
     assert pr, "oracle MUST exercise pre-release / build-metadata cases"
+
+
+# Oracle cases whose range grammar (partial versions, comma AND, `||`
+# OR, X-ranges) the registry parse-time gate `is_semver_range` does not
+# accept yet. Widening that shared gate is outside the #3466 scope.
+_REGISTRY_GRAMMAR_GAPS = frozenset({"tilde-0_x", "comma-and", "or-union"})
+
+
+def _registry_oracle_cases(*, grammar_gaps: bool) -> list:
+    oracle = load_json_fixture("resolution", "semver-dialect.json")
+    return [
+        pytest.param(case, id=case["id"])
+        for case in oracle["cases"]
+        if not case["prerelease_optin"] and (case["id"] in _REGISTRY_GRAMMAR_GAPS) == grammar_gaps
+    ]
+
+
+@pytest.mark.req("req-rs-007")
+@pytest.mark.req("req-rs-014")
+@pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=False))
+def test_registry_picker_matches_semver_dialect_oracle(case):
+    """Registry version selection honours section 7.3.1 pre-release opt-in."""
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
+
+
+@pytest.mark.xfail(strict=True, reason="registry range grammar does not accept this form yet")
+@pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=True))
+def test_registry_picker_range_grammar_gaps(case):
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
 
 
 @pytest.mark.req("req-rs-015")
