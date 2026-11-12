@@ -1309,8 +1309,18 @@
       "keyword": "MUST",
       "section": "7.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 11,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[build-metadata-ignored]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[build-metadata-tiebreak-ascii-highest]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[caret-0_0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[caret-0_2]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[caret-1_x]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[empty-set]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[gte-range]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[prerelease-excluded-default]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[prerelease-in-range-allows-same-tuple]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[tilde-1_2]",
         "tests/spec_conformance/test_resolution_reqs.py::test_semver_dialect_oracle_present_and_well_formed"
       ]
     },
@@ -1405,8 +1415,18 @@
       "keyword": "MUST",
       "section": "7.3.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 11,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[build-metadata-ignored]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[build-metadata-tiebreak-ascii-highest]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[caret-0_0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[caret-0_2]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[caret-1_x]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[empty-set]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[gte-range]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[prerelease-excluded-default]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[prerelease-in-range-allows-same-tuple]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_picker_matches_semver_dialect_oracle[tilde-1_2]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_honours_prerelease_inclusion_rules"
       ]
     },

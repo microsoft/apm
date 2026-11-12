@@ -634,7 +634,7 @@ Registry dependency (whole package or virtual sub-path):
   targets: [docker]                # OPTIONAL - restrict deployment targets
 ```
 
-`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
+`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. Range selection skips pre-release versions unless the range itself names a pre-release on the same `major.minor.patch` (for example `>=1.2.0-alpha <1.3.0` admits `1.2.0-beta` but not `1.3.0-beta`); an exact `version:` such as `1.3.0-beta.1` still selects that release. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
 
 #### 4.1.3. Virtual Packages
 
