@@ -39,7 +39,9 @@ resolves or helps you create a token for `HOST`.
 
 ## Token precedence chain
 
-For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
+For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`. It also inherits `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath` from user and system Git config, so a corporate CA configured there still applies.
+
+If the anonymous attempt still fails at TLS, `--auth-first` / `APM_GITHUB_AUTH_FIRST=1` / `apm config set github-auth-first true` skip it for exact-host `github.com` when a credential resolves (with no credential, APM still tries anonymously as a last resort) and print a one-time `[!]` warning. See [Authentication: TLS-inspecting proxy blocks the anonymous attempt](https://microsoft.github.io/apm/getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Ordinary credentials are cached per `(host, port, org)` for the process. A private `github.com` helper fallback adds the repository path to that scope, so later phases reuse it without applying that credential to another repository. APM never writes the credential into persistent cache keys or stored remote URLs.
 
@@ -408,7 +410,7 @@ rejects secret-looking flags) -- export them as env vars instead.
 
 `apm install <package>` validates a virtual subdirectory package (`owner/repo/path#ref`) before writing it to `apm.yml`. The chain mirrors the actual clone auth path so a credential that succeeds for `git clone` is never false-rejected by the installer:
 
-1. **Marker-file probes** via raw content -- `apm.yml`, `SKILL.md`, `plugin.json`, `README.md`. Fast positive signal; absence is not a failure.
+1. **Marker-file probes** -- `apm.yml`, `SKILL.md`, `plugin.json`, `.github/plugin/plugin.json`, `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `README.md`. On public `github.com`, APM first checks them through `raw.githubusercontent.com` only and stops at the first hit; per-marker raw + Contents API probes run only if none is found. Fast positive signal; absence is not a failure.
 2. **Contents API directory probe** -- `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`. Confirms the directory exists at the ref.
 3. **`git ls-remote`** with the install auth chain (PAT header-injected, then plain HTTPS w/ credential helper, then SSH if `--ssh` or `--allow-protocol-fallback`). Confirms the ref exists.
 4. **Shallow `git fetch --depth=1 --filter=tree:0` + `git ls-tree`** at the resolved ref -- the path probe that confirms the subdirectory exists at that ref. Required to close the fail-open hole where step 3 would otherwise pass any successful repo handshake.

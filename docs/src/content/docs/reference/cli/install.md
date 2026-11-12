@@ -124,8 +124,9 @@ clients, or rejected capabilities, fail without loose-file fallback. See
 | `--ssh` | off | Prefer SSH transport for shorthand (`owner/repo`) deps. Mutually exclusive with `--https`. |
 | `--https` | off | Prefer HTTPS transport for shorthand deps. Mutually exclusive with `--ssh`. |
 | `--allow-protocol-fallback` | off | Restore the legacy permissive HTTPS<->SSH fallback chain. Env: `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
+| `--auth-first` | off | Skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves (no credential: anonymous last resort). Env: `APM_GITHUB_AUTH_FIRST=1`. |
 
-Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`.
+Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`. Credential-order env var: `APM_GITHUB_AUTH_FIRST=1` mirrors `--auth-first` (not a transport selector -- see [Authentication: TLS-inspecting proxy blocks the anonymous attempt](../../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt)).
 
 ### Skill subset
 
@@ -250,7 +251,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   installation. See [Author primitives](../../../producer/author-primitives/)
   for fence and UTF-8 BOM syntax.
 - **MCP-only lock state.** A normal project install creates or updates `apm.lock.yaml` when `apm.yml` declares only MCP dependencies, records the resolved MCP configs and targets, and migrates a legacy `apm.lock` first. Repeating the same install leaves the lockfile and target configs byte-identical. If initial lock creation fails, install exits nonzero and warns with writable-directory and rerun guidance.
-- **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs reuse the locked commit for matching Git dependencies, declared refs and host providers across the resolved graph, without checking whether upstream branches moved. A mutable ref without a matching lock entry resolves upstream instead of reusing a stale bare-cache ref, even if another package or sibling path is locked. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update` or `apm lock --update`. See the [lockfile specification](../../lockfile-spec/) for the replay contract.
+- **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs reuse the locked commit for matching Git dependencies, declared refs and host providers across the resolved graph, without checking whether upstream branches moved. A mutable ref without a matching lock entry resolves upstream instead of reusing a stale bare-cache ref, even if another package or sibling path is locked. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update`, `apm install --update` or `apm lock --update`. A normal install re-reads local-path dependencies, so edits to their `apm.yml` apply in the same run; `--frozen` instead fails on changed local content (see **Frozen mode**). See the [lockfile specification](../../lockfile-spec/) for the replay contract.
 - **Semver ranges on git deps.** `ref:` accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`) for git-source deps, including positional virtual-subdirectory references. APM runs `git ls-remote` against the dep, picks the highest tag matching the range, and pins the resolved tag plus commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `--update` (or change the manifest constraint) to re-resolve. See [manage dependencies](../../../consumer/manage-dependencies/#pin-a-semver-range) for the supported syntax.
 - **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
 - **Conflicted lockfiles.** A lockfile containing unresolved Git merge conflict markers exits `1` for required readers and names the file; the conflicted bytes are never rewritten. Preview retains its warning and exit `0`. See [manual conflict repair](../../../troubleshooting/install-failures/#merge-conflict-markers-in-the-lockfile).
@@ -269,7 +270,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Switching targets that share a skill path refreshes valid same-writer evidence
   through a guarded copy, even when the source bytes are unchanged.
   Missing evidence, including installations predating these receipts, does not
-  authorize overwriting existing files. Preserve your edits and move the
+  authorize overwriting existing files. A fresh clone or CI runner is the one
+  exception: a skill directory whose files all match what this install would
+  write, and are recorded in the lockfile, is kept and receipts are recorded.
+  Lockfile hashes are never that proof. Preserve your edits and move the
   conflicting file aside before reinstalling. Invalid evidence fails explicitly.
   Creating this state requires filesystem hard-link support. State-write failures
   are reported; successful earlier deployment writes are not rolled back.
@@ -302,6 +306,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `~/.config/opencode/skills/`. Run `apm compile -g` to refresh
   `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
+- **Local edit hint.** Before re-syncing a project install, `apm install` compares the managed files of the remote dependencies being installed with the hashes recorded at deployment. When some were edited locally, it prints one `[i]` hint that this install may overwrite them; run [`apm export-patch`](../export-patch/) before the next install to keep such edits as upstream patches. The install still proceeds. `--dry-run`, global installs, and `apm lock` skip the check.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed only when recorded hashes match (user-edited files are kept with a warning). The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`.
   Narrowing one dependency's `targets:` also reconciles its removed targets
   within the current install scope, even when the consumer still enables those

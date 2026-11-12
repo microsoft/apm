@@ -95,7 +95,7 @@ def test_docs_footer_exposes_both_license_scopes() -> None:
 
 
 def test_filelock_notice_matches_reviewed_release() -> None:
-    """Catch the stale Unlicense/public-domain override for filelock 3.29.0."""
+    """Catch a stale Unlicense/public-domain override for the locked filelock release."""
     metadata = yaml.safe_load(
         (ROOT / "scripts" / "notice-metadata.yaml").read_text(encoding="utf-8")
     )
@@ -104,7 +104,7 @@ def test_filelock_notice_matches_reviewed_release() -> None:
     assert component["copyright_snippet"] == (
         "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors"
     )
-    assert "locked 3.29.0 release" in component["notes"]
+    assert "locked 4.2.10 release" in component["notes"]
     notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
     section = notice.split("## Component. filelock\n", 1)[1].split("\n## Component.", 1)[0]
     assert "Unlicense" not in section

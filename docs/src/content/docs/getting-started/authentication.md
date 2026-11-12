@@ -14,7 +14,9 @@ Installing or updating the CLI queries public release metadata authenticated-fir
 
 Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.
 
-The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. APM preserves caller-supplied Git config, including URL rewrites, CA settings, and non-credential HTTP headers, while removing credential-bearing headers and helpers. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
+The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. APM preserves caller-supplied Git config, including URL rewrites, CA settings, and non-credential HTTP headers, while removing credential-bearing headers and helpers. It also inherits `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath` from your user and system Git config, so a corporate CA configured there still applies to the anonymous attempt. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
+
+If the anonymous attempt still fails at TLS, `--auth-first` skips it for exact-host `github.com`. See [TLS-inspecting proxy blocks the anonymous attempt](#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 For individual-file dependencies, confirmed API throttling can select the existing sparse-Git fallback. If that separate Git attempt receives an authentication challenge, APM uses the credential chain below, including an existing `gh` login; a new PAT is not required. The API throttle itself never triggers credential rotation or an authenticated API retry. If Git also fails, the diagnostic retains both failures.
 
@@ -134,6 +136,7 @@ For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentic
 | `GITHUB_HOST` | Default host for bare package names (e.g., GHES hostname) |
 | `ADO_HOST` | One on-prem Azure DevOps Server FQDN, without a port or path (e.g., `ado.company.com`) |
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, without ports or paths |
+| `APM_GITHUB_AUTH_FIRST` | `1`/`true` skips the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves (also: `--auth-first`, `apm config set github-auth-first true`). See [TLS-inspecting proxy blocks the anonymous attempt](#tls-inspecting-proxy-blocks-the-anonymous-attempt) |
 
 ## Multi-org setup
 
@@ -521,6 +524,26 @@ APM tries unauthenticated access first for public repos to conserve rate limits 
 export GITHUB_TOKEN=ghp_any_valid_token
 ```
 
+For subdirectory packages in public github.com repositories (for example nested Claude plugins), APM checks package markers through `raw.githubusercontent.com`, which does not count against the REST API limit. It calls the Contents API only when no marker is found that way, for example in a private repository.
+
+### TLS-inspecting proxy blocks the anonymous attempt
+
+The anonymous `github.com` attempt inherits your Git TLS backend and CA settings, so a corporate CA usually works. If the inherited settings are not enough (for example, a proxy CA without revocation info under Schannel), the isolated attempt can fail at TLS while a plain `git clone` that reads your full Git config succeeds.
+
+Symptoms: `apm install` fails with a network/TLS-classified error (e.g. `CRYPT_E_NO_REVOCATION_CHECK` on Windows, or a hang) rather than an authentication error, and `--allow-protocol-fallback` jumps straight to SSH, which may also be blocked.
+
+Use your resolved credentials from the first HTTPS attempt:
+
+```bash
+apm install --auth-first
+# or
+export APM_GITHUB_AUTH_FIRST=1
+# or, to always do this on this machine
+apm config set github-auth-first true
+```
+
+When a credential resolves, APM sends it on the first attempt and prints a one-time `[!]` warning; with no credential, it still tries anonymously as a last resort. Only exact-host `github.com` is affected; other hosts already resolve credentials first. Undo with `apm config unset github-auth-first` or by unsetting `APM_GITHUB_AUTH_FIRST`.
+
 ### SSO-protected organizations
 
 Authorize your PAT for SSO at [github.com/settings/tokens](https://github.com/settings/tokens) — click **Configure SSO** next to the token.
@@ -549,10 +572,12 @@ The full resolution and fallback flow (simplified):
 flowchart TD
     A[Dependency Reference] --> HC{Host class?}
 
-    HC -->|github.com HTTPS| ANON[Anonymous attempt<br/>tokens and helpers fenced]
+    HC -->|github.com HTTPS| AF{auth-first opt-out?}
+    AF -->|"No: default"| ANON["Anonymous attempt<br/>tokens and helpers fenced<br/>Git TLS settings inherited"]
     ANON -->|Success| L[Success]
     ANON -->|401 / 403 / 404<br/>or Git auth failure| B{Per-org env var?}
     ANON -->|DNS / TLS / timeout<br/>or rate limit| Q[Surface non-auth failure]
+    AF -->|"Yes: --auth-first / APM_GITHUB_AUTH_FIRST"| B
 
     HC -->|GHE Cloud / GHES| B
     B -->|GITHUB_APM_PAT_ORG| C[Use per-org token]

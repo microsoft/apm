@@ -131,7 +131,7 @@ You do not need Homebrew to use APM.
 #### Linux / macOS
 
 ```bash
-# pip (Python 3.10+)
+# pip (Python 3.11+)
 pip install apm-cli
 ```
 

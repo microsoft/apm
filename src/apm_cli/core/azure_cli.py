@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -335,4 +335,4 @@ def _parse_expires_on(value: str) -> float | None:
     if dt.tzinfo is None:
         # az emits naive timestamps in *local* time on older versions; respect that.
         dt = dt.astimezone()
-    return dt.astimezone(timezone.utc).timestamp()
+    return dt.astimezone(UTC).timestamp()

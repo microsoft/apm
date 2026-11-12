@@ -12,13 +12,13 @@ or (c) a real apm_cli loader call where the surface exists.
 from __future__ import annotations
 
 import shutil
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import jsonschema
 import pytest
-import tomllib
 
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter

@@ -9,7 +9,7 @@ sidebar:
 
 - macOS, Linux, or Windows (x86_64 or ARM64)
 - [git](https://git-scm.com/) for dependency management
-- Python 3.10+ (only for pip or from-source installs)
+- Python 3.11+ (only for pip or from-source installs)
 
 On **Windows ARM64**, the one-line installer currently downloads the **x86_64** ZIP (same as the GitHub Release asset); it runs via emulation. Native ARM64 Windows binaries are not selected yet.
 
@@ -185,7 +185,7 @@ After installing the bundle and launcher, `install.sh` runs the launcher at its 
 
 **Migration:** ask the original administrator or package manager to update system/custom installs. To migrate deliberately, uninstall through that owner first, then install fresh. Destination overrides never migrate an install. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs receive terminal owner guidance even when Python is unavailable.
 
-Pip fallback uses the selected Python 3.10+ interpreter for both `-m pip` and its `sysconfig` user scheme. If that scheme query fails, installation stops before package installation. If the installed launcher is off `PATH`, the installer prints a safely shell-quoted command for the current shell using that interpreter's actual scripts directory, including `PYTHONUSERBASE` and framework layouts. Pip fallback never modifies shell profiles or writes native shell setup policy.
+Pip fallback uses the selected Python 3.11+ interpreter for both `-m pip` and its `sysconfig` user scheme. If that scheme query fails, installation stops before package installation. If the installed launcher is off `PATH`, the installer prints a safely shell-quoted command for the current shell using that interpreter's actual scripts directory, including `PYTHONUSERBASE` and framework layouts. Pip fallback never modifies shell profiles or writes native shell setup policy.
 
 For native installs, automatic shell setup writes only installer-owned marked profile blocks that source generated hooks under `~/.apm/shell`. Truthy `APM_NO_MODIFY_PATH` writes no profile or hook changes and records the disabled preference only after the native binary succeeds. To re-enable after opting out, rerun a normal desktop native install with `APM_NO_MODIFY_PATH=0`. During `apm self-update`, the installer never enrolls shell setup or edits profiles/hooks.
 
@@ -420,7 +420,7 @@ arbitrary older versions were not end-to-end tested.
 python3 -m pip install apm-cli
 ```
 
-Requires Python 3.10+. Update or uninstall with the Python interpreter that owns the installation:
+Requires Python 3.11+. Update or uninstall with the Python interpreter that owns the installation:
 
 ```bash
 python3 -m pip install --upgrade apm-cli
@@ -612,9 +612,9 @@ manager, or use [self-update](../../reference/cli/self-update/) for standalone i
 
 For existing installations, follow [ownership and migration](#unix-install-ownership-and-migration). Fresh destinations, including `--prefix`, must be writable, absolute paths without dot segments.
 
-### Binary install fails on older Linux (devcontainers, Debian-based images)
+### Binary install fails on older Linux (glibc below 2.28)
 
-Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.38+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or [pip with a working Python 3.10+](#pip-install). This glibc floor applies to prebuilt binaries, not your system Python. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
+Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.28+ (for example, RHEL/Rocky/Alma Linux 8+, Debian 10+, Ubuntu 20.04+). On older systems, use a newer base image or [pip with a working Python 3.11+](#pip-install). This glibc floor applies to prebuilt binaries, not your system Python. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
 
 ### Authentication errors when installing packages
 
