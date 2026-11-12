@@ -174,6 +174,53 @@ def test_conflicting_classification_and_duplicate_reads_are_bounded() -> None:
     assert len(_plan([_issue(1), _issue(1)])["selected"]) == 1
 
 
+PILLARS = {
+    "pillar/consume",
+    "pillar/ecosystem",
+    "pillar/foundations",
+    "pillar/govern",
+    "pillar/produce",
+}
+# Built by concatenation so a repository grep for the retired family stays empty.
+RETIRED_LABEL_PREFIX = "theme" + "/"
+
+
+def test_pillar_is_a_single_valued_classification_dimension() -> None:
+    """Triage proposes at most one pillar and respects an existing pillar or alias."""
+    labels = ["triage/recommended", "status/triaged", *sorted(PILLARS)]
+    issue = _issue(1)
+    issue["proposed_labels"] = ["pillar/consume", "pillar/govern"]
+    with pytest.raises(ValueError, match="Conflicting proposed pillar"):
+        _plan([issue], labels=labels)
+
+    issue = _issue(2)
+    issue["proposed_labels"] = ["pillar/govern"]
+    assert _plan([issue], labels=labels)["selected"][0]["add_labels"] == [
+        "pillar/govern",
+        "triage/recommended",
+    ]
+
+    occupied = _issue(3, ["security"])
+    occupied["proposed_labels"] = ["pillar/consume"]
+    assert "pillar/consume" not in _plan([occupied], labels=labels)["selected"][0]["add_labels"]
+
+
+def test_automation_classifies_with_pillar_labels_only() -> None:
+    """The contract allowlists pillar/* and no tracked file names the retired family."""
+    classification = set(CONTRACT["classification_labels"])
+    assert {label for label in classification if label.startswith("pillar/")} == PILLARS
+    assert CONTRACT["legacy_read_aliases"]["security"] == "pillar/govern"
+    assert not any(label.startswith(RETIRED_LABEL_PREFIX) for label in classification)
+    found = subprocess.run(
+        [get_git_executable(), "grep", "-n", "-I", "--fixed-strings", RETIRED_LABEL_PREFIX],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert found.returncode == 1, found.stdout
+
+
 def test_deferred_consumer_schema_rejects_legacy_acceptance_and_release_fields() -> None:
     """The internal decision remains advice; no writable human metadata survives."""
     schema = json.loads((WORKER_CODE / "assets/autopilot-triage-schema.json").read_text())

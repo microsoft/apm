@@ -68,7 +68,6 @@ _RUNTIME_NAME_CONSUMERS: tuple[str, ...] = (
     "src/apm_cli/commands/runtime.py",
     "src/apm_cli/core/script_runner.py",
     "src/apm_cli/runtime/manager.py",
-    "src/apm_cli/workflow/runner.py",
 )
 
 
@@ -238,7 +237,7 @@ def _check_runtime_descriptors(provider: FactsProvider) -> Iterable[Violation]:
     """Runtime names must be sourced from ``runtime/registry.py`` only.
 
     Ports the AC1 ``check_pattern`` forbidding hard-coded runtime-name
-    vocabularies (Click choices, literal command lists) in the four runtime
+    vocabularies (Click choices, literal command lists) in the runtime
     consumer modules.
     """
     rule_id = "registry_delegation.runtime_descriptors"

@@ -281,6 +281,18 @@ class TestComputeFileHash:
         """A path that does not exist yields the empty-content hash."""
         assert compute_file_hash(tmp_path / "nope.md") == _EMPTY_HASH
 
+    def test_symlink_returns_empty_hash(self, tmp_path):
+        """A symlink is never followed; it yields the empty-content hash."""
+        target = tmp_path / "real.txt"
+        target.write_text("hello")
+        link = tmp_path / "link.txt"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            pytest.skip("Cannot create symlinks on this platform")
+        assert compute_file_hash(target) != _EMPTY_HASH
+        assert compute_file_hash(link) == _EMPTY_HASH
+
 
 # ---------------------------------------------------------------------------
 # Lockfile integration
