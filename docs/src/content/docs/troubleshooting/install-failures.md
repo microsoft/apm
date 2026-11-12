@@ -274,6 +274,8 @@ apm install
 
 The cache short-circuits already-downloaded packages and the integrate phase overwrites partially-deployed files.
 
+A failed install does not remove files it already deployed to harness directories such as `.claude/agents/`, and `apm.lock.yaml` does not track them. APM lists those paths in the failure output. Remove them, or re-run `apm install` (`apm install -g` for user scope); add `--force` if the re-run skips them as not managed by APM.
+
 If resolution rejects a cyclic dependency graph, fix the package manifests and run `apm install` again. APM rolls back only the package snapshots staged by the rejected resolution, so no manual `apm_modules/` deletion is required.
 
 If an MCP command names `.apm-resolution-staging`, upgrade to a release that
