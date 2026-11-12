@@ -57,10 +57,17 @@ def legacy_hook_file_selection(hook_files: list[Path], target_key: str) -> list[
     return _dedupe_selected_hook_files(specific if specific else universal)
 
 
-def legacy_routing_widening(hook_files: list[Path], target_key: str) -> list[Path]:
+def legacy_routing_widening(
+    hook_files: list[Path],
+    target_key: str,
+    *,
+    configured: list[Path] | None = None,
+) -> list[Path]:
     """Return files that configured routing activates beyond the retired selection."""
     legacy = set(legacy_hook_file_selection(hook_files, target_key))
-    return [path for path in configured_hook_file_selection(hook_files) if path not in legacy]
+    if configured is None:
+        configured = configured_hook_file_selection(hook_files)
+    return [path for path in configured if path not in legacy]
 
 
 def hook_package_label(package_info: Any) -> str:
@@ -97,7 +104,7 @@ def raise_for_legacy_routing(
     lines.extend(
         [
             "    APM refused to install these hooks so no script gains executable reach",
-            "    the old filename convention excluded. To migrate, declare the intended",
+            "    that the old filename convention excluded. To migrate, declare the intended",
             "    targets in the package's own apm.yml (target: <name>) or narrow this",
             "    dependency with object-form 'targets: [...]' in your apm.yml, and move",
             "    hooks meant for different targets into separate packages.",

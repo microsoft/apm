@@ -23,6 +23,8 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 
 class _NoopSkillIntegrator:
     def integrate_package_skill(self, package_info, project_root: Path, **kwargs):
@@ -289,7 +291,7 @@ def test_event_without_claude_equivalent_fails_before_settings_change(
     claude_settings.write_text('{"model": "keep"}', encoding="utf-8")
 
     with pytest.raises(
-        HookContractError, match=rf"no Claude Code equivalent \(hooks.json: {event}\)"
+        HookContractError, match=rf"no documented Claude Code name \(hooks.json: {event}\)"
     ):
         _install(package_info, project, ["claude"])
 

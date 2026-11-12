@@ -47,11 +47,13 @@ class HookSourceSelection:
         event_maps: dict[str, dict[str, str]],
     ) -> None:
         """Refuse retired-routing widening and Claude events without a native pair."""
-        self.require_configured_routing(hook_package_label(package_info))
+        package_label = hook_package_label(package_info)
+        self.require_configured_routing(package_label)
         require_claude_native_events(
             self.descriptors_for("claude"),
             lambda path: _parse_hook_json(path, logger=_LOG),
             event_maps,
+            package_label,
         )
 
     def descriptors_for(self, target_name: str) -> list[Path]:
@@ -208,7 +210,7 @@ def select_hook_sources(
     for target_name in dict.fromkeys(target_names):
         if target_name not in supported_targets:
             continue
-        widened = legacy_routing_widening(hook_files, target_name)
+        widened = legacy_routing_widening(hook_files, target_name, configured=descriptors)
         if widened:
             conflicts[target_name] = tuple(
                 sorted(portable_relpath(path, package_path) for path in widened)

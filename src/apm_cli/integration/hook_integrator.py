@@ -550,6 +550,7 @@ class HookIntegrator(BaseIntegrator):
             selection = self.select_deployable_hook_sources(
                 package_info.install_path, (target_name,)
             )
+        # Routing only; Claude events are checked at preflight and the Claude write.
         selection.require_configured_routing(hook_package_label(package_info))
         return selection
 
@@ -1214,8 +1215,10 @@ class HookIntegrator(BaseIntegrator):
         hook_files = hook_sources.descriptors_for(config.target_key)
         if not hook_files:
             return _empty
-        if config.target_key == "claude":
-            require_claude_native_events(hook_files, self._parse_hook_json, _HOOK_EVENT_MAP)
+        if config.target_key == "claude":  # write-boundary re-check, as for Cursor
+            require_claude_native_events(
+                hook_files, self._parse_hook_json, _HOOK_EVENT_MAP, hook_package_label(package_info)
+            )
 
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (

@@ -49,18 +49,27 @@ def preflight_survivor_hooks(
     survivors. A survivor that relied on retired filename routing, or that
     declares a Claude event without a native pair, would fail that rebuild
     after its working hooks were already gone (#3226). Each entry is
-    ``(dep_ref, package_info, authorized_targets)``.
+    ``(dep_ref, package_info, authorized_targets)``. Only the hook selection
+    that ``DeployableSourcePlan`` would carry is checked; nothing is written,
+    and the rebuild still builds and scans its full source plan.
     """
     from apm_cli.integration.hook_integrator import _HOOK_EVENT_MAP, HookIntegrator
 
     finder = HookIntegrator()
     for dep_ref, package_info, targets in survivors:
-        if not any("hooks" in getattr(target, "primitives", {}) for target in targets):
+        hook_targets = [
+            target.name for target in targets if "hooks" in getattr(target, "primitives", {})
+        ]
+        if not hook_targets:
             continue
-        if not finder.find_hook_files(Path(package_info.install_path)):
+        source_root = Path(package_info.install_path).resolve()
+        hook_files = finder.find_hook_files(source_root)
+        if not hook_files:
             continue
-        selection = build_hook_reintegration_source_plan(
-            dep_ref, package_info, list(targets), allow_executables
-        ).hook_source_selection
-        if selection is not None:
-            selection.require_deployable(package_info, _HOOK_EVENT_MAP)
+        if not check_executable_approval(dep_ref.get_identity(), package_info, allow_executables)[
+            0
+        ]:
+            continue
+        HookIntegrator.select_deployable_hook_sources(
+            source_root, hook_targets, hook_files=hook_files
+        ).require_deployable(package_info, _HOOK_EVENT_MAP)

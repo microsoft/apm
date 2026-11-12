@@ -148,9 +148,12 @@ def _sync_integrations_for_manifest(
     except Exception as sync_err:
         logger.warning("Integration cleanup did not finish.")
         if isinstance(sync_err, HookContractError):
-            # The survivor preflight refused before any hook settings changed.
+            # The survivor preflight refused before any hook settings changed;
+            # 'apm install' would refuse the same package until it is migrated.
             logger.warning(str(sync_err))
-        logger.warning("Run 'apm install' to resync remaining integrations.")
+            logger.warning("Migrate the package above, then run 'apm install' to resync.")
+        else:
+            logger.warning("Run 'apm install' to resync remaining integrations.")
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
         logger.verbose_detail(traceback.format_exc().rstrip())
         return default_outcome, sync_err

@@ -469,6 +469,7 @@ def require_claude_native_events(
     hook_files: list[Path],
     parse_hook_json: Callable[[Path], dict | None],
     event_maps: dict[str, dict[str, str]],
+    package_label: str = "",
 ) -> None:
     """Refuse Claude output whose events Claude Code rejects (#3226).
 
@@ -495,8 +496,9 @@ def require_claude_native_events(
         f"{printable_ascii_text(name)}: {', '.join(sorted(printable_ascii_text(e) for e in events))}"
         for name, events in sorted(invalid.items())
     )
+    prefix = f"{printable_ascii_text(package_label)}: " if package_label else ""
     raise HookContractError(
-        f"hook events have no Claude Code equivalent ({details}). "
+        f"{prefix}hook events have no documented Claude Code name ({details}). "
         "Claude settings were not changed. Rename them to Claude events such as "
         "PreToolUse, or limit this package to targets that support them with "
         "'target:' in its apm.yml or dependency 'targets:' in yours"
