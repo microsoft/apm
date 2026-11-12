@@ -99,7 +99,9 @@ the manifest or lockfile.
 Without local receipts (a fresh clone or CI runner), a committed skill whose
 whole directory matches what the install would write, and whose files are
 recorded in `apm.lock.yaml`, is kept and receipts are recorded; lockfile hashes
-are never the proof.
+are never the proof. `apm update` also replaces such a skill when it matches
+what the currently locked version renders (fetched from its locked commit); if
+any of those files was edited, update fails before writing files or the lock.
 When a missing local receipt prevents an existing skill from being overwritten,
 install exits nonzero before stale cleanup and lock replacement. The refused
 files and prior lock contents are preserved, including cold `--frozen` replay
