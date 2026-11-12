@@ -27,6 +27,7 @@ from apm_cli.commands.export_patch import (
     export_patch,
     patch_filename,
     patch_filenames,
+    patch_ref,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import CacheMissError, DriftFinding
@@ -80,34 +81,51 @@ def _patch_materialize(monkeypatch: pytest.MonkeyPatch, source_root: Path) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_patch_filename_sanitizes_separators():
-    assert patch_filename("testorg/testpkg") == "testorg-testpkg.patch"
-    assert patch_filename("gitlab.com/group/sub/repo") == "gitlab.com-group-sub-repo.patch"
+def test_patch_filename_uses_pkg_at_ref_convention():
+    assert patch_filename("testorg/testpkg", "v1.2.0") == "testorg__testpkg@v1.2.0.patch"
+    assert (
+        patch_filename("gitlab.com/group/sub/repo", "main")
+        == "gitlab.com__group__sub__repo@main.patch"
+    )
+
+
+def test_patch_filename_sanitizes_ref_segment():
+    assert patch_filename("org/pkg", "release/1.0") == "org__pkg@release__1.0.patch"
+    assert patch_filename("org/pkg", "a b:c") == "org__pkg@a-b-c.patch"
 
 
 def test_patch_filename_never_empty():
-    assert patch_filename("///") == "package.patch"
+    assert patch_filename("///", "") == "package@unknown.patch"
 
 
 def test_patch_filename_ascii_only_and_reserved_stems():
     # Unicode letters must not survive: repo sanitizers are ASCII-only (#1217).
-    assert all(ord(c) < 128 for c in patch_filename("caf\u00e9/p\u00e4ck"))
+    assert all(ord(c) < 128 for c in patch_filename("caf\u00e9/p\u00e4ck", "v\u00e9"))
     # Windows reserved device names cannot be file stems.
-    assert patch_filename("nul") == "pkg-nul.patch"
-    assert patch_filename("CON") == "pkg-CON.patch"
+    assert patch_filename("nul", "v1") == "pkg-nul@v1.patch"
+    assert patch_filename("CON", "v1") == "pkg-CON@v1.patch"
 
 
 def test_patch_filenames_disambiguates_collisions():
-    # Both keys sanitize to 'org-pkg.patch'; the batch mapping must keep
+    # Both keys sanitize to 'org-pkg@v1.patch'; the batch mapping must keep
     # them distinct or one package's patch silently overwrites the other.
-    names = patch_filenames(["org/pkg", "org-pkg"])
+    names = patch_filenames({"org pkg": "v1", "org-pkg": "v1"})
     assert len(set(names.values())) == 2
-    assert all(name.endswith(".patch") for name in names.values())
+    assert all(name.endswith("@v1.patch") for name in names.values())
 
 
 def test_patch_filenames_stable_without_collisions():
-    names = patch_filenames(["testorg/testpkg"])
-    assert names == {"testorg/testpkg": "testorg-testpkg.patch"}
+    names = patch_filenames({"testorg/testpkg": "main"})
+    assert names == {"testorg/testpkg": "testorg__testpkg@main.patch"}
+
+
+def test_patch_ref_prefers_registry_version_then_git_ref_then_commit():
+    registry = LockedDependency(repo_url="org/pkg", source="registry", version="2.0.0")
+    tagged = LockedDependency(repo_url="org/pkg", resolved_ref="v1.4.0", resolved_commit=_COMMIT)
+    pinned = LockedDependency(repo_url="org/pkg", resolved_commit=_COMMIT)
+    assert patch_ref(registry) == "2.0.0"
+    assert patch_ref(tagged) == "v1.4.0"
+    assert patch_ref(pinned) == _COMMIT[:12]
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +630,7 @@ def test_cli_reports_unparsable_lockfile_distinctly(tmp_path, monkeypatch):
     get_lockfile_path(project).write_text(":\nnot valid yaml [", encoding="utf-8")
     result = CliRunner().invoke(export_patch, [], catch_exceptions=False)
     assert result.exit_code == 1
-    assert "could not be parsed" in result.output
+    assert "could not be parsed" in " ".join(result.output.split())
     assert "No lockfile found" not in result.output
 
 

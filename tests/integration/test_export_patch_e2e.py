@@ -95,7 +95,7 @@ class TestExportPatchE2E:
         result = _run(["export-patch"])
         assert result.exit_code == 0
         assert "nothing to export" in result.output.lower()
-        assert not (project[0] / "apm-patches").exists()
+        assert not (project[0] / "patches").exists()
 
     def test_closed_loop_edit_export_apply_converges(self, project, tmp_path: Path) -> None:
         if shutil.which("git") is None:
@@ -105,11 +105,18 @@ class TestExportPatchE2E:
         # 1. A local edit to the deployed managed file.
         (proj / _DEPLOYED).write_bytes(_EDITED)
 
-        # 2. Export it.
-        result = _run(["export-patch", "-o", "patches"])
+        # 2. Export it to the default patches/<pkg>@<ref>.patch location.
+        lock_path = get_lockfile_path(proj)
+        lock_before = lock_path.read_bytes()
+        manifest_before = (proj / "apm.yml").read_bytes()
+        result = _run(["export-patch"])
         assert result.exit_code == 0, result.output
-        patch_file = proj / "patches" / "testorg-testpkg.patch"
+        patch_file = proj / "patches" / "testorg__testpkg@main.patch"
         assert patch_file.exists()
+        # Read-only: the edit, the lockfile and apm.yml are left untouched.
+        assert (proj / _DEPLOYED).read_bytes() == _EDITED
+        assert lock_path.read_bytes() == lock_before
+        assert (proj / "apm.yml").read_bytes() == manifest_before
         patch_text = patch_file.read_text(encoding="utf-8")
         assert "# package: testorg/testpkg" in patch_text
         assert f"# base: commit {_COMMIT} (main)" in patch_text
@@ -141,9 +148,18 @@ class TestExportPatchE2E:
         proj, _pkg_src = project
         (proj / _DEPLOYED).write_bytes(_EDITED)
 
-        result = _run(["export-patch", "--dry-run", "-o", "patches"])
+        result = _run(["export-patch", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert "Dry run" in result.output
+        assert not (proj / "patches").exists()
+
+    def test_out_option_overrides_directory(self, project) -> None:
+        proj, _pkg_src = project
+        (proj / _DEPLOYED).write_bytes(_EDITED)
+
+        result = _run(["export-patch", "-o", "upstream-patches"])
+        assert result.exit_code == 0, result.output
+        assert (proj / "upstream-patches" / "testorg__testpkg@main.patch").exists()
         assert not (proj / "patches").exists()
 
     def test_missing_cache_fails_with_guidance(self, project) -> None:
@@ -154,3 +170,12 @@ class TestExportPatchE2E:
         result = _run(["export-patch"])
         assert result.exit_code == 1
         assert "apm install" in result.output
+
+    def test_audit_points_local_edits_at_export_patch(self, project) -> None:
+        proj, _pkg_src = project
+        (proj / _DEPLOYED).write_bytes(_EDITED)
+
+        result = CliRunner().invoke(cli, ["audit", "--ci", "--no-policy"])
+        output = " ".join(result.output.split())
+        assert "1 local edit(s) to managed files" in output, result.output
+        assert "run 'apm export-patch'" in output

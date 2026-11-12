@@ -107,37 +107,69 @@ class _SourceIndex:
     unindexed: tuple[str, ...]  # rel paths excluded by size cap or read errors
 
 
-def patch_filename(dep_key: str) -> str:
-    """Map a lockfile dependency key to a filesystem-safe patch filename.
+def _filename_segment(value: str, fallback: str) -> str:
+    """Make one ``<pkg>`` or ``<ref>`` segment filesystem-safe.
+
+    ``/`` becomes ``__`` (the pnpm convention for scoped names), so path
+    separators in keys and refs stay distinguishable from ``-``; any
+    other character outside ``[A-Za-z0-9._-]`` collapses to ``-``.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.replace("/", "__")).strip("-._")
+    return safe or fallback
+
+
+def patch_ref(dep: LockedDependency) -> str:
+    """Locked ref that names a package's patch file (the ``<ref>`` part).
+
+    Registry packages use their locked version; git packages use the
+    resolved ref, or the short resolved commit when no ref was recorded.
+    The full base always lives in the patch header.
+    """
+    if dep.source == "registry":
+        return str(dep.version or "unknown")
+    if dep.resolved_ref:
+        return str(dep.resolved_ref)
+    if dep.resolved_commit:
+        return str(dep.resolved_commit)[:12]
+    return str(dep.version or "unknown")
+
+
+def _patch_stem_parts(dep_key: str, ref: str) -> tuple[str, str]:
+    pkg = _filename_segment(dep_key, "package")
+    if pkg.lower() in _RESERVED_STEMS:
+        pkg = f"pkg-{pkg}"
+    return pkg, _filename_segment(ref, "unknown")
+
+
+def patch_filename(dep_key: str, ref: str) -> str:
+    """Map a dependency key and locked ref to ``<pkg>@<ref>.patch``.
 
     Lossy (many keys can share one name); use :func:`patch_filenames`
     when writing a batch so collisions are disambiguated.
     """
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", dep_key).strip("-.") or "package"
-    if safe.lower() in _RESERVED_STEMS:
-        safe = f"pkg-{safe}"
-    return f"{safe}.patch"
+    pkg, safe_ref = _patch_stem_parts(dep_key, ref)
+    return f"{pkg}@{safe_ref}.patch"
 
 
-def patch_filenames(dep_keys: list[str]) -> dict[str, str]:
-    """Assign a unique patch filename to every dependency key.
+def patch_filenames(refs_by_key: dict[str, str]) -> dict[str, str]:
+    """Assign a unique ``<pkg>@<ref>.patch`` filename to every dependency key.
 
     The sanitizer is many-to-one, so colliding keys get a short digest
-    suffix; without this, one package's patch would silently overwrite
-    another's.
+    suffix on the ``<pkg>`` segment; without this, one package's patch
+    would silently overwrite another's.
     """
     by_name: dict[str, list[str]] = {}
-    for key in dep_keys:
-        by_name.setdefault(patch_filename(key), []).append(key)
+    for key, ref in refs_by_key.items():
+        by_name.setdefault(patch_filename(key, ref), []).append(key)
     result: dict[str, str] = {}
     for name, keys in by_name.items():
         if len(keys) == 1:
             result[keys[0]] = name
             continue
-        stem = name[: -len(".patch")]
         for key in keys:
+            pkg, safe_ref = _patch_stem_parts(key, refs_by_key[key])
             suffix = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
-            result[key] = f"{stem}-{suffix}.patch"
+            result[key] = f"{pkg}-{suffix}@{safe_ref}.patch"
     return result
 
 
@@ -511,16 +543,16 @@ def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
     "-o",
     "out_dir",
     type=click.Path(file_okay=False),
-    default="apm-patches",
+    default="patches",
     show_default=True,
-    help="Directory to write per-package .patch files into",
+    help="Directory to write per-package <pkg>@<ref>.patch files into",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
     help="List what would be exported without writing patch files",
 )
-@click.option("--verbose", "-v", is_flag=True, help="Show replay progress and skip details")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed replay progress")
 def export_patch(out_dir, dry_run, verbose):
     """Export local edits to APM-managed files as upstream patches.
 
@@ -528,9 +560,12 @@ def export_patch(out_dir, dry_run, verbose):
     machinery as the 'apm audit' drift check), then re-expresses every
     locally modified managed file as a unified diff against the source
     file inside the package that deployed it. Each package with
-    exportable edits gets one .patch file, applicable with 'git apply'
-    from the package repository root at the base recorded in the patch
-    header.
+    exportable edits gets one patches/<pkg>@<ref>.patch file, applicable
+    with 'git apply' from the package repository root at the base
+    recorded in the patch header.
+
+    Read-only: the project tree, the lockfile, and apm.yml are never
+    modified. Patch files are the only output.
 
     Only verbatim-deployed files can be exported. Deployments that
     transform their source (frontmatter rewrites, compiled or aggregated
@@ -538,7 +573,7 @@ def export_patch(out_dir, dry_run, verbose):
 
     \b
     Examples:
-        apm export-patch                # write patches to ./apm-patches/
+        apm export-patch                # write patches to ./patches/
         apm export-patch -o /tmp/out    # write patches elsewhere
         apm export-patch --dry-run      # preview without writing
 
@@ -655,7 +690,9 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
 
     from ..utils.atomic_io import atomic_write_text
 
-    filenames = patch_filenames(sorted(export.patches))
+    filenames = patch_filenames(
+        {key: patch_ref(lockfile.get_dependency(key)) for key in sorted(export.patches)}
+    )
     try:
         resolved_out.mkdir(parents=True, exist_ok=True)
         for dep_key in sorted(export.patches):
