@@ -88,7 +88,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
 | `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
-| `CODEX_HOME` | Override the Codex home used by Codex target detection and user-scope writes. | platform auto-detect | Read by the Codex integration target. |
+| `CODEX_HOME` | Override the Codex home used for user-scope writes: `apm compile --global` (`AGENTS.md`) and `apm install -g` agents, hooks, and MCP config (`config.toml`). | `~/.codex` | Nonblank values must be absolute. Blank or unset uses `~/.codex`. Codex skills stay in `~/.agents/skills/`. Auto-detection still checks `~/.codex/`; otherwise use `--target codex` or `targets:`. |
 | `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | Used by the explicit `hermes` target; it does not enable auto-detection. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |

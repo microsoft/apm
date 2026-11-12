@@ -127,7 +127,7 @@ Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
-### Claude Code profiles
+### Claude Code and Codex profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
 removes a package's files and lockfile rows only under the selected
@@ -135,6 +135,8 @@ removes a package's files and lockfile rows only under the selected
 If another profile still uses the package, it stays in `~/.apm/apm.yml` and
 `apm_modules/`; uninstall it with that profile selected to remove it everywhere.
 The selected profile is matched by path; symlinks are not resolved.
+Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
+Codex agents and hooks.
 
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message

@@ -34,7 +34,7 @@ def _managed_absolute_target_root(
     allow_final_symlink: bool = False,
 ) -> Path | None:
     """Return the managed root for *candidate*, or ``None`` if unmanaged."""
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     source = targets
     if source is None:
@@ -42,7 +42,7 @@ def _managed_absolute_target_root(
         for profile in KNOWN_TARGETS.values():
             if not profile.user_supported or profile.user_root_resolver is not None:
                 continue
-            scoped = profile.for_scope(user_scope=True)
+            scoped = scoped_profile_or_none(profile, user_scope=True)
             if scoped is not None:
                 source.append(scoped)
     try:

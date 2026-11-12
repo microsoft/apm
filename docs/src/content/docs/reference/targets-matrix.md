@@ -191,7 +191,7 @@ Cursor.
 OpenAI Codex CLI.
 
 - **Detection.** `.codex/` directory.
-- **Deploy directory.** `.codex/` plus `.agents/` for skills.
+- **Deploy directory.** `.codex/` plus `.agents/` for skills. At user scope, a non-blank `CODEX_HOME` replaces `~/.codex/`; skills stay in `~/.agents/skills/`.
 - **Supported primitives.** agents, skills, hooks, mcp. (No `instructions`, `prompts`, or `commands`.)
 - **File conventions.**
   - agents: `.codex/agents/<name>.toml`
