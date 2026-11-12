@@ -165,16 +165,23 @@ def test_cache_hit_rematerializes_shard_missing_symlink_pin(tmp_path: Path) -> N
     assert _checkout_has_materialization_pins(healed)
 
 
-def test_pins_require_both_autocrlf_and_symlinks(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("core", "pinned"),
+    [
+        ("\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", True),
+        ("\tautocrlf = false\n", False),
+        ("\tautocrlf = false\n\tsymlinks = true\n", False),
+        ("\teol = lf\n\tsymlinks = true\n", False),
+        ("\tautocrlf = false\n\teol = lf\n", False),
+        ("\tautocrlf = false\n\teol = crlf\n\tsymlinks = true\n", False),
+    ],
+    ids=["all", "autocrlf-only", "pre-eol", "no-autocrlf", "no-symlinks", "eol-crlf"],
+)
+def test_pins_require_autocrlf_eol_and_symlinks(tmp_path: Path, core: str, pinned: bool) -> None:
     checkout = tmp_path / "checkout"
     (checkout / ".git").mkdir(parents=True)
-    config = checkout / ".git" / "config"
-    config.write_text("[core]\n\tautocrlf = false\n", encoding="utf-8")
-    assert not _checkout_has_materialization_pins(checkout)
-    config.write_text("[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="utf-8")
-    assert _checkout_has_materialization_pins(checkout)
-    config.write_text("[core]\n\tsymlinks = true\n", encoding="utf-8")
-    assert not _checkout_has_materialization_pins(checkout)
+    (checkout / ".git" / "config").write_text(f"[core]\n{core}", encoding="utf-8")
+    assert _checkout_has_materialization_pins(checkout) is pinned
 
 
 @pytest.mark.parametrize("exit_code", [0, 1])

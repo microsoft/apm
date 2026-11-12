@@ -86,6 +86,16 @@ install with a diagnostic naming the package; on Windows enable Developer
 Mode or the "Create symbolic links" privilege. See [Install packages: when
 things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
+### Line endings in dependency checkouts
+
+APM checks out dependencies with `core.autocrlf=false` and `core.eol=lf` on
+its own Git commands only, so `text` / `text=auto` files keep their committed
+LF bytes on every platform and the `content_hash` matches. Explicit
+`.gitattributes` `eol=crlf` / `eol=lf`, binary files and blobs committed with
+CRLF keep their repository-defined bytes. A lockfile written by an older APM
+on Windows may hold a CRLF hash; `--frozen` refuses it, and a reviewed
+`apm install --update` re-records the hash at the same pin.
+
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs

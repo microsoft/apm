@@ -552,19 +552,33 @@ def raise_for_symlink_capability(
         current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
 
 
-def git_autocrlf_pin_args() -> tuple[str, str]:
-    """Return the canonical per-command pin against host CRLF conversion.
+_LINE_ENDING_PIN_ENTRIES: tuple[tuple[str, str], ...] = (
+    ("core.autocrlf", "false"),
+    ("core.eol", "lf"),
+)
 
-    ``core.autocrlf`` snapshots frozen into ``GIT_CONFIG_KEY_n`` by
-    :func:`git_clone_env` (apm#2971) outrank repository-local config, so on a
-    host whose system gitconfig sets ``core.autocrlf=true`` a working-tree
-    clone rewrites LF-committed blobs as CRLF. A checkout that runs without
-    the snapshot then compares that CRLF worktree against the LF index and
-    refuses the switch with "local changes would be overwritten" (apm#3368).
-    ``-c`` outranks the snapshots, so clone and checkout agree and the
-    materialized bytes are the committed bytes.
+
+def git_line_ending_pin_entries() -> tuple[tuple[str, str], ...]:
+    """Return the canonical ``(key, value)`` pins for package text line endings."""
+    return _LINE_ENDING_PIN_ENTRIES
+
+
+def git_line_ending_pin_args() -> tuple[str, ...]:
+    """Return the canonical per-command pins against host-selected line endings.
+
+    - ``core.autocrlf=false`` stops host CRLF conversion of LF-committed
+      blobs (apm#2971). Without it a CRLF clone and a snapshot-free
+      checkout disagree and the switch aborts (apm#3368).
+    - ``core.eol=lf`` fixes the line ending Git writes for ``text`` and
+      ``text=auto`` paths, which otherwise follows the host default
+      (``native`` is CRLF on Windows) (apm#3270).
+
+    Explicit ``eol=lf`` / ``eol=crlf`` attributes, binary paths and
+    committed CRLF blobs keep their repository-defined bytes. ``-c``
+    outranks every config file and ``GIT_CONFIG_KEY_n`` snapshot, so the
+    materialized bytes match on every host.
     """
-    return "-c", "core.autocrlf=false"
+    return tuple(arg for key, value in _LINE_ENDING_PIN_ENTRIES for arg in ("-c", f"{key}={value}"))
 
 
 class _GitProgress(Protocol):
@@ -1081,12 +1095,14 @@ def _materialize_git_config_snapshot(
         if auth_fence is not None
         else None
     )
+    pinned = (git_symlink_pin_entry(), *git_line_ending_pin_entries())
+    pinned_keys = {key for key, _value in pinned}
     retained: list[tuple[str, str]] = []
     for entry in snapshot.entries:
         normalized = entry.key.lower()
-        if normalized == git_symlink_pin_entry()[0]:
-            # Replaced by the pin below; Git init's capability result and
-            # inherited values must not turn package links into link text.
+        if normalized in pinned_keys:
+            # Replaced by the pins below; Git init's capability result and
+            # inherited host values must not change package bytes.
             continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
@@ -1111,7 +1127,7 @@ def _materialize_git_config_snapshot(
                 continue
         retained.append((entry.key, entry.value))
 
-    retained.append(git_symlink_pin_entry())
+    retained.extend(pinned)
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:
@@ -1459,7 +1475,7 @@ def clone_git_worktree(
     args = [
         get_git_executable(),
         *git_no_hooks_args(),
-        *git_autocrlf_pin_args(),
+        *git_line_ending_pin_args(),
         "clone",
         *git_no_templates_args(),
     ]
@@ -1547,7 +1563,7 @@ def checkout_git_worktree(
                 get_git_executable(),
                 *git_no_hooks_args(),
                 *git_symlink_pin_args(),
-                *git_autocrlf_pin_args(),
+                *git_line_ending_pin_args(),
                 "-C",
                 str(worktree),
                 "checkout",

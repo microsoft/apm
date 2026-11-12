@@ -127,7 +127,7 @@ def test_failed_sparse_validation_does_not_refresh_access(
     (checkout / ".git").mkdir(parents=True)
     (checkout / ".git/HEAD").write_text(sha, encoding="ascii")
     (checkout / ".git" / "config").write_text(
-        "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+        "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
     )
 
     def reject_sparse(*args: object, **kwargs: object) -> Path:

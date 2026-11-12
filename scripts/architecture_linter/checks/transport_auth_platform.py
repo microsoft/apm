@@ -840,7 +840,9 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 'return ("--template=",)',
                 "def validate_git_url_rewrite_safety(",
                 "def git_symlink_pin_args(",
-                "retained.append(git_symlink_pin_entry())",
+                "pinned = (git_symlink_pin_entry(), *git_line_ending_pin_entries())",
+                "retained.extend(pinned)",
+                "def git_line_ending_pin_args(",
                 "def raise_for_symlink_capability(",
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
@@ -1061,11 +1063,22 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
     for path, needles in (
         (
             "src/apm_cli/cache/git_cache.py",
-            ("git_symlink_pin_args(", "git_symlink_pin_entry(", "raise_for_symlink_capability("),
+            (
+                "git_symlink_pin_args(",
+                "git_symlink_pin_entry(",
+                "git_line_ending_pin_args(",
+                "git_line_ending_pin_entries(",
+                "raise_for_symlink_capability(",
+            ),
         ),
         (
             "src/apm_cli/deps/bare_cache.py",
-            ("git_symlink_pin_args(", "raise_for_symlink_capability("),
+            (
+                "git_symlink_pin_args(",
+                "git_line_ending_pin_args(",
+                "git_line_ending_pin_entries(",
+                "raise_for_symlink_capability(",
+            ),
         ),
     ):
         findings.extend(
@@ -1075,7 +1088,8 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 _RID_GIT_CHILD_ENV,
                 path,
                 needles,
-                "Dependency checkouts must pin real symlinks and name capability failures",
+                "Dependency checkouts must pin real symlinks and deterministic line endings,"
+                " and name capability failures",
             )
         )
     findings.extend(
@@ -1086,6 +1100,17 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
             _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
             re.compile(r"core\.symlinks=|[\"']core\.symlinks[\"']"),
             "The core.symlinks pin must route through utils/git_env.git_symlink_pin_*",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(r"core\.eol=|[\"']core\.eol[\"']"),
+            "The core.eol pin must route through utils/git_env.git_line_ending_pin_*",
             exempt=False,
         )
     )

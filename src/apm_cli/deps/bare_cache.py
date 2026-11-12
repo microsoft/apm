@@ -595,8 +595,10 @@ def materialize_from_bare(
         blocks downstream rmtree.
 
     CRLF + LFS pinning before checkout:
-      - ``core.autocrlf=false`` guarantees byte-identical content
-        across consumers regardless of the user's global git config.
+      - ``git_line_ending_pin_args`` (``core.autocrlf=false`` and
+        ``core.eol`` set to ``lf``) guarantees byte-identical ``text`` /
+        ``text=auto`` content across consumers regardless of host Git
+        config or platform default (apm#3270).
       - ``git_symlink_pin_args`` checks out in-repo links as real
         symlinks; a host that cannot create them raises
         :class:`GitSymlinkCapabilityError` naming ``package`` (#3457).
@@ -625,6 +627,8 @@ def materialize_from_bare(
     """
     from ..utils.git_env import (
         get_git_executable,
+        git_line_ending_pin_args,
+        git_line_ending_pin_entries,
         git_no_hooks_args,
         git_no_templates_args,
         git_subprocess_env,
@@ -634,7 +638,7 @@ def materialize_from_bare(
 
     git_exe = get_git_executable()
     env = git_subprocess_env(env)
-    pin_args = list(git_symlink_pin_args())
+    pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]
 
     if known_sha:
         resolved_sha = known_sha
@@ -650,7 +654,7 @@ def materialize_from_bare(
         resolved_sha = sha_result.stdout.strip()
 
     consumer_dir.parent.mkdir(parents=True, exist_ok=True)
-    # --no-checkout because we want to set core.autocrlf and disable
+    # --no-checkout because we want to pin line endings and disable
     # LFS smudge BEFORE checkout writes any file content.
     subprocess.run(
         [
@@ -670,15 +674,17 @@ def materialize_from_bare(
         env=env,
         check=True,
     )
-    # CRLF determinism (panel: byte-identical across users).
-    subprocess.run(
-        [git_exe, "-C", str(consumer_dir), "config", "core.autocrlf", "false"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env=env,
-        check=True,
-    )
+    # Line-ending determinism (panel: byte-identical across users). The
+    # checkout also carries the ``-c`` pins, which outrank env snapshots.
+    for key, val in git_line_ending_pin_entries():
+        subprocess.run(
+            [git_exe, "-C", str(consumer_dir), "config", key, val],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+            check=True,
+        )
     # Disable LFS smudge cross-platform: empty-string smudge is the
     # portable equivalent of `git lfs smudge --skip`. The `cat`
     # alternative is not on Windows PATH.

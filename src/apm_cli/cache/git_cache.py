@@ -67,13 +67,13 @@ def _safe_git_args() -> list[str]:
       malicious upstream might ship, so clone and checkout stay inert.
     - ``submodule.recurse=false`` prevents any subcommand from
       recursing into attacker-controlled submodule URLs.
-    - ``core.autocrlf=false`` disables host autocrlf conversion so
-      LF-committed blobs are not rewritten as CRLF on checkout.
+    - ``git_line_ending_pin_args`` disables host autocrlf conversion
+      and sets ``core.eol`` to ``lf`` so ``text`` / ``text=auto`` paths are
+      written with the same bytes on every host (apm#2971, apm#3270).
       ``-c`` outranks host system / global config and
       ``GIT_CONFIG_KEY_n`` snapshots from ``git_network_env``, which
-      otherwise win over a repo-local pin (apm#2971). This pin does
-      not override ``core.eol`` or ``.gitattributes`` ``eol=crlf`` /
-      ``text=auto`` requests.
+      otherwise win over a repo-local pin. Explicit ``.gitattributes``
+      ``eol=`` requests and committed CRLF blobs are still honored.
 
     - ``git_symlink_pin_args`` checks out in-repo links as real symlinks
       so Windows hashes the same bytes as POSIX (#3457).
@@ -83,15 +83,19 @@ def _safe_git_args() -> list[str]:
     truth for git subprocess invocation -- callers must use this
     helper rather than ad-hoc ``git`` argv construction.
     """
-    from ..utils.git_env import git_long_paths_args, git_no_hooks_args, git_symlink_pin_args
+    from ..utils.git_env import (
+        git_line_ending_pin_args,
+        git_long_paths_args,
+        git_no_hooks_args,
+        git_symlink_pin_args,
+    )
 
     return [
         *git_long_paths_args(),
         *git_no_hooks_args(),
         "-c",
         "submodule.recurse=false",
-        "-c",
-        "core.autocrlf=false",
+        *git_line_ending_pin_args(),
         *git_symlink_pin_args(),
     ]
 
@@ -122,29 +126,26 @@ def _checkout_core_values(checkout_dir: Path) -> dict[str, str] | None:
     return values
 
 
-def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
-    """Return whether the checkout's local gitconfig pins ``core.autocrlf=false``.
+def _checkout_materialization_pins() -> tuple[tuple[str, str], ...]:
+    """Return every byte-determinism ``(key, value)`` a cached shard must record."""
+    from ..utils.git_env import git_line_ending_pin_entries, git_symlink_pin_entry
 
-    Pre-fix shards materialized under host ``core.autocrlf=true`` omit this
-    pin and may contain CRLF working-tree bytes. Cache hits rematerialize
-    those shards so existing Windows caches heal without ``apm cache clean``.
-    """
-    values = _checkout_core_values(checkout_dir) or {}
-    return values.get("autocrlf") in {"false", "0", "no", "off"}
+    return (*git_line_ending_pin_entries(), git_symlink_pin_entry())
 
 
 def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     """Return whether a shard was materialized with every byte-determinism pin.
 
-    Shards written before the ``core.symlinks`` pin may hold Windows
-    link-text files instead of symlinks (#3457); cache hits rematerialize them.
+    Shards written before a pin existed may hold host-dependent bytes: CRLF
+    from ``core.autocrlf`` (apm#2971) or ``core.eol`` under ``text=auto``
+    (apm#3270), or Windows link-text files instead of symlinks (#3457).
+    Cache hits rematerialize them so existing caches heal without
+    ``apm cache clean``.
     """
-    from ..utils.git_env import git_symlink_pin_entry
-
-    key, value = git_symlink_pin_entry()
     values = _checkout_core_values(checkout_dir) or {}
-    return _checkout_pins_autocrlf_false(checkout_dir) and (
-        values.get(key.split(".", 1)[1]) == value
+    return all(
+        values.get(key.split(".", 1)[1].lower()) == value
+        for key, value in _checkout_materialization_pins()
     )
 
 
@@ -682,7 +683,6 @@ class GitCache:
             git_network_env,
             git_no_templates_args,
             git_subprocess_env,
-            git_symlink_pin_entry,
             raise_for_symlink_capability,
         )
 
@@ -785,7 +785,7 @@ class GitCache:
                 # Checkout itself still needs the ``-c`` pins from
                 # ``_safe_git_args`` because env-frozen host config outranks
                 # these local values.
-                for key, value in (("core.autocrlf", "false"), git_symlink_pin_entry()):
+                for key, value in _checkout_materialization_pins():
                     subprocess.run(
                         [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
                         capture_output=True,

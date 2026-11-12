@@ -86,7 +86,7 @@ class TestGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
         )
 
         with (
@@ -500,7 +500,7 @@ class TestCreateCheckout:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
         )
 
         with (
@@ -541,7 +541,7 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "b" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 4  # clone, two config pins, checkout
+        assert mock_run.call_count == 5  # clone, three config pins, checkout
 
     def test_clone_failure_cleans_staged_checkout(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
@@ -592,7 +592,7 @@ class TestCreateCheckout:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
         )
         (cache._db_root / shard_key).mkdir(parents=True)
 
@@ -609,7 +609,7 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "e" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 4  # clone, two config pins, checkout
+        assert mock_run.call_count == 5  # clone, three config pins, checkout
 
     def test_atomic_land_false_with_invalid_winner_evicts_and_raises(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"

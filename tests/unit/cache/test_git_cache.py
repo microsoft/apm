@@ -180,7 +180,7 @@ class TestGitCacheGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
         )
 
         # Mock git rev-parse HEAD to return the expected SHA
@@ -413,7 +413,7 @@ class TestCheckoutWriteDedup:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
         )
 
         with (
@@ -480,7 +480,7 @@ class TestCheckoutWriteDedup:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
         )
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 
