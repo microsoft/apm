@@ -142,6 +142,37 @@ def test_context_protection_cannot_regress_to_root_only(
 
 
 @pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/service.py",
+            "drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)",
+            "drifted, unresolved = [], []",
+            id="frozen-skips-hash-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
+            "hash_mismatches, unresolved_hash_paths = _local_hash_loop(",
+            id="audit-bypasses-shared-verifier",
+        ),
+    ],
+)
+def test_frozen_and_audit_share_deployed_hash_verifier(
+    path: str, original: str, replacement: str
+) -> None:
+    """``install --frozen`` and ``audit --ci`` re-verify hashes through one owner (#3654)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-frozen-mutation-eligibility"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement", "refused"),
     [
         (

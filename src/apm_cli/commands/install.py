@@ -1650,9 +1650,9 @@ def install(  # noqa: PLR0913
             summary_rendered = True
 
             if frozen and apm_count > 0:
-                # --frozen verifies lockfile structure, not content integrity.
+                # --frozen verified lockfile structure and deployed hashes (req-lk-017).
                 logger.info(
-                    "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
+                    "Deployed files verified against apm.lock.yaml.",
                     symbol="info",
                 )
 

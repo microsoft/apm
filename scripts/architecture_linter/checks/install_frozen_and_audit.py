@@ -67,6 +67,18 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 
 
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
+# req-lk-017: frozen install and audit content-integrity share one verifier.
+_DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
+_DEPLOYED_HASH_FRAGMENTS = (
+    (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
+    (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
+    (_DEPLOYED_HASH_VERIFIER, "def verify_deployed_file_hashes("),
+    (
+        _DEPLOYED_HASH_VERIFIER,
+        "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
+    ),
+    (_DEPLOYED_HASH_VERIFIER, "= resolve_audit_scope(project_root, lock)"),
+)
 
 
 def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -82,8 +94,15 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
+    audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
     failures = (
-        owner_fail + adapter_fail + services_fail + integration_fail + outcome_fail + mcp_fail
+        owner_fail
+        + adapter_fail
+        + services_fail
+        + integration_fail
+        + outcome_fail
+        + mcp_fail
+        + audit_fail
     )
     if failures:
         return tuple(failures)
@@ -198,6 +217,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         )
         or not _before(acquisition, hydrated_check)
         or not _before(hydrated_check, deployment)
+        or not all(
+            _present(owner if path == _FROZEN_OWNER else audit, needle)
+            for path, needle in _DEPLOYED_HASH_FRAGMENTS
+        )
         or bool(duplicates)
     )
     if not failed:

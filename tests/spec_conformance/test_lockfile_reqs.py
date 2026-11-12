@@ -531,6 +531,60 @@ def test_lockfile_deployed_file_hash_mismatch_fails_closed():
     )
 
 
+@pytest.mark.req("req-lk-017")
+def test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed(tmp_path: Path) -> None:
+    """A frozen install re-verifies deployed bytes against the lock (#3654).
+
+    The committed lock records a ``deployed_file_hashes`` envelope that the
+    deployed file does not match. The installed CLI must exit 1, name the
+    path with the expected and observed envelopes, and leave the lockfile
+    byte-identical; an unchanged replay of the same project stays green.
+    """
+    import os
+    import sys
+
+    from apm_cli.utils.content_hash import compute_file_hash
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+    from tests.utils.local_package import LocalPackageFactory
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "verify", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    provider = factory.create("provider", targets=("agent-skills",))
+    factory.add_skill(provider, "review", "---\nname: review\ndescription: fixture\n---\nok\n")
+    consumer = factory.create("consumer", dependencies=("../provider",), targets=("agent-skills",))
+    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+    environment = isolated.subprocess_env()
+    installed = runner.run(("install", "--no-policy"), cwd=consumer.root, env=environment)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    unchanged = runner.run(
+        ("install", "--frozen", "--no-policy"), cwd=consumer.root, env=environment
+    )
+    assert unchanged.returncode == 0, unchanged.stdout + unchanged.stderr
+
+    relative = ".agents/skills/review/SKILL.md"
+    observed = compute_file_hash(consumer.root / relative)
+    expected = "sha256:" + "0" * 64
+    lockfile = consumer.root / "apm.lock.yaml"
+    locked = load_yaml(lockfile)
+    (dependency,) = locked["dependencies"]
+    assert dependency["deployed_file_hashes"][relative] == observed
+    dependency["deployed_file_hashes"][relative] = expected
+    for deployment in locked.get("deployments") or []:
+        if deployment.get("value") == relative:
+            deployment["content_hash"] = expected
+    dump_yaml(locked, lockfile)
+    committed = lockfile.read_bytes()
+
+    frozen = runner.run(("install", "--frozen", "--no-policy"), cwd=consumer.root, env=environment)
+
+    text = " ".join((frozen.stdout + frozen.stderr).split())
+    assert frozen.returncode == 1, text
+    assert f"{relative}: expected {expected}, observed {observed}" in text, text
+    assert lockfile.read_bytes() == committed
+
+
 @pytest.mark.req("req-lk-018")
 def test_lockfile_should_record_publish_timestamp():
     schema = load_schema("lockfile-v0.1.41.schema.json")

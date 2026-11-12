@@ -637,6 +637,56 @@ class TestEnforceFrozenNoRewrite:
         InstallService._enforce_frozen_no_rewrite(req, [extra_dep])
 
 
+class TestEnforceFrozenDeployedHashes:
+    """req-lk-017: frozen re-verifies deployed bytes against the lock (#3654)."""
+
+    _SKILL = ".claude/skills/a/SKILL.md"
+
+    def _project(self, tmp_path: Path, on_disk: bytes, recorded: str | None) -> InstallRequest:
+        _write_apm_yml(tmp_path)
+        skill = tmp_path / self._SKILL
+        skill.parent.mkdir(parents=True)
+        skill.write_bytes(on_disk)
+        dep = _locked([".claude/skills/a", self._SKILL])
+        if recorded is not None:
+            dep.deployed_file_hashes[self._SKILL] = recorded
+        _write_lockfile(tmp_path, [dep])
+        return _make_request(project_dir=tmp_path, manifest_deps=[])
+
+    def test_drifted_deployed_file_fails_naming_both_envelopes(self, tmp_path: Path):
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        req = self._project(tmp_path, b"edited\n", recorded=None)
+        observed = compute_file_hash(tmp_path / self._SKILL)
+
+        with pytest.raises(FrozenInstallError, match="do not match the hashes") as exc:
+            InstallService._enforce_frozen_no_rewrite(req, [])
+
+        assert exc.value.reasons == [
+            f"  - {self._SKILL}: expected sha256:{'0' * 64}, observed {observed}"
+        ]
+        assert "without --frozen" in exc.value.tip
+        assert "apm export-patch" in exc.value.tip
+
+    def test_matching_deployed_file_passes(self, tmp_path: Path):
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        probe = tmp_path / "probe.md"
+        probe.write_bytes(b"locked\n")
+        req = self._project(tmp_path, b"locked\n", recorded=compute_file_hash(probe))
+
+        InstallService._enforce_frozen_no_rewrite(req, [])
+
+    def test_unrecorded_claims_are_reported_before_hash_drift(self, tmp_path: Path):
+        req = self._project(tmp_path, b"edited\n", recorded=None)
+        grown = _build_lockfile(
+            [_locked([".claude/skills/a", self._SKILL, ".claude/skills/b"])]
+        ).to_yaml()
+
+        with pytest.raises(FrozenInstallError, match="does not record everything"):
+            InstallService._enforce_frozen_no_rewrite(req, [grown])
+
+
 class TestFrozenRunEndToEnd:
     """``run()`` wiring: withhold the write, then judge it -- but only when
     the pipeline got far enough for the verdict to mean anything."""

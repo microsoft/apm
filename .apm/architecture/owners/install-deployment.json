@@ -79,8 +79,8 @@
     },
     {
       "id": "frozen-install-mutation-eligibility",
-      "decision": "Frozen install mutation eligibility",
-      "owner": "install/service.py (InstallService)",
+      "decision": "Frozen install mutation eligibility and post-deploy deployed-hash re-verification (req-lk-017)",
+      "owner": "install/service.py (InstallService); deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
       "selectors": ["src/apm_cli/install/service.py"],
       "guards": ["install-deployment-frozen-mutation-eligibility"]
     },

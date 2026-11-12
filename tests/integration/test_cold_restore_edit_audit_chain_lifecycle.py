@@ -168,19 +168,20 @@ def test_edit_frozen_audit_revert_prune_uninstall_chain(tmp_path, apm_binary_pat
     _between(kit, mode)
 
     # With receipts the edited skill is kept with a warning and the edited
-    # instruction is re-synced (export-patch hint, #2162); without receipts
-    # the whole install fails closed. Both behaviours match v0.35.1.
+    # instruction is re-synced (export-patch hint, #2162), then the kept edit
+    # fails the req-lk-017 deployed-hash check (#3654); without receipts the
+    # whole install fails closed before deployment.
     frozen = kit.run("install", "--no-policy", "--frozen")
     assert (project / "apm.lock.yaml").read_bytes() == lock
     assert (project / ".claude/skills/beta/SKILL.md").read_bytes() == b"Edited skill.\n"
     assert "apm export-patch" in output(frozen), output(frozen)
+    assert frozen.returncode != 0, output(frozen)
     if mode == "apm-home-wipe":
-        assert frozen.returncode != 0, output(frozen)
         assert REFUSAL in output(frozen), output(frozen)
         assert tree(project) == edited
     else:
-        assert frozen.returncode == 0, output(frozen)
         assert "Kept user-edited file .claude/skills/beta/SKILL.md" in output(frozen)
+        assert ".claude/skills/beta/SKILL.md: expected sha256:" in output(frozen)
         assert (project / _INSTRUCTION).read_bytes() == clean[_INSTRUCTION]
     current = tree(project)
     _between(kit, mode)

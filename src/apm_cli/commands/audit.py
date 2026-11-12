@@ -864,7 +864,14 @@ def _audit_ci_gate(
             from ..install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose, lockfile=lockfile))
+            click.echo(
+                render_drift_text(
+                    drift_findings,
+                    verbose=cfg.verbose,
+                    lockfile=lockfile,
+                    project_root=cfg.project_root,
+                )
+            )
 
     sys.exit(0 if ci_result.passed else 1)
 
@@ -1203,7 +1210,14 @@ def _audit_content_scan(
             from ..install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose, lockfile=lockfile))
+            click.echo(
+                render_drift_text(
+                    drift_findings,
+                    verbose=cfg.verbose,
+                    lockfile=lockfile,
+                    project_root=cfg.project_root,
+                )
+            )
     elif effective_format == "markdown":
         from ..security.audit_report import findings_to_markdown
 

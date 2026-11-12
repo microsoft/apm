@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
-from apm_cli.install.local_edits import count_exportable_findings, local_edit_hint
+from apm_cli.install.local_edits import (
+    count_exportable_findings,
+    local_edit_hint,
+    rendering_change_hint,
+    unedited_modified_paths,
+)
 from apm_cli.utils.console import STATUS_SYMBOLS
 
 if TYPE_CHECKING:
@@ -80,10 +85,12 @@ def render_drift_text(
     verbose: bool = False,
     *,
     lockfile: LockFile | None = None,
+    project_root: Path | None = None,
 ) -> str:
     """Render drift findings as grouped terminal text.
 
-    *lockfile* lets the export-patch hint skip local-path packages.
+    *lockfile* lets the export-patch hint skip local-path packages; with
+    *project_root* it also tells local edits from rendering changes.
     """
     if not findings:
         return f"{STATUS_SYMBOLS['check']} No drift detected"
@@ -112,9 +119,12 @@ def render_drift_text(
                 lines.append(f"      {item.inline_diff}")
         lines.append("")
 
-    exportable = count_exportable_findings(findings, lockfile)
+    unedited = unedited_modified_paths(findings, lockfile, project_root)
+    exportable = count_exportable_findings(findings, lockfile, unedited=unedited)
     if exportable:
         lines.append(f"  {STATUS_SYMBOLS['info']} {local_edit_hint(exportable)}")
+    if unedited:
+        lines.append(f"  {STATUS_SYMBOLS['info']} {rendering_change_hint(len(unedited))}")
 
     if by_kind.get("unmanaged-conflict"):
         lines.append(

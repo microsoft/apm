@@ -581,48 +581,40 @@ class InstallService:
 
     @staticmethod
     def _enforce_frozen_no_rewrite(request: InstallRequest, withheld: list[str]) -> None:
-        """Raise when a withheld write claims paths the committed lockfile omits.
+        """Fail a frozen install whose result does not match the committed lockfile.
 
-        Compares each lockfile the frozen install *would* have written
-        against the committed ``apm.lock.yaml`` on disk.  It reads that one
-        file and does not otherwise inspect the filesystem: the deployed set
-        is taken from the withheld lockfiles, which is what install recorded
-        for the files it just deployed.
+        Two post-deploy checks share this owner:
 
-        Withholding the write satisfies req-lk-006 on its own, but silently:
-        a committed lockfile that under-records the deployed set would stay
-        green while install deployed files it does not claim, and a file no
-        lockfile row claims carries no recorded hash, which puts it outside
-        ``content-integrity``'s hash comparison *and* its hidden-Unicode
-        scan for as long as it stays omitted (#2379).  CI is the one place
-        positioned to catch that, so frozen mode reports it.
+        * **Unrecorded claims.** Each lockfile the frozen install *would*
+          have written is compared against the committed ``apm.lock.yaml``.
+          A file no lockfile row claims carries no recorded hash, which puts
+          it outside ``content-integrity``'s hash comparison *and* its
+          hidden-Unicode scan (#2379).  Deliberately one-directional:
+          claims a narrower install would *drop* (``--target`` filter,
+          ``--only``, a removed dependency) do not fail.  Equivalence ignores
+          ``generated_at`` and ``apm_version`` (Section 5.5).
+        * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
+          entry is re-verified against the on-disk bytes through the same
+          verifier ``apm audit`` uses, so ``install --frozen`` and
+          ``audit --ci`` give one answer.  This catches a user edit the
+          install kept and an APM upgrade that renders a locked file
+          differently (#3654).
 
-        Deliberately one-directional, matching the tolerance
-        :class:`FrozenInstallError` already documents.  Only paths the
-        install would *add* to the ledger fail; claims it would drop do
-        not, because a legitimately narrower install (``--target`` filter,
-        ``--only``, a removed dependency) produces exactly that and
-        ``no-orphaned-packages`` / ``deployed-files-present`` already own
-        the opposite direction.
-
-        Equivalence is judged by ``is_semantically_equivalent``, which
-        ignores ``generated_at`` and ``apm_version``: per Section 5.5 those
-        two fields "MUST NOT affect content-equivalence comparison", so a
-        newer CLI reading an older lockfile is not by itself a rewrite.
+        Native target files are outside the install transaction, so files
+        already deployed stay on disk; only the lockfile write is withheld.
         """
-        if not withheld:
-            return
-
         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
 
         # Re-read rather than reuse the copy `enforce_frozen` loaded: this
         # judges what is on disk now.  `--frozen` is a CI primitive with a
         # single writer, so nothing else is expected to touch the file
         # between the two reads; drift.py's own membership checks make the
         # same assumption.
-        committed = LockFile.read(_frozen_lockfile_path(request))
+        lockfile_path = _frozen_lockfile_path(request)
+        committed = LockFile.read(lockfile_path)
         if committed is None:  # pragma: no cover -- enforce_frozen ran first
             return
         # DeploymentLedgerCodec owns the deployed-files vocabulary (see
@@ -637,21 +629,39 @@ class InstallService:
                 continue
             claimed = set(DeploymentLedgerCodec.legacy_deployed_file_claims(candidate))
             unclaimed |= claimed - committed_paths
-        if not unclaimed:
-            return
+        if unclaimed:
+            raise FrozenInstallError(
+                "--frozen: apm.lock.yaml does not record everything this install deploys.",
+                reasons=[
+                    f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
+                    for path in _outermost(unclaimed)
+                ],
+                tip=_FROZEN_REPAIR_TIP,
+            )
 
+        deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+        drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
+        if not drifted and not unresolved:
+            return
         raise FrozenInstallError(
-            "--frozen: apm.lock.yaml does not record everything this install deploys.",
+            "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[
-                f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
-                for path in _outermost(unclaimed)
+                *(
+                    f"  - {drift.path}: expected {drift.expected}, observed {drift.actual}"
+                    for drift in sorted(drifted, key=lambda drift: drift.path)
+                ),
+                *(f"  - {path}: unsafe or unresolved deployed path" for path in sorted(unresolved)),
             ],
-            tip=(
-                "Tip: the files were still deployed; only the lockfile write was "
-                "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
-                "or --global if specified, then commit apm.lock.yaml."
-            ),
+            tip=_FROZEN_REPAIR_TIP
+            + " To keep local edits, run 'apm export-patch' or move them aside first.",
         )
+
+
+_FROZEN_REPAIR_TIP = (
+    "Tip: the files were still deployed; only the lockfile write was "
+    "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
+    "or --global if specified, then commit the deployed files and apm.lock.yaml."
+)
 
 
 def _outermost(paths: set[str]) -> list[str]:
