@@ -24,6 +24,7 @@ from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+from apm_cli.registry.client import SimpleRegistryClient
 
 pytestmark = pytest.mark.unit
 
@@ -197,6 +198,53 @@ class TestInferRegistryNameOci(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # _ensure_docker_image_arg
 # ---------------------------------------------------------------------------
+
+
+class TestEnsureDockerRunArgs(unittest.TestCase):
+    """Runtime arguments ensure leading 'run', '-i', and '--rm' operands."""
+
+    def test_default_run_args_when_none_or_empty(self):
+        self.assertEqual(MCPClientAdapter._ensure_docker_run_args(None), ["run", "-i", "--rm"])
+        self.assertEqual(MCPClientAdapter._ensure_docker_run_args([]), ["run", "-i", "--rm"])
+
+    def test_run_subcommand_already_present_is_preserved(self):
+        base = ["run", "-i", "--rm", "-v", "/w:/w"]
+        self.assertEqual(MCPClientAdapter._ensure_docker_run_args(base), base)
+
+    def test_options_only_runtime_args_prepends_run_and_stdio_flags(self):
+        args = ["--network", "none"]
+        self.assertEqual(
+            MCPClientAdapter._ensure_docker_run_args(args),
+            ["run", "-i", "--rm", "--network", "none"],
+        )
+
+    def test_existing_interactive_or_rm_flags_not_duplicated(self):
+        self.assertEqual(
+            MCPClientAdapter._ensure_docker_run_args(["-i", "--network", "none"]),
+            ["run", "--rm", "-i", "--network", "none"],
+        )
+        self.assertEqual(
+            MCPClientAdapter._ensure_docker_run_args(["--rm", "--network", "none"]),
+            ["run", "-i", "--rm", "--network", "none"],
+        )
+
+    def test_authored_complete_invocations_preserved(self):
+        invocations = [
+            ["container", "run", "-i", "--rm"],
+            ["run", "-i", "--rm"],
+            ["run", "--rm", "-i", "-v", "/w:/w"],
+            ["exec", "-it"],
+        ]
+        for inv in invocations:
+            with self.subTest(invocation=inv):
+                self.assertEqual(MCPClientAdapter._ensure_docker_run_args(inv), inv)
+
+    def test_options_with_run_as_value_treated_as_options_only(self):
+        args = ["--name", "run", "-v", "/w:/w"]
+        self.assertEqual(
+            MCPClientAdapter._ensure_docker_run_args(args),
+            ["run", "-i", "--rm", "--name", "run", "-v", "/w:/w"],
+        )
 
 
 class TestEnsureDockerImageArg(unittest.TestCase):
@@ -511,6 +559,226 @@ class TestOciLauncherAcrossTargets(unittest.TestCase):
             config.get("args"),
             ["run", "-i", "--rm", "ghcr.io/example/playwright-mcp:1.2.3"],
         )
+
+    def test_options_only_runtime_arguments_prepends_docker_run_across_adapters(self):
+        """Issue #3404: options-only runtimeArguments must prepend docker run -i --rm."""
+        package = {
+            "name": OCI_IMAGE,
+            "registry_name": "oci",
+            "runtime_hint": "docker",
+            "transport": {"type": "stdio"},
+            "runtime_arguments": [{"type": "named", "name": "--network", "value": "none"}],
+            "package_arguments": [{"type": "named", "name": "--definition-snapshot"}],
+        }
+        for name, make_adapter in (
+            ("copilot", _make_copilot),
+            ("codex", _make_codex),
+            ("gemini", _make_gemini),
+            ("vscode", _make_vscode),
+        ):
+            with self.subTest(adapter=name):
+                rendered = make_adapter()._format_server_config(
+                    {"id": "s", "name": "s", "packages": [package]}
+                )
+                config = rendered[0] if isinstance(rendered, tuple) else rendered
+                self.assertEqual(config.get("command"), "docker")
+                self.assertEqual(
+                    config["args"],
+                    [
+                        "run",
+                        "-i",
+                        "--rm",
+                        "--network",
+                        "none",
+                        OCI_IMAGE,
+                        "--definition-snapshot",
+                    ],
+                )
+
+    def test_authored_container_run_invocation_preserved_across_affected_adapters(self):
+        """Preserve authored invocations like ['container', 'run', ...] without prepending 'run'."""
+        package = {
+            "name": OCI_IMAGE,
+            "registry_name": "docker",
+            "runtime_hint": "docker",
+            "transport": {"type": "stdio"},
+            "runtime_arguments": [
+                {"value": "container", "type": "positional"},
+                {"value": "run", "type": "positional"},
+                {"value": "-i", "type": "positional"},
+                {"value": "--rm", "type": "positional"},
+            ],
+        }
+        for name, make_adapter in (
+            ("copilot", _make_copilot),
+            ("codex", _make_codex),
+            ("gemini", _make_gemini),
+        ):
+            with self.subTest(adapter=name):
+                rendered = make_adapter()._format_server_config(
+                    {"id": "s", "name": "s", "packages": [package]}
+                )
+                config = rendered[0] if isinstance(rendered, tuple) else rendered
+                self.assertEqual(config.get("command"), "docker")
+                self.assertEqual(
+                    config["args"],
+                    ["container", "run", "-i", "--rm", OCI_IMAGE],
+                )
+
+    def test_options_only_named_run_across_adapters(self):
+        """An option value equal to 'run' (e.g. --name run) is treated as an option value, not a subcommand."""
+        package = {
+            "name": OCI_IMAGE,
+            "registry_name": "oci",
+            "runtime_hint": "docker",
+            "transport": {"type": "stdio"},
+            "runtime_arguments": [{"type": "named", "name": "--name", "value": "run"}],
+        }
+        for name, make_adapter in (
+            ("copilot", _make_copilot),
+            ("codex", _make_codex),
+            ("gemini", _make_gemini),
+            ("vscode", _make_vscode),
+        ):
+            with self.subTest(adapter=name):
+                rendered = make_adapter()._format_server_config(
+                    {"id": "s", "name": "s", "packages": [package]}
+                )
+                config = rendered[0] if isinstance(rendered, tuple) else rendered
+                self.assertEqual(config.get("command"), "docker")
+                self.assertEqual(
+                    config["args"],
+                    ["run", "-i", "--rm", "--name", "run", OCI_IMAGE],
+                )
+
+    def test_registry_casing_and_whitespace_variants_across_adapters(self):
+        """Packages with registry_name='OCI', ' oci ', or 'docker' normalize options-only args."""
+        for reg_name in ("OCI", " oci ", "docker"):
+            package = {
+                "name": OCI_IMAGE,
+                "registry_name": reg_name,
+                "runtime_hint": "docker",
+                "transport": {"type": "stdio"},
+                "runtime_arguments": [{"type": "named", "name": "--network", "value": "none"}],
+            }
+            for name, make_adapter in (
+                ("copilot", _make_copilot),
+                ("codex", _make_codex),
+                ("gemini", _make_gemini),
+                ("vscode", _make_vscode),
+            ):
+                with self.subTest(registry_name=reg_name, adapter=name):
+                    rendered = make_adapter()._format_server_config(
+                        {"id": "s", "name": "s", "packages": [package]}
+                    )
+                    config = rendered[0] if isinstance(rendered, tuple) else rendered
+                    self.assertEqual(config.get("command"), "docker")
+                    self.assertEqual(
+                        config["args"],
+                        ["run", "-i", "--rm", "--network", "none", OCI_IMAGE],
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Issue #3404: the reporter's raw server.json, through the registry normalizer
+# ---------------------------------------------------------------------------
+
+ISSUE_3404_IMAGE = "docker.io/example/demo:1.0.0"
+
+_ALL_ADAPTERS = (
+    ("copilot", _make_copilot),
+    ("codex", _make_codex),
+    ("gemini", _make_gemini),
+    ("vscode", _make_vscode),
+)
+
+# Adapters that inject environment variables as ``docker run -e`` flags.
+_ENV_FLAG_ADAPTERS = _ALL_ADAPTERS[:3]
+
+
+def _issue_3404_server(runtime_arguments: list, *, with_env: bool = False) -> dict:
+    """Return the issue's v0.1 server.json, normalized as the registry client does."""
+    package = {
+        "registryType": "oci",
+        "identifier": ISSUE_3404_IMAGE,
+        "transport": {"type": "stdio"},
+        "runtimeArguments": runtime_arguments,
+        "packageArguments": [{"type": "named", "name": "--definition-snapshot"}],
+    }
+    if with_env:
+        package["environmentVariables"] = [{"name": "API_KEY", "isRequired": True}]
+    return SimpleRegistryClient._normalize_v0_1_server(
+        {"name": "io.github.example/demo", "version": "1.0.0", "packages": [package]}
+    )
+
+
+class TestIssue3404OptionsOnlyRuntimeArguments(unittest.TestCase):
+    """Options-only runtimeArguments gain ``run -i --rm``; other shapes are unchanged."""
+
+    def _render_args(self, make_adapter, server, **kwargs) -> list:
+        return make_adapter().render_server_config(server, **kwargs)["args"]
+
+    def test_issue_fixture_renders_docker_run_on_every_adapter(self):
+        server = _issue_3404_server([{"type": "named", "name": "--network", "value": "none"}])
+        for name, make_adapter in _ALL_ADAPTERS:
+            with self.subTest(adapter=name):
+                self.assertEqual(
+                    self._render_args(make_adapter, server),
+                    [
+                        "run",
+                        "-i",
+                        "--rm",
+                        "--network",
+                        "none",
+                        ISSUE_3404_IMAGE,
+                        "--definition-snapshot",
+                    ],
+                )
+
+    def test_existing_runtime_argument_shapes_render_unchanged(self):
+        """Explicit ``run``, explicit ``run -i --rm`` and empty arguments keep today's argv."""
+        tail = [ISSUE_3404_IMAGE, "--definition-snapshot"]
+        cases = {
+            "explicit-run": (
+                [{"type": "positional", "value": "run"}],
+                {
+                    "copilot": ["run", "-i", "--rm", *tail],
+                    "codex": ["run", *tail],
+                    "gemini": ["run", "-i", "--rm", *tail],
+                    "vscode": ["run", "-i", "--rm", *tail],
+                },
+            ),
+            "explicit-run-i-rm": (
+                [{"type": "positional", "value": value} for value in ("run", "-i", "--rm")],
+                {name: ["run", "-i", "--rm", *tail] for name, _ in _ALL_ADAPTERS},
+            ),
+            "empty": (
+                [],
+                {name: ["run", "-i", "--rm", *tail] for name, _ in _ALL_ADAPTERS},
+            ),
+        }
+        for case, (runtime_arguments, expected) in cases.items():
+            server = _issue_3404_server(runtime_arguments)
+            for name, make_adapter in _ALL_ADAPTERS:
+                with self.subTest(case=case, adapter=name):
+                    args = self._render_args(make_adapter, server)
+                    self.assertEqual(args, expected[name])
+                    for operand in ("run", "-i", "--rm"):
+                        self.assertLessEqual(args.count(operand), 1)
+
+    def test_injected_env_flags_precede_the_image_for_options_only_arguments(self):
+        server = _issue_3404_server(
+            [{"type": "named", "name": "--network", "value": "none"}], with_env=True
+        )
+        for name, make_adapter in _ENV_FLAG_ADAPTERS:
+            with self.subTest(adapter=name):
+                args = self._render_args(make_adapter, server, env_overrides={"API_KEY": "secret"})
+                image_at = args.index(ISSUE_3404_IMAGE)
+                self.assertEqual(args[0], "run")
+                self.assertIn("-e", args)
+                self.assertLess(args.index("-e"), image_at, "env flags must precede the image")
+                self.assertLess(args.index("--network"), image_at)
+                self.assertEqual(args[image_at + 1 :], ["--definition-snapshot"])
 
 
 if __name__ == "__main__":

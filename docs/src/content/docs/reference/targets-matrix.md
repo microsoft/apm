@@ -131,6 +131,12 @@ GitHub Copilot (CLI and IDE).
   CLI can invoke them from any working directory.
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
+- **Prompt harness limitation.** In VS Code, only Local harness sessions load
+  `.github/prompts/` files; the Copilot harness and Copilot CLI do not. See
+  [VS Code prompt files](https://code.visualstudio.com/docs/agent-customization/prompt-files).
+  For those harnesses, ship the workflow as a skill, with
+  `disable-model-invocation: true` where the host supports it. See
+  [Author a prompt](../../producer/author-primitives/prompts/#copilot-harness-limitation).
 
 ## claude
 
@@ -154,7 +160,7 @@ Claude Code.
 Cursor.
 
 - **Detection.** `.cursor/` directory, or legacy `.cursorrules` file.
-- **Deploy directory.** `.cursor/`.
+- **Deploy directory.** `.cursor/` (project scope); `~/.cursor/` (user scope).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
   - instructions: `.cursor/rules/<name>.mdc`
@@ -163,10 +169,17 @@ Cursor.
   - skills: `.agents/skills/<name>/SKILL.md` (project) or
     `~/.agents/skills/<name>/SKILL.md` (user)
   - hooks: `.cursor/hooks.json`
-- **User scope.** Partial. `instructions` is excluded at user scope; Cursor reads global rules from its Settings UI rather than from disk.
-- **Global compile.** `apm compile -g` can render global instructions to
-  `~/.cursor/AGENTS.md` for root-context readers that honor `AGENTS.md`; Cursor
-  global rules still use the Settings UI.
+- **User scope.** Supported. Instructions deploy to
+  `~/.cursor/rules/<name>.mdc` (same `cursor_rules` transform as project
+  scope), and `apm uninstall -g` removes only package-owned rules. As at
+  project scope, an existing rule with the same filename as a package rule is
+  replaced on install. Local
+  Cursor 2.1+ clients include `~/.cursor/rules` in context
+  ([changelog](https://cursor.com/changelog/2-1)). APM manages the files;
+  other Cursor surfaces, such as cloud agents or remote workspaces, are not
+  qualified. Settings UI "User Rules" are separate and not managed by APM.
+- **Global compile.** `apm compile -g` can also render global instructions to
+  `~/.cursor/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 - **Caveat.** Command files use the shared `claude_command` transformer today; Cursor-specific frontmatter keys (`author`, `mcp`, `parameters`, ...) are dropped at install time and surfaced via diagnostics.
 
 ## codex

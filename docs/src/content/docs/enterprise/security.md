@@ -44,7 +44,7 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 APM resolves `git` and `gh` from explicit `PATH` directories outside the
 current repository or APM project. Project-local executables and symlinks
 resolving back into that project are excluded. On Windows, discovery also
-checks `PATHEXT` extensions such as `.EXE`, including on Python 3.10 and 3.11,
+checks `PATHEXT` extensions such as `.EXE`, including on Python 3.11,
 without adding the current directory to the search.
 
 This check applies to APM's executable selection, not to searches performed
@@ -368,6 +368,7 @@ during contained package materialization:
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
 - **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
+- **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; replace the link with a regular file to continue.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
@@ -651,4 +652,22 @@ APM is distributed as a PyPI package (`apm-cli`) and as pre-built binaries attac
 
 ### Where is the source code?
 
-APM is open source under the MIT license, hosted on GitHub under the `microsoft` organization. The full source code, build pipeline, and release process are publicly auditable.
+APM-owned software, bundled agent primitives, code examples and the
+software-facing OpenAPM specification are licensed under
+[Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE).
+General documentation is licensed under
+[CC-BY-4.0](https://github.com/microsoft/apm/blob/main/LICENSE-DOCS).
+[LICENSING.md](https://github.com/microsoft/apm/blob/main/LICENSING.md)
+defines the scope and exclusions; Markdown agent primitives are software,
+not general documentation.
+Third-party material retains its applicable license; attribution and the
+historical MIT notice are preserved in
+[NOTICE](https://github.com/microsoft/apm/blob/main/NOTICE). Previously published
+MIT releases are unchanged. Downstream redistributors should review the applicable
+terms and retain licenses and notices when updating. The generated NOTICE covers
+direct Python runtime dependencies, not the complete transitive, vendored, native,
+website or build-tool inventory. A successful NOTICE drift check does not establish
+complete dependency-license compliance.
+
+APM is hosted on GitHub under the `microsoft` organization. The full source code,
+build pipeline, and release process are publicly auditable.

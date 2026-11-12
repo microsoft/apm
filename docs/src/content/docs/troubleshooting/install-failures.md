@@ -304,9 +304,11 @@ apm install
 
 `WinError 5` (access denied) or `WinError 32` (sharing violation) during
 activation does not mean the destination parent is missing. APM downloads and
-validates a candidate before replacing the installed package. If activation
-fails, it attempts to restore the prior package and manifest without changing
-the locked dependency pins.
+validates a candidate before replacing the installed package. Activation and
+its restore are retried with a short bounded backoff (about 3 seconds), so a
+brief hold by a scanner or indexer clears without failing the install. If the
+denial persists, APM attempts to restore the prior package and manifest without
+changing the locked dependency pins.
 
 Close editors, terminals, or other programs holding the named paths, then retry
 the same command. Do not elevate APM, change ACLs, disable security controls, or
@@ -390,7 +392,7 @@ downloads:**
    apm --version
    ```
 
-   Requires Python 3.10+. See [pip install](../../getting-started/installation/#pip-install).
+   Requires Python 3.11+. See [pip install](../../getting-started/installation/#pip-install).
 
 3. **Submit the binary to Microsoft** if your organisation needs the detection
    cleared for an older release: use the

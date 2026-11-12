@@ -25,6 +25,13 @@ Explicit transport or resolver changes are not no-ops: an HTTPS request can
 replace an HTTP declaration, and a Git-qualified marketplace source can replace
 a shorthand routed through the default registry.
 
+Installing named packages leaves other packages' lock entries untouched, but
+reconciles each named package's own transitive dependencies: a dependency the
+package no longer declares, and that no other installed package still needs, is
+removed from `apm.lock.yaml`, `apm_modules/` and its deployed files. A dependency
+still reached through another declared package is kept. This applies at project
+and user (`-g`) scope.
+
 `PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
 
 Local paths may select a directory package or one `.agent.md`,
@@ -112,14 +119,15 @@ you use the generated registration.
 | `--ssh` | off | Prefer SSH transport for shorthand (`owner/repo`) deps. Mutually exclusive with `--https`. |
 | `--https` | off | Prefer HTTPS transport for shorthand deps. Mutually exclusive with `--ssh`. |
 | `--allow-protocol-fallback` | off | Restore the legacy permissive HTTPS<->SSH fallback chain. Env: `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
+| `--auth-first` | off | Skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves (no credential: anonymous last resort). Env: `APM_GITHUB_AUTH_FIRST=1`. |
 
-Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`.
+Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`. Credential-order env var: `APM_GITHUB_AUTH_FIRST=1` mirrors `--auth-first` (not a transport selector -- see [Authentication: TLS-inspecting proxy blocks the anonymous attempt](../../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt)).
 
 ### Skill subset
 
 | Flag | Default | Description |
 |---|---|---|
-| `--skill NAME` | all | Install only named skills from a dependency that exposes selectable skills. Applies to both git-longhand and registry-longhand (`id:`/`registry:`) dependencies. Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. A CLI name that matches no declared skill is an install error; the diagnostic lists the available names. A non-empty persisted `skills:` selection matching no available skill also fails, preserving the dependency's previous skill files and ownership/hash records. The selection is persisted to `apm.yml` and `apm.lock.yaml` only after a successful CLI match. `--skill` is additive across separate installs: a later `apm install <bundle> --skill X` adds `X` to the existing pin (union) rather than replacing it -- previously deployed skills are never silently removed. Use `--skill '*'` to reset to the full bundle; to drop a single skill, edit the `skills:` list in `apm.yml` and re-run `apm install`. |
+| `--skill NAME` | all | Install only named skills from a dependency that exposes selectable skills. Applies to both git-longhand and registry-longhand (`id:`/`registry:`) dependencies. Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. A CLI name that matches no declared skill is an install error; the diagnostic lists the available names. A non-empty persisted `skills:` selection matching no available skill also fails before any of that dependency's primitives are written, preserving its previously deployed files and ownership/hash records. The selection is persisted to `apm.yml` and `apm.lock.yaml` only after a successful CLI match. `--skill` is additive across separate installs: a later `apm install <bundle> --skill X` adds `X` to the existing pin (union) rather than replacing it -- previously deployed skills are never silently removed. Use `--skill '*'` to reset to the full bundle; to drop a single skill, edit the `skills:` list in `apm.yml` and re-run `apm install`. |
 | `--as ALIAS` | bundle id | Override the log/display label for a local-bundle install. Only valid with a single local-bundle `PACKAGE_REF`. |
 
 #### Skill-filter outcomes
@@ -158,6 +166,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   dependency, source file, local path, and affected targets. Rename the local
   skill, or edit an existing `skills:`/`targets:` selection to exclude the
   conflict. A skill allow-list does not automatically include future skills.
+  A pre-existing skill directory that holds no files or symlinks at any depth
+  is not a conflict: install deploys into it and records the deployment.
   Matching names or shared directories alone are not conflicts; identical
   files and exact managed paths retain their existing handling. Preparation
   may populate caches; refusal does not delete an older partial installation
@@ -208,7 +218,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **Direct registry lookup fails closed.** Registry-form MCP entries (`apm install --mcp NAME` with no `--url` and no post-`--` command) resolve one unique registry identity before writing the manifest or user config. An unreachable registry, missing identity, or ambiguous bare server name exits non-zero without changing state.
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically. MCP servers with matching config are skipped; unchanged APM-managed connections can be updated when their declaration changes.
 - **Claude/Codex MCP collisions.** A differing self-defined connection with the same name is preserved unless its native configuration still matches the recorded APM baseline. Install identifies the conflicting target and exits nonzero; successful writes to other targets remain recorded. An identical foreign entry is not adopted. Neither `--force` nor `--frozen` takes over a user connection. Removal also preserves entries with a differing or unverifiable baseline. See [MCP conflict recovery](../../../consumer/install-mcp-servers/#resolve-a-connection-name-conflict).
-- **Claude Code profiles.** For user-scope MCP installs, an absolute `CLAUDE_CONFIG_DIR` selects that profile's `.claude.json` for both installation and stale-server cleanup. Removing an APM-managed server in the selected profile preserves other profiles and user-owned entries. Cleanup refuses symlinked config files or profile directories; replace the link with a regular file or directory before retrying.
+- **Claude Code profiles.** For user-scope MCP installs, an absolute `CLAUDE_CONFIG_DIR` selects that profile's `.claude.json` for both installation and stale-server cleanup. Removing an APM-managed server in the selected profile preserves other profiles and user-owned entries. Cleanup refuses symlinked config files or profile directories; replace the link with a regular file or directory before retrying. Skills, agents, and other deployed files follow the same rule: profiles share one user lockfile, and a global install removes stale files only under the selected `CLAUDE_CONFIG_DIR` (or `~/.claude`), leaving files deployed to other profiles in place. Files of a profile you no longer install into stay on disk and in the lockfile; remove them manually. `apm uninstall -g` follows the same rule; see [Claude Code profiles](../uninstall/#claude-code-profiles).
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
@@ -233,7 +243,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   installation. See [Author primitives](../../../producer/author-primitives/)
   for fence and UTF-8 BOM syntax.
 - **MCP-only lock state.** A normal project install creates or updates `apm.lock.yaml` when `apm.yml` declares only MCP dependencies, records the resolved MCP configs and targets, and migrates a legacy `apm.lock` first. Repeating the same install leaves the lockfile and target configs byte-identical. If initial lock creation fails, install exits nonzero and warns with writable-directory and rerun guidance.
-- **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs reuse the locked commit for matching Git dependencies, declared refs and host providers across the resolved graph, without checking whether upstream branches moved. A mutable ref without a matching lock entry resolves upstream instead of reusing a stale bare-cache ref, even if another package or sibling path is locked. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update` or `apm lock --update`. See the [lockfile specification](../../lockfile-spec/) for the replay contract.
+- **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs reuse the locked commit for matching Git dependencies, declared refs and host providers across the resolved graph, without checking whether upstream branches moved. A mutable ref without a matching lock entry resolves upstream instead of reusing a stale bare-cache ref, even if another package or sibling path is locked. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update`, `apm install --update` or `apm lock --update`. A normal install re-reads local-path dependencies, so edits to their `apm.yml` apply in the same run; `--frozen` instead fails on changed local content (see **Frozen mode**). See the [lockfile specification](../../lockfile-spec/) for the replay contract.
 - **Semver ranges on git deps.** `ref:` accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`) for git-source deps, including positional virtual-subdirectory references. APM runs `git ls-remote` against the dep, picks the highest tag matching the range, and pins the resolved tag plus commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `--update` (or change the manifest constraint) to re-resolve. See [manage dependencies](../../../consumer/manage-dependencies/#pin-a-semver-range) for the supported syntax.
 - **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
 - **Conflicted lockfiles.** A lockfile containing unresolved Git merge conflict markers exits `1` for required readers and names the file; the conflicted bytes are never rewritten. Preview retains its warning and exit `0`. See [manual conflict repair](../../../troubleshooting/install-failures/#merge-conflict-markers-in-the-lockfile).
@@ -245,11 +255,17 @@ still cleans up its managed files, subject to the usual user-edit protections.
   The ignored `.apm-local/` installation identity and
   `~/.apm/deployment-receipts/` are local state, not files to commit or share.
   The identity lives in the project root, or your home directory for `--global`.
+  On Linux and macOS, a receipt stays valid when a reboot or remount changes
+  only the root's device number; the inode, path, installation identity and
+  recorded creation time must still match, so a recreated root is rejected.
   Configured external skill roots use the same ownership and receipt checks.
   Switching targets that share a skill path refreshes valid same-writer evidence
   through a guarded copy, even when the source bytes are unchanged.
   Missing evidence, including installations predating these receipts, does not
-  authorize overwriting existing files. Preserve your edits and move the
+  authorize overwriting existing files. A fresh clone or CI runner is the one
+  exception: a skill directory whose files all match what this install would
+  write, and are recorded in the lockfile, is kept and receipts are recorded.
+  Lockfile hashes are never that proof. Preserve your edits and move the
   conflicting file aside before reinstalling. Invalid evidence fails explicitly.
   Creating this state requires filesystem hard-link support. State-write failures
   are reported; successful earlier deployment writes are not rolled back.

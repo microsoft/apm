@@ -97,6 +97,19 @@ The pipeline is deterministic. Each phase must pass before the next runs.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
 
+On a fresh clone or CI runner without local deployment receipts, a committed
+skill is kept and its receipts are recorded when every file in its directory
+matches what the install would write and is recorded in `apm.lock.yaml`. The
+lockfile hashes are not used as proof. If any file differs, or another existing
+skill cannot be overwritten because its local deployment receipt is missing,
+install exits nonzero before stale-file cleanup and lockfile replacement. The
+refused files and prior lock contents are preserved, including during cold
+`--frozen` replay and when dependencies deliver the same skill. This is not a
+full rollback: files admitted earlier in the run may remain. Move the
+conflicting file aside and retry, or use `--force` only when you intend to
+overwrite it. Files edited since a valid recorded deployment remain protected
+with a warning.
+
 For the deeper view of how compile fits in, see
 [Lifecycle](../../concepts/lifecycle/).
 
@@ -225,18 +238,15 @@ and the full flag reference, or run `apm install --help`.
 
 ## When things go wrong
 
-- **Symlink checkout fallback.** If a checked-out file contains only a short
-  relative path (for example `../shared/config.yml`) instead of real content,
-  Git substituted a plain-text fallback for a symlink it could not create.
-  APM preserves Git's detected `core.symlinks` setting instead of letting an
-  inherited global value override it; this capability check is not
-  Windows-specific, but Windows non-admin accounts are the common case
-  without symlink-creation rights. Explicit command-scope Git settings still
-  take precedence; APM does not change your global Git configuration. A
-  successful checkout therefore does not guarantee that a package requiring
-  real symlinks works -- see "Skipped symlinked agent source" below for the
-  related install-time check on agent sources. Use a package that ships real
-  source files, or a symlink-capable environment.
+- **Package contains symbolic links.** APM always checks out in-repo links
+  in a dependency as real symlinks, so a package records the same
+  `content_hash` on Windows, macOS and Linux and a lockfile from one platform
+  verifies on another. If the host cannot create symlinks, install fails
+  before hashing with `Package <name> contains symbolic links, but this host
+  cannot create them`. On Windows, enable Developer Mode or grant the
+  "Create symbolic links" privilege, then retry. APM sets `core.symlinks=true`
+  only on its own Git commands and does not change your Git configuration.
+  Cached checkouts made by older APM versions are re-created automatically.
 - **Critical security finding.** Install aborts with the offending
   characters and file path. Patch upstream when you can; use
   `--force` only when you can document the exception.

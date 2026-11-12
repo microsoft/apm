@@ -285,11 +285,13 @@ class BaseIntegrator:
         unchanged: bool = False,
         force: bool = False,
         diagnostics=None,
+        package: str = "",
     ) -> list[Path]:
         """Copy admitted members through the shared skill containment boundary.
 
         Skill copies route here for symlink and destination-containment checks,
-        without deleting or inventorying destination siblings.
+        without deleting or inventorying destination siblings. *package* is the
+        owning dependency key used to attribute refusal diagnostics.
         """
         from apm_cli.utils.content_hash import compute_file_hash
 
@@ -353,12 +355,21 @@ class BaseIntegrator:
                         if expected is None
                         else "modified since deployment"
                     )
-                    message = (
-                        f"Skipped {entry}: {reason}. "
-                        "Preserve your changes before reinstalling with --force."
-                    )
+                    if expected is None:
+                        message = (
+                            f"Skipped {entry}: {reason}. Move the conflicting file aside "
+                            "and retry; use --force only to intentionally overwrite it."
+                        )
+                    else:
+                        message = (
+                            f"Skipped {entry}: {reason}. "
+                            "Preserve your changes before reinstalling with --force."
+                        )
                     if diagnostics is not None:
-                        diagnostics.warn(message)
+                        if expected is None:
+                            diagnostics.error(message, package=package)
+                        else:
+                            diagnostics.warn(message)
                     else:
                         _rich_warning(message)
                     if on_member_skipped is not None:

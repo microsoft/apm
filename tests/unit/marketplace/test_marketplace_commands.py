@@ -58,12 +58,12 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_uses_manifest_name_when_available(self, mock_detect, mock_fetch, mock_add, runner):
         """Manifest's `name` field becomes the registered alias."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = ".claude-plugin/marketplace.json"
+        mock_detect.return_value = (".claude-plugin/marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="addy-agent-skills",
             plugins=(MarketplacePlugin(name="agent-skills"),),
@@ -80,12 +80,12 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_cli_name_overrides_manifest(self, mock_detect, mock_fetch, mock_add, runner):
         """An explicit --name flag wins over the manifest's name."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="manifest-alias",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -100,14 +100,14 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_falls_back_when_manifest_name_invalid(
         self, mock_detect, mock_fetch, mock_add, runner
     ):
         """Invalid manifest.name triggers a soft fallback to the repo name."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="has spaces!",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -124,14 +124,14 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_falls_back_when_manifest_name_missing(
         self, mock_detect, mock_fetch, mock_add, runner
     ):
         """Empty manifest.name silently falls back to the repo name."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -156,12 +156,12 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_awesome_copilot_pattern_unchanged(self, mock_detect, mock_fetch, mock_add, runner):
         """Regression: github/awesome-copilot manifest name == repo name -> no behaviour change."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = ".github/plugin/marketplace.json"
+        mock_detect.return_value = (".github/plugin/marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="awesome-copilot",
             plugins=(MarketplacePlugin(name="azure-cloud-development"),),
@@ -175,12 +175,12 @@ class TestMarketplaceAdd:
         assert "Install plugins with" not in result.output
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_verbose_shows_alias_source(self, mock_detect, mock_fetch, runner):
         """Verbose mode reports which precedence tier picked the alias."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="acme-tools",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -200,11 +200,11 @@ class TestMarketplaceAdd:
         )
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_successful_add(self, mock_detect, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="Test",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -215,12 +215,12 @@ class TestMarketplaceAdd:
         assert "registered" in result.output.lower() or "1 plugin" in result.output
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_respects_github_host(self, mock_detect, mock_fetch, runner, monkeypatch):
         from apm_cli.commands.marketplace import marketplace
 
         monkeypatch.setenv("GITHUB_HOST", "ghe.corp.example.com")
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="Test",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -237,11 +237,11 @@ class TestMarketplaceAdd:
         final_source = mock_fetch.call_args[0][0]
         assert final_source.host == "ghe.corp.example.com"
 
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_no_marketplace_json_found(self, mock_detect, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = None
+        mock_detect.return_value = (None, None)
         result = runner.invoke(marketplace, ["add", "acme-org/empty-repo"])
         assert result.exit_code != 0
         assert "marketplace.json" in result.output
@@ -253,12 +253,12 @@ class TestMarketplaceAdd:
     # ------------------------------------------------------------------
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_accepts_full_https_url(self, mock_detect, mock_fetch, runner):
         """`apm marketplace add https://github.com/org/repo` parses as github.com/org/repo."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -273,12 +273,12 @@ class TestMarketplaceAdd:
         assert probe_source.repo == "plugin-marketplace"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_git_url_fragment_sets_ref_and_canonical_url(self, mock_detect, mock_fetch, runner):
         """Anthropic git URL shape accepts #ref and stores the URL without the fragment."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -297,12 +297,12 @@ class TestMarketplaceAdd:
         assert final_source.ref == "v1.2.3"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_unpinned_git_url_warns_about_mutable_ref(self, mock_detect, mock_fetch, runner):
         """Git URL sources without #ref get an actionable pinning warning."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -439,13 +439,13 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_mixed_case_ssh_url_warns_host_flag_is_ignored(
         self, mock_detect, mock_fetch, mock_add, runner
     ):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m",
             plugins=(MarketplacePlugin(name="p1"),),
@@ -469,13 +469,13 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_unpinned_ssh_url_warns_about_mutable_ref(
         self, mock_detect, mock_fetch, mock_add, runner
     ):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(name="m", plugins=())
         result = runner.invoke(
             marketplace,
@@ -488,11 +488,11 @@ class TestMarketplaceAdd:
         assert "#v1.0.0" not in result.output
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_strips_dot_git_suffix(self, mock_detect, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -505,7 +505,7 @@ class TestMarketplaceAdd:
         assert probe_source.repo == "plugin-marketplace"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_accepts_nested_subpath_on_github_host(
         self, mock_detect, mock_fetch, runner, monkeypatch
     ):
@@ -516,7 +516,7 @@ class TestMarketplaceAdd:
         # trusted-host gate accepts it. This is the realistic shape on which
         # nested sub-paths actually appear.
         monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example.com")
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -532,12 +532,12 @@ class TestMarketplaceAdd:
         assert probe_source.repo == "plugin-marketplace"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_accepts_gitlab_com_https_url(self, mock_detect, mock_fetch, runner):
         """GitLab SaaS HTTPS URL passes registration and probes the GitLab host."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -552,12 +552,12 @@ class TestMarketplaceAdd:
         assert probe_source.repo == "plugin-marketplace"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_accepts_gitlab_com_host_shorthand(self, mock_detect, mock_fetch, runner):
         """Host-qualified shorthand for gitlab.com passes the registration gate."""
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -570,7 +570,7 @@ class TestMarketplaceAdd:
         assert probe_source.repo == "plugin-marketplace"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_accepts_self_managed_gitlab_with_gitlab_host_env(
         self, mock_detect, mock_fetch, runner, monkeypatch
     ):
@@ -578,7 +578,7 @@ class TestMarketplaceAdd:
         from apm_cli.commands.marketplace import marketplace
 
         monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -591,7 +591,7 @@ class TestMarketplaceAdd:
         assert probe_source.repo == "apm-registry"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_accepts_generic_host_via_git_fetcher(self, mock_detect, mock_fetch, runner):
         """Unknown FQDN is now accepted: kind=git routes through GitCache.
 
@@ -603,7 +603,7 @@ class TestMarketplaceAdd:
         """
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -694,7 +694,7 @@ class TestMarketplaceAdd:
         )
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_unknown_host_no_longer_rejects_with_export_hint(self, mock_detect, mock_fetch, runner):
         """Replacement for the round-3 'untrusted host' regression trap.
 
@@ -707,7 +707,7 @@ class TestMarketplaceAdd:
         """
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -724,7 +724,7 @@ class TestMarketplaceAdd:
         assert "export GITHUB_HOST=" not in normalized
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_ghes_shorthand_routes_through_git_fetcher_when_unclassified(
         self, mock_detect, mock_fetch, runner
     ):
@@ -738,7 +738,7 @@ class TestMarketplaceAdd:
         """
         from apm_cli.commands.marketplace import marketplace
 
-        mock_detect.return_value = "marketplace.json"
+        mock_detect.return_value = ("marketplace.json", None)
         mock_fetch.return_value = MarketplaceManifest(
             name="m", plugins=(MarketplacePlugin(name="p1"),)
         )

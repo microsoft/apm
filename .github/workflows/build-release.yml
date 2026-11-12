@@ -51,13 +51,27 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # PyInstaller bundles the build interpreter's libpython. The setup-python
+      # build for ubuntu-24.04 needs glibc 2.38, so Linux uses uv-managed
+      # python-build-standalone (glibc 2.17) to keep RHEL/Rocky/Alma 8 working.
+      # APM_MAX_GLIBC turns on the ELF check in build-binary.sh.
+      - name: Use uv-managed Python (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          {
+            echo "UV_PYTHON_PREFERENCE=only-managed"
+            echo "UV_PYTHON=${PYTHON_VERSION}"
+            echo "APM_MAX_GLIBC=2.28"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.platform != 'linux'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -125,6 +139,28 @@ jobs:
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
 
+      # apm imports GitPython at startup and exits when git is missing,
+      # so the container installs git-core before running the binary.
+      # The image is pinned by digest (multi-arch index for rockylinux:8) and
+      # gets only the job-scoped read token: the sample package is public.
+      - name: Smoke-test binary on Rocky Linux 8 (glibc 2.28)
+        if: matrix.platform == 'linux'
+        env:
+          GITHUB_APM_PAT: ${{ github.token }}
+        run: |
+          docker run --rm -e GITHUB_APM_PAT \
+            -v "$PWD/dist/${{ matrix.binary_name }}:/opt/apm:ro" \
+            rockylinux:8@sha256:9794037624aaa6212aeada1d28861ef5e0a935adaf93e4ef79837119f2a2d04c \
+            bash -euo pipefail -c '
+              dnf -y -q install git-core
+              rpm -q glibc
+              /opt/apm/apm --version
+              mkdir /tmp/smoke && cd /tmp/smoke
+              /opt/apm/apm init -y
+              /opt/apm/apm install microsoft/apm-sample-package --target claude
+              test -f apm_modules/microsoft/apm-sample-package/apm.yml
+            '
+
       - name: Build binary (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -179,7 +215,7 @@ jobs:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -197,7 +233,7 @@ jobs:
           brew list fish >/dev/null 2>&1 || brew install fish
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -309,7 +345,7 @@ jobs:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -322,7 +358,7 @@ jobs:
           brew list fish >/dev/null 2>&1 || brew install fish
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -471,21 +507,19 @@ jobs:
 
       - name: Set up Python
         if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
       - name: Install Unix shell startup test runtimes
         if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fish zsh
+        run: bash scripts/ci-apt-install.sh fish zsh
 
       - name: Install test dependencies
         if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
@@ -557,7 +591,7 @@ jobs:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -781,7 +815,7 @@ jobs:
 
       - name: Create GitHub Release
         id: release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           generate_release_notes: true
           prerelease: ${{ steps.release_type.outputs.is_prerelease == 'true' }}
@@ -865,7 +899,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Install locked build dependencies
         run: uv sync --frozen --extra dev
@@ -902,6 +936,6 @@ jobs:
           path: dist
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           verbose: true

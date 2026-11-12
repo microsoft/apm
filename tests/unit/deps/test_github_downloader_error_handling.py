@@ -1249,7 +1249,9 @@ class TestDownloadPackage:
             patch("apm_cli.deps.github_downloader.checkout_git_worktree") as checkout,
         ):
             downloader.download_package(dep, tmp_path / "pkg")
-        checkout.assert_called_once_with(tmp_path / "pkg", sha, env=downloader.git_env)
+        checkout.assert_called_once_with(
+            tmp_path / "pkg", sha, env=downloader.git_env, package=str(dep)
+        )
 
     def test_virtual_artifactory_subdir_routes_to_artifactory(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
