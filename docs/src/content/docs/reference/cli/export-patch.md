@@ -50,7 +50,7 @@ The next `apm install` overwrites local edits to managed files. `apm audit` drif
 | Code | Meaning |
 |---|---|
 | 0 | Success, including "nothing to export" (skipped-only runs exit 0 with warnings). |
-| 1 | Replay or export failed (missing or unparsable lockfile, cold cache, invalid `--out`). |
+| 1 | Replay or export failed (missing `apm.yml`, missing or unparsable lockfile, cold cache, invalid `--out`). |
 
 ## Examples
 
