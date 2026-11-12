@@ -1542,7 +1542,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/deps/github_downloader.py",
         old="            return _repair(env)\n",
         new="            return True\n",
-        intent="Downloader skips the dangling-cone-symlink repair owner.",
+        intent="Downloader skips Git-object link materialization in its sparse clone.",
     ),
     MutationCase(
         guard_id="transport-platform-tls-trust-injection",
