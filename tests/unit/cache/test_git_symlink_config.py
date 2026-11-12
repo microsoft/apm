@@ -1,4 +1,4 @@
-"""Real Git checks for the pinned ``core.symlinks=true`` dependency contract (#3457)."""
+"""Real Git checks for the pinned ``core.symlinks=false`` dependency contract (#3457)."""
 
 import os
 import subprocess
@@ -46,18 +46,6 @@ def config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str
 _QUERY = ("config", "--bool", "--get", "core.symlinks")
 
 
-def _host_creates_symlinks(scratch: Path) -> bool:
-    """Probe the real OS capability that Git needs for mode-120000 entries."""
-    scratch.mkdir(parents=True, exist_ok=True)
-    target = scratch / "target.txt"
-    target.write_bytes(b"probe")
-    try:
-        os.symlink(target, scratch / "link.txt")
-    except OSError:
-        return False
-    return True
-
-
 def _posix_package_hash(tmp_path: Path) -> str:
     """Hash the dereferenced tree that a POSIX install records for the fixture."""
     expected = tmp_path / "posix-expected"
@@ -81,7 +69,7 @@ def _posix_package_hash(tmp_path: Path) -> str:
         ("false", "local", None, None, None),
     ],
 )
-def test_network_env_pins_symlinks_true(
+def test_network_env_pins_link_text(
     tmp_path: Path,
     config_env: dict[str, str],
     inherited_scope: str,
@@ -91,7 +79,7 @@ def test_network_env_pins_symlinks_true(
     command_source: str | None,
     command: str | None,
 ) -> None:
-    """No inherited, capability or caller value can turn real links into link text."""
+    """No inherited, capability or caller value can make Git create OS symlinks."""
     config = config_env[f"GIT_CONFIG_{inherited_scope.upper()}"]
     _git(config_env, "config", "--file", config, "core.symlinks", inherited)
     _git(config_env, "config", "--file", config, "core.compression", "3")
@@ -115,7 +103,7 @@ def test_network_env_pins_symlinks_true(
 
     child = git_env.git_network_env("https://example.test/org/repo.git", config_env, worktree=repo)
 
-    assert _git(child, "-C", str(repo), *_QUERY) == "true"
+    assert _git(child, "-C", str(repo), *_QUERY) == "false"
     assert _git(child, "-C", str(repo), "config", "--get", "core.compression") == "3"
     assert child["GIT_CONFIG_GLOBAL"] == os.devnull
     assert child["GIT_CONFIG_SYSTEM"] == os.devnull
@@ -143,7 +131,7 @@ def test_network_env_symlink_pin_preserves_auth_isolation(
 
     child = git_env.git_network_env("https://example.test/org/repo.git", config_env, worktree=repo)
 
-    assert _git(child, "-C", str(repo), *_QUERY) == "true"
+    assert _git(child, "-C", str(repo), *_QUERY) == "false"
     assert "GIT_HTTP_EXTRAHEADER" not in child
     entries = [
         (
@@ -155,11 +143,11 @@ def test_network_env_symlink_pin_preserves_auth_isolation(
     assert ("credential.helper", "!stale-helper") not in entries
     assert all(not value.lower().startswith("authorization:") for _, value in entries)
     assert [entry for entry in entries if entry[0] == "core.symlinks"] == [
-        ("core.symlinks", "true")
+        ("core.symlinks", "false")
     ]
 
 
-@pytest.mark.parametrize(("parent", "child"), [("false", None), ("false", "false")])
+@pytest.mark.parametrize(("parent", "child"), [("true", None), ("true", "true")])
 def test_isolated_child_pins_over_parent_command_intent(
     tmp_path: Path,
     config_env: dict[str, str],
@@ -170,7 +158,7 @@ def test_isolated_child_pins_over_parent_command_intent(
     """Merged parent and child snapshots still resolve to the pinned value."""
     repo = tmp_path / "repo"
     _git(config_env, "init", "--quiet", "--template=", str(repo))
-    _git(config_env, "-C", str(repo), "config", "core.symlinks", "false")
+    _git(config_env, "-C", str(repo), "config", "core.symlinks", "true")
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.symlinks")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", parent)
@@ -182,7 +170,7 @@ def test_isolated_child_pins_over_parent_command_intent(
 
     result = git_env.git_network_env("https://example.test/org/repo.git", config_env, worktree=repo)
 
-    assert _git(result, "-C", str(repo), *_QUERY) == "true"
+    assert _git(result, "-C", str(repo), *_QUERY) == "false"
 
 
 @pytest.fixture
@@ -209,77 +197,31 @@ def symlink_source(tmp_path: Path, config_env: dict[str, str]) -> Path:
     return source
 
 
-def test_clone_never_materializes_link_text_after_capability_probe(
-    tmp_path: Path,
-    config_env: dict[str, str],
-    symlink_source: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_clone_writes_link_text_even_when_host_config_asks_for_symlinks(
+    tmp_path: Path, config_env: dict[str, str], symlink_source: Path
 ) -> None:
-    """Replay the Windows init result ``core.symlinks=false``; the pin still wins."""
-    real_init = git_env._git_init_run
-
-    def init_without_symlinks(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
-        result = real_init(args, **kwargs)
-        if "init" in args:
-            _git(config_env, "-C", args[-1], "config", "core.symlinks", "false")
-        return result
-
-    monkeypatch.setattr(git_env, "_git_init_run", init_without_symlinks)
-    _git(config_env, "config", "--global", "core.symlinks", "false")
+    """The Git layer never creates an OS link, whatever the host config says."""
     target = tmp_path / "clone"
-
-    if not _host_creates_symlinks(tmp_path / "capability"):
-        with pytest.raises(git_env.GitSymlinkCapabilityError):
-            git_env.clone_git_worktree(str(symlink_source), target, env=config_env)
-        return
 
     git_env.clone_git_worktree(str(symlink_source), target, env=config_env)
 
-    assert (target / "AGENTS.md").is_symlink()
-    assert (target / "AGENTS.md").read_bytes() == b"Package instructions\n"
-    assert _git(config_env, "config", "--global", "--get", "core.symlinks") == "false"
+    assert not (target / "AGENTS.md").is_symlink()
+    assert (target / "AGENTS.md").read_bytes() == b"CLAUDE.md"
+    assert _git(config_env, "config", "--global", "--get", "core.symlinks") == "true"
 
 
-def test_clone_records_the_posix_content_hash(
+def test_clone_then_materialize_records_the_posix_content_hash(
     tmp_path: Path, config_env: dict[str, str], symlink_source: Path
 ) -> None:
-    """A capable host hashes the dereferenced link exactly as POSIX does."""
-    # APM's auth env hides the user's global config; Git for Windows then
-    # records ``core.symlinks=false`` at init unless APM pins it.
-    _git(config_env, "config", "--global", "--unset", "core.symlinks")
+    """Link text plus Git-object materialization hashes exactly as POSIX does."""
+    from apm_cli.utils.git_sparse import materialize_tracked_symlinks
+
     clone = tmp_path / "clone"
     installed = tmp_path / "apm_modules" / "pkg"
 
-    if not _host_creates_symlinks(tmp_path / "capability"):
-        with pytest.raises(git_env.GitSymlinkCapabilityError) as raised:
-            git_env.clone_git_worktree(str(symlink_source), clone, env=config_env)
-        assert "Developer Mode" in str(raised.value)
-        return
-
     git_env.clone_git_worktree(str(symlink_source), clone, env=config_env)
+    materialize_tracked_symlinks("git", clone, None, env=config_env)
     robust_copytree(clone, installed, ignore=lambda _root, names: {".git"} & set(names))
 
-    assert not (installed / "AGENTS.md").is_symlink()
+    assert (installed / "AGENTS.md").read_bytes() == b"Package instructions\n"
     assert compute_package_hash(installed) == _posix_package_hash(tmp_path)
-
-
-def test_checkout_pins_symlinks_over_isolated_caller_env(
-    tmp_path: Path, config_env: dict[str, str], symlink_source: Path
-) -> None:
-    """``checkout_git_worktree`` beats a caller env that froze ``false``."""
-    clone = tmp_path / "clone"
-    _git(config_env, "clone", "--quiet", "--no-checkout", str(symlink_source), str(clone))
-    head = _git(config_env, "-C", str(symlink_source), "rev-parse", "HEAD")
-    caller_env = dict(config_env)
-    caller_env.update(
-        GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.symlinks", GIT_CONFIG_VALUE_0="false"
-    )
-
-    if not _host_creates_symlinks(tmp_path / "capability"):
-        with pytest.raises(git_env.GitSymlinkCapabilityError):
-            git_env.checkout_git_worktree(clone, head, env=caller_env, package="owner/repo")
-        return
-
-    git_env.checkout_git_worktree(clone, head, env=caller_env, package="owner/repo")
-
-    assert (clone / "AGENTS.md").is_symlink()

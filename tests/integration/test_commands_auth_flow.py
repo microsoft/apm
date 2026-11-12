@@ -375,6 +375,34 @@ class TestTryWithFallback:
         assert result == "success"
         assert calls == [None]
 
+    def test_github_auth_first_env_skips_anonymous_attempt(self) -> None:
+        """APM_GITHUB_AUTH_FIRST=1 (issue #2545): an unauth_first caller makes
+        no anonymous request when a credential resolves, and the one-time
+        warning names the recovery action."""
+        with (
+            patch.dict(
+                os.environ,
+                {"GITHUB_APM_PAT": "ghp_token", "APM_GITHUB_AUTH_FIRST": "1"},
+                clear=True,
+            ),
+            _NO_GIT_CRED,
+            _NO_GH_CLI,
+            patch("apm_cli.utils.console._rich_warning") as mock_warn,
+        ):
+            resolver = AuthResolver()
+            calls: list = []
+
+            def op(token, git_env):
+                calls.append(token)
+                return "ok"
+
+            result = resolver.try_with_fallback("github.com", op, unauth_first=True)
+            resolver.try_with_fallback("github.com", op, unauth_first=True)
+        assert result == "ok"
+        assert calls == ["ghp_token", "ghp_token"]
+        mock_warn.assert_called_once()
+        assert "apm config unset github-auth-first" in mock_warn.call_args.args[0]
+
     def test_unauth_fails_then_token_used(self) -> None:
         with (
             patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_fallback"}, clear=True),

@@ -1,7 +1,7 @@
 """Regression trap: root help and light commands must not import heavy verbs.
 
 ``apm --help``, ``apm doctor --help``, and ``apm config get`` must not load
-``install``, ``audit``, ``pack``, ``marketplace``, ``uninstall``, ``update``,
+``install``, ``audit``, ``export_patch``, ``pack``, ``marketplace``, ``uninstall``, ``update``,
 or ``prune``. Those modules load only when the matching verb is dispatched.
 """
 
@@ -13,6 +13,7 @@ import sys
 _FORBIDDEN_PREFIXES = (
     "apm_cli.commands.install",
     "apm_cli.commands.audit",
+    "apm_cli.commands.export_patch",
     "apm_cli.commands.pack",
     "apm_cli.commands.marketplace",
     "apm_cli.commands.uninstall",

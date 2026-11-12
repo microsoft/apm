@@ -231,16 +231,7 @@ class InstallService:
     @staticmethod
     def _build_event(event_name: str, request: InstallRequest) -> LifecycleEvent:
         """Build a :class:`LifecycleEvent` from the request."""
-        from apm_cli.core.lifecycle_scripts import LifecycleEvent, PackageInfo
-
-        packages = []
-        for dep in request.apm_package.get_apm_dependencies():
-            packages.append(
-                PackageInfo(
-                    name=dep.repo_url or str(dep),
-                    reference=dep.reference,
-                )
-            )
+        from apm_cli.core.lifecycle_scripts import event_for_dependencies
 
         scope_name = "project"
         if request.scope is not None:
@@ -248,16 +239,12 @@ class InstallService:
                 request.scope.value if hasattr(request.scope, "value") else str(request.scope)
             )
 
-        project_root = None
         pkg_path = getattr(request.apm_package, "package_path", None)
-        if pkg_path is not None:
-            project_root = str(pkg_path)
-
-        return LifecycleEvent.create(
-            event=event_name,
-            packages=packages,
+        return event_for_dependencies(
+            event_name,
+            request.apm_package.get_apm_dependencies(),
             scope=scope_name,
-            working_directory=project_root,
+            working_directory=str(pkg_path) if pkg_path is not None else None,
         )
 
     @staticmethod

@@ -24,6 +24,17 @@ from apm_cli.models.apm_package import (
     ValidationResult,
 )
 
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked clones carry no Git objects; real-git tests cover link materialization."""
+    with (
+        patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+    ):
+        yield
+
+
 _CRED_FILL_PATCH = patch(
     "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
     return_value=None,
@@ -319,7 +330,6 @@ class TestGitHubPackageDownloader:
                 target_path,
                 "abc123def456",
                 env=self.downloader.git_env,
-                package="github.com/user/repo#abc123",
             )
             assert result.package.name == "test-package"
 

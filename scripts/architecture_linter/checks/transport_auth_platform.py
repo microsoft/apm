@@ -841,7 +841,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "def validate_git_url_rewrite_safety(",
                 "def git_symlink_pin_args(",
                 "retained.append(git_symlink_pin_entry())",
-                "def raise_for_symlink_capability(",
+                '_SYMLINK_PIN_VALUE = "false"',
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
         )
@@ -1061,11 +1061,11 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
     for path, needles in (
         (
             "src/apm_cli/cache/git_cache.py",
-            ("git_symlink_pin_args(", "git_symlink_pin_entry(", "raise_for_symlink_capability("),
+            ("git_symlink_pin_args(", "git_symlink_pin_entry(", "materialize_tracked_symlinks("),
         ),
         (
             "src/apm_cli/deps/bare_cache.py",
-            ("git_symlink_pin_args(", "raise_for_symlink_capability("),
+            ("git_symlink_pin_args(", "materialize_tracked_symlinks("),
         ),
     ):
         findings.extend(
@@ -1075,7 +1075,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 _RID_GIT_CHILD_ENV,
                 path,
                 needles,
-                "Dependency checkouts must pin real symlinks and name capability failures",
+                "Dependency checkouts must write link text and materialize it from Git objects",
             )
         )
     findings.extend(

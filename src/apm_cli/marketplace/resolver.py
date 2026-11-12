@@ -56,6 +56,7 @@ _MARKETPLACE_RE = re.compile(r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$")
 
 # Characters that signal a semver range rather than a raw git ref
 _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
+_IMPLICIT_MARKETPLACE_REFS = frozenset({"main", "HEAD"})
 
 
 @dataclass(frozen=True)
@@ -825,6 +826,31 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
+def _select_marketplace_plugin_ref(
+    source: MarketplaceSource,
+    plugin_ref: str | None,
+) -> str | None:
+    """Return the ref for an in-marketplace plugin, falling back to the registry ref.
+
+    Shared registered-ref fallback (#1811, #1917). Invariants this helper must
+    preserve:
+
+    - A ref the plugin source already declares wins over the registered
+      marketplace ref.
+    - A registered ``main`` or ``HEAD`` ref stays implicit (returns ``None``):
+      the repository's real default branch is unknown here, so it is never
+      written into a canonical or ``DependencyReference``.
+
+    Callers keep source eligibility, dict non-overwrite and rendering guards,
+    and the later install-time ``version_spec`` raw-ref/semver override.
+    """
+    if plugin_ref:
+        return plugin_ref
+    if source.ref and source.ref not in _IMPLICIT_MARKETPLACE_REFS:
+        return source.ref
+    return None
+
+
 def _extract_auth(
     auth_resolver: object | None,
     host: str,
@@ -1021,14 +1047,7 @@ def resolve_marketplace_plugin(
                 # heuristic; the normal downloader still validates its content.
                 needs_explicit_path = True
         if in_repo_path and needs_explicit_path:
-            # Fall back to the marketplace's registered ref when the plugin
-            # source itself declares no ref and no version_spec overrides it.
-            # "main" / "HEAD" are excluded because they represent the default
-            # branch -- appending them would be a no-op at best and misleading
-            # when the repo's actual default branch has a different name.
-            effective_ref = path_ref
-            if not effective_ref and source.ref and source.ref not in ("main", "HEAD"):
-                effective_ref = source.ref
+            effective_ref = _select_marketplace_plugin_ref(source, path_ref)
             dep_ref = _gitlab_in_marketplace_dependency_reference(
                 source, in_repo_path, effective_ref
             )
@@ -1068,25 +1087,17 @@ def resolve_marketplace_plugin(
     )
 
     # ---- Propagate marketplace registered ref (#1811) ----
-    # When a marketplace is registered with ``--ref feat/xxx`` and the plugin
-    # uses a relative string source (e.g. ``"./plugins/my-plugin"``), the
-    # canonical built by ``resolve_plugin_source`` carries no ``#ref`` suffix.
-    # Without this block the plugin would resolve against the default branch
-    # instead of the registered ref.
-    # "main" / "HEAD" are excluded to avoid appending a no-op suffix; if the
-    # repo's actual default branch is not named "main" and the user pinned
-    # ``--ref main``, this condition silently drops the ref -- fixing that
-    # would require knowing the repo's real default branch which is not
-    # available at this stage.
+    # Relative string sources on GitHub-family marketplaces have no structured
+    # dep_ref, so the selected registered ref is appended to the canonical.
     if (
         dep_ref is None
         and not version_spec
         and isinstance(plugin.source, str)
         and "#" not in canonical
-        and source.ref
-        and source.ref not in ("main", "HEAD")
     ):
-        canonical = f"{canonical}#{source.ref}"
+        canonical_ref = _select_marketplace_plugin_ref(source, None)
+        if canonical_ref:
+            canonical = f"{canonical}#{canonical_ref}"
 
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag

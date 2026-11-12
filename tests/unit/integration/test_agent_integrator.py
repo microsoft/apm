@@ -1,12 +1,12 @@
 """Tests for agent integration functionality."""
 
 import tempfile
+import tomllib
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-import tomllib
 
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference

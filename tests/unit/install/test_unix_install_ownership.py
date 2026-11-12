@@ -2198,7 +2198,7 @@ def test_glibc_recovery_guidance_reports_prebuilt_floor(
         )
     else:
         assert "Use a system with glibc 2.28+ for the prebuilt binary" in result.stdout
-    assert "Install Python 3.10+ first" in result.stdout
+    assert "Install Python 3.11+ first" in result.stdout
     assert "glibc 2.35+" not in result.stdout
     assert "glibc 2.38+" not in result.stdout
 
@@ -2215,7 +2215,7 @@ def test_pip_recovery_guidance_uses_selected_python_command(
     python = root / "tools" / python_name
     python.write_text(
         "#!/bin/sh\n"
-        'if [ "$1" = "-c" ]; then printf \'3.10\\n\'; exit 0; fi\n'
+        'if [ "$1" = "-c" ]; then printf \'3.11\\n\'; exit 0; fi\n'
         'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi\n'
         "exit 1\n",
         encoding="ascii",
@@ -2247,7 +2247,7 @@ def test_missing_python_recovery_does_not_invent_pip_command(
         ldd.chmod(0o755)
     result = _run(installation, failure_stage=failure_stage)
     assert result.returncode == 1
-    assert "Install Python 3.10+ first" in result.stdout
+    assert "Install Python 3.11+ first" in result.stdout
     assert "-m pip install" not in result.stdout
     assert not any(
         line.strip().startswith(("pip install ", "pip3 install "))
@@ -2263,7 +2263,7 @@ def test_fail_closed_pip_recovery_never_prints_public_command(
     python = root / "tools/python3"
     python.write_text(
         "#!/bin/sh\n"
-        'if [ "$1" = "-c" ]; then printf \'3.10\\n\'; exit 0; fi\n'
+        'if [ "$1" = "-c" ]; then printf \'3.11\\n\'; exit 0; fi\n'
         'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi\n'
         "exit 1\n",
         encoding="ascii",
@@ -2310,7 +2310,7 @@ def test_ineligible_fallback_prints_no_pip_attempt_or_command(
 
 
 @pytest.mark.parametrize("kind", ["existing", "custom", "fresh"])
-@pytest.mark.parametrize("python_version", [None, "3.9", "3.10"])
+@pytest.mark.parametrize("python_version", [None, "3.10", "3.11"])
 @pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
 def test_binary_failure_advice_preserves_installation_ownership(
     installation: tuple[Path, dict[str, str]],
@@ -2339,11 +2339,11 @@ def test_binary_failure_advice_preserves_installation_ownership(
     result = _run(installation, failure_stage=failure_stage, **options)
     assert result.returncode == 1
     if kind == "fresh":
-        if python_version == "3.10":
+        if python_version == "3.11":
             assert "pip is not available" in result.stdout
             assert "python3 -m pip install --user apm-cli" in result.stdout
         else:
-            assert "Python 3.10+" in result.stdout
+            assert "Python 3.11+" in result.stdout
             assert "-m pip install" not in result.stdout
         assert not any(
             line.strip().startswith(("pip install ", "pip3 install "))
