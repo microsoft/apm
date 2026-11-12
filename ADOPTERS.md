@@ -24,8 +24,9 @@ alphabetically by the Organization column:
 - **Organization:** the name approved for public listing. An approved industry
   description may be used instead when the organization needs to remain anonymous.
 - **Type (optional):** CNCF End-User Member, End-User Organization, Service
-  Provider, Project, Consultancy, or Contributor. Choose based on how APM is
-  used; more than one type may apply.
+  Provider, Project, or Consultancy. Choose based on how APM is used; more than
+  one type may apply. APM also accepts Contributor, a project-specific type that
+  is not a CNCF category, for organizations that contribute to APM.
 - **Adoption Level (optional):** Production, Dev/Test, Trialing, or Evaluating.
   Leave blank if the stage is not confirmed or cannot be disclosed.
 - **Description:** a short, factual statement approved for publication.
