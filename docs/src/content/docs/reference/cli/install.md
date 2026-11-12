@@ -85,7 +85,7 @@ use the user installation's lockfile; retain `--global` when retrying.
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip one runtime from the resolved MCP/LSP target set (explicit selection, manifest, saved config, or auto-detection). |
 | `--only apm\|mcp` | both | Install only APM packages or MCP/LSP service dependencies. Use `--only=apm` to skip service configuration and `--only=mcp` to select MCP and LSP services only. |
-| `-g`, `--global` | off | Install to user scope under the APM home (`$APM_HOME`, default `~/.apm`) instead of the current project. `apm install -g --mcp NAME` creates or updates `$APM_HOME/apm.yml`, then deploys only to global-capable runtimes, such as Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot. `APM_HOME` changes APM metadata paths only; target files still use their target-specific home variables or the operating-system home. Mixed selections skip workspace-only targets with a warning. A selection with no global-capable target exits `2` before changing the user manifest, lockfile, or runtime configuration. |
+| `-g`, `--global` | off | Install to user scope under the APM home (`$APM_HOME`, default `~/.apm`) instead of the current project. `apm install -g --mcp NAME` creates or updates `$APM_HOME/apm.yml`, then deploys only to global-capable runtimes, such as Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot. `APM_HOME` does not move target files; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract). Mixed selections skip workspace-only targets with a warning. A selection with no global-capable target exits `2` before changing the user manifest, lockfile, or runtime configuration. |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 File primitives resolve targets in this order: `--target`, manifest
@@ -280,7 +280,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **Frozen native-service targets.** The no-write boundary includes late MCP/LSP integration and MCP-only installs: `apm.yml` and `apm.lock.yaml` keep their exact bytes, including legacy timestamps. Frozen mode replays recorded target/server ownership, not an unrecorded personal deployment. If Copilot and Claude own a server but IntelliJ does not, `apm install --frozen --target copilot,claude,intellij` exits `1`, names the missing target/server claim, and leaves native MCP/LSP configs and user entries unchanged. Run the same command without `--frozen`, keeping the intended `--target`, `--only`, `--root DIR` or `--global` options, to record that ownership; commit the lockfile, then replay frozen. `--only mcp` does not hydrate package sources, even without `--frozen`. Restore the package sources and declarations matching the lock using `apm install` without `--only mcp` in the same deployment store (retain `--root DIR` or `--global`, if used) before retrying. Reordered, repeated and narrower selections remain valid. Source acquisition may precede this check; this is not a general rollback guarantee for package deployment or lifecycle scripts.
   Late MCP checks use the complete resolved package graph, not just the packages selected for installation.
 - **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped with `--only mcp`. At `--global` the source root is `$HOME`, so `~/.apm/` primitives deploy to user-scope targets.
-- **User-scope skill paths.** Global skill installation reads the lockfile from the canonical user metadata root (`~/.apm/`), separate from the skill deployment root. `HOME` or `APM_HOME` directory symlink aliases work without extra flags; package-descendant symlinks and symlinked skill destinations remain rejected. Explicit dependency `alias:` placement is separate; unrelated user files remain protected.
+- **User-scope skill paths.** Global skill installation reads the lockfile from the APM user home (`$APM_HOME`, default `~/.apm/`), separate from the skill deployment root. `HOME` or `APM_HOME` directory symlink aliases work without extra flags; package-descendant symlinks and symlinked skill destinations remain rejected. Explicit dependency `alias:` placement is separate; unrelated user files remain protected.
 - **Shared skill assets.** When dependencies deploy the same skill directory,
   matching managed files still use last-writer behavior, but reinstalling one
   package preserves the other's unique assets. This applies to project and
@@ -381,8 +381,6 @@ An incomplete summary reports the locally known count, not a complete install pl
 This graph pass performs no fetching, materialization, or writes; positional
 validation may still access the network. Stale-file integration cleanup is not
 previewed.
-
-With `-g`, an absent APM home (`$APM_HOME`, default `~/.apm`) remains uncreated while APM previews the user-scope install.
 
 ### Redirect writes to a scratch directory
 

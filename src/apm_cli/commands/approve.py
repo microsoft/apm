@@ -7,7 +7,7 @@ the commands two clearly-scoped destinations:
   block -- committed to source control so the whole team inherits the trust
   decision. This is where a maintainer pins the dependencies their project
   trusts.
-* ``--user`` (personal UX): ``~/.apm/config.json`` ``executables: {allow,
+* ``--user`` (personal UX): ``$APM_HOME/config.json`` ``executables: {allow,
   deny}`` -- never committed, lowest authority, a personal override on the
   current machine only.
 
@@ -149,8 +149,8 @@ def approve_cmd(
     """Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.
 
     By default writes to the project ``apm.yml`` ``executables.allow`` block
-    (committed). Use ``--user`` to record a personal grant in
-    ``~/.apm/config.json`` instead.
+    (committed). Use ``--user`` to record a personal grant in your APM user
+    config instead.
 
     Examples:
 
@@ -206,7 +206,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     """Deny executable primitives for packages (a narrowing override).
 
     Writes a deny entry to the project ``executables.deny`` (default) or your
-    personal ``~/.apm/config.json`` (``--user``). Deny always wins.
+    personal APM user config (``--user``). Deny always wins.
 
     Example:
 

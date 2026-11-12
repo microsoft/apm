@@ -119,9 +119,9 @@ update --global`, `apm uninstall --global`, `apm lock --global`, `apm deps ...
 config`. `apm prune` is project-scope only. Other pages write `~/.apm` for the
 default location.
 
-APM reads `APM_HOME` once at process start. A leading `~` is expanded, and a
-relative value is resolved against the directory APM started in, so commands
-that change directory keep using the same root. Changing `APM_HOME` does not
+A leading `~` is expanded, and a relative `APM_HOME` resolves against the
+directory APM started in, so commands that change directory keep using the same
+root. Changing `APM_HOME` does not
 move an existing `~/.apm`; copy the files yourself if you want to keep them.
 
 These paths are outside the contract:
