@@ -33,14 +33,15 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
 
-## Transport and protocol
+## Transport and credential order
 
-Controls how APM clones packages and enumerates refs on Git hosts. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
+Controls how APM clones packages and enumerates refs on Git hosts: `APM_GIT_PROTOCOL` and `APM_ALLOW_PROTOCOL_FALLBACK` select the transport scheme, while `APM_GITHUB_AUTH_FIRST` changes credential order for exact-host `github.com` without affecting transport. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
 | `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
+| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github-auth-first` in `~/.apm/config.json`, then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 
 ## TLS trust
 
@@ -55,7 +56,7 @@ APM verifies package-management HTTPS against the operating-system trust store b
 
 Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
 
-The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage).
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated `github.com` Git attempts, APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 ## Registry (MCP and proxy)
 
@@ -82,7 +83,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. See [`apm cache`](../cli/cache/). |
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
-| `APM_HOME` | Override the APM home directory used for user config and state. | platform default | Must be writable. |
+| `APM_HOME` | Override the root for APM-owned user metadata and configuration. | `~/.apm` | Must be writable. Does not redirect files deployed to agent targets. |
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
@@ -93,6 +94,63 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
 | `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
+
+### `APM_HOME` path contract
+
+`APM_HOME` is the single root for APM-owned user metadata. When it is unset or
+empty, the root is `~/.apm`. When set, global commands and lifecycle processing
+use the same overridden root:
+
+| State | Path |
+|---|---|
+| User manifest | `$APM_HOME/apm.yml` |
+| User lockfile | `$APM_HOME/apm.lock.yaml` |
+| Installed package metadata and content | `$APM_HOME/apm_modules/` |
+| User configuration | `$APM_HOME/config.json` |
+| Marketplace registrations | `$APM_HOME/marketplaces.json` |
+| Marketplace cache and version pins | `$APM_HOME/cache/marketplace/` |
+| Lifecycle trust | `$APM_HOME/scripts-trust.json` |
+| Lifecycle logs | `$APM_HOME/logs/` |
+| Lifecycle lock and deployment receipts | `$APM_HOME/.apm-lifecycle.lock`, `$APM_HOME/deployment-receipts/` |
+
+This applies to user-scope operations such as `apm install --global`, `apm
+update --global`, `apm uninstall --global`, `apm lock --global`, `apm deps ...
+--global`, `apm compile --global`, `apm marketplace`, `apm lifecycle`, and `apm
+config`. `apm prune` is project-scope only. Other pages write `~/.apm` for the
+default location.
+
+APM reads `APM_HOME` once at process start. Changing it does not move an
+existing `~/.apm`; copy the files yourself if you want to keep them.
+
+These paths are outside the contract:
+
+- The download cache follows `APM_CACHE_DIR` (see above); the update-check
+  timestamp stays in the operating-system cache directory.
+- Runtimes installed by `apm runtime setup` stay under `~/.apm/runtimes/`.
+- `apm install --global` keeps its installation identity at `~/.apm-local/`,
+  beside the deployment root, like deployed target files.
+
+`APM_HOME` does **not** redirect target deployment. Precedence:
+
+1. APM metadata: `APM_HOME`, then `~/.apm`.
+2. Target files: the target's own home variable when it has one (for example
+   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `HERMES_HOME`), then the
+   operating-system home.
+
+The two families never fall back to each other: a target variable does not
+move APM metadata, and `APM_HOME` does not move target files.
+
+To isolate APM metadata for a temporary global install:
+
+```bash
+export APM_HOME="$(mktemp -d)/apm"
+apm install --global example-org/example-package
+```
+
+The manifest, lockfile, modules, configuration, and lifecycle state remain
+under `$APM_HOME`; deployed target files still go to their normal user-scope
+destinations. For complete filesystem isolation, also run with an isolated
+operating-system home and/or set the selected targets' home variables.
 
 ## Policy
 

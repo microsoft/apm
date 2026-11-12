@@ -104,7 +104,8 @@ Supported events: `pre-install`, `post-install`, `pre-update`, `post-update`,
 Note: `apm lifecycle test` bypasses the project-script trust gate -- it is an
 explicit developer inspection tool for their own repository.
 
-Script output is written to `~/.apm/logs/scripts.log`.
+Script output is written to `$APM_HOME/logs/scripts.log` (default
+`~/.apm/logs/scripts.log`).
 
 ### `apm lifecycle trust`
 
@@ -118,9 +119,9 @@ apm lifecycle trust
 Trust is bound to the canonical `lifecycle:` subtree (SHA-256). Editing
 other `apm.yml` keys does not revoke trust; editing `lifecycle:` does.
 
-Trust records are stored at `~/.apm/scripts-trust.json` (or
-`$APM_HOME/scripts-trust.json`). To audit or reset trust manually, edit or
-delete that file.
+Trust records are stored at `$APM_HOME/scripts-trust.json` (default
+`~/.apm/scripts-trust.json`). To audit or reset trust manually, edit or delete
+that file.
 
 ### `apm lifecycle untrust`
 
@@ -136,7 +137,7 @@ apm lifecycle untrust
 | Variable | Effect |
 |---|---|
 | `APM_NO_SCRIPTS=1` | Disable all lifecycle scripts for one invocation. Useful in CI and untrusted clone environments. |
-| `APM_HOME` | Override the base directory for user `apm.yml` (`$APM_HOME/apm.yml`) and trust store (`$APM_HOME/scripts-trust.json`). |
+| `APM_HOME` | Override the shared root for user `apm.yml`, global package metadata, configuration, lifecycle trust, and lifecycle logs. It does not redirect target deployment. See the [authoritative path contract](../../environment-variables/#apm_home-path-contract). |
 
 ## Exit codes
 

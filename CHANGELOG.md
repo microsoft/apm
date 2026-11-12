@@ -10,15 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm install -g` reconciles a `marketplaces:` list in the user manifest (`~/.apm/apm.yml`): it registers missing entries, updates changed ones and removes only the ones it added, never touching marketplaces registered with `apm marketplace add` (name conflicts are reported). Each entry is a `name` plus any `apm marketplace add` source form. A project or package `apm.yml` with `marketplaces:` fails with an error pointing to the user manifest. (#3610)
+- `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
+
+### Added
+
 - OpenCode targets write native OpenCode 2 MCP entries under `mcp.servers` when `opencode.json` already declares that map, translating `enabled` to `disabled` and keeping `codemode` and other extra fields; files without it keep the OpenCode 1 layout. -- by @RamsesJM (#3414)
 
 ### Changed
 
+- **BREAKING:** APM now requires Python 3.11 or newer (Python 3.10 reached end of life in October 2026); standalone installers are unaffected (#3562)
 - Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
 
 ### Fixed
 
+- `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; target deployment destinations are unchanged. -- by @WilliamK112 (#3614)
+- HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells), instead of connecting without the pin that guards against DNS rebinding; an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
 - `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
 - When a registry proxy serves an archive that APM rejects (an unsafe member such as a symlink, or a body that is not a zip), `apm install` now reports that rejection instead of a later fallback URL's HTTP 404. Symlinks are still refused. (#3375)
 - `apm install --target claude` keeps `${VAR}` and `${VAR:-default}` references in the project `.mcp.json` instead of prompting for and writing the values, names missing variables, and on reinstall replaces values APM can confirm it wrote earlier; user scope (`~/.claude.json`) is unchanged. -- by @Aaryan-Dadu (#3377)
@@ -255,6 +262,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
 - File-lock retry diagnostics no longer include paths or exception text that may contain secrets, while retaining retry counts and delays. (#2742)
+
+### Fixed
+
+- GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
 
 ## [0.30.0] - 2026-09-07
 

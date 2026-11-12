@@ -37,7 +37,7 @@ import os
 import platform
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
@@ -108,7 +108,7 @@ class LifecycleEvent:
             event=event,
             packages=packages or [],
             scope=scope,
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )
@@ -403,10 +403,9 @@ def _get_policy_scripts_dir() -> Path:
 
 def _get_user_apm_yml() -> Path:
     """Return the user-level apm.yml path (~/.apm/apm.yml or $APM_HOME/apm.yml)."""
-    apm_home = os.environ.get("APM_HOME")
-    if apm_home:
-        return Path(apm_home) / "apm.yml"
-    return Path.home() / ".apm" / "apm.yml"
+    from apm_cli.core.scope import get_apm_home
+
+    return get_apm_home() / "apm.yml"
 
 
 def _get_project_apm_yml(project_root: str | None = None) -> Path:

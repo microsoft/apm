@@ -181,8 +181,10 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
     for t in threads:
         t.join(timeout=15)
 
+    from apm_cli.core.script_executors import _get_scripts_log_path
+
     _rich_success(
-        f"'{event}' event fired. Check ~/.apm/logs/scripts.log for output.",
+        f"'{event}' event fired. Check {_get_scripts_log_path()} for output.",
         symbol="check",
     )
 

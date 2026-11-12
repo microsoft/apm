@@ -42,6 +42,17 @@ def test_lifecycle_lock_uses_isolated_windows_home(
         lock.release()
 
 
+def test_lifecycle_lock_honors_apm_home(tmp_path: Path, monkeypatch) -> None:
+    apm_home = tmp_path / "isolated-metadata"
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+
+    lock = acquire_lifecycle_lock()
+    try:
+        assert Path(lock.lock_file) == (apm_home / ".apm-lifecycle.lock").resolve()
+    finally:
+        lock.release()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
 def test_lifecycle_lock_rejects_symlink_without_touching_target(
     tmp_path: Path,

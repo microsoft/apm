@@ -467,7 +467,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             if declared_names == target_names
             else f"{declared_names} -> {target_names}"
         )
-        selection_source = "~/.apm/apm.yml"
+        selection_source = _display_user_path(source_root / APM_YML_FILENAME)
     logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
 
     results = compile_user_root_contexts(
@@ -1292,7 +1292,7 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules, using target(s) from ~/.apm/apm.yml or every "
+        "from the APM user home, using its manifest targets or every "
         "supported target when undeclared. Cannot be combined with project-scoped "
         "output flags such as --target, --all, --watch, --root, or --output; "
         "use with --dry-run to preview changes."

@@ -26,8 +26,8 @@ What it does
 Flags
 -----
 * ``--verbose``/``-v`` -- show per-dependency resolution details.
-* ``--global``/``-g`` -- operate on ``~/.apm/apm.yml`` instead of the
-  current project (mirrors ``apm install -g``).
+* ``--global``/``-g`` -- operate on ``$APM_HOME/apm.yml`` (default
+  ``~/.apm/apm.yml``) instead of the current project.
 * ``--update`` -- re-resolve refs to their latest SHAs (like
   ``apm install --update``) before writing the lockfile.
 * ``--no-policy`` -- skip policy enforcement during resolution.
@@ -101,7 +101,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     "global_",
     is_flag=True,
     default=False,
-    help="Operate on ~/.apm/apm.yml instead of the current project",
+    help="Operate on the APM user manifest instead of the current project",
 )
 @click.option(
     "--update",
@@ -191,7 +191,8 @@ def _run_lock(
         manifest_path = get_apm_dir(scope) / "apm.yml"
         if not manifest_path.is_file():
             _rich_error(
-                "No apm.yml found in ~/.apm/. Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. "
+                "Run 'apm install -g <org/repo>' to create one."
             )
             sys.exit(1)
         project_root = manifest_path.parent
@@ -333,7 +334,7 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
 
     if explicit is not None:
         try:
-            dt = datetime.fromisoformat(_normalize_utc_designator(explicit))
+            dt = datetime.fromisoformat(explicit)
         except (ValueError, TypeError):
             dt = None
         if dt is None or dt.tzinfo is None:
@@ -345,11 +346,6 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
             )
         return dt.isoformat()
     return resolve_reproducible_timestamp(None, lockfile_generated_at)
-
-
-def _normalize_utc_designator(value: str) -> str:
-    """Normalize ISO 8601 UTC syntax for Python 3.10 ``fromisoformat``."""
-    return f"{value[:-1]}+00:00" if value.endswith("Z") else value
 
 
 __all__ = ["lock"]

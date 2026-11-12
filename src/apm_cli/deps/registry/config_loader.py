@@ -84,8 +84,10 @@ def load_merged_registries(
     # 4. config.json (lowest)
     merged.update(_load_config_json_registries(create_config=create_config))
 
-    # 3. workspace ~/.apm/apm.yml
-    workspace_yml = Path.home() / ".apm" / "apm.yml"
+    # 3. user workspace ($APM_HOME/apm.yml, default ~/.apm/apm.yml)
+    from ...core.scope import InstallScope, get_manifest_path
+
+    workspace_yml = get_manifest_path(InstallScope.USER)
     if workspace_yml.exists():
         merged.update(_load_yaml_registries(workspace_yml))
 

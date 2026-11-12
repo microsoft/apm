@@ -19,7 +19,7 @@ apm view PACKAGE [FIELD] [OPTIONS]
 
 `apm view` has two modes, selected by the optional `FIELD` argument:
 
-- **No field** -- read installed package metadata from `apm_modules/` (or `~/.apm/apm_modules/` with `-g`). Local-only; the package must be installed.
+- **No field** -- read installed package metadata from `apm_modules/` (or `$APM_HOME/apm_modules/`, default `~/.apm/apm_modules/`, with `-g`). Local-only; the package must be installed.
 - **`versions` field** -- query available versions. Git packages list remote tags and branches without requiring a local install. Registry packages list version and published-timestamp columns. See the `apm view <package> versions` subcommand below for the full registry-routing precedence and escape-hatch details.
 
 When `PACKAGE` matches the `NAME@MARKETPLACE` pattern, `apm view` resolves the plugin against the marketplace manifest and prints its entry (name, version, description, source, tags) instead of a Git repository view. This applies whether or not `versions` is passed.
@@ -51,7 +51,7 @@ For git packages, output is a table with name, type (`tag` or `branch`), and sho
 
 | Option              | Description                                  |
 | ------------------- | -------------------------------------------- |
-| `-g`, `--global`    | Inspect a package installed in user scope (`~/.apm/apm_modules/`) |
+| `-g`, `--global`    | Inspect a package installed in user scope (`$APM_HOME/apm_modules/`, default `~/.apm/apm_modules/`) |
 | `--registry [NAME]` | List versions from a registry. Omit a value to use the lockfile entry or configured default; provide `NAME` to force a specific named registry. Only valid with the `versions` field. |
 
 ## Examples

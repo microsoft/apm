@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 
 from filelock import FileLock, Timeout
 
+from apm_cli.core.scope import get_apm_home
 from apm_cli.utils.path_security import has_symlink_component
 
 LIFECYCLE_LOCK_TIMEOUT = 120.0
@@ -29,9 +30,9 @@ class LifecycleBusyError(RuntimeError):
 
 
 def _validate_lifecycle_lock_path(lock_path: Path) -> None:
-    """Reject lock paths that traverse a symlink below the user's home."""
-    home = Path.home()
-    if has_symlink_component(home, lock_path):
+    """Reject lock paths that traverse a symlink into the APM metadata root."""
+    apm_home = get_apm_home().absolute()
+    if has_symlink_component(apm_home.parent, lock_path.absolute()):
         raise LifecycleBusyError(
             f"Refusing symlinked lifecycle lock path: {lock_path}. "
             "Replace the symlink with a regular directory or file, then retry."
@@ -40,7 +41,7 @@ def _validate_lifecycle_lock_path(lock_path: Path) -> None:
 
 def lifecycle_lock() -> FileLock:
     """Return the process-reentrant OS-user lifecycle lock."""
-    lock_path = Path.home() / ".apm" / _LIFECYCLE_LOCK_NAME
+    lock_path = get_apm_home() / _LIFECYCLE_LOCK_NAME
     _validate_lifecycle_lock_path(lock_path)
     key = (os.getpid(), lock_path)
     with _locks_guard:
