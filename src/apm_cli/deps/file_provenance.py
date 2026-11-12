@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from ..core.deployment_ledger import _LOCAL_BUNDLE_OWNER as LOCAL_BUNDLE_OWNER
 from ..core.deployment_ledger import _SHA256_PREFIX, DeploymentLedgerCodec
 from ..core.deployment_state import DeploymentRecord, LocatorKind
 from ..utils.content_hash import compute_file_hash
@@ -32,6 +31,9 @@ from .lockfile import (
     LockfileFormatError,
     resolve_lockfile_path_for_read,
 )
+
+# The codec owns local-bundle semantics; this read-only view only labels the key.
+LOCAL_BUNDLE_OWNER = "local-bundle"
 
 
 class FileProvenanceError(Exception):
