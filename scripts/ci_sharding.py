@@ -180,7 +180,7 @@ def partition(
 
 
 def estimated_wall(seconds: float, largest_unit: float, workers: int) -> float:
-    """A shard can finish no sooner than its work spread over workers or its biggest unit."""
+    """A shard finishes no sooner than its work over its workers or its longest serial unit."""
     return max(seconds / max(workers, 1), largest_unit)
 
 
@@ -197,7 +197,13 @@ def plan_shard_count(
         raise pytest.UsageError("Cannot plan shards for an empty selection.")
     weights = item_weights(items, durations)
     units = affinity_units(items, weights, sum(weights.values()) / (max_shards * 2))
-    largest = max(sum(weights[item.nodeid] for item in unit) for unit in units)
+    # Only an xdist group (or one test) runs serially on one worker; a module's
+    # tests spread across the shard's workers.
+    serial: dict[str, float] = defaultdict(float)
+    for item in items:
+        group = _group_key(item)
+        serial[f"group:{group}" if group else item.nodeid] += weights[item.nodeid]
+    largest = max(serial.values())
     total = sum(weights.values())
     upper = max(1, min(max_shards, len(units)))
     count = min(upper, max(1, math.ceil(total / (target_seconds * max(workers, 1)))))
