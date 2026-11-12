@@ -60,6 +60,7 @@ _ROWS = (
     ),
     _Row("gemini-command-user", ("commands",), ("gemini",), True),
     _Row("cursor-instruction-project", ("instructions",), ("cursor",), False),
+    _Row("cursor-instruction-user", ("instructions",), ("cursor",), True),
     _Row(
         "claude-codex-hook-narrow",
         ("hooks",),
