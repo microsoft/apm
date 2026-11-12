@@ -106,6 +106,12 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
     ),
     (
+        "export-patch",
+        "apm_cli.commands.export_patch",
+        "export_patch",
+        "Export local edits to APM-managed files as patches against their source packages",
+    ),
+    (
         "install",
         "apm_cli.commands.install",
         "install",
