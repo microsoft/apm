@@ -62,6 +62,11 @@ class ResolutionStagingSession:
         Several local sources can share one ``_local/<name>`` slot. The first
         one refreshes it during resolution; the download callback uses this to
         let the others reuse that copy instead of staging the slot twice (#3401).
+
+        A reserved but unpublished slot still holds the previous live content,
+        so this is only safe while callers serialise download-then-activate per
+        slot. The resolver does so for local packages with one lock per install
+        path (``APMDependencyResolver._local_materialization_locks``).
         """
         resolved = ensure_path_within(path, self._modules_dir)
         with self._lock:
