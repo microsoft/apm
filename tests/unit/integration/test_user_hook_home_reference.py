@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import pytest
 
 from apm_cli.integration import targets as targets_mod
+from apm_cli.integration.hook_command_paths import splice_references
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS, UserHookHomeReference
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -270,3 +271,9 @@ class TestUserScopeInstall:
             assert (home_b / ".claude" / name).read_bytes() == (
                 home / ".claude" / name
             ).read_bytes()
+
+
+def test_splice_references_rejects_overlapping_edits() -> None:
+    assert splice_references("a b c", [(4, 5, "z"), (0, 1, "x")]) == "x b z"
+    with pytest.raises(ValueError, match="overlapping"):
+        splice_references("abcdef", [(0, 3, "x"), (2, 4, "y")])

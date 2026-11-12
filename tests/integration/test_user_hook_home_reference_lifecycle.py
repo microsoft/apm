@@ -38,6 +38,7 @@ class _Harness:
     script_root: str
     document: dict
     verified: bool
+    case: str = ""
 
 
 def _nested(event: str) -> dict:
@@ -56,6 +57,25 @@ _HARNESSES = (
     ),
     _Harness("gemini", ".gemini", f".gemini/hooks/{_PACKAGE}", _nested("PreToolUse"), True),
     _Harness("kiro", ".kiro", f".kiro/hooks/{_PACKAGE}", _nested("PreToolUse"), True),
+    _Harness(
+        "claude",
+        ".claude",
+        f".claude/hooks/{_PACKAGE}",
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "*",
+                        "hooks": [
+                            {"type": "command", "command": f"./{_SCRIPT}", "args": [_OUTPUT]}
+                        ],
+                    }
+                ]
+            }
+        },
+        False,
+        case="claude-exec-form",
+    ),
     _Harness(
         "cursor",
         ".cursor",
@@ -154,13 +174,16 @@ def _commands(home: Path, harness: _Harness) -> list[str]:
     return found
 
 
-@pytest.mark.parametrize("harness", _HARNESSES, ids=[harness.target for harness in _HARNESSES])
+@pytest.mark.parametrize(
+    "harness", _HARNESSES, ids=[harness.case or harness.target for harness in _HARNESSES]
+)
 def test_user_scope_hook_home_reference_lifecycle(
     tmp_path: Path, apm_binary_path: Path, harness: _Harness
 ) -> None:
     scenario = _scenario(tmp_path / harness.target, apm_binary_path, harness)
     home = scenario.isolated.home
-    absolute = f"sh {(home / harness.script_root / _SCRIPT).resolve()} {_OUTPUT}"
+    script = (home / harness.script_root / _SCRIPT).resolve()
+    absolute = str(script) if harness.case == "claude-exec-form" else f"sh {script} {_OUTPUT}"
     portable = f"sh $HOME/{harness.script_root}/{_SCRIPT.as_posix()} {_OUTPUT}"
 
     _install(scenario, harness, scenario.environment, "install")

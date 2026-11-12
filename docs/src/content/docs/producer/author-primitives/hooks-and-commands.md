@@ -388,17 +388,24 @@ agent a procedure" fits a skill -- and reaches every harness.
   | Harness | `$HOME` anchor applies to |
   |---------|---------------------------|
   | Claude Code | `command` in shell form (`sh -c`); not exec form (`args`) or `shell: "powershell"` |
-  | Copilot CLI | `bash` (not `command`, which Copilot also runs in PowerShell) |
+  | Copilot CLI | `bash` only (`command` is copied to PowerShell, so it stays absolute) |
   | Gemini CLI | `command` |
   | Kiro | command actions from `command` or `bash` |
-  | Cursor, Codex, Windsurf | none -- absolute paths (no documented shell execution) |
+  | Cursor, Codex, Windsurf | none -- absolute paths (no documented POSIX shell execution) |
 
   Absolute paths are also kept on Windows, for single-quoted references (a
   shell does not expand `$HOME` inside single quotes), and for a config
   root outside the home directory (for example `CLAUDE_CONFIG_DIR`).
-  Because the anchor resolves at run time, keep `HOME` pointing at the
-  installing user's home when a wrapper, service, or CI job launches the
-  harness. Reinstalling replaces older absolute entries in place.
+  Reinstalling replaces older absolute entries in place.
+
+  :::caution[`HOME` must match at run time]
+  `$HOME` resolves when the harness runs the hook, not when APM writes it.
+  If a wrapper, service, CI job, or `sudo` launches the harness under a
+  different `HOME`, the harness reports the script as missing (for example
+  `$HOME/.claude/hooks/<pkg>/run.sh` resolves under `/root`). Keep `HOME`
+  pointing at the installing user's home, or reinstall as the runtime user.
+  :::
+
   Project-scope `apm install` (no `-g`) keeps
   non-Claude command paths repo-relative. Claude project hooks use
   `CLAUDE_PROJECT_DIR` (or `$env:CLAUDE_PROJECT_DIR` for PowerShell) so

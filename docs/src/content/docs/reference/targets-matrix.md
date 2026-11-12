@@ -128,8 +128,8 @@ GitHub Copilot (CLI and IDE).
   `instructions` deploy individually under `~/.copilot/instructions/`, mirroring
   the project-scope layout. User-scope deploys land under `~/.copilot/`, not
   `~/.github/`; hook script commands (`~/.copilot/hooks/`) resolve from any
-  working directory: `bash` commands anchor to `$HOME` on macOS/Linux, other
-  forms use absolute paths.
+  working directory (see the per-harness `$HOME` rule in
+  [Hooks and commands](../../producer/author-primitives/hooks-and-commands/#pitfalls)).
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 - **Prompt harness limitation.** In VS Code, only Local harness sessions load

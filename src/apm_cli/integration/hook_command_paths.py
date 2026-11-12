@@ -103,6 +103,8 @@ def splice_references(text: str, edits: list[tuple[int, int, str]]) -> str:
     parts: list[str] = []
     position = 0
     for start, end, replacement in sorted(edits):
+        if start < position:
+            raise ValueError(f"overlapping hook command edits at {start} (cursor {position})")
         parts.extend((text[position:start], replacement))
         position = end
     parts.append(text[position:])
