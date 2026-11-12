@@ -112,6 +112,16 @@ class TestCheckRegistryLockedDep:
         assert result.outside_constraint is outside
         assert result.status == "outdated"
 
+    def test_wanted_excludes_prerelease_from_stable_range(self) -> None:
+        result = check_registry_locked_dep(
+            _locked(version="1.7.0"),
+            _ctx(manifest_range="^1.7.0"),
+            client_factory=lambda url, auth: _fake_client(["1.7.0", "1.8.0", "1.8.1-beta.1"]),
+        )
+
+        assert result.latest == "1.8.1-beta.1"
+        assert result.wanted == "1.8.0"
+
     @pytest.mark.parametrize(
         ("current", "versions", "latest", "status"),
         [
