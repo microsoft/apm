@@ -504,6 +504,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # ------------------------------------------------------------------
     # Build InstallContext from function args + computed state
     # ------------------------------------------------------------------
+    from ..policy._constraint_pinning import collect_declared_refs
     from .context import InstallContext
 
     ctx = InstallContext(
@@ -530,6 +531,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
         all_apm_deps=all_apm_deps,
+        declared_direct_refs=collect_declared_refs(all_apm_deps),
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,

@@ -31,8 +31,8 @@ constraint string only; no remote calls and no subprocess.  Used by
 
 The install pipeline rewrites ``dep.reference`` to the selected tag once
 a semver range is resolved, so callers that run after that point pass
-the manifest-declared ref through ``declared_ref`` and the classifier
-never judges the replacement (#3224).
+the manifest-declared ref (``collect_declared_refs``) through
+``declared_ref`` and the classifier never judges the replacement (#3224).
 """
 
 from __future__ import annotations
@@ -42,6 +42,8 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -125,59 +127,70 @@ def _classify_range(spec: str) -> UnboundedReason | None:
     return None
 
 
-def package_tag_name(dep: DependencyReference) -> str | None:
-    """Return the ``{name}`` the git-semver resolver matches tags with for *dep*.
-
-    Same rule as ``apm_cli.install.helpers.ref_reuse._git_semver_package_name``
-    and OpenAPM 7.3: the final virtual-path component for a selected
-    subdirectory package, otherwise the final repository path component
-    without a trailing ``.git``.
-    """
-    virtual_path = getattr(dep, "virtual_path", None)
-    is_subdirectory = getattr(dep, "is_virtual_subdirectory", None)
-    if callable(is_subdirectory) and is_subdirectory() and virtual_path:
-        return virtual_path.rstrip("/").rsplit("/", 1)[-1] or None
-    repo_url = getattr(dep, "repo_url", None) or ""
-    name = repo_url.rstrip("/").rsplit("/", 1)[-1]
-    if name.endswith(".git"):
-        name = name[: -len(".git")]
-    return name or None
-
-
 def _is_package_literal_tag(spec: str, dep: DependencyReference) -> bool:
     """True when *spec* is a literal tag in a ``{name}`` layout for *dep*'s own name.
 
-    Reuses the resolver's tag layouts and regex builder, so the version
-    grammar is the one the resolver already selects with. ``{name}`` is
-    bound to this dependency's package name: ``pkg-b-v1.1.0`` on a
-    ``pkg-a`` dependency, or ``anything-v1.1.0`` on a repository named
-    differently, is still a bare branch.
+    Reuses the resolver's package-name owner, tag layouts, regex builder
+    and semver parser, so a tag counts here exactly when the resolver
+    could select it for this dependency. ``{name}`` is bound to this
+    dependency's package name: ``pkg-b-v1.1.0`` on a ``pkg-a``
+    dependency, or ``anything-v1.1.0`` on a repository named differently,
+    is still a bare branch.
     """
-    name = package_tag_name(dep)
-    if not name:
-        return False
     # Lazy imports keep the policy import graph free of resolver modules.
     from apm_cli.deps.git_semver_resolver import DEFAULT_TAG_PATTERNS
+    from apm_cli.install.helpers.ref_reuse import git_semver_package_name
+    from apm_cli.marketplace.semver import parse_semver
     from apm_cli.marketplace.tag_pattern import build_tag_regex
 
+    name = git_semver_package_name(dep)
+    if not name:
+        return False
     for pattern in DEFAULT_TAG_PATTERNS:
         if _NAME_PLACEHOLDER not in pattern:
             continue
-        if build_tag_regex(pattern, name=name).match(spec):
+        match = build_tag_regex(pattern, name=name).match(spec)
+        if match and parse_semver(match.group("version")) is not None:
             return True
     return False
+
+
+def collect_declared_refs(
+    deps: Iterable[DependencyReference],
+) -> dict[str, tuple[str | None, ...]]:
+    """Map each direct dep's unique key to every ref the manifest declares for it.
+
+    Taken before resolution rewrites ``dep.reference`` to a selected tag.
+    The unique key excludes the ref, so one package declared twice (for
+    example under ``dependencies`` and ``devDependencies``) keeps both
+    declarations, and a missing ref is kept as ``None``: neither a
+    sibling declaration nor a selected tag can stand in for it.
+    """
+    declared: dict[str, tuple[str | None, ...]] = {}
+    for dep in deps:
+        key = dep.get_unique_key()
+        declared[key] = (*declared.get(key, ()), getattr(dep, "reference", None))
+    return declared
+
+
+class _Unset(Enum):
+    TOKEN = 0
+
+
+_FROM_DEP = _Unset.TOKEN
 
 
 def classify_unbounded_reason(
     dep: DependencyReference,
     *,
-    declared_ref: str | None = None,
+    declared_ref: str | None | _Unset = _FROM_DEP,
 ) -> UnboundedReason | None:
     """Return ``None`` if *dep*'s constraint is pinned, otherwise the reason.
 
     ``declared_ref`` is the manifest-declared ref when the caller knows
     ``dep.reference`` has since been rewritten to a resolved tag; when
-    given it is classified in place of ``dep.reference``.
+    given (including ``None`` for a declaration without a ref) it is
+    classified in place of ``dep.reference``.
 
     Classification order (first match wins):
 
@@ -186,7 +199,7 @@ def classify_unbounded_reason(
     3. Empty / missing ref         -> ``NO_REF``.
     4. 40-char hex SHA             -> ``None``.
     5. Literal ``v\\d+\\.\\d+\\.\\d+`` tag -> ``None``.
-    5a. ``{name}-v…`` / ``{name}--v…`` tag for this dep's own name -> ``None``.
+    5a. ``{name}-v...`` / ``{name}--v...`` tag for this dep's own name -> ``None``.
     6. Parses as semver range      -> range-shape check.
     7. Else                        -> ``BARE_BRANCH``.
     """
@@ -194,7 +207,7 @@ def classify_unbounded_reason(
     if getattr(dep, "is_local", False):
         return None
 
-    ref = declared_ref if declared_ref is not None else getattr(dep, "reference", None)
+    ref = getattr(dep, "reference", None) if declared_ref is _FROM_DEP else declared_ref
     source = getattr(dep, "source", None)
 
     # Lazy import: avoid pulling marketplace.semver into policy import graph.

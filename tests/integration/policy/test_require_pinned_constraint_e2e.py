@@ -301,10 +301,26 @@ class TestDeclaredRefsWiring:
         )
         for call in gate_calls:
             declared = call.kwargs.get("declared_refs") or {}
-            matching = [ref for key, ref in declared.items() if "test-org/skills" in str(key)]
-            assert matching == ["^1.2.0"], (
+            matching = [refs for key, refs in declared.items() if "test-org/skills" in str(key)]
+            assert matching == [("^1.2.0",)], (
                 "policy_gate did not forward the manifest-declared range for the "
                 f"direct dep; it would judge the resolved tag instead. kwargs: {call.kwargs!r}"
+            )
+        # The post-targets re-check (policy_target_check) runs the same dep
+        # checks and must judge the same declarations.
+        target_calls = [
+            c
+            for c in mock_run_checks.call_args_list
+            if c.kwargs.get("effective_target") is not None
+        ]
+        assert target_calls, (
+            f"policy_target_check did not run the dep checks: {mock_run_checks.call_args_list}"
+        )
+        for call in target_calls:
+            declared = call.kwargs.get("declared_refs") or {}
+            matching = [refs for key, refs in declared.items() if "test-org/skills" in str(key)]
+            assert matching == [("^1.2.0",)], (
+                f"policy_target_check did not forward the manifest-declared range: {call.kwargs!r}"
             )
 
 
