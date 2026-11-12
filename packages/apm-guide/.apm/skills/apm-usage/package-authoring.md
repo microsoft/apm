@@ -618,7 +618,9 @@ authority for the preserved metadata.
 #### Codex target: native model settings
 
 Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
-`description`, and the Markdown body as `developer_instructions`.
+`description`, and the Markdown body as `developer_instructions`
+(package-relative Markdown links are rewritten for the generated file's
+location, as for verbatim agent targets).
 String `model` and `model_reasoning_effort` frontmatter values are
 preserved as top-level TOML keys:
 
@@ -723,6 +725,10 @@ my-skill/
   resource1.md                         # supporting documentation
   resource2.md
 ```
+
+APM never prefixes or renames skills; same-named skills are told apart by
+native plugin namespacing (`<plugin>:<skill>`). Use
+`apm view --file <deployed-path>` to see which package deployed a skill file.
 
 ### 7. Marketplace Plugin (`plugin.json`)
 

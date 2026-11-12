@@ -338,7 +338,9 @@ single-file sparse fetches. Git then applies matching safe
 | Other shorthand | HTTPS |
 
 `apm audit --ci` cold replay uses the same declared transport, so an SSH
-dependency does not need `APM_GIT_PROTOCOL` for audit.
+dependency does not need `APM_GIT_PROTOCOL` for audit. The persistent Git
+cache also clones an SSH-declared dependency on a non-GitHub host over SSH, so
+a cold install makes no HTTPS request to that host.
 
 An explicit scheme prevents APM from choosing another protocol unless
 cross-protocol fallback is enabled, but it does not disable your Git `insteadOf`

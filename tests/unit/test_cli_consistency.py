@@ -50,6 +50,36 @@ def test_every_registered_command_has_explicit_help():
     )
 
 
+def test_root_help_command_summaries_are_not_truncated():
+    """Every top-level summary prints in full in ``apm --help`` at 80 columns.
+
+    Click truncates a summary longer than the Commands column with "..." (or
+    wraps an explicit ``short_help``). Keep each summary short enough to fit;
+    see #3523.
+    """
+    result = CliRunner().invoke(cli, ["--help"], terminal_width=80)
+    assert result.exit_code == 0
+
+    lines = result.output.splitlines()
+    shown: dict[str, str] = {}
+    for line in lines[lines.index("Commands:") + 1 :]:
+        if not line.strip():
+            break
+        if line.startswith("  ") and not line.startswith("   "):
+            name, _, summary = line.strip().partition(" ")
+            shown[name] = summary.strip()
+
+    problems: list[str] = []
+    for name in cli.list_commands(click.Context(cli)):
+        cmd = cli.commands[name]
+        if cmd.hidden:
+            continue
+        full = cmd.get_short_help_str(10_000)
+        if shown.get(name) != full:
+            problems.append(f"{name}: shown={shown.get(name)!r} full={full!r}")
+    assert not problems, "Top-level summaries truncated or wrapped: " + "; ".join(problems)
+
+
 def test_audit_help_describes_security_and_integrity_modes():
     result = CliRunner().invoke(cli, ["audit", "--help"])
 

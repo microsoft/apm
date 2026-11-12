@@ -357,6 +357,29 @@ export const SPAWN_CATALOG = {
             extra: { json: "off", debug: "off", comment_via: "autopilot-comment" },
         }, number),
     },
+    "worker-issue-accept": {
+        id: "worker-issue-accept",
+        role: "worker",
+        skill: "autopilot-issue-accept",
+        itemKind: "issue",
+        needsNumber: true,
+        requiresConfirm: false,
+        sessionNameFor: (number) => `Issue accept #${number}`,
+        targetFor: (number) => `worker:issue-accept:${number}`,
+        cardFor: (number) => workerCard({
+            skill: "autopilot-issue-accept",
+            itemKind: "issue",
+            path: "accept",
+            intent: "record one approved issue scope, then label",
+            extra: {
+                owns_comment_and_label: "yes",
+                draft_from: "latest-triage-proposed-scope",
+                chat_approval: "exact-text",
+                roster: "GOVERNANCE",
+                pull_requests: "stop",
+            },
+        }, number),
+    },
     "worker-issue-delivery": {
         id: "worker-issue-delivery",
         role: "worker",
@@ -476,6 +499,7 @@ export function occupancyKey(target) {
 
 const FAMILY_ORDER = [
     "issue-triage",
+    "issue-accept",
     "issue-delivery",
     "pr-triage",
     "pr-review",
@@ -532,6 +556,9 @@ export function planLabelMutation(input) {
     const remove = [];
 
     if (action === "accept") {
+        if (kind === "issue") {
+            throw new Error("issue accept is owned by autopilot-issue-accept; do not label from the canvas");
+        }
         if (!current.has(LABEL.accepted)) add.push(LABEL.accepted);
         if (current.has(LABEL.deferred)) remove.push(LABEL.deferred);
         if (current.has(LABEL.needsTriage)) remove.push(LABEL.needsTriage);
@@ -678,13 +705,14 @@ export function occupancyBlocksSpawn(row) {
 
 const SESSION_FAMILY = {
     "Issue triage": "issue-triage",
+    "Issue accept": "issue-accept",
     "Issue delivery": "issue-delivery",
     "PR triage": "pr-triage",
     "PR review": "pr-review",
     "PR merge": "pr-merge",
 };
 
-const SESSION_NAME_RE = /^(Issue triage|Issue delivery|PR triage|PR review|PR merge)(?: scheduler| #(\d+))$/;
+const SESSION_NAME_RE = /^(Issue triage|Issue accept|Issue delivery|PR triage|PR review|PR merge)(?: scheduler| #(\d+))$/;
 
 export function occupancyFromSessionName(name) {
     const trimmed = String(name || "").trim();
