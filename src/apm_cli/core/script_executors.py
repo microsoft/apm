@@ -1,7 +1,8 @@
 """Lifecycle script executors -- one per action type.
 
-Each executor isolates failures: it catches all exceptions internally
-and logs failures in verbose mode only (using ``[i]`` ASCII symbol).
+Each executor isolates failures: it catches all exceptions internally.
+A command script that exits non-zero or times out prints a warning; other
+failures are logged in verbose mode only (using ``[i]`` ASCII symbol).
 ``http`` scripts dispatch in a background daemon thread; ``command``
 scripts run synchronously and can delay the operation up to their timeout.
 
@@ -668,7 +669,7 @@ def _expand_env_vars(
         var_name = match.group(1) or match.group(2)
         if _is_denylisted(var_name, allowed):
             warning = (
-                f"[!] Script: credential variable '{var_name}' will NOT be expanded. "
+                f"Script: credential variable '{var_name}' will NOT be expanded. "
                 f"If you must pass it, add it to the script's 'allowedEnvVars' -- "
                 f"note this sends its value to the configured endpoint or subprocess."
             )
@@ -1578,7 +1579,7 @@ def _execute_command(
                 warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
                 if warn is not None:
                     warn(
-                        "[!] Lifecycle command script output exceeded the capture "
+                        "Lifecycle command script output exceeded the capture "
                         "limit and was truncated; the script was terminated."
                     )
         _append_to_script_log(
@@ -1590,12 +1591,19 @@ def _execute_command(
             exit_code=returncode,
             status="ok" if returncode == 0 else "error",
         )
+        if returncode != 0 and not capped and logger is not None:
+            warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
+            if warn is not None:
+                warn(
+                    f"Lifecycle {event.event} command script exited with code "
+                    f"{returncode}; continuing. Output: {_get_scripts_log_path()}"
+                )
         elapsed = time.monotonic() - start
         if elapsed > _SLOW_SCRIPT_THRESHOLD_SEC and logger is not None:
             warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if warn is not None:
                 warn(
-                    f"[!] Lifecycle command script took {elapsed:.1f}s "
+                    f"Lifecycle command script took {elapsed:.1f}s "
                     "(command scripts run synchronously and delay the operation)."
                 )
     except subprocess.TimeoutExpired:
@@ -1606,7 +1614,8 @@ def _execute_command(
             warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if warn is not None:
                 warn(
-                    f"[!] Lifecycle command script timed out after {script.effective_timeout}s: {cmd}"
+                    f"Lifecycle {event.event} command script timed out after "
+                    f"{script.effective_timeout}s. Output: {_get_scripts_log_path()}"
                 )
     except Exception as exc:
         _logger.debug("Command script failed: %s", cmd, exc_info=True)

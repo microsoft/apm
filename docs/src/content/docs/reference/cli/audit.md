@@ -38,6 +38,11 @@ selection first. Audit does not adopt, overwrite, or delete either file.
 JSON retains the finding's path and kind; SARIF uses
 `apm/drift/unmanaged-conflict` with error severity.
 
+When `modified` findings belong to remote (non-local) dependencies, the text output adds a hint
+such as `[i] 2 local edit(s) to managed files; run 'apm export-patch' to export
+them as upstream patches before the next install overwrites them`. See
+[`apm export-patch`](../export-patch/).
+
 Replay and coverage use the current `apm.yml` target declaration when present,
 otherwise the concrete target identities recorded by install. An unrelated
 `.github/workflows/` file does not add a Copilot deployment to a recorded
@@ -374,6 +379,7 @@ CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement
 ## Related
 
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.
+- [`apm export-patch`](../export-patch/) -- turn the `modified` drift this reports into upstream patches.
 - [`apm prune`](../prune/) -- reconciles the canonical deployment-owner references this check validates.
 - [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- consumer-side overview of the two-layer security model.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
