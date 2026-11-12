@@ -142,7 +142,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-gitlab-facade-orchestration",
         path="src/apm_cli/policy/discovery.py",
-        old="result = _gitlab._fetch_from_gitlab_repo(",
+        old="result = _gitlab._fetch_gitlab_ancestry(",
         new="result = _gitlab._fetch_gitlab_contents(",
         intent="The policy facade reaches into GitLab transport internals directly.",
     ),
@@ -151,7 +151,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/policy/_gitlab.py",
         old="def _fetch_gitlab_contents(",
         new="def _fetch_gitlab_contents_impl(",
-        intent="The GitLab adapter drops one of its four owned fetch/state helpers.",
+        intent="The GitLab adapter drops one of its five owned fetch/state helpers.",
     ),
     MutationCase(
         rule_id="install-deployment-incomplete-chain-routing",

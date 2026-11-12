@@ -149,24 +149,30 @@ def test_cache_hit_rematerializes_shard_without_link_materialization(
     assert _checkout_has_materialization_pins(healed)
 
 
-def test_pins_require_autocrlf_link_text_and_marker(tmp_path: Path) -> None:
+def test_pins_require_line_endings_link_text_and_marker(tmp_path: Path) -> None:
     checkout = tmp_path / "checkout"
     (checkout / ".git").mkdir(parents=True)
     config = checkout / ".git" / "config"
     complete = (
-        "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+        "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
         "[apm]\n\tlinkMaterialization = git-objects\n"
     )
     config.write_text(complete, encoding="utf-8")
     assert _checkout_has_materialization_pins(checkout)
-    for missing in ("\tautocrlf = false\n", "\tsymlinks = false\n", "\tlinkMaterialization"):
+    for missing in (
+        "\tautocrlf = false\n",
+        "\teol = lf\n",
+        "\tsymlinks = false\n",
+        "\tlinkMaterialization",
+    ):
         config.write_text(
             complete.replace(missing, "\tunrelated = 1\n" if missing.endswith("\n") else "\tother"),
             encoding="utf-8",
         )
         assert not _checkout_has_materialization_pins(checkout)
-    config.write_text(complete.replace("symlinks = false", "symlinks = true"), encoding="utf-8")
-    assert not _checkout_has_materialization_pins(checkout)
+    for wrong in (("symlinks = false", "symlinks = true"), ("eol = lf", "eol = crlf")):
+        config.write_text(complete.replace(*wrong), encoding="utf-8")
+        assert not _checkout_has_materialization_pins(checkout)
 
 
 def test_shard_keeps_unresolvable_link_for_the_consumer_to_reject(tmp_path: Path) -> None:
