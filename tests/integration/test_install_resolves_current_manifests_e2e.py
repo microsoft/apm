@@ -100,6 +100,46 @@ def test_local_package_that_drops_a_dependency_removes_it_in_one_install(
     assert "pkg-b" not in tree.stdout
 
 
+def test_local_sources_sharing_one_slot_reuse_this_runs_copy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Two local packages in same-named directories share one ``_local/`` slot.
+
+    Now that every local source is rechecked, the second one reaches the slot
+    after the first already staged it this run. It must reuse that copy, as
+    before, instead of failing to stage the slot twice, on cold and warm runs.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "shared", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    for group, name in (("a", "shared-one"), ("b", "shared-two")):
+        sources = LocalPackageFactory(isolated.package_root / group)
+        package = sources.create("shared")
+        sources.add_skill(package, name, _skill(name, name))
+        manifest = load_yaml(package.manifest_path)
+        manifest["name"] = name
+        dump_yaml(manifest, package.manifest_path)
+    project_root = isolated.work_root / "project"
+    project = LocalPackageFactory(isolated.work_root).create(
+        "project",
+        dependencies=tuple(
+            os.path.relpath(isolated.package_root / group / "shared", project_root)
+            for group in ("a", "b")
+        ),
+        targets=("copilot",),
+    )
+    runner = _runner(apm_binary_path)
+
+    for scenario in ("shared-cold", "shared-warm"):
+        result = runner.run(_INSTALL, scenario_id=scenario, cwd=project.root, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "already staged" not in result.stdout + result.stderr
+        lock = load_yaml(project.root / "apm.lock.yaml")
+        assert sorted(dep["local_path"] for dep in lock["dependencies"]) == [
+            "../../packages/a/shared",
+            "../../packages/b/shared",
+        ]
+
+
 @pytest.mark.parametrize("scope", ["project", "user"])
 def test_local_package_that_adds_a_dependency_installs_it_in_one_install(
     tmp_path: Path, apm_binary_path: Path, scope: str
