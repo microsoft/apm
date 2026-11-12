@@ -174,7 +174,7 @@ class TestUpdateConfig(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.mkdtemp()
         self.config_path = os.path.join(self.tmp_dir, "mcp-config.json")
-        self.adapter = _make_adapter()
+        self.adapter = _make_adapter(project_root=self.tmp_dir)
         self.patcher = patch(
             "apm_cli.adapters.client.copilot.CopilotClientAdapter.get_config_path",
             return_value=self.config_path,
@@ -219,7 +219,7 @@ class TestConfigureMcpServer(unittest.TestCase):
         self.config_path = os.path.join(self.tmp_dir, "mcp-config.json")
         with open(self.config_path, "w") as f:
             json.dump({"mcpServers": {}}, f)
-        self.adapter = _make_adapter()
+        self.adapter = _make_adapter(project_root=self.tmp_dir)
         self.path_patcher = patch(
             "apm_cli.adapters.client.copilot.CopilotClientAdapter.get_config_path",
             return_value=self.config_path,
