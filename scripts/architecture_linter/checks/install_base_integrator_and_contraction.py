@@ -191,6 +191,7 @@ _SPELLING_ALIAS_CALLERS = {
     "src/apm_cli/integration/cleanup.py": "physical_alias(stale_path, project_root, live_paths)",
     "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
     "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
+    "src/apm_cli/deps/file_provenance.py": "physical_alias(relative, Path(path.anchor)",
 }
 
 

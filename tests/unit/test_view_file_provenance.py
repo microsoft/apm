@@ -6,6 +6,7 @@ import hashlib
 import os
 import socket
 import sys
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -402,6 +403,33 @@ class TestExactPathOnly:
         assert "No recorded provenance" in out
         assert "do not assume it is project-owned or safe to edit" in out
         assert "acme/skills" not in out
+
+    @pytest.mark.parametrize("absolute", [False, True])
+    def test_decomposed_query_matches_precomposed_record_on_same_file(self, project, absolute):
+        # macOS (Finder drag and drop) hands out NFD paths for NFC-named files.
+        rel = ".github/skills/caf\u00e9/r\u00e9sum\u00e9.md"
+        skill_hash = _write(project, rel, "x\n")
+        _write_lock(
+            project,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [_row(rel, ["acme/skills"], content_hash=skill_hash)],
+            },
+        )
+        decomposed = unicodedata.normalize("NFD", rel)
+        query = str(project.resolve() / decomposed) if absolute else decomposed
+        # True on normalization-insensitive filesystems (macOS APFS/HFS+), False on ext4.
+        same_file = (project / decomposed).exists()
+
+        result, out = _run("--file", query)
+
+        if same_file:
+            assert result.exit_code == 0, result.output
+            assert "Owner: acme/skills [active writer]" in out
+            assert "matches the recorded deployed hash" in out
+        else:
+            assert result.exit_code == 1, result.output
+            assert "acme/skills" not in out
 
     def test_canonical_row_from_other_scope_is_ignored(self, project):
         skill_hash = _write(project, SKILL, "x\n")
