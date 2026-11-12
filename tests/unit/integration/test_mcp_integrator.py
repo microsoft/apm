@@ -501,6 +501,7 @@ class TestApplyOverlay:
         dep = _make_dep("ghost", transport="stdio")
         # Should not raise
         MCPIntegrator._apply_overlay(cache, dep)
+        assert cache == {}
 
     def test_list_args_appended_to_packages(self):
         cache = {
