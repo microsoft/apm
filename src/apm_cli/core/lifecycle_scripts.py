@@ -667,26 +667,39 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
-    # Org deny_all ceiling: best-effort, never raises into the install flow.
-    org_deny_all = False
+    # Org deny_all ceiling, resolved through the install gate's outcome
+    # routing: a policy outcome that blocks install (hash mismatch,
+    # fetch_failure_default=block, cached fetch_failure=block) also
+    # suppresses scripts. Unexpected errors never raise into the command.
+    suppressed_reason = None
     try:
+        from apm_cli.install.errors import PolicyViolationError
         from apm_cli.policy.discovery import discover_policy_with_chain
+        from apm_cli.policy.outcome_routing import route_discovery_outcome
+        from apm_cli.policy.project_config import read_project_fetch_failure_default
 
         # Discovery joins paths onto the root, so a str root would raise
         # TypeError here and the except below would silently skip deny_all.
-        fetch_result = discover_policy_with_chain(
-            Path(project_root) if project_root else Path.cwd()
-        )
-        if fetch_result and fetch_result.policy:
-            org_deny_all = bool(fetch_result.policy.executables.deny_all)
+        root = Path(project_root) if project_root else Path.cwd()
+        try:
+            policy = route_discovery_outcome(
+                discover_policy_with_chain(root),
+                logger=None,
+                fetch_failure_default=read_project_fetch_failure_default(root),
+            )
+        except PolicyViolationError:
+            suppressed_reason = "org policy could not be enforced"
+        else:
+            if policy is not None and policy.executables.deny_all:
+                suppressed_reason = "org policy (executables.deny_all)"
     except Exception:
-        pass
+        _logger.debug("Lifecycle org-policy check failed", exc_info=True)
 
-    if org_deny_all:
+    if suppressed_reason is not None:
         if logger is not None:
             emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if emit is not None:
-                emit("Lifecycle scripts suppressed by org policy (executables.deny_all).")
+                emit(f"Lifecycle scripts suppressed by {suppressed_reason}.")
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )

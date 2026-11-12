@@ -244,6 +244,15 @@ class PolicyFetchResult:
         return self.policy is not None
 
 
+def policy_disabled_by_env() -> bool:
+    """Return True when ``APM_POLICY_DISABLE`` disables org policy for this process.
+
+    The documented switch value is ``1``; other values leave policy on. Every
+    command that honours the switch reads it through this function.
+    """
+    return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
+
+
 def discover_policy_with_chain(
     project_root: Path,
     *,
@@ -290,7 +299,7 @@ def discover_policy_with_chain(
     # The CLI's --no-policy flag is handled by callers; this env-var
     # check stays so third-party use of the API still respects the
     # global disable switch.
-    if os.environ.get("APM_POLICY_DISABLE") == "1":
+    if policy_disabled_by_env():
         return PolicyFetchResult(outcome="disabled")
 
     # -- Resolve project-side hash pin (#827) --------------------------

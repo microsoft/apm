@@ -505,3 +505,16 @@ class TestMultiLevelExtendsChain:
         kw = mock_write_cache.call_args
         chain_refs = kw.kwargs.get("chain_refs") or kw[1].get("chain_refs")
         assert len(chain_refs) == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "disabled"),
+    [("1", True), (" 1 ", True), ("0", False), ("true", False), ("", False)],
+)
+def test_policy_disabled_by_env_accepts_only_the_documented_value(
+    monkeypatch, value: str, disabled: bool
+) -> None:
+    from apm_cli.policy.discovery import policy_disabled_by_env
+
+    monkeypatch.setenv("APM_POLICY_DISABLE", value)
+    assert policy_disabled_by_env() is disabled

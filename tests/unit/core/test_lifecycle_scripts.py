@@ -331,6 +331,8 @@ class TestBuildRunnerFromContext:
         mock_policy.executables.deny_all = True
         mock_fetch = MagicMock()
         mock_fetch.policy = mock_policy
+        mock_fetch.outcome = "found"
+        mock_fetch.source = "org"
         with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert runner._scripts == []
@@ -343,6 +345,8 @@ class TestBuildRunnerFromContext:
         mock_policy.executables.deny_all = False
         mock_fetch = MagicMock()
         mock_fetch.policy = mock_policy
+        mock_fetch.outcome = "found"
+        mock_fetch.source = "org"
         user_apm = _write_yaml(
             tmp_path / "user" / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
@@ -353,6 +357,29 @@ class TestBuildRunnerFromContext:
         ):
             runner = build_runner_from_context(project_root=str(tmp_path))
         assert any(script.bash == "echo user" for script in runner._scripts)
+
+    @pytest.mark.parametrize(("failure_default", "suppressed"), [("block", True), ("warn", False)])
+    def test_unresolved_org_policy_follows_fetch_failure_default(
+        self, tmp_path: Path, monkeypatch, failure_default: str, suppressed: bool
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        user_apm = _write_yaml(
+            tmp_path / "user" / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"name": "p", "policy": {"fetch_failure_default": failure_default}},
+        )
+        failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
+        with (
+            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed),
+            patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path))
+        assert (runner._scripts == []) is suppressed
 
     def test_untrusted_project_scripts_are_skipped(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
