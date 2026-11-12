@@ -1,7 +1,7 @@
 """End-to-end APM_HOME contract (#2884), exercised through real CLI processes.
 
-``APM_HOME`` is read at process start, so each command runs in its own
-interpreter with an explicit environment. No network access is needed:
+``APM_HOME`` is read at process start, so each command runs the apm binary
+under test in its own process with an explicit environment. No network access is needed:
 the global package is a local path and marketplaces are pre-seeded.
 """
 
@@ -10,14 +10,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGE = "global-package"
 
 
@@ -39,7 +37,8 @@ def _write_package(root: Path) -> Path:
 
 
 class _Env:
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, apm_binary_path: Path) -> None:
+        self.binary = str(apm_binary_path)
         self.home = tmp_path / "home"
         self.home.mkdir()
         self.claude = tmp_path / "claude-config"
@@ -67,7 +66,7 @@ class _Env:
         if apm_home is not None:
             env["APM_HOME"] = str(apm_home)
         return subprocess.run(
-            (sys.executable, "-m", "apm_cli.cli", *args),
+            (self.binary, *args),
             cwd=self.cwd,
             env=env,
             capture_output=True,
@@ -90,8 +89,8 @@ def _files_under(root: Path) -> set[str]:
     return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
 
 
-def test_two_apm_homes_do_not_interfere(tmp_path: Path) -> None:
-    env = _Env(tmp_path)
+def test_two_apm_homes_do_not_interfere(tmp_path: Path, apm_binary_path: Path) -> None:
+    env = _Env(tmp_path, apm_binary_path)
     package = _write_package(tmp_path)
     home_a = tmp_path / "apm-a"
     home_b = tmp_path / "apm-b"
@@ -149,8 +148,8 @@ def test_two_apm_homes_do_not_interfere(tmp_path: Path) -> None:
     assert {p.name for p in env.home.iterdir()} <= {".apm-local", ".cache"}
 
 
-def test_unset_apm_home_keeps_the_default_layout(tmp_path: Path) -> None:
-    env = _Env(tmp_path)
+def test_unset_apm_home_keeps_the_default_layout(tmp_path: Path, apm_binary_path: Path) -> None:
+    env = _Env(tmp_path, apm_binary_path)
     package = _write_package(tmp_path)
     default_home = env.home / ".apm"
 
@@ -166,7 +165,7 @@ def test_unset_apm_home_keeps_the_default_layout(tmp_path: Path) -> None:
     assert (env.claude / "rules" / "global.md").is_file()
 
 
-def test_empty_apm_home_behaves_as_unset(tmp_path: Path) -> None:
-    env = _Env(tmp_path)
+def test_empty_apm_home_behaves_as_unset(tmp_path: Path, apm_binary_path: Path) -> None:
+    env = _Env(tmp_path, apm_binary_path)
     _ok(env.run("", "config", "set", "target", "claude"))
     assert (env.home / ".apm" / "config.json").is_file()
