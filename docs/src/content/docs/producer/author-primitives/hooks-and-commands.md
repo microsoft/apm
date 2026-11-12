@@ -378,9 +378,35 @@ agent a procedure" fits a skill -- and reaches every harness.
   alias) for scripts that ship inside the package, using the quoting forms
   described above. Plain absolute paths break on consumers' machines.
 - **Hook script path resolution.** `apm install -g` (user-scope)
-  rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
-  paths so Claude Code and Copilot CLI can execute scripts regardless
-  of the working directory. Project-scope `apm install` (no `-g`) keeps
+  rewrites `${PLUGIN_ROOT}` and relative `./` references so harnesses
+  can execute scripts regardless of the working directory. Where a
+  harness documents that it runs the hook command through a POSIX shell,
+  the path is anchored to `$HOME` on macOS and Linux (for example
+  `$HOME/.claude/hooks/<pkg>/run.sh`), so a user config kept in a dotfiles
+  repo stays identical across machines:
+
+  | Harness | `$HOME` anchor applies to |
+  |---------|---------------------------|
+  | Claude Code | `command` in shell form (`sh -c`); not exec form (`args`) or `shell: "powershell"` |
+  | Copilot CLI | `bash` only (`command` is copied to PowerShell, so it stays absolute) |
+  | Gemini CLI | `command` |
+  | Kiro | command actions from `command` or `bash` |
+  | Cursor, Codex, Windsurf | none -- absolute paths (no documented POSIX shell execution) |
+
+  Absolute paths are also kept on Windows, for single-quoted references (a
+  shell does not expand `$HOME` inside single quotes), and for a config
+  root outside the home directory (for example `CLAUDE_CONFIG_DIR`).
+  Reinstalling replaces older absolute entries in place.
+
+  :::caution[`HOME` must match at run time]
+  `$HOME` resolves when the harness runs the hook, not when APM writes it.
+  If a wrapper, service, CI job, or `sudo` launches the harness under a
+  different `HOME`, the harness reports the script as missing (for example
+  `$HOME/.claude/hooks/<pkg>/run.sh` resolves under `/root`). Keep `HOME`
+  pointing at the installing user's home, or reinstall as the runtime user.
+  :::
+
+  Project-scope `apm install` (no `-g`) keeps
   non-Claude command paths repo-relative. Claude project hooks use
   `CLAUDE_PROJECT_DIR` (or `$env:CLAUDE_PROJECT_DIR` for PowerShell) so
   checked-in settings remain portable while hooks can run from outside the
