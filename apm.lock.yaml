@@ -342,11 +342,11 @@ dependencies:
   - .agents/skills/autopilot-issue-accept/apm.yml
   deployed_file_hashes:
     .agents/skills/autopilot-issue-accept/SKILL.md: sha256:3387674ec37fe7e5c764ea9b1d10926cfec700cb0310f26a21f2d90fb6f268a8
-    .agents/skills/autopilot-issue-accept/apm.yml: sha256:f45c6774d80aea8c5f1878cccf4822bfa62648be0726cc20a614976cf6639beb
+    .agents/skills/autopilot-issue-accept/apm.yml: sha256:6b5b15f65c6e6ec4a1099c70e5cdaab4059b6d9e656256e8077769ca47cd5497
   source: local
   local_path: ./packages/autopilot/autopilot-issue-accept
-  content_hash: sha256:83f2076993670b91e7f38a87407c4dd322c539198b018b6fa73ff348f3cf4e74
-  declared_license: MIT
+  content_hash: sha256:09023dc4d10e998cb8fae64f8497be24ffe1a4e9fd811b93382e288ecfc819ae
+  declared_license: Apache-2.0
 deployments:
 - kind: project-relative
   target: copilot
@@ -401,7 +401,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-accept
   active_owner: ./packages/autopilot/autopilot-issue-accept
-  content_hash: sha256:f45c6774d80aea8c5f1878cccf4822bfa62648be0726cc20a614976cf6639beb
+  content_hash: sha256:6b5b15f65c6e6ec4a1099c70e5cdaab4059b6d9e656256e8077769ca47cd5497
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-scheduler

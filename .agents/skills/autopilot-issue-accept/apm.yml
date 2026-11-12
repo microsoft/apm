@@ -2,7 +2,7 @@ name: autopilot-issue-accept
 version: 0.1.0
 description: Accept ONE microsoft/apm issue by drafting a triage-based scope comment, posting it only after exact chat approval by a GOVERNANCE roster human, then applying status/accepted. Does not accept pull requests and does not implement.
 author: Microsoft
-license: MIT
+license: Apache-2.0
 type: skill
 
 dependencies:
