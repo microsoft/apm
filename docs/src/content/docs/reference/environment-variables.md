@@ -119,8 +119,10 @@ update --global`, `apm uninstall --global`, `apm lock --global`, `apm deps ...
 config`. `apm prune` is project-scope only. Other pages write `~/.apm` for the
 default location.
 
-APM reads `APM_HOME` once at process start. Changing it does not move an
-existing `~/.apm`; copy the files yourself if you want to keep them.
+APM reads `APM_HOME` once at process start. A leading `~` is expanded, and a
+relative value is resolved against the directory APM started in, so commands
+that change directory keep using the same root. Changing `APM_HOME` does not
+move an existing `~/.apm`; copy the files yourself if you want to keep them.
 
 These paths are outside the contract:
 
@@ -129,6 +131,9 @@ These paths are outside the contract:
 - Runtimes installed by `apm runtime setup` stay under `~/.apm/runtimes/`.
 - `apm install --global` keeps its installation identity at `~/.apm-local/`,
   beside the deployment root, like deployed target files.
+- State-changing commands also hold `~/.apm-local/.apm-lifecycle.lock`, so
+  commands run with different `APM_HOME` values wait for each other instead of
+  racing on the same project or target directories.
 
 `APM_HOME` does **not** redirect target deployment. Precedence:
 
