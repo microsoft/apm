@@ -36,7 +36,11 @@ from . import (
 )
 @click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
-@click.option("--category", default=None, help="Marketplace-owned package category")
+@click.option(
+    "--category",
+    default=None,
+    help="Package category (e.g. 'developer-tools'); required for Codex output",
+)
 @click.option("--tags", default=None, help="Comma-separated tags")
 @click.option("--include-prerelease", is_flag=True, help="Include prerelease versions")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
