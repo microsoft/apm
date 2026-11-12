@@ -561,9 +561,11 @@ jobs:
     # Python plus the glibc 2.28 check in build-binary.sh.
     - name: Use uv-managed Python
       run: |
-        echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
-        echo "UV_PYTHON=${PYTHON_VERSION}" >> "$GITHUB_ENV"
-        echo "APM_MAX_GLIBC=2.28" >> "$GITHUB_ENV"
+        {
+          echo "UV_PYTHON_PREFERENCE=only-managed"
+          echo "UV_PYTHON=${PYTHON_VERSION}"
+          echo "APM_MAX_GLIBC=2.28"
+        } >> "$GITHUB_ENV"
 
     - name: Install uv
       uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1

@@ -58,9 +58,11 @@ jobs:
       - name: Use uv-managed Python (Linux)
         if: matrix.platform == 'linux'
         run: |
-          echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
-          echo "UV_PYTHON=${PYTHON_VERSION}" >> "$GITHUB_ENV"
-          echo "APM_MAX_GLIBC=2.28" >> "$GITHUB_ENV"
+          {
+            echo "UV_PYTHON_PREFERENCE=only-managed"
+            echo "UV_PYTHON=${PYTHON_VERSION}"
+            echo "APM_MAX_GLIBC=2.28"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Python
         if: matrix.platform != 'linux'
@@ -139,14 +141,17 @@ jobs:
 
       # apm imports GitPython at startup and exits when git is missing,
       # so the container installs git-core before running the binary.
+      # The image is pinned by digest (multi-arch index for rockylinux:8) and
+      # gets only the job-scoped read token: the sample package is public.
       - name: Smoke-test binary on Rocky Linux 8 (glibc 2.28)
         if: matrix.platform == 'linux'
         env:
-          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+          GITHUB_APM_PAT: ${{ github.token }}
         run: |
           docker run --rm -e GITHUB_APM_PAT \
             -v "$PWD/dist/${{ matrix.binary_name }}:/opt/apm:ro" \
-            rockylinux:8 bash -euo pipefail -c '
+            rockylinux:8@sha256:9794037624aaa6212aeada1d28861ef5e0a935adaf93e4ef79837119f2a2d04c \
+            bash -euo pipefail -c '
               dnf -y -q install git-core
               rpm -q glibc
               /opt/apm/apm --version
