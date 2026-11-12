@@ -1,6 +1,5 @@
 """Dependencies management package for APM."""
 
-from .aggregator import scan_workflows_for_dependencies, sync_workflow_dependencies
 from .apm_resolver import APMDependencyResolver
 from .dependency_graph import (
     CircularRef,
@@ -30,7 +29,5 @@ __all__ = [
     "get_lockfile_path",
     "install_missing_dependencies",
     "load_apm_config",
-    "scan_workflows_for_dependencies",
-    "sync_workflow_dependencies",
     "verify_dependencies",
 ]
