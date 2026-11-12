@@ -7,6 +7,30 @@ export function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+const LINK_SCHEMES = new Set(["http", "https", "mailto"]);
+const IMAGE_SCHEMES = new Set(["http", "https"]);
+
+function unescapeHtml(str) {
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+// Returns the escaped URL when its scheme is allowed (or it has none), else null.
+// The scheme is checked on exactly the string that is returned. Any whitespace
+// or control character fails closed, because browsers strip some of them
+// before detecting the scheme.
+export function safeUrl(escapedUrl, allowedSchemes) {
+  if (!escapedUrl) return null;
+  const url = escapedUrl.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "");
+  if (!url || /[\s\u0000-\u001f\u007f-\u009f\ufeff]/.test(url)) return null;
+  const scheme = unescapeHtml(url).match(/^([a-zA-Z][a-zA-Z0-9+.\-]*):/);
+  if (scheme && !allowedSchemes.has(scheme[1].toLowerCase())) return null;
+  return url;
+}
+
 export function renderMarkdown(text) {
   if (!text) return "";
   let html = escapeHtml(text);
@@ -20,10 +44,18 @@ export function renderMarkdown(text) {
   html = html.replace(/`([^`]+)`/g, '<span class="md-code">$1</span>');
 
   // Images before links
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img class="md-img" alt="$1" src="$2" />');
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    const src = safeUrl(url, IMAGE_SCHEMES);
+    return src === null ? alt : `<img class="md-img" alt="${alt}" src="${src}" />`;
+  });
 
   // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="md-link" href="$2" target="_blank">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+    const href = safeUrl(url, LINK_SCHEMES);
+    return href === null
+      ? label
+      : `<a class="md-link" href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
 
   // Headings
   html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');

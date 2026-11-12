@@ -540,6 +540,8 @@ class TestMcpInstallAlias:
         assert "--header" in result.output
         assert "--mcp-version" in result.output
         assert "--registry" in result.output
+        # Inherited "(requires --mcp)" notes are explained, not rewritten.
+        assert "'--mcp NAME' is implied" in " ".join(result.output.split())
 
     def test_epilog_does_not_reference_broken_mcp_help_flag(self):
         """Epilog must reference `apm install --help`, not `apm install --mcp --help`.
@@ -587,6 +589,137 @@ class TestMcpInstallAlias:
             assert "http" in forwarded
             assert "--url" in forwarded
             assert "https://example.com/mcp" in forwarded
+
+    def test_forwarded_options_are_borrowed_from_install(self):
+        """#3588: forwarded options are apm install's own definitions, not prose."""
+        from apm_cli.commands.install import install as install_command
+
+        install_cmd = mcp.commands["install"]
+        mcp_ctx = click.Context(install_cmd, info_name="install")
+        install_ctx = click.Context(install_command, info_name="install")
+        install_by_name = {p.name: p for p in install_command.params}
+        forwarded = [
+            p
+            for p in install_cmd.get_params(mcp_ctx)
+            if p.name not in {"name", "help"} and isinstance(p, click.Option)
+        ]
+        # Every install option except the alias-owned --mcp is parsed with
+        # install's arity, so pass-through values stay attached.
+        expected = {
+            p.name
+            for p in install_command.params
+            if isinstance(p, click.Option) and p.name != "mcp_name"
+        }
+        assert {p.name for p in forwarded} == expected
+        for param in forwarded:
+            source = install_by_name[param.name]
+            assert param.opts == source.opts
+            assert param.secondary_opts == source.secondary_opts
+            assert param.type is source.type
+            assert param.help == source.help
+            if not param.hidden:
+                assert param.get_help_record(mcp_ctx) == source.get_help_record(install_ctx)
+
+    def test_pass_through_value_shaped_like_a_flag_stays_attached(self):
+        """``--root --dry-run`` keeps ``--dry-run`` as --root's value, as in apm install."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "api", "--root", "--dry-run"]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
+            result = runner.invoke(mcp, ["install", "api", "--root", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert forwarded[:3] == ["install", "--mcp", "api"]
+        root_idx = forwarded.index("--root")
+        assert forwarded[root_idx + 1] == "--dry-run"
+        assert forwarded.count("--dry-run") == 1
+
+    def test_hidden_install_options_forward_but_stay_out_of_help(self):
+        """Install options outside the shown set still forward verbatim."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp, ["install", "api", "--runtime", "copilot", "--no-trust-bin"]
+            )
+        assert result.exit_code == 0, result.output
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert forwarded[forwarded.index("--runtime") + 1] == "copilot"
+        assert "--no-trust-bin" in forwarded
+        help_result = runner.invoke(mcp, ["install", "--help"])
+        option_lines = [line.strip() for line in help_result.output.splitlines()]
+        assert not any(line.startswith(("--runtime", "--trust-bin")) for line in option_lines)
+
+    def test_forwards_raw_option_values_verbatim(self):
+        """Forwarded options reach apm install as typed, before the ``--``."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "api", "--", "npx", "-y", "srv"]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
+            result = runner.invoke(
+                mcp,
+                [
+                    "install",
+                    "api",
+                    "-t",
+                    "copilot,claude",
+                    "-g",
+                    "--env",
+                    "A=1",
+                    "--env",
+                    "B=2",
+                    "--dry-run",
+                    "--runtime",
+                    "copilot",
+                    "--",
+                    "npx",
+                    "-y",
+                    "srv",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        forwarded = mock_main.call_args.kwargs.get("args")
+        dd = forwarded.index("--")
+        head = forwarded[:dd]
+        assert head[:3] == ["install", "--mcp", "api"]
+        assert head[head.index("--target") + 1] == "copilot,claude"
+        assert "--global" in head
+        assert "--dry-run" in head
+        env_values = [head[i + 1] for i, tok in enumerate(head) if tok == "--env"]
+        assert env_values == ["A=1", "B=2"]
+        # Options not surfaced on mcp install still forward unchanged.
+        assert head[head.index("--runtime") + 1] == "copilot"
+        assert forwarded[dd + 1 :] == ["npx", "-y", "srv"]
+        # Defaults are not materialized into explicit flags.
+        assert "--force" not in head
+        assert "--url" not in head
+
+    def test_forwarded_option_validation_matches_install(self):
+        """Invalid choices fail with install's choice set before forwarding."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main") as mock_main:
+            result = runner.invoke(mcp, ["install", "api", "--transport", "bogus"])
+        assert result.exit_code == 2
+        assert "Invalid value for '--transport'" in result.output
+        mock_main.assert_not_called()
+
+    def test_forwarded_options_shell_complete(self):
+        """Forwarded options complete like apm install's (names and choices)."""
+        from click.shell_completion import ShellComplete
+
+        from apm_cli.cli import cli
+
+        completer = ShellComplete(cli, {}, "apm", "_APM_COMPLETE")
+        names = [c.value for c in completer.get_completions(["mcp", "install", "api"], "--tr")]
+        assert "--transport" in names
+        assert "--trust-transitive-mcp" in names
+        choices = [
+            c.value for c in completer.get_completions(["mcp", "install", "api", "--transport"], "")
+        ]
+        assert choices == ["stdio", "http", "sse", "streamable-http"]
 
     def test_propagates_systemexit_nonzero(self):
         """Failures from the underlying install propagate as non-zero exit codes."""

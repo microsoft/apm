@@ -494,6 +494,68 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
 
 _AUDIT_REPLAY_OWNER = "src/apm_cli/install/audit_replay.py"
 _AUDIT_ROOTS_OWNER = "src/apm_cli/install/audit_target_roots.py"
+_LOCKFILE_OWNER = "src/apm_cli/deps/lockfile.py"
+_SELF_ENTRY_CONSTRUCTOR = re.compile(r"""repo_url\s*=\s*["']<self>["']""")
+
+
+def _check_project_self_entry(
+    provider: FactsProvider, rule_id: str, run_replay_body: tuple[str, ...]
+) -> list[Violation]:
+    """Lockfile load and audit replay share one project self-entry owner (#3369).
+
+    ``LockFile.project_self_entry`` is the only constructor of the virtual
+    ``<self>`` row; ``LockFile.from_yaml`` (via ``_from_validated_data``) and
+    ``run_replay`` must delegate to it, and replay must decide root ``.apm/``
+    integration with the same ``_project_has_root_primitives`` predicate
+    install uses.
+    """
+    lockfile, lockfile_fail = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    if lockfile_fail:
+        return list(lockfile_fail)
+    findings = _duplicate_definition_lines(
+        provider,
+        rule_id=rule_id,
+        prefix=_SRC_PREFIX,
+        pattern=_SELF_ENTRY_CONSTRUCTOR,
+        owner=_LOCKFILE_OWNER,
+        message="The project self-entry must be built by LockFile.project_self_entry",
+        respect_exempt=False,
+    )
+    factory_body = _awk_body(
+        lockfile, re.compile(r"^    def project_self_entry\("), re.compile(r"^    (def |@)")
+    )
+    load_body = _awk_body(
+        lockfile, re.compile(r"^    def _from_validated_data\("), re.compile(r"^    (def |@)")
+    )
+    constructors = sum(
+        1 for line in _lines(lockfile) if _SELF_ENTRY_CONSTRUCTOR.search(line) is not None
+    )
+    if not (
+        constructors == 1
+        and any(_SELF_ENTRY_CONSTRUCTOR.search(line) for line in factory_body)
+        and _body_has(load_body, "lock.project_self_entry()")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _LOCKFILE_OWNER,
+                "LockFile loading must build the self-entry through project_self_entry",
+            )
+        )
+    if not (
+        _body_has(run_replay_body, "lock.project_self_entry()")
+        and _body_has(run_replay_body, "_project_has_root_primitives(project_root)")
+        and _body_has(run_replay_body, "not config.user_scope")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/drift.py",
+                "Audit replay must add the project self-entry through "
+                "LockFile.project_self_entry when install integrates root .apm/",
+            )
+        )
+    return findings
 
 
 def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -571,6 +633,8 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
                 "build_project_local_package_info",
             )
         )
+
+    findings.extend(_check_project_self_entry(provider, rule_id, run_replay_body))
 
     audit_gate_calls = _name_calls_in(audit, "_audit_ci_gate")
     audit_gate_body = _awk_body(audit, re.compile(r"^def _audit_ci_gate\("), re.compile(r"^def "))
