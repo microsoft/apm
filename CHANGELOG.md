@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
+- `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
+
+### Added
+
 - OpenCode targets write native OpenCode 2 MCP entries under `mcp.servers` when `opencode.json` already declares that map, translating `enabled` to `disabled` and keeping `codemode` and other extra fields; files without it keep the OpenCode 1 layout. -- by @RamsesJM (#3414)
 
 ### Changed
