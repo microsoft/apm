@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
 - `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
+- Regression tests prove that a marketplace registered with a non-default branch (`apm marketplace add ... --ref release/pilot`) installs that branch's plugin files and commit on the GitHub canonical (`owner/repo/path#ref`) and GitLab `git` + `path` routes, while registering without `--ref` keeps the default branch and explicit plugin pins and `plugin@marketplace#ref` overrides keep precedence. -- by @abhinavgautam01 (#1994)
 
 ### Added
 
@@ -30,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
+- Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
+- Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release; a pre-release is selected only when the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1, and builds differing only in metadata resolve to the highest version string. Credit to @xubenqiang for the approach in #3469. (#3601)
 - `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses and forms keep absolute paths. -- by @Bronyal-lzx (#2944)
 - `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; the field is omitted. `apm init` still fills it in. (#3630)
 - HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells), instead of connecting without the pin that guards against DNS rebinding; an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
