@@ -110,6 +110,38 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
 
 
 @pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/compilation/root_context_protection.py",
+            "if not lexical_root and path.name in accepted_markers_by_name:",
+            "if False:",
+            id="helper-root-only",
+        ),
+        pytest.param(
+            "src/apm_cli/compilation/agents_compiler.py",
+            "for path in claude_result.content_map\n            if self._hand_authored",
+            "for path in claude_result.content_map\n            if path.parent == self.base_dir"
+            " and self._hand_authored",
+            id="claude-root-only",
+        ),
+    ],
+)
+def test_context_protection_cannot_regress_to_root_only(
+    path: str, original: str, replacement: str
+) -> None:
+    """Hand-authored context protection covers nested placements too (#3655)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "contracts-tooling-root-context-write-eligibility"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement", "refused"),
     [
         (

@@ -508,9 +508,10 @@ For scoped frozen replay and recovery, see the
 
 **Dry-run preview.** Use `--dry-run` with `--clean` to preview what would be removed without touching any files. If a hand-authored `CLAUDE.md` would block deletion, the preview surfaces that outcome as well.
 
-**Root file protection.** Project compiles never overwrite a root `AGENTS.md`
-or `CLAUDE.md` that lacks the APM-generated marker, including destinations
-selected with `--root`. Compile skips the hand-authored file and prints a
+**Context file protection.** Project compiles never overwrite an `AGENTS.md`
+or `CLAUDE.md` that lacks the APM-generated marker, at the root or in a
+distributed subdirectory, including destinations selected with `--root`.
+Compile skips the hand-authored file and prints a
 warning. Delete or rename it before compiling if generated output should
 replace it. In `managed_section` mode (AGENTS.md only), compile updates only
 the explicit APM-owned block. See the

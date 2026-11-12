@@ -119,8 +119,9 @@ Keep them on the same filesystem drive.
 For frozen replay, see [install's deploy location](../install/#deploy-location).
 
 Project compilation protects root `AGENTS.md`, `CLAUDE.md`, and
-`.github/copilot-instructions.md` files, including
-destinations selected with `--root`. If an existing root file has no
+`.github/copilot-instructions.md` files, and distributed `AGENTS.md` and
+`CLAUDE.md` outputs in subdirectories, including
+destinations selected with `--root`. If an existing file has no
 exact APM-generated marker line among its first five lines, full-file compilation
 retains it and prints a warning. Live compiles leave the file unchanged; dry
 runs report that it would be retained without writing it. Delete or rename that
