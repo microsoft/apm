@@ -1,7 +1,7 @@
 """Installed-CLI regression: a targeted install reconciles the selected package's subtree.
 
-Issue #3502: after a local package drops a dependency, ``apm install PKG``
-(project scope) and ``apm install -g PKG`` (user scope) must remove the dropped
+Issue #3502: after a local package drops a dependency, one ``apm install PKG``
+(project scope) or ``apm install -g PKG`` (user scope) must remove the dropped
 dependency's lock entry, ``apm_modules`` copy and deployed skill, keep a
 dependency another declared package still needs, and leave unrelated packages'
 lock entries unchanged.
@@ -141,9 +141,8 @@ def test_targeted_install_removes_dependency_dropped_by_selected_package(
     )
 
     factory.replace_apm_dependencies(parent, ())
-    # The first run may still read the previously materialized parent manifest
-    # (#3401); the second run must have reconciled the parent's subtree.
-    scenario.install(parent)
+    # One install must read the edited source manifest (#3401) and reconcile
+    # the parent's subtree in the same run.
     scenario.install(parent)
 
     after_entries = scenario.lock_entries()
