@@ -12,6 +12,13 @@ on:
     # Run weekly on Mondays at 05:00 UTC
     - cron: '0 5 * * 1'
 
+# Supersede in-flight PR runs when a newer push lands on the same PR.
+# Only pull_request runs share a group; every other event gets a unique
+# per-run group, so it is never cancelled or serialized.
+concurrency:
+  group: codeql-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze

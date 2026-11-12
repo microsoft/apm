@@ -222,5 +222,7 @@ markers = [
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
     "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
     "lifecycle_merge_group: unique lifecycle contracts retained in the full merge-group integration suite",
+    "architecture_contract: platform-agnostic architecture-linter contract over repository source (applied to tests/integration/test_architecture_*); runs once on Linux, deselected on macOS, Windows and Linux arm64 release lanes",
+    "platform_sensitive: integration behavior that varies by OS, filesystem or shell (symlinks, case folding, permissions, shells); also runs on the macOS release lanes",
     "xdist_group(name): assigns HOME-mutating tests to one pytest-xdist loadgroup for process-level serialization",
 ]

@@ -20,7 +20,7 @@ from apm_cli.utils.git_sparse import (
 )
 from apm_cli.utils.path_security import PathTraversalError
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.platform_sensitive]
 
 
 def _commit_symlink_repo(

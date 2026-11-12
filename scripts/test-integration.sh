@@ -368,14 +368,37 @@ run_e2e_tests() {
         marker_args=(-m "$PYTEST_MARK_EXPR")
         log_info "Pytest marker selection: $PYTEST_MARK_EXPR"
     fi
-    if pytest tests/integration/ -v --tb=short \
-        ${extra_args[@]+"${extra_args[@]}"} \
-        ${marker_args[@]+"${marker_args[@]}"}; then
-        log_success "Integration test suite passed (collected and ran via pytest discovery)"
-    else
-        log_error "Integration test suite reported failures"
-        exit 1
-    fi
+    # PYTEST_RETRY_FAILED=N re-runs only the failed tests up to N more times.
+    # Only the network-dependent lane sets it; hermetic lanes never retry.
+    # A retry happens only for exit code 1 (tests failed), never for usage,
+    # collection or internal errors.
+    local attempts=$(( ${PYTEST_RETRY_FAILED:-0} + 1 ))
+    local attempt=1
+    local status=0
+    retry_args=()
+    while true; do
+        # python -m puts the repository root on sys.path so CI can load
+        # repository pytest plugins such as scripts.ci_sharding with -p.
+        status=0
+        python -m pytest tests/integration/ -v --tb=short \
+            ${extra_args[@]+"${extra_args[@]}"} \
+            ${marker_args[@]+"${marker_args[@]}"} \
+            ${retry_args[@]+"${retry_args[@]}"} || status=$?
+        if [[ $status -eq 0 ]]; then
+            log_success "Integration test suite passed (collected and ran via pytest discovery)"
+            return 0
+        fi
+        if [[ $status -ne 1 || $attempt -ge $attempts ]]; then
+            log_error "Integration test suite reported failures (exit $status, attempt $attempt of $attempts)"
+            exit 1
+        fi
+        attempt=$((attempt + 1))
+        retry_args=(--last-failed --last-failed-no-failures none)
+        if [[ " ${extra_args[*]-} " == *" --cov"* ]]; then
+            retry_args+=(--cov-append)
+        fi
+        log_info "Retrying only the failed tests (attempt $attempt of $attempts)"
+    done
 }
 
 # Main execution

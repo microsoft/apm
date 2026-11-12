@@ -80,14 +80,51 @@ def _gate_pytest_command(step: dict) -> list[str]:
     return matches[0]
 
 
+# xdist scheduling flags and their values (and the --basetemp location):
+# irrelevant to selection, and the plugin-free --collect-only
+# re-invocation cannot parse them.
+_SCHEDULING_FLAGS = ("-n", "--dist")
+
+
 def _gate_pytest_args(step: dict) -> list[str]:
     """Extract pytest's own CLI arguments (marker + roots), stripped of
-    the `uv run --extra dev` invocation prefix and the `-v` verbosity
-    flag (irrelevant to selection semantics, and it would otherwise
-    leak into a --collect-only re-invocation)."""
+    the `uv run --extra dev` invocation prefix, the `-v` verbosity flag
+    and xdist scheduling flags (irrelevant to selection semantics, and
+    they would otherwise leak into a --collect-only re-invocation)."""
     command = _gate_pytest_command(step)
     index = command.index("pytest")
-    return [arg for arg in command[index + 1 :] if arg != "-v"]
+    args: list[str] = []
+    skip_next = False
+    for arg in command[index + 1 :]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _SCHEDULING_FLAGS:
+            skip_next = True
+            continue
+        if arg.startswith("--basetemp="):
+            continue
+        if arg != "-v":
+            args.append(arg)
+    return args
+
+
+def _assert_gate_parallelism(step: dict) -> None:
+    """Four bounded xdist workers; loadgroup keeps xdist_group affinity."""
+    tokens = _gate_pytest_command(step)
+    worker_flags = [token for token in tokens if token.startswith(("-n", "--numprocesses"))]
+    assert worker_flags == ["-n"], "Windows gate must use four bounded xdist workers"
+    worker_index = tokens.index("-n")
+    assert tokens[worker_index : worker_index + 2] == ["-n", "4"], (
+        "Windows gate must use four bounded xdist workers"
+    )
+    assert [token for token in tokens if token.startswith("--dist")] == ["--dist"], (
+        "Windows gate must use loadgroup to preserve xdist_group serialization"
+    )
+    scheduler_index = tokens.index("--dist")
+    assert tokens[scheduler_index : scheduler_index + 2] == ["--dist", "loadgroup"], (
+        "Windows gate must use loadgroup to preserve xdist_group serialization"
+    )
 
 
 # Flags that take a value as the following token -- needed to tell
@@ -182,6 +219,32 @@ def test_legacy_windows_git_discovery_runs_real_consumer_contracts() -> None:
     assert mutation_step["shell"] == "python"
     assert "assert result.returncode == 1" in mutation_step["run"]
     assert "source.write_bytes(original)" in mutation_step["run"]
+
+
+def test_windows_compat_gate_runs_parallel_with_group_affinity() -> None:
+    """The gate is the PR critical path; it must use all four runner vCPUs."""
+    _assert_gate_parallelism(workflow_step(workflow_job(_ci_workflow(), GATE_JOB), GATE_STEP))
+
+
+@pytest.mark.parametrize(
+    "parallel_args",
+    [
+        "",
+        "-n 0 --dist loadgroup",
+        "-n auto --dist loadgroup",
+        "-n 2 --dist loadgroup",
+        "-n 4 --dist worksteal",
+        "-n 4 --dist loadgroup --numprocesses=auto",
+        "-n 4 --dist loadgroup --dist=load",
+    ],
+)
+def test_windows_compat_gate_parallelism_drift_fails(parallel_args: str) -> None:
+    """Serial, unbounded or group-breaking scheduling must fail the contract."""
+    step = deepcopy(workflow_step(workflow_job(_ci_workflow(), GATE_JOB), GATE_STEP))
+    step["run"] = step["run"].replace("-n 4 --dist loadgroup", parallel_args)
+
+    with pytest.raises(AssertionError, match=r"workers|loadgroup"):
+        _assert_gate_parallelism(step)
 
 
 def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:

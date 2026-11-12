@@ -1,57 +1,32 @@
-"""Adapt pytest-split to preserve xdist affinity in the two lifecycle shards."""
+"""Two-way lifecycle shards built on the shared CI sharding plugin."""
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 import pytest
-from pytest_split.algorithms import LeastDurationAlgorithm
+
+from scripts import ci_sharding
 
 SHARD_COUNT = 2
 
 
-def partition_items(items: list[pytest.Item]) -> tuple[list[pytest.Item], list[pytest.Item]]:
-    """Balance member counts with pytest-split without splitting loadgroup units."""
-    node_ids = {item.nodeid for item in items}
-    if len(node_ids) != len(items):
-        raise pytest.UsageError("Duplicate lifecycle node IDs; remove duplicate collection inputs.")
-
-    units: dict[tuple[str, str], list[pytest.Item]] = defaultdict(list)
-    for item in items:
-        names = {
-            str(mark.args[0] if mark.args else mark.kwargs.get("name", "default"))
-            for mark in item.iter_markers("xdist_group")
-        }
-        # Match the composite labels used by xdist's loadgroup worker.
-        key = ("group", "_".join(sorted(names))) if names else ("node", item.nodeid)
-        units[key].append(item)
-
-    members = {unit[0].nodeid: unit for unit in units.values()}
-    representatives = [unit[0] for unit in units.values()]
-    weights = {node_id: float(len(unit)) for node_id, unit in members.items()}
-    groups = LeastDurationAlgorithm()(SHARD_COUNT, representatives, weights)
-    selected = [
-        {
-            item.nodeid
-            for representative in group.selected
-            for item in members[representative.nodeid]
-        }
-        for group in groups
-    ]
-    if (
-        len(selected) != SHARD_COUNT
-        or not all(selected)
-        or selected[0] & selected[1]
-        or selected[0] | selected[1] != node_ids
-    ):
+def partition_items(
+    items: list[pytest.Item],
+    durations: dict[str, float] | None = None,
+) -> tuple[list[pytest.Item], list[pytest.Item]]:
+    """Balance whole xdist affinity units across the two lifecycle shards."""
+    if len(items) < SHARD_COUNT:
         raise pytest.UsageError(
             "Lifecycle shards must be nonempty and partition every selected node exactly once; "
             "check collection inputs and xdist groups."
         )
-    return (
-        [item for item in items if item.nodeid in selected[0]],
-        [item for item in items if item.nodeid in selected[1]],
-    )
+    try:
+        shards = ci_sharding.partition(items, SHARD_COUNT, durations).shards
+    except pytest.UsageError as exc:
+        raise pytest.UsageError(
+            f"Lifecycle shards must be nonempty and partition every selected node exactly once; "
+            f"check collection inputs and xdist groups. ({exc})"
+        ) from exc
+    return list(shards[0]), list(shards[1])
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -62,6 +37,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         choices=(1, 2),
         default=None,
         help="Run lifecycle shard 1 or 2 while retaining complete xdist groups.",
+    )
+    parser.addoption(
+        "--lifecycle-durations",
+        default=None,
+        help="Optional JSON {node_id: seconds} used to balance the two shards.",
     )
 
 
@@ -75,6 +55,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         raise pytest.UsageError(
             "Do not combine --lifecycle-shard with --splits/--group; use one shard selector."
         )
-    partitions = partition_items(items)
+    durations = ci_sharding.load_durations(config.getoption("lifecycle_durations"))
+    partitions = partition_items(items, durations)
     items[:] = partitions[shard - 1]
     config.hook.pytest_deselected(items=partitions[SHARD_COUNT - shard])

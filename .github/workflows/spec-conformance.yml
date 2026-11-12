@@ -26,6 +26,13 @@ on:
 permissions:
   contents: read
 
+# Supersede in-flight PR runs when a newer push lands on the same PR.
+# Only pull_request runs share a group; every other event gets a unique
+# per-run group, so it is never cancelled or serialized.
+concurrency:
+  group: spec-conformance-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   spec-conformance:
     name: Spec conformance gate

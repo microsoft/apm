@@ -32,9 +32,11 @@ on:
 permissions:
   contents: read
 
+# Deploys (release / dispatch / workflow_call) queue rather than cancel.
+# PR build-only runs supersede the in-flight run for the same PR ref.
 concurrency:
   group: "pages-${{ github.ref }}"
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:

@@ -25,9 +25,11 @@ AUTH_WORKFLOW = ROOT / ".github" / "workflows" / "auth-acceptance.yml"
 INTEGRATION_SCRIPT = ROOT / "scripts" / "test-integration.sh"
 LIVE_ADO_SELECTOR = "live and requires_ado_pat"
 RELEASE_INTEGRATION_STEPS = (
-    ("build-and-validate-macos-intel", "Run focused Intel integration tests"),
-    ("build-and-validate-macos-arm", "Run integration tests"),
-    ("integration-tests", "Run integration tests (Unix)"),
+    ("build-and-validate-macos-intel", "Run platform-sensitive integration tests"),
+    ("build-and-validate-macos-arm", "Run platform-sensitive integration tests"),
+    ("integration-linux-x86", "Run integration tests (Unix)"),
+    ("integration-linux-arm", "Run integration tests (Unix)"),
+    ("integration-network", "Run network-dependent integration tests"),
 )
 
 
@@ -59,7 +61,7 @@ def _assert_release_excludes_live_ado(workflow: dict[str, Any]) -> None:
         assert "not live" in marker_expression
 
     windows_step = workflow_step(
-        workflow_job(workflow, "integration-tests"),
+        workflow_job(workflow, "integration-windows"),
         "Run integration tests (Windows)",
     )
     assert "-IncludeLiveADO" not in shell_tokens(windows_step)
@@ -143,7 +145,7 @@ def test_release_ado_secret_mutation_is_rejected() -> None:
     """Adding the expiring ADO PAT back to publication must fail the contract."""
     workflow = deepcopy(load_workflow(RELEASE_WORKFLOW))
     step = workflow_step(
-        workflow_job(workflow, "integration-tests"),
+        workflow_job(workflow, "integration-linux-x86"),
         "Run integration tests (Unix)",
     )
     step["env"]["ADO_APM_PAT"] = "secret"
@@ -157,7 +159,7 @@ def test_release_live_selector_mutation_is_rejected() -> None:
     workflow = deepcopy(load_workflow(RELEASE_WORKFLOW))
     step = workflow_step(
         workflow_job(workflow, "build-and-validate-macos-arm"),
-        "Run integration tests",
+        "Run platform-sensitive integration tests",
     )
     step["env"]["PYTEST_MARK_EXPR"] = "live"
 

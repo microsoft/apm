@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI is faster at every stage. On PRs, the Windows Compatibility Gate uses four workers and the unit and lifecycle shards run on arm64 runners, balanced by measured test durations; superseded runs are cancelled. In the merge queue, integration shards are balanced by duration, network-dependent tests retry on their own, and the full Windows unit suite runs before merge. Release builds fan out per platform. A release tag now promotes a commit that has already passed full validation instead of re-running every suite, and fails closed when no such evidence exists. macOS runs a smaller platform-sensitive subset, still on one Intel and one Apple Silicon runner. (#3582)
 - **BREAKING:** APM now requires Python 3.11 or newer (Python 3.10 reached end of life in October 2026); standalone installers are unaffected (#3562)
 - Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)

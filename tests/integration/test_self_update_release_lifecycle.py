@@ -25,6 +25,7 @@ _HISTORICAL_PROBE = (
     "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm"
 )
 pytestmark = [
+    pytest.mark.platform_sensitive,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
 ]
