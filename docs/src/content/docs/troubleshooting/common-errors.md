@@ -277,6 +277,8 @@ Cause: Python's TLS stack rejected the server certificate. Almost always a corpo
 
 Fix: install the corporate CA into the OS trust store and retry. For a per-shell additive setting that retains public trust, export `APM_EXTRA_CA_BUNDLE=/path/to/corporate-ca.pem`. Use `REQUESTS_CA_BUNDLE` only when you intend to replace the complete Requests trust set; `SSL_CERT_FILE` alone is not a reliable requests override. Do not disable TLS verification.
 
+If the hint names `APM_DISABLE_TRUSTSTORE`, `REQUESTS_CA_BUNDLE`, or `CURL_CA_BUNDLE` instead, that setting is active; follow the hint's advice for that trust mode.
+
 See also: [SSL issues](../ssl-issues/)
 
 ### Network timeout or host unreachable

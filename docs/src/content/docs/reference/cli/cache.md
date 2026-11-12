@@ -193,6 +193,12 @@ of that SHA. A sparse variant widens to the full tree when a package
 symlink targets a tracked file excluded from the sparse cone, so that
 variant can consume more disk than its name suggests.
 
+A sparse variant fetches file contents from the remote on demand. If any
+tracked file is missing after checkout (for example, an anonymous fetch from a
+private repository was rejected), APM discards the shard and retries with
+credentials, and rebuilds an incomplete shard left by an earlier version on
+its next use.
+
 The cache root is created with mode `0700` and validated to be
 absolute with no NUL bytes before use.
 
