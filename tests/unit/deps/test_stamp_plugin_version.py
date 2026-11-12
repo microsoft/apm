@@ -199,6 +199,7 @@ def test_cache_invalidation_is_safe_under_concurrent_inserts(tmp_path):
 
     from apm_cli.models.apm_package import (
         APMPackage,
+        clear_apm_yml_cache,
         invalidate_apm_yml_cache_entry,
     )
 
@@ -232,13 +233,12 @@ def test_cache_invalidation_is_safe_under_concurrent_inserts(tmp_path):
     finally:
         stop.set()
         thread.join(timeout=10)
+        # Drop the many unique-keyed entries this test added, even when an
+        # assertion below fails.
+        clear_apm_yml_cache()
 
     assert not thread.is_alive(), "inserter thread wedged"
     assert not errors, errors
-    # Drop the many unique-keyed entries this test added.
-    from apm_cli.models.apm_package import clear_apm_yml_cache
-
-    clear_apm_yml_cache()
 
 
 def test_in_flight_parse_cannot_repoison_cache_after_invalidation(tmp_path):
