@@ -20,9 +20,17 @@ RESOURCE = ".github/skills/alpha/scripts/run.sh"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 
-def _row(value, owners, active=None, content_hash=None, target="copilot", scope="project"):
+def _row(
+    value,
+    owners,
+    active=None,
+    content_hash=None,
+    target="copilot",
+    scope="project",
+    kind="project-relative",
+):
     return {
-        "kind": "project-relative",
+        "kind": kind,
         "target": target,
         "value": value,
         "runtime": None,
@@ -197,6 +205,87 @@ class TestRecordedProvenance:
         assert "Source: local path ./packages/pkg" in out
         assert "Ref:" not in out
 
+    @pytest.mark.parametrize(
+        ("source", "extra", "expected"),
+        [
+            ({"path": "../checkout"}, {}, "Source: local path ../checkout (replacement)"),
+            (
+                {"git": "https://github.com/fork/skills.git", "ref": "fix"},
+                {"resolved_ref": "fix", "resolved_commit": COMMIT},
+                "Source: github.com/fork/skills (replacement)",
+            ),
+        ],
+    )
+    def test_replacement_shows_effective_source(self, project, source, extra, expected):
+        skill_hash = _write(project, SKILL, "x\n")
+        request = {
+            "parent": None,
+            "ref": None,
+            "skills": None,
+            "targets": None,
+            "dev": False,
+            "alias": None,
+        }
+        _write_lock(
+            project,
+            {
+                "lockfile_version": "3",
+                "replacements": [
+                    {"for": {"git": "https://github.com/acme/skills.git"}, "with": source}
+                ],
+                "dependencies": [
+                    {
+                        "repo_url": "acme/skills",
+                        "host": "github.com",
+                        "replacement": {"source": source, "requests": [request]},
+                        **extra,
+                    }
+                ],
+                "deployments": [_row(SKILL, ["acme/skills"], content_hash=skill_hash)],
+            },
+        )
+        result, out = _run("--file", SKILL)
+        assert result.exit_code == 0, result.output
+        assert "Owner: acme/skills [active writer]" in out
+        assert expected in out
+        assert "Source: github.com/acme/skills" not in out
+
+    def test_target_relative_record_resolves_under_target_root(
+        self, project, tmp_path, monkeypatch
+    ):
+        from dataclasses import replace
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        external = tmp_path / "cursor-root"
+        rel = "skills/alpha/SKILL.md"
+        skill_hash = _write(external, rel, "x\n")
+        monkeypatch.setitem(
+            KNOWN_TARGETS,
+            "cursor",
+            replace(KNOWN_TARGETS["cursor"], resolved_deploy_root=external),
+        )
+        _write_lock(
+            project,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [
+                    _row(
+                        rel,
+                        ["acme/skills"],
+                        content_hash=skill_hash,
+                        target="cursor",
+                        kind="target-relative",
+                    )
+                ],
+            },
+        )
+        result, out = _run("--file", str(external / rel))
+        assert result.exit_code == 0, result.output
+        assert "Target: cursor" in out
+        assert "Owner: acme/skills [active writer]" in out
+        assert "matches the recorded deployed hash" in out
+
     def test_absolute_path_inside_project_is_accepted(self, project):
         _standard_project(project)
         result, out = _run("--file", str(project / SKILL))
@@ -259,6 +348,28 @@ class TestCurrentFileStatus:
         assert "unverifiable (path crosses a symlink, which is not followed)" in out
         assert "matches the recorded" not in out
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_symlinked_user_deploy_root_is_not_followed(self, tmp_path, monkeypatch):
+        real_home = tmp_path / "real-home"
+        home = tmp_path / "home"
+        rel = ".copilot/skills/alpha/SKILL.md"
+        skill_hash = _write(real_home, rel, "user\n")
+        _write_lock(
+            real_home / ".apm",
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [_row(rel, ["acme/skills"], content_hash=skill_hash, scope="user")],
+            },
+        )
+        home.symlink_to(real_home, target_is_directory=True)
+        _set_home(monkeypatch, home)
+        monkeypatch.chdir(tmp_path)
+        result, out = _run("--file", str(home / rel), "-g")
+        assert result.exit_code == 0, result.output
+        assert "Owner: acme/skills [active writer]" in out
+        assert "unverifiable (path crosses a symlink, which is not followed)" in out
+        assert "matches the recorded" not in out
+
 
 class TestExactPathOnly:
     @pytest.mark.parametrize(
@@ -280,6 +391,22 @@ class TestExactPathOnly:
         assert "do not assume it is project-owned or safe to edit" in out
         assert "acme/skills" not in out
 
+    def test_canonical_row_from_other_scope_is_ignored(self, project):
+        skill_hash = _write(project, SKILL, "x\n")
+        _write_lock(
+            project,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [
+                    _row(SKILL, ["acme/skills"], content_hash=skill_hash, scope="user")
+                ],
+            },
+        )
+        result, out = _run("--file", SKILL)
+        assert result.exit_code == 1, result.output
+        assert "No recorded provenance" in out
+        assert "acme/skills" not in out
+
     def test_unrecorded_local_file_is_not_project_owned(self, project):
         _standard_project(project)
         _write(project, ".github/skills/handmade/SKILL.md", "mine\n")
@@ -290,10 +417,12 @@ class TestExactPathOnly:
 
 class TestStateErrors:
     def test_missing_lockfile_is_actionable(self, project):
+        before = _snapshot(project.parent)
         result, out = _run("--file", SKILL)
         assert result.exit_code == 2
         assert "No lockfile found" in out
         assert "apm install" in out
+        assert _snapshot(project.parent) == before
 
     def test_malformed_deployments_is_actionable(self, project):
         _write_lock(project, {"deployments": [{"kind": "project-relative", "target": "x"}]})
@@ -314,9 +443,49 @@ class TestStateErrors:
             project,
             {"deployments": [_row(SKILL, ["acme/gone"], content_hash=skill_hash)]},
         )
+        before = _snapshot(project.parent)
         result, out = _run("--file", SKILL)
         assert result.exit_code == 1
         assert "unresolved (owner has no dependency record" in out
+        assert "provenance is incomplete" in out
+        assert _snapshot(project.parent) == before
+
+    @pytest.mark.parametrize(
+        ("owners", "active"),
+        [
+            ([".", "acme/gone"], "acme/gone"),  # unresolved active writer
+            (["acme/gone", "acme/skills"], "acme/skills"),  # unresolved surviving owner
+        ],
+    )
+    def test_any_unresolved_owner_is_incomplete(self, project, owners, active):
+        skill_hash = _write(project, SKILL, "x\n")
+        _write_lock(
+            project,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [_row(SKILL, owners, active=active, content_hash=skill_hash)],
+            },
+        )
+        result, out = _run("--file", SKILL)
+        assert result.exit_code == 1, result.output
+        assert "Owner: acme/gone" in out
+        assert "provenance is incomplete" in out
+
+    def test_resolved_record_does_not_mask_unresolved_one(self, project):
+        skill_hash = _write(project, SKILL, "x\n")
+        _write_lock(
+            project,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [
+                    _row(SKILL, ["acme/skills"], content_hash=skill_hash),
+                    _row(SKILL, ["acme/gone"], content_hash=skill_hash, target="claude"),
+                ],
+            },
+        )
+        result, out = _run("--file", SKILL)
+        assert result.exit_code == 1, result.output
+        assert "Owner: acme/skills [active writer]" in out
         assert "provenance is incomplete" in out
 
     def test_path_outside_project_root(self, project):
@@ -396,6 +565,25 @@ class TestUserScope:
         assert "matches the recorded deployed hash" in out
         assert _snapshot(tmp_path) == before
 
+    def test_global_legacy_rows_keep_inferred_scope_compatibility(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        _set_home(monkeypatch, home)
+        monkeypatch.chdir(tmp_path)
+        rel = ".github/skills/alpha/SKILL.md"
+        skill_hash = _write(home, rel, "user\n")
+        _write_lock(
+            home / ".apm",
+            {
+                "dependencies": [
+                    _remote_dep(deployed_files=[rel], deployed_file_hashes={rel: skill_hash})
+                ]
+            },
+        )
+        result, out = _run("--file", str(home / rel), "-g")
+        assert result.exit_code == 0, result.output
+        assert "Owner: acme/skills [active writer]" in out
+        assert "legacy deployed_files views" in out
+
     def test_project_scope_does_not_read_user_lock(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
         project = tmp_path / "proj"
@@ -434,6 +622,25 @@ class TestSafeDisplay:
         assert result.exit_code == 0, result.output
         assert "s3cretT0ken" not in out
         assert "Source: registry" in out
+
+    def test_control_characters_from_lockfile_are_not_echoed(self, project):
+        skill_hash = _write(project, SKILL, "x\n")
+        _write_lock(
+            project,
+            {
+                "dependencies": [
+                    _remote_dep(
+                        name="evil\x1b[2Jname", version="1.0\x07", resolved_ref="v1\x1b]0;x"
+                    )
+                ],
+                "deployments": [_row(SKILL, ["acme/skills"], content_hash=skill_hash)],
+            },
+        )
+        result, out = _run("--file", SKILL)
+        assert result.exit_code == 0, result.output
+        assert "\x1b" not in result.output
+        assert "\x07" not in result.output
+        assert "Package: evil?[2Jname 1.0?" in out
 
 
 class TestArgumentValidation:

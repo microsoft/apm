@@ -18,21 +18,20 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from ..core.deployment_ledger import DeploymentLedgerCodec
+from ..core.deployment_ledger import _LOCAL_BUNDLE_OWNER as LOCAL_BUNDLE_OWNER
+from ..core.deployment_ledger import _SHA256_PREFIX, DeploymentLedgerCodec
 from ..core.deployment_state import DeploymentRecord, LocatorKind
 from ..utils.content_hash import compute_file_hash
+from ..utils.diagnostics import printable_ascii_text
 from ..utils.git_env import redact_git_diagnostic
 from ..utils.path_security import has_symlink_component
+from .lockfile import _SELF_KEY as PROJECT_SELF_OWNER
 from .lockfile import (
     LockedDependency,
     LockFile,
     LockfileFormatError,
     resolve_lockfile_path_for_read,
 )
-
-PROJECT_SELF_OWNER = "."
-LOCAL_BUNDLE_OWNER = "local-bundle"
-_SHA256_PREFIX = "sha256:"
 
 
 class FileProvenanceError(Exception):
@@ -84,6 +83,7 @@ class RecordProvenance:
     content_hash: str | None
     status: FileStatus
     status_detail: str = ""
+    owner_violation: bool = False
 
     @property
     def active_owner(self) -> OwnerProvenance | None:
@@ -105,32 +105,32 @@ class FileProvenance:
         return bool(self.records)
 
     @property
-    def has_resolved_owner(self) -> bool:
-        return any(
-            owner.kind is not OwnerKind.UNRESOLVED
-            for record in self.records
-            for owner in record.owners
-        )
+    def incomplete(self) -> bool:
+        """Whether any matched record names an owner the lockfile cannot resolve."""
+        return any(record.owner_violation for record in self.records)
 
 
 def _safe(text: str | None) -> str | None:
-    """Return *text* with credentials and secrets redacted for display."""
+    """Return lockfile-sourced *text* redacted and stripped of control characters."""
     if not text:
         return None
-    return redact_git_diagnostic(str(text))
+    return printable_ascii_text(redact_git_diagnostic(str(text)))
 
 
 def _dependency_source(dependency: LockedDependency) -> str | None:
-    if dependency.is_local_source:
-        location = dependency.anchored_local_path or dependency.local_path
-        return _safe(f"local path {location}") if location else "local path (not recorded)"
-    if dependency.source == "registry":
+    """Describe the source APM installs from: the replacement when one is selected."""
+    if dependency.source == "registry" and dependency.replacement is None:
         return _safe(f"registry {dependency.resolved_url or dependency.repo_url}")
-    host = f"{dependency.host}/" if dependency.host else ""
-    path = (
-        f"/{dependency.virtual_path}" if dependency.is_virtual and dependency.virtual_path else ""
-    )
-    return _safe(f"{host}{dependency.repo_url}{path}")
+    selected = dependency.to_dependency_ref()
+    suffix = " (replacement)" if dependency.replacement is not None else ""
+    if dependency.is_local_source:
+        location = selected.anchored_local_path or selected.local_path
+        if not location:
+            return f"local path (not recorded){suffix}"
+        return _safe(f"local path {location}{suffix}")
+    host = f"{selected.host}/" if selected.host else ""
+    path = f"/{selected.virtual_path}" if selected.is_virtual and selected.virtual_path else ""
+    return _safe(f"{host}{selected.repo_url}{path}{suffix}")
 
 
 def _owner_provenance(owner: str, active: bool, lockfile: LockFile) -> OwnerProvenance:
@@ -150,11 +150,11 @@ def _owner_provenance(owner: str, active: bool, lockfile: LockFile) -> OwnerProv
         key=_safe(owner) or owner,
         kind=kind,
         active=active,
-        name=dependency.name,
-        version=dependency.version,
+        name=_safe(dependency.name),
+        version=_safe(dependency.version),
         source=_dependency_source(dependency),
         ref=_safe(dependency.resolved_ref or dependency.resolved_tag),
-        commit=dependency.resolved_commit,
+        commit=_safe(dependency.resolved_commit),
         resolved_by=_safe(dependency.resolved_by),
         local_source=dependency.is_local_source,
     )
@@ -164,7 +164,8 @@ def _current_status(
     base: Path, file_path: Path, content_hash: str | None
 ) -> tuple[FileStatus, str]:
     """Classify current bytes without following symlinks or adopting content."""
-    if has_symlink_component(base, file_path):
+    # The deploy root itself counts: a symlinked $HOME or project root is not followed.
+    if base.is_symlink() or has_symlink_component(base, file_path):
         return FileStatus.UNVERIFIABLE, "path crosses a symlink, which is not followed"
     if not os.path.lexists(file_path):
         return FileStatus.MISSING, ""
@@ -256,19 +257,24 @@ def _read_lockfile(lock_dir: Path, user_scope: bool) -> tuple[Path, LockFile]:
 
 
 def _record_provenance(
-    record: DeploymentRecord, base: Path, relative: str, lockfile: LockFile
+    record: DeploymentRecord,
+    base: Path,
+    relative: str,
+    lockfile: LockFile,
+    owner_violation: bool,
 ) -> RecordProvenance:
     owners = tuple(
         _owner_provenance(owner, owner == record.active_owner, lockfile) for owner in record.owners
     )
     status, detail = _current_status(base, base / relative, record.content_hash)
     return RecordProvenance(
-        target=record.locator.target,
+        target=_safe(record.locator.target) or "",
         value=record.locator.value,
         owners=owners,
         content_hash=record.content_hash,
         status=status,
         status_detail=detail,
+        owner_violation=owner_violation,
     )
 
 
@@ -294,27 +300,41 @@ def lookup_file_provenance(
         )
     lock_path, lockfile = _read_lockfile(lock_dir, user_scope)
     ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    # Canonical rows carry their recorded scope; legacy-synthesized rows only infer it.
+    canonical = bool(getattr(lockfile, "_deployments_present", False))
+    scope_value = "user" if user_scope else "project"
+    violations = {
+        violation.locator.key
+        for violation in DeploymentLedgerCodec.owner_reference_violations(lockfile, ledger=ledger)
+    }
     project_match = _relative_to_any(absolute, _roots(deploy_root))
 
-    records: list[RecordProvenance] = []
-    target_roots: dict[str, Path | None] = {}
-    for key in sorted(ledger.records):
-        record = ledger.records[key]
+    matched: list[tuple[str, DeploymentRecord, tuple[Path, str]]] = []
+    target_matches: dict[str, tuple[Path, str] | None] = {}
+    for key, record in ledger.records.items():
+        if canonical and record.locator.scope != scope_value:
+            continue
         kind = record.locator.kind
         value = record.locator.value.rstrip("/")
         if kind is LocatorKind.PROJECT_RELATIVE:
-            if project_match is None or value != project_match[1]:
-                continue
-            records.append(_record_provenance(record, project_match[0], value, lockfile))
+            match = project_match
         elif kind is LocatorKind.TARGET_RELATIVE:
             target = record.locator.target
-            if target not in target_roots:
-                target_roots[target] = _target_root(target, user_scope)
-            root = target_roots[target]
-            match = _relative_to_any(absolute, _roots(root)) if root is not None else None
-            if match is None or value != match[1]:
-                continue
-            records.append(_record_provenance(record, match[0], value, lockfile))
+            if target not in target_matches:
+                root = _target_root(target, user_scope)
+                target_matches[target] = (
+                    _relative_to_any(absolute, _roots(root)) if root is not None else None
+                )
+            match = target_matches[target]
+        else:
+            continue
+        if match is not None and value == match[1]:
+            matched.append((key, record, match))
+
+    records = [
+        _record_provenance(record, match[0], match[1], lockfile, record.locator.key in violations)
+        for key, record, match in sorted(matched, key=lambda item: item[0])
+    ]
 
     if project_match is None and not records:
         scope_hint = (
@@ -330,8 +350,8 @@ def lookup_file_provenance(
     relative = project_match[1] if project_match is not None else records[0].value
     return FileProvenance(
         query=query,
-        relative_path=relative,
+        relative_path=printable_ascii_text(relative),
         lockfile_path=lock_path,
-        legacy_records=not getattr(lockfile, "_deployments_present", False),
+        legacy_records=not canonical,
         records=tuple(records),
     )

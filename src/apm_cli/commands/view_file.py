@@ -103,7 +103,7 @@ def render_file_provenance(
         )
         return EXIT_UNRECORDED
 
-    logger.progress(f"{result.relative_path} ({scope} scope, from {result.lockfile_path.name})")
+    logger.info(f"{result.relative_path} ({scope} scope, from {result.lockfile_path.name})")
     for record in result.records:
         _render_record(record, logger)
 
@@ -116,11 +116,12 @@ def render_file_provenance(
         logger.warning(
             "Owners above are recorded provenance, not verification of the current bytes."
         )
-    if not result.has_resolved_owner:
+    if result.incomplete:
         logger.error(
-            "Recorded owner is not in the lockfile dependencies; provenance is incomplete. "
-            "Rerun 'apm install' to rebuild deployment records."
+            "A recorded owner (active writer or surviving owner) is not in the lockfile "
+            "dependencies; provenance is incomplete."
         )
+        logger.error_detail("  Rerun 'apm install' to rebuild deployment records.")
         return EXIT_UNRECORDED
 
     active = result.records[0].active_owner
