@@ -1,7 +1,8 @@
 """User-root-scope, drift, and hook-cleanup mutation analyzers.
 
 Ports ``hooks-integrations-user-root-scope`` (AC1 user-root scoped
-instruction) plus two additional in-domain rules that carry no owner guard
+instruction), guards ``hooks-integrations-user-hook-home-reference`` (#2821
+per-harness user-scope hook home reference), plus two additional in-domain rules that carry no owner guard
 because their canonical owners sit outside the hooks-integrations owner set,
 yet their decisions are hook/MCP-integration semantics in this group's
 domain: ``mutation_writes.drift_hook_membership`` (AC4 hook config
@@ -50,6 +51,12 @@ _USER_ROOT_OWNER = "src/apm_cli/integration/targets.py"
 _USER_ROOT_CONSUMER = "src/apm_cli/compilation/user_root_context.py"
 
 
+_HOOK_REWRITER = "src/apm_cli/integration/hook_integrator.py"
+
+
+_KIRO_HOOK_REWRITER = "src/apm_cli/integration/kiro_hook_integrator.py"
+
+
 def _check_user_root_scope(provider: FactsProvider) -> Iterable[Violation]:
     """User-root scoped instruction eligibility must come from TargetProfile.
 
@@ -91,6 +98,64 @@ def _check_user_root_scope(provider: FactsProvider) -> Iterable[Violation]:
             "user-root context consumer must not branch on a hard-coded target name",
         )
     )
+    return findings
+
+
+def _check_user_hook_home_reference(provider: FactsProvider) -> Iterable[Violation]:
+    """User-scope hook home anchoring must come from the TargetProfile capability.
+
+    ``TargetProfile.user_hook_home_reference`` owns which harnesses expand a
+    home reference and for which command fields. Hook rewriters must resolve
+    it through ``_home_reference_for_hook_rewrite`` and ask
+    ``reference_for``; they must never gate anchoring on the host OS or emit
+    a hard-coded ``$HOME`` prefix themselves.
+    """
+    rule_id = "mutation_writes.user_hook_home_reference"
+    paths = (_USER_ROOT_OWNER, _HOOK_REWRITER, _KIRO_HOOK_REWRITER)
+    facts_by_path, failures = _read_required(provider, rule_id, paths)
+    if failures:
+        return failures
+    owner = facts_by_path[_USER_ROOT_OWNER]
+    rewriter = facts_by_path[_HOOK_REWRITER]
+    kiro = facts_by_path[_KIRO_HOOK_REWRITER]
+    findings: list[Violation] = []
+    for present, path, message in (
+        (
+            _has_fixed(owner, "user_hook_home_reference: UserHookHomeReference | None = None"),
+            _USER_ROOT_OWNER,
+            "TargetProfile must own the user-scope hook home reference capability",
+        ),
+        (
+            _has_fixed(owner, "def reference_for("),
+            _USER_ROOT_OWNER,
+            "UserHookHomeReference must own the per-field home reference decision",
+        ),
+        (
+            _has_fixed(rewriter, '"user_hook_home_reference"'),
+            _HOOK_REWRITER,
+            "hook rewriter must read the TargetProfile home reference capability",
+        ),
+        (
+            _has_fixed(rewriter, "home_reference.reference_for("),
+            _HOOK_REWRITER,
+            "hook rewriter must ask the capability for the home reference",
+        ),
+        (
+            _has_fixed(kiro, "integrator._home_reference_for_hook_rewrite("),
+            _KIRO_HOOK_REWRITER,
+            "Kiro hook rewriter must resolve the shared home reference capability",
+        ),
+    ):
+        findings.extend(_require(present, rule_id, path, message))
+    for facts, path in ((rewriter, _HOOK_REWRITER), (kiro, _KIRO_HOOK_REWRITER)):
+        findings.extend(
+            _require(
+                not _has_regex(facts, r"os\.name|sys\.platform|platform\.system|[\"']\$HOME"),
+                rule_id,
+                path,
+                "hook rewriters must not gate home anchoring on the host OS or hard-code $HOME",
+            )
+        )
     return findings
 
 
@@ -189,6 +254,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-user-root-scope",),
         description="User-root scoped instruction eligibility must come from TargetProfile.",
         check=_check_user_root_scope,
+    ),
+    Rule(
+        id="mutation_writes.user_hook_home_reference",
+        group=GROUP,
+        guard_ids=("hooks-integrations-user-hook-home-reference",),
+        description="User-scope hook home anchoring must come from the TargetProfile capability.",
+        check=_check_user_hook_home_reference,
     ),
     Rule(
         id="mutation_writes.drift_hook_membership",

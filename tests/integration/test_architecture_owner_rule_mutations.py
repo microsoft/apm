@@ -648,6 +648,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Explicit false and null become omission instead of manifest intent.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-user-hook-home-reference",
+        rule_id="mutation_writes.user_hook_home_reference",
+        path="src/apm_cli/integration/hook_integrator.py",
+        old="            if reference is not None:\n",
+        new='            if reference is not None and os.name != "nt":\n',
+        intent="The hook rewriter gates home anchoring on the host OS, not the capability.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-user-root-scope",
         rule_id="mutation_writes.user_root_scope",
         path="src/apm_cli/integration/targets.py",
