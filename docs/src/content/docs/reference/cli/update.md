@@ -21,6 +21,11 @@ When every ref is already current but the locked `apm_modules/` cache is empty, 
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
+Partial updates retain deployment targets in `apm.lock.yaml` for both refreshed
+and untouched packages, including skills deployed under the shared
+`.agents/skills/` directory. A follow-up `apm install` is not needed to restore
+target records.
+
 This command refreshes dependencies, not the CLI. For CLI upgrades, use your
 package manager (`brew upgrade apm` for Homebrew), or
 [`apm self-update`](../self-update/) for standalone installs.
@@ -95,8 +100,11 @@ apm update
 - **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
 - **Refreshes preserve the active package.** Replacement content downloads and
   passes package validation in an isolated transaction path before publication.
-  A failed download, validation, or activation keeps the previous package and
-  lockfile active; fix the reported cause and rerun `apm update`.
+  Failed downloads or validation keep the previous package active. Failed
+  activation attempts restoration without changing the lockfile. If
+  restoration is also denied, preserve the reported backups and follow
+  [recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
+  before rerunning `apm update`; the prior package may not be active.
 - **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
 - **Registry deps.** Updates stay within the manifest constraint and use the configured registry. An exact `1.7.0` or `=1.7.0` pin remains **unchanged** even when `apm outdated` reports `Latest` as `1.8.0`. To take an outside-constraint release, [select it explicitly](../outdated/#registry-reporting). Unlike read-only `outdated`, `update` can write the manifest, lockfile, modules, and deployed files.
 - **Structured plan.** Output is grouped into four sections:

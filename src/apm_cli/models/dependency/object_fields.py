@@ -6,6 +6,7 @@ import re
 from collections.abc import Collection
 from typing import Any
 
+from ...utils.path_security import PathTraversalError, validate_path_segments
 from .subsets import parse_skill_subset, parse_target_subset
 
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -36,6 +37,13 @@ def parse_alias_override(raw: object) -> str | None:
             f"Invalid alias: {alias}. Aliases can only contain "
             "letters, numbers, dots, underscores, and hyphens"
         )
+    try:
+        validate_path_segments(alias, context="dependency alias")
+    except PathTraversalError:
+        raise ValueError(
+            f"Invalid dependency alias {alias!r}: '.' and '..' are reserved directory names. "
+            "Set alias to a name such as 'my-skill.v2' in apm.yml and rerun apm install."
+        ) from None
     return alias
 
 

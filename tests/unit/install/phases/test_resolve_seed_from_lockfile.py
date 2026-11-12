@@ -12,10 +12,18 @@ import os
 import re
 import sys
 import types
+from unittest.mock import MagicMock
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
-from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.tiered_ref_resolver import (
+    RefFreshnessPolicy,
+    build_tiered_ref_resolver,
+)
+from apm_cli.drift import detect_ref_change
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -68,6 +76,64 @@ def _ctx(*, resolver, lockfile, update_refs=False, refresh=False):
 
 
 SHA = "a" * 40
+
+
+@pytest.mark.parametrize("stale_repo", ["owner/repo", "removed/package"])
+def test_unclassifiable_historical_seed_allows_current_resolution(
+    monkeypatch: pytest.MonkeyPatch, stale_repo: str
+) -> None:
+    """Both matching and removed provider hints leave valid current work resolvable."""
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    historical = LockedDependency(
+        repo_url=stale_repo,
+        host="code.example.com",
+        host_type="gitlab",
+        resolved_ref="main",
+        resolved_commit=SHA,
+    )
+    historical_ref = historical.to_dependency_ref()
+    monkeypatch.setenv("GITHUB_HOST", "code.example.com")
+    declaration = {"git": "https://code.example.com/owner/repo", "ref": "main"}
+    current = DependencyReference.parse_from_dict(declaration)
+    assert detect_ref_change(current, historical) is True
+    valid_locked = LockedDependency(
+        repo_url="still/locked", host="code.example.com", resolved_ref="main", resolved_commit=SHA
+    )
+    downloader = MagicMock()
+    downloader._refs.resolve_commit_sha_for_ref.return_value = "b" * 40
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader, freshness_policy=RefFreshnessPolicy.LOCKED_OR_CURRENT
+    )
+    assert resolver is not None
+    context = _ctx(
+        resolver=resolver,
+        lockfile=LockFile(
+            dependencies={
+                historical_ref.get_unique_key(): historical,
+                valid_locked.get_unique_key(): valid_locked,
+            }
+        ),
+    )
+    context.logger = MagicMock()
+    seed_ref_resolver_from_lockfile(context)
+    context.logger.verbose_detail.assert_called_once_with(
+        "[i] Seeded ref resolver from lockfile: 1 ref(s) (0 round-trips)"
+    )
+    assert len(resolver._lock_seeds) == 1
+    assert resolver._cache.size() == 0
+    assert resolver.resolve(current).resolved_commit == "b" * 40
+    downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(current, "main")
+    assert resolver.resolve(valid_locked.to_dependency_ref()).resolved_commit == SHA
+    downloader._refs.resolve.assert_not_called()
+    assert resolver.remotely_resolved(current, "b" * 40) is False
+
+    # Historical rejection must not turn invalid current declarations into success,
+    # even after a fresh repository answer is cached.
+    invalid_current = DependencyReference.parse_from_dict({**declaration, "type": "gitlab"})
+    with pytest.raises(ValueError, match="conflicts with recognized 'ghes'"):
+        resolver.resolve(invalid_current)
+    downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(current, "main")
 
 
 def test_seeds_branch_and_tag_refs():

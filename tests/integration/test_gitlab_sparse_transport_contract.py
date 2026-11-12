@@ -92,6 +92,8 @@ def materialization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
                     "sparse-checkout",
                     "checkout",
                     "rev-parse",
+                    # Link lookup reads trees, which blob:none fetches (#3457).
+                    "ls-tree",
                 )
             ) or ("ls-remote" in argv and "--get-url" in argv), f"Network command: {argv}"
         return real_run(argv, *args, **kwargs)

@@ -13,9 +13,36 @@ backward compatibility with existing tests) and
 
 import contextlib
 import os
+import secrets
 import stat
 import tempfile
 from pathlib import Path
+
+
+def umask_file_mode(path: Path) -> int | None:
+    """Return the mode a plain ``open()`` would give ``path`` if created now.
+
+    Shared, committed artifacts pass this as ``new_file_mode`` so they do not
+    inherit ``mkstemp``'s owner-only 0600. The mode is observed from a
+    short-lived probe file in ``path.parent`` rather than by reading the
+    umask, because reading it requires changing the process-wide umask, which
+    unrelated concurrent file or directory creation would observe. Returns
+    ``None`` when ``path`` already exists (its mode is preserved anyway) or
+    where ``os.fchmod`` is unavailable, e.g. Windows.
+    """
+    if not hasattr(os, "fchmod") or path.exists():
+        return None
+    probe = path.parent / f".apm-mode-probe-{secrets.token_hex(8)}"
+    try:
+        fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    except OSError:
+        return None
+    try:
+        return stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(probe)
 
 
 def _replace_atomic_file(source: str, destination: Path) -> None:
@@ -62,6 +89,7 @@ def atomic_write_text(
     normalize_line_endings: bool = True,
     temp_prefix: str = "apm-atomic-",
     temp_suffix: str = "",
+    create_only: bool = False,
 ) -> None:
     """Atomically write ``data`` (UTF-8) to ``path``.
 
@@ -85,6 +113,11 @@ def atomic_write_text(
     an established sibling-file naming contract without reimplementing the
     atomic write.
 
+    ``create_only`` publishes the completed temp file with an exclusive hard
+    link instead of replacement. An existing destination, including one that
+    appears during staging, is never overwritten. Unsupported filesystems fail
+    explicitly rather than falling back to a racy check followed by replacement.
+
     On any failure, the temp file is removed and the original target
     file (if any) remains untouched.
     """
@@ -107,7 +140,11 @@ def atomic_write_text(
         fd_wrapped = True
         with fh:
             fh.write(normalize_crlf_to_lf(data) if normalize_line_endings else data)
-        _replace_atomic_file(tmp_name, path)
+        if create_only:
+            os.link(tmp_name, path)
+            os.unlink(tmp_name)
+        else:
+            _replace_atomic_file(tmp_name, path)
     except Exception:
         if not fd_wrapped:
             # fdopen never took ownership of the descriptor; close it so

@@ -9,10 +9,11 @@
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |
 | Stale dependencies | Run `apm install --update` to refresh to latest refs. |
 | MCP path contains `.apm-resolution-staging` | Upgrade APM and retry the same install once. If it repeats, stop and report the redacted error and named MCP entry. Do not edit package files, delete the lockfile, or use `--refresh`/`--force` solely for this repair. |
-| TLS verification failed | Install your corporate CA into the OS trust store. For a per-shell override, set `REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem`; `SSL_CERT_FILE` alone is not a reliable requests override. |
+| TLS verification failed | Install your corporate CA into the OS trust store. For additive per-shell trust, set `APM_EXTRA_CA_BUNDLE=/path/to/ca-bundle.pem`; configure `GIT_SSL_CAINFO` separately for Git. Use `REQUESTS_CA_BUNDLE` only when you intend to replace Requests' normal trust set. `APM_LOG_LEVEL=DEBUG apm install` reports when a higher-precedence setting ignores the extra bundle. |
 | Orphaned packages in lockfile | Run `apm prune` to remove packages no longer in apm.yml. |
+| Lockfile contains git merge conflict markers | Resolve the conflict in the named file or restore a known-good lockfile, review it against `apm.yml`, then retry the original command with the same scope and flags. APM preserves the conflicted bytes and does not discard or regenerate them. Selecting one side manually retains only that side's records. |
 | Security findings block install | Run `apm audit` to review findings, then `apm install --force` if acceptable. |
 | Compilation not picking up changes | Run `apm compile --clean` to remove orphaned output, or `apm compile --watch` for auto-regeneration. |
-| Windows encoding / charmap errors | Ensure all source files and CLI output use printable ASCII only (U+0020-U+007E). No emojis or unicode symbols. |
+| Windows encoding / charmap errors | Prefer printable ASCII (U+0020-U+007E) for CLI output and scripts: whether a non-ASCII character survives depends on the active code page, so it may fail. cp1252 encodes U+00E9 and U+2014 but raises UnicodeEncodeError on U+65E5 or an emoji. Package content may be UTF-8 -- `apm audit` flags hidden characters (zero-width, bidi), not ordinary non-ASCII text. |
 | Fine-grained PAT cannot access org | The PAT resource owner must be the org, not your user account. Recreate with org as owner. |
 | SSO-protected repo access denied | Authorize the token: Settings > Tokens > Configure SSO for the org. |

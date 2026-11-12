@@ -42,8 +42,10 @@ import io
 import json
 import os
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
@@ -55,9 +57,13 @@ from apm_cli.adapters.client.copilot import (
     _stringify_env_literal,
     _translate_env_placeholder,
 )
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.git_file_transport import GitFileTransportError
+from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.dependency.reference import DependencyReference
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 # ---------------------------------------------------------------------------
 # Helpers / factories
@@ -832,69 +838,94 @@ class TestDownloadAdoFile:
 
 
 class TestDownloadGitlabFile:
-    """GitLab REST v4 file download."""
+    """GitLab REST v4 fallback after an authorized HTTPS Git attempt fails."""
 
-    def test_successful_download(self) -> None:
+    @pytest.fixture
+    def gitlab_downloader(self, tmp_path: Path) -> Iterator[GitHubPackageDownloader]:
+        """Keep transport/auth policy real and replace only external download I/O."""
+        isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+        env = isolated.subprocess_env()
+        env["GITLAB_APM_PAT"] = "gl-token"
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch(
+                "requests.sessions.Session.request", side_effect=AssertionError("HTTP forbidden")
+            ),
+        ):
+            host = GitHubPackageDownloader(
+                auth_resolver=AuthResolver(allow_external_fallback=False),
+                allow_fallback=False,
+            )
+            transport = MagicMock()
+            transport.fetch_file.side_effect = GitFileTransportError("Git unavailable")
+            host._strategies._git_file_transport_factory = MagicMock(return_value=transport)
+            try:
+                yield host
+                transport.fetch_file.assert_called_once_with("apm.yml")
+                transport.close.assert_called_once()
+            finally:
+                host._strategies._git_file_transport_finalizer()
+
+    def test_successful_download(self, gitlab_downloader: GitHubPackageDownloader) -> None:
         """Downloads a file from GitLab successfully."""
-        host = _make_host()
-        delegate = DownloadDelegate(host)
-        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com")
-        host.auth_resolver.classify_host.return_value = MagicMock(
-            kind="gitlab",
-            api_base="https://gitlab.com/api/v4",
-        )
-        host.auth_resolver.resolve.return_value = MagicMock(token="gl-token", source="env")
+        host = gitlab_downloader
+        delegate = host._strategies
+        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com", explicit_scheme="https")
         mock_resp = _make_mock_response(200, content=b"gitlab file")
         host._resilient_get = MagicMock(return_value=mock_resp)
 
         result = delegate.download_gitlab_file(dep, "apm.yml", ref="main")
         assert result == b"gitlab file"
-
-    def test_404_tries_master_fallback(self) -> None:
-        """On 404 with ref=main, retries with master."""
-        host = _make_host()
-        delegate = DownloadDelegate(host)
-        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com")
-        host.auth_resolver.classify_host.return_value = MagicMock(
-            kind="gitlab",
-            api_base="https://gitlab.com/api/v4",
+        host._resilient_get.assert_called_once()
+        call = host._resilient_get.call_args
+        url = urlparse(call.args[0])
+        assert (url.scheme, url.hostname, url.path) == (
+            "https",
+            "gitlab.com",
+            "/api/v4/projects/group%2Fproject/repository/files/apm.yml/raw",
         )
-        host.auth_resolver.resolve.return_value = MagicMock(token="gl-token", source="env")
+        assert parse_qs(url.query) == {"ref": ["main"]}
+        assert call.kwargs == {"headers": {"PRIVATE-TOKEN": "gl-token"}, "timeout": 30}
+
+    def test_404_tries_master_fallback(self, gitlab_downloader: GitHubPackageDownloader) -> None:
+        """On 404 with ref=main, retries with master."""
+        host = gitlab_downloader
+        delegate = host._strategies
+        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com", explicit_scheme="https")
         not_found = _make_mock_response(404)
         success = _make_mock_response(200, content=b"from master")
         host._resilient_get = MagicMock(side_effect=[not_found, success])
 
         result = delegate.download_gitlab_file(dep, "apm.yml", ref="main")
         assert result == b"from master"
+        assert [
+            parse_qs(urlparse(call.args[0]).query) for call in host._resilient_get.call_args_list
+        ] == [{"ref": ["main"]}, {"ref": ["master"]}]
 
-    def test_auth_error_raises_runtime_error_with_token(self) -> None:
+    def test_auth_error_raises_runtime_error_with_token(
+        self, gitlab_downloader: GitHubPackageDownloader
+    ) -> None:
         """401 with token raises RuntimeError."""
-        host = _make_host()
-        delegate = DownloadDelegate(host)
-        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com")
-        host.auth_resolver.classify_host.return_value = MagicMock(
-            kind="gitlab",
-            api_base="https://gitlab.com/api/v4",
-        )
-        host.auth_resolver.resolve.return_value = MagicMock(token="gl-token", source="env")
+        host = gitlab_downloader
+        delegate = host._strategies
+        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com", explicit_scheme="https")
         forbidden = _make_mock_response(401)
         forbidden_err = requests.exceptions.HTTPError(response=forbidden)
         forbidden.raise_for_status.side_effect = forbidden_err
         host._resilient_get = MagicMock(return_value=forbidden)
 
-        with pytest.raises(RuntimeError, match="Authentication failed"):
+        with pytest.raises(RuntimeError, match="Authentication failed") as error:
             delegate.download_gitlab_file(dep, "apm.yml", ref="main")
+        host._resilient_get.assert_called_once()
+        assert "gl-token" not in str(error.value)
 
-    def test_verbose_callback_called_on_success(self) -> None:
+    def test_verbose_callback_called_on_success(
+        self, gitlab_downloader: GitHubPackageDownloader
+    ) -> None:
         """verbose_callback is invoked when download succeeds."""
-        host = _make_host()
-        delegate = DownloadDelegate(host)
-        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com")
-        host.auth_resolver.classify_host.return_value = MagicMock(
-            kind="gitlab",
-            api_base="https://gitlab.com/api/v4",
-        )
-        host.auth_resolver.resolve.return_value = MagicMock(token="gl-token", source="env")
+        host = gitlab_downloader
+        delegate = host._strategies
+        dep = _make_dep_ref(repo_url="group/project", host="gitlab.com", explicit_scheme="https")
         mock_resp = _make_mock_response(200, content=b"data")
         host._resilient_get = MagicMock(return_value=mock_resp)
         calls = []

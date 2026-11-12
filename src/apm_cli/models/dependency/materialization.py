@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
-from ...utils.path_security import ensure_path_within, validate_path_segments
+from ...utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+from .object_fields import parse_alias_override
 
 if TYPE_CHECKING:
     from ...install.resolution_staging import ResolutionStagingSession
@@ -107,11 +108,30 @@ def build_materialization_path(
     apm_modules_dir: Path,
 ) -> Path:
     """Build the source-cased path for one dependency below ``apm_modules``."""
+    dependency = dependency.ownership_reference
     if dependency.is_marketplace:
         raise ValueError(
             "Cannot compute install path for unresolved marketplace dependency "
             f"'{dependency.marketplace_plugin_name}@{dependency.marketplace_name}'"
         )
+
+    alias = parse_alias_override(dependency.alias)
+    if alias is not None:
+        result = apm_modules_dir / alias
+        try:
+            resolved = ensure_path_within(result, apm_modules_dir)
+        except PathTraversalError as exc:
+            raise PathTraversalError(
+                f"Invalid dependency alias {alias!r}: unsafe destination {result}. "
+                "Inspect the alias path without removing its target, choose a separate "
+                "package directory, and rerun apm install."
+            ) from exc
+        if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):
+            raise PathTraversalError(
+                f"Invalid dependency alias {alias!r}: destination resolves to apm_modules itself. "
+                "Choose a separate package directory and rerun apm install."
+            )
+        return result
 
     if dependency.is_local and dependency.local_path:
         pkg_dir_name = Path(dependency.local_path).name
@@ -251,10 +271,29 @@ def find_case_equivalent_materialization_path(
     dependency: DependencyReference,
     reader: MaterializationPathReader = _NATIVE_READER,
     candidate_relatives: Iterable[PurePosixPath] | None = None,
+    match_complete_path: bool = False,
 ) -> Path | None:
-    """Find the sole existing path whose components differ only by casing."""
+    """Find a case-equivalent path; optionally allow ambiguous parent prefixes.
+
+    Read-only consumers can match complete paths without treating distinct
+    repositories under case-variant owners as collisions. Relocation callers
+    retain strict prefix collision checks by default.
+    """
     desired_parts = _relative_parts(desired, apm_modules_dir)
     policy = _case_policy(dependency)
+    if match_complete_path and candidate_relatives is None:
+        candidates = [apm_modules_dir]
+        for index, desired_part in enumerate(desired_parts):
+            candidates = [
+                child
+                for parent in candidates
+                if reader.is_dir(parent)
+                for child in reader.iterdir(parent)
+                if _component_matches(index, desired_part, child.name, policy)
+            ]
+        candidate_relatives = (
+            PurePosixPath(*_relative_parts(candidate, apm_modules_dir)) for candidate in candidates
+        )
     if candidate_relatives is not None:
         matches = _candidate_matches(desired_parts, candidate_relatives, policy)
         if len(matches) > 1:
@@ -327,8 +366,9 @@ def prepare_materialization_path(
     on_migrate: Callable[[Path, Path], None] | None = None,
 ) -> Path:
     """Return the display-cased path, transactionally migrating stale casing."""
+    dependency = dependency.ownership_reference
     desired = dependency.get_install_path(apm_modules_dir)
-    if not dependency.has_case_insensitive_repo_identity:
+    if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:
         return desired
 
     existing = find_case_equivalent_materialization_path(

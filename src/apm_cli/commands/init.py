@@ -21,7 +21,7 @@ from ..core.target_detection import (
     detect_signals,
     manifest_targets_from_target_option,
 )
-from ..install.locking import serialized_lifecycle
+from ..install.locking import serialized_lifecycle_unless
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -36,6 +36,7 @@ from ._helpers import (
     _rich_blank_line,
     _validate_plugin_name,
 )
+from .discover import discover_options, run_discover
 
 
 def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
@@ -69,6 +70,13 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 
 
 @click.command(help="Initialize a new APM project")
+@click.option(
+    "--discover",
+    "discover_flag",
+    is_flag=True,
+    help="Inventory existing local packages without writes",
+)
+@discover_options
 @click.argument("project_name", required=False)
 @click.option(
     "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
@@ -93,8 +101,20 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-@serialized_lifecycle
-def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+@serialized_lifecycle_unless("discover_flag")
+def init(
+    ctx: click.Context,
+    project_name: str | None,
+    yes: bool,
+    plugin: bool,
+    marketplace_flag: bool,
+    target_flag: str | list[str] | None,
+    verbose: bool,
+    discover_flag: bool = False,
+    write: bool = False,
+    output_format: str = "text",
+    global_: bool = False,
+) -> None:
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -104,6 +124,22 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
     --marketplace flags on 'apm init' are kept for backward
     compatibility and will be removed in v0.16.
     """
+    if discover_flag:
+        if project_name or plugin or marketplace_flag or target_flag:
+            raise click.UsageError(
+                "--discover cannot scaffold a name/plugin/marketplace or select targets."
+            )
+        run_discover(
+            write=write, output_format=output_format, global_=global_, yes=yes, verbose=verbose
+        )
+        return
+    if write or global_ or output_format != "text":
+        raise click.UsageError("--apply, --write, --global and --format require --discover.")
+    _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
+
+
+def _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+    """Keep the pre-existing init flow serialized, outside read-only discovery."""
     # Soft deprecation warnings -- legacy flags still work.
     if plugin:
         click.echo(

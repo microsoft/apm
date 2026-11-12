@@ -1,10 +1,11 @@
-"""Integration: install -> compile deduplication for Copilot / AGENTS.md (issue #1550).
+"""Integration: install -> compile deduplication for Copilot (issues #1550 and #3099).
 
 Pins the user-visible promise across the install and compile boundaries:
 after ``apm install --target copilot`` populates ``.github/instructions/``
 with per-instruction files, a subsequent ``apm compile --target agents``
-must omit the instructions content from ``AGENTS.md`` so Copilot does not
-load duplicate content into its context window.
+must omit the instructions content from ``AGENTS.md`` and matching global
+instructions from ``copilot-instructions.md`` so Copilot does not load
+duplicate content into its context window.
 
 This is the parity guard for #1550 (sibling of the Claude dedup in #1445).
 The unit suite covers the compiler logic in isolation; this regression trap
@@ -42,6 +43,9 @@ INSTRUCTION_BODY = (
 )
 
 INSTRUCTION_SENTINEL = "Use type hints everywhere."
+GLOBAL_INSTRUCTION_SENTINEL = "Use shared configuration for all repository changes."
+
+pytestmark = pytest.mark.e2e
 
 
 def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
@@ -63,6 +67,23 @@ def project_with_instruction():
         instr_dir.mkdir(parents=True)
         (instr_dir / "style.instructions.md").write_text(INSTRUCTION_BODY, encoding="utf-8")
         yield proj
+
+
+@pytest.fixture
+def project_with_global_instruction(tmp_path: Path):
+    """Create a Copilot project containing one unscoped local instruction."""
+    (tmp_path / "apm.yml").write_text(APM_YML, encoding="utf-8")
+    instr_dir = tmp_path / ".apm" / "instructions"
+    instr_dir.mkdir(parents=True)
+    (instr_dir / "global.instructions.md").write_text(
+        "---\n"
+        "description: Global Copilot guidance for the dedup test\n"
+        "---\n"
+        "# Shared configuration\n"
+        f"{GLOBAL_INSTRUCTION_SENTINEL}\n",
+        encoding="utf-8",
+    )
+    return tmp_path
 
 
 @pytest.mark.integration
@@ -122,3 +143,100 @@ def test_compile_without_github_instructions_includes_content(
         "Without .github/instructions/ populated, AGENTS.md must include "
         "the instruction content. Content was:\n" + all_content
     )
+
+
+@pytest.mark.integration
+def test_install_then_compile_deduplicates_global_copilot_root_and_force_restores_it(
+    project_with_global_instruction: Path,
+    apm_binary_path: Path,
+):
+    """Installed no-applyTo rules stay out of the root file unless forced."""
+    proj = project_with_global_instruction
+
+    install_res = _run(apm_binary_path, proj, "install", "--target", "copilot")
+    assert install_res.returncode == 0, (
+        f"install stdout:\n{install_res.stdout}\ninstall stderr:\n{install_res.stderr}"
+    )
+    installed_rule = proj / ".github" / "instructions" / "global.instructions.md"
+    assert installed_rule.exists(), "install must deploy the no-applyTo Copilot instruction"
+    assert GLOBAL_INSTRUCTION_SENTINEL in installed_rule.read_text(encoding="utf-8")
+
+    compile_res = _run(apm_binary_path, proj, "compile", "--target", "copilot")
+    assert compile_res.returncode == 0, (
+        f"compile stdout:\n{compile_res.stdout}\ncompile stderr:\n{compile_res.stderr}"
+    )
+    root_file = proj / ".github" / "copilot-instructions.md"
+    assert not root_file.exists(), (
+        "default Copilot compile must not repeat an installed global instruction "
+        "in copilot-instructions.md"
+    )
+
+    forced_compile = _run(
+        apm_binary_path,
+        proj,
+        "compile",
+        "--target",
+        "copilot",
+        "--force-instructions",
+    )
+    assert forced_compile.returncode == 0, (
+        f"forced compile stdout:\n{forced_compile.stdout}\n"
+        f"forced compile stderr:\n{forced_compile.stderr}"
+    )
+    assert root_file.exists(), "--force-instructions must restore the aggregated root file"
+    assert GLOBAL_INSTRUCTION_SENTINEL in root_file.read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_install_then_compile_partial_dedup_retains_non_deployed_global_instructions(
+    project_with_global_instruction: Path, apm_binary_path: Path
+):
+    """Partial native coverage retains only the uncovered root guidance."""
+    proj = project_with_global_instruction
+    retained_sentinel = "Keep the uncovered repository guidance."
+    (proj / ".apm/instructions/uncovered.instructions.md").write_text(
+        f"---\ndescription: Uncovered global guidance\n---\n{retained_sentinel}\n",
+        encoding="utf-8",
+    )
+    installed = _run(apm_binary_path, proj, "install", "--target", "copilot")
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    (proj / ".github/instructions/uncovered.instructions.md").unlink()
+
+    compiled = _run(apm_binary_path, proj, "compile", "--target", "copilot")
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    root = proj / ".github/copilot-instructions.md"
+    assert root.exists()
+    content = root.read_text(encoding="utf-8")
+    assert retained_sentinel in content
+    assert GLOBAL_INSTRUCTION_SENTINEL not in content
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_compile_cleanup_preserves_root_under_linked_parent(
+    project_with_global_instruction: Path, apm_binary_path: Path, dry_run: bool
+):
+    """The real compile command refuses cleanup outside the project root."""
+    proj = project_with_global_instruction
+    generated = _run(apm_binary_path, proj, "compile", "--target", "copilot")
+    assert generated.returncode == 0, generated.stdout + generated.stderr
+    github_dir = proj / ".github"
+    external = proj.with_name(proj.name + "-external")
+    github_dir.rename(external)
+    retained = (external / "copilot-instructions.md").read_bytes()
+    try:
+        github_dir.symlink_to(external, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
+    instruction = proj / ".apm/instructions/global.instructions.md"
+    instruction.write_text(
+        instruction.read_text(encoding="utf-8").replace(
+            "description:", "applyTo: '**/*.py'\ndescription:", 1
+        ),
+        encoding="utf-8",
+    )
+    args = ("--dry-run",) if dry_run else ()
+    compiled = _run(apm_binary_path, proj, "compile", "--target", "copilot", *args)
+    assert compiled.returncode != 0, compiled.stdout + compiled.stderr
+    assert (external / "copilot-instructions.md").read_bytes() == retained
+    assert github_dir.is_symlink()

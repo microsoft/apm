@@ -359,6 +359,44 @@ class TestInstallCommandAutoBootstrap:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_auto_created_apm_yml_omits_git_author(
+        self, mock_install_apm, mock_apm_package, mock_validate, monkeypatch
+    ):
+        """Auto-bootstrap must not stamp the local git user.name as author (#3593)."""
+        with self._chdir_tmp() as tmp_dir:
+            git_config = tmp_dir / "gitconfig"
+            git_config.write_text("[user]\n\tname = Jane Example\n", encoding="utf-8")
+            monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+            monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+            mock_validate.return_value = True
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            result = self.runner.invoke(cli, ["install", "test/package"])
+
+            assert result.exit_code == 0, result.output
+            assert "Created apm.yml" in result.output
+            raw = Path("apm.yml").read_text(encoding="utf-8")
+            config = yaml.safe_load(raw)
+            assert "author" not in config
+            assert "Jane Example" not in raw
+            assert config["version"] == "1.0.0"
+            assert "APM project" in config["description"]
+
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
     def test_install_auto_bootstrap_at_root_writes_valid_name(
         self,
         mock_install_apm,
@@ -527,7 +565,7 @@ class TestInstallCommandAutoBootstrap:
         self,
         _mock_validate,
     ):
-        """A changed positional ref remains prospective during dry-run."""
+        """A changed positional ref remains prospective and explicitly incomplete."""
         with self._chdir_tmp():
             Path("apm.yml").write_text(
                 "name: project\nversion: 1.0.0\ndependencies:\n  apm:\n    - owner/repo#main\n",
@@ -545,7 +583,8 @@ class TestInstallCommandAutoBootstrap:
             assert "would update ref in apm.yml" in result.output
             assert "Previewing 1 package (1 ref update)" in result.output
             assert "-> update" in result.output
-            assert "Dry run completed: would apply 1 APM dependency update" in result.output
+            assert "Dry run incomplete: 1 locally known APM dependency" in result.output
+            assert "Dry run completed:" not in result.output
             assert "No new packages to add" not in result.output
             assert "Installing 1 new package" not in result.output
             assert Path("apm.yml").read_bytes() == manifest_before
@@ -626,6 +665,30 @@ class TestValidationFailureReasonMessages:
             # The "(run with --verbose...)" hint is suppressed once the
             # user is already in verbose mode.
             assert "run with --verbose for the full probe log" not in output
+
+    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_clone_root_probe_omits_probe_chain(self, mock_validate, mock_probe):
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(cli, ["install", "owner/repo/skills/foo#v1.2.0"])
+            output = " ".join(result.output.split())
+            assert "all probes failed" not in output
+            assert "not accessible or doesn't exist" in output
+
+    @patch("apm_cli.commands.install._initial_scheme", return_value="ssh")
+    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_ssh_probe_names_ssh_failure(
+        self, mock_validate, mock_probe, mock_scheme
+    ):
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(cli, ["install", "owner/repo/skills/foo#v1.2.0"])
+            output = " ".join(result.output.split())
+            assert "all probes failed" not in output
+            assert "git ls-remote over SSH failed" in output
+            assert "SSH key has read access" in output
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_selfhosted_gitlab_like_host_hints_gitlab_host_env(self, mock_validate, monkeypatch):
@@ -1009,10 +1072,10 @@ class TestLocalPathValidationMessages:
 
         dep_ref = DependencyReference.parse(str(tmp_path / "does-not-exist-xyz-9999"))
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "path does not exist"
+        assert "path does not exist" in reason
 
     def test_local_path_failure_reason_file_not_dir(self, tmp_path):
-        """A file (not directory) returns 'path is not a directory'."""
+        """An unsupported file reports supported formats and the package alternative."""
         from apm_cli.commands.install import _local_path_failure_reason
         from apm_cli.models.apm_package import DependencyReference
 
@@ -1020,7 +1083,8 @@ class TestLocalPathValidationMessages:
         f.write_text("hello")
         dep_ref = DependencyReference.parse(str(f))
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "path is not a directory"
+        assert "Unsupported single-file dependency" in reason
+        assert "directory package" in reason
 
     def test_local_path_failure_reason_no_markers(self, tmp_path):
         """Directory without markers returns specific message."""
@@ -1031,15 +1095,10 @@ class TestLocalPathValidationMessages:
         empty_dir.mkdir()
         dep_ref = DependencyReference.parse(str(empty_dir))
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "no apm.yml, SKILL.md, or plugin.json found"
+        assert "no apm.yml, SKILL.md, or plugin.json" in reason
 
     def test_local_path_failure_reason_valid_apm_yml(self, tmp_path):
-        """Directory with apm.yml still returns 'no markers' message.
-
-        _local_path_failure_reason is only called when _validate_package_exists
-        already returned False, so it doesn't re-check markers. We verify it
-        returns a string (not None) and doesn't crash.
-        """
+        """A valid package has no fabricated missing-marker diagnosis."""
         from apm_cli.commands.install import _local_path_failure_reason
         from apm_cli.models.apm_package import DependencyReference
 
@@ -1048,7 +1107,7 @@ class TestLocalPathValidationMessages:
         (pkg / "apm.yml").write_text("name: test\nversion: 1.0.0\n")
         dep_ref = DependencyReference.parse(str(pkg))
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "no apm.yml, SKILL.md, or plugin.json found"
+        assert reason is None
 
     def test_local_path_failure_reason_remote_ref(self):
         """Remote refs return None (not a local path)."""
@@ -1572,14 +1631,16 @@ class TestAllowInsecureFlag:
             assert "allow_insecure: true" in result.output
             assert "--allow-insecure" in result.output
 
-    def test_install_help_mentions_allow_insecure_for_http_deps(self):
-        """Install help should mention the HTTP allow-insecure flow."""
+    def test_install_help_describes_transport_and_frozen_identity(self):
+        """Install help describes opt-in HTTP and the frozen identity boundary."""
         result = self.runner.invoke(cli, ["install", "--help"])
 
         assert result.exit_code == 0
         normalized = " ".join(result.output.split())
         assert "use --allow-insecure for http:// packages" in normalized
         assert "--allow-insecure-host HOSTNAME" in result.output
+        assert "Git source, ref, host provider, transport, and MCP config state" in normalized
+        assert "Use 'apm audit' for on-disk integrity." in normalized
 
     def test_allow_insecure_host_rejects_non_hostname(self):
         """The explicit transitive host option only accepts bare hostnames."""
@@ -2408,6 +2469,43 @@ class TestInstallMcpFlag:
         assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
         assert "Skipped workspace-only runtimes" not in excluded.output
 
+    def test_global_mcp_bootstrap_config_omits_git_author(self, tmp_path, monkeypatch):
+        """User-scope MCP bootstrap must not stamp git user.name as author (#3593)."""
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        git_config = tmp_path / "gitconfig"
+        git_config.write_text("[user]\n\tname = Jane Example\n", encoding="utf-8")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--target",
+            "claude",
+            "--mcp",
+            "probe",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        manifest_config = run_mcp_install.call_args.kwargs["initial_manifest_config"]
+        assert manifest_config is not None
+        assert "author" not in manifest_config
+        assert "Jane Example" not in manifest_config.values()
+
     def test_global_mcp_dry_run_creates_no_user_state(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
         project = tmp_path / "project"
@@ -2592,6 +2690,38 @@ class TestInstallMcpFlag:
             result = self.runner.invoke(cli, ["install", "--mcp", "foo", "--ssh"])
             assert result.exit_code == 2
             assert "transport selection flags" in result.output
+
+    def test_auth_first_flag_threads_into_auth_resolver(self):
+        """--auth-first (issue #2545) constructs AuthResolver(github_auth_first=True).
+
+        Wraps (rather than replaces) the real class so the rest of the install
+        pipeline still operates on a genuine ``AuthResolver`` instance.
+        """
+        from apm_cli.core.auth import AuthResolver
+
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install.AuthResolver", side_effect=AuthResolver
+            ) as mock_resolver_cls,
+        ):
+            result = self.runner.invoke(cli, ["install", "--auth-first"])
+        assert result.exit_code == 0, result.output
+        mock_resolver_cls.assert_called_once_with(github_auth_first=True)
+
+    def test_auth_first_flag_defaults_to_false(self):
+        """Without --auth-first, the CLI-scoped override passed is False."""
+        from apm_cli.core.auth import AuthResolver
+
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install.AuthResolver", side_effect=AuthResolver
+            ) as mock_resolver_cls,
+        ):
+            result = self.runner.invoke(cli, ["install"])
+        assert result.exit_code == 0, result.output
+        mock_resolver_cls.assert_called_once_with(github_auth_first=False)
 
     def test_e5_mcp_with_update(self):
         with self._chdir_with_apm_yml():

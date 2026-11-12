@@ -21,7 +21,7 @@ yet reached by test_sources_classification.py:
   - no targets → package_info=None materialization
   - with targets + apm.yml present
   - with targets + no apm.yml (bare APMPackage)
-  - resolved_ref=None branch (ResolvedReference created)
+  - resolved_ref=None branch (fallback carries only a vouched full-SHA source pin)
 * FreshDependencySource.acquire
   - success path (no progress, no tui, no logger)
   - success path with logger
@@ -303,7 +303,7 @@ class TestLocalDependencySourceAcquire:
             patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="deadbeef",
-            ),
+            ) as hash_package,
         ):
             from apm_cli.install.sources import LocalDependencySource
 
@@ -311,6 +311,8 @@ class TestLocalDependencySourceAcquire:
             result = source.acquire()
 
         assert result is not None
+        assert ctx.package_hashes["owner/pkg"] == "deadbeef"
+        hash_package.assert_called_once_with(install_path)
 
     def test_logger_download_complete_called_on_success(self, tmp_path: Path) -> None:
         """logger.download_complete should be called on the happy path."""
@@ -492,6 +494,9 @@ class TestResolveCachedCommit:
 # ---------------------------------------------------------------------------
 
 
+_LOCKED_SHA = "f1b2ba49d18a3de11f87d8e6dc672dfdaadbff85"
+
+
 class TestCachedDependencySourceAcquire:
     """Tests for CachedDependencySource.acquire()."""
 
@@ -618,13 +623,39 @@ class TestCachedDependencySourceAcquire:
 
         assert result is not None
 
-    def test_resolved_ref_none_creates_fallback_resolved_reference(self, tmp_path: Path) -> None:
-        """resolved_ref=None → a synthetic ResolvedReference is built."""
+    @pytest.mark.parametrize(
+        ("cached_commit", "marker_commit", "fetched_this_run", "expected"),
+        [
+            pytest.param(_LOCKED_SHA, _LOCKED_SHA, False, _LOCKED_SHA, id="locked-sha-and-pin"),
+            pytest.param(_LOCKED_SHA, None, True, _LOCKED_SHA, id="fetched-this-run"),
+            pytest.param(_LOCKED_SHA, None, False, "cached", id="missing-pin"),
+            pytest.param(_LOCKED_SHA, "a" * 40, False, "cached", id="inconsistent-pin"),
+            pytest.param("f1b2ba4", "f1b2ba4", False, "cached", id="short-sha"),
+            pytest.param("main", "main", False, "cached", id="branch-name"),
+            pytest.param(None, None, False, "cached", id="no-commit"),
+        ],
+    )
+    def test_resolved_ref_none_fallback_carries_only_a_vouched_source_pin(
+        self,
+        tmp_path: Path,
+        cached_commit: str | None,
+        marker_commit: str | None,
+        fetched_this_run: bool,
+        expected: str,
+    ) -> None:
+        """Only a full commit the cache vouches for replaces the sentinel (#3388).
+
+        Lockfile bookkeeping keeps the resolved cached commit in every case.
+        """
+        from apm_cli.install.cache_pin import write_marker
+
         ctx = _make_ctx(targets=["copilot"])
         dep_ref = _make_dep_ref(is_virtual=False, reference="feature-branch")
         install_path = tmp_path / "pkg"
         install_path.mkdir()
         (install_path / "apm.yml").write_text("name: test\nversion: 0.0.1\n")
+        if marker_commit is not None:
+            write_marker(install_path, marker_commit)
 
         mock_pkg = MagicMock()
         mock_pkg.source = "owner/repo"
@@ -635,14 +666,22 @@ class TestCachedDependencySourceAcquire:
             patch("apm_cli.utils.content_hash.compute_package_hash", return_value="h"),
             patch(
                 "apm_cli.install.sources.CachedDependencySource._resolve_cached_commit",
-                return_value="c",
+                return_value=cached_commit,
             ),
         ):
-            source = self._make_source(ctx, dep_ref, install_path, resolved_ref=None)
+            source = self._make_source(
+                ctx,
+                dep_ref,
+                install_path,
+                resolved_ref=None,
+                fetched_this_run=fetched_this_run,
+            )
             result = source.acquire()
 
         assert result is not None
-        # resolved_ref was None; the code builds a fallback - we just confirm no crash
+        assert result.package_info is not None
+        assert result.package_info.resolved_reference.resolved_commit == expected
+        assert ctx.installed_packages[-1].resolved_commit == cached_commit
 
     def test_unpinned_dep_sets_delta(self, tmp_path: Path) -> None:
         """dep_ref.reference=None → deltas['unpinned']=1."""

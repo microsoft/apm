@@ -98,10 +98,11 @@ def _run(
     bootstrap: bool = False,
     pip_fallback: bool = False,
     failure_stage: Literal["binary", "glibc"] | None = None,
+    binary_glibc_failure: bool = False,
     script_args: tuple[str, ...] = (),
     **overrides: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run unchanged configuration and installation code from this checkout."""
+    """Run production installer code; binary_glibc_failure injects a later loader failure."""
     root, env = installation
     source = INSTALLER.read_text(encoding="ascii")
     config = source.split("# Banner\n", 1)[0]
@@ -135,6 +136,14 @@ def _run(
             body += source.split("# Early glibc compatibility check for Linux\n", 1)[1].split(
                 "# Detect if running in a container", 1
             )[0]
+            if binary_glibc_failure:
+                body += "\nBINARY_TEST_EXIT_CODE=255\nBINARY_TEST_OUTPUT='GLIBC fixture failure'\n"
+                failure_branch = source.index("if [ $BINARY_TEST_EXIT_CODE -eq 0 ]; then")
+                body += source[failure_branch:].split(
+                    "# Resolve before either installation path", 1
+                )[0]
+            else:
+                body += "\nprintf 'Reached binary download phase\\n'\n"
         else:
             body += "\ntry_pip_installation\n"
         # Exercise the same fallback consumer, with its historical path arguments
@@ -2139,6 +2148,61 @@ def test_existing_install_cannot_fall_back_to_pip(
     assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
 
 
+@pytest.mark.parametrize(
+    "glibc_version", ["2.17", "2.24", "2.27", "2.28", "2.31", "2.35", "2.38", "2.39"]
+)
+def test_glibc_floor_routes_to_pip_before_binary_download(
+    installation: tuple[Path, dict[str, str]], glibc_version: str
+) -> None:
+    """Run the production gate and pip consumer, not a Python copy of the comparison."""
+    root, _ = installation
+    ldd = root / "tools/ldd"
+    ldd.write_text(f"#!/bin/sh\nprintf 'ldd fixture {glibc_version}\\n'\n", encoding="ascii")
+    ldd.chmod(0o755)
+    fake_modules, _ = _stage_fake_python_pip(root)
+    log = root / "pip.log"
+    result = _run(
+        installation,
+        failure_stage="glibc",
+        PYTHONPATH=str(fake_modules),
+        PYTHONUSERBASE=str(root / "python-user-base"),
+        PIP_LOG=str(log),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if glibc_version in {"2.17", "2.24", "2.27"}:
+        assert log.read_text(encoding="ascii").splitlines() == ["install", "--user", "apm-cli"]
+        assert f"Your glibc version: {glibc_version}" in result.stdout
+        assert "Required version: glibc 2.28+" in result.stdout
+        assert "Reached binary download phase" not in result.stdout
+    else:
+        assert not log.exists()
+        assert "Reached binary download phase" in result.stdout
+        assert "Compatibility Issue Detected" not in result.stdout
+
+
+@pytest.mark.parametrize("binary_glibc_failure", [False, True])
+def test_glibc_recovery_guidance_reports_prebuilt_floor(
+    installation: tuple[Path, dict[str, str]], binary_glibc_failure: bool
+) -> None:
+    """Both the early rejection and later loader diagnostic must report the same floor."""
+    root, _ = installation
+    version = "2.28" if binary_glibc_failure else "2.27"
+    ldd = root / "tools/ldd"
+    ldd.write_text(f"#!/bin/sh\nprintf 'ldd fixture {version}\\n'\n", encoding="ascii")
+    ldd.chmod(0o755)
+    result = _run(installation, failure_stage="glibc", binary_glibc_failure=binary_glibc_failure)
+    assert result.returncode == 1, result.stdout + result.stderr
+    if binary_glibc_failure:
+        assert (
+            f"Your system has glibc {version} but the binary requires glibc 2.28+" in result.stdout
+        )
+    else:
+        assert "Use a system with glibc 2.28+ for the prebuilt binary" in result.stdout
+    assert "Install Python 3.11+ first" in result.stdout
+    assert "glibc 2.35+" not in result.stdout
+    assert "glibc 2.38+" not in result.stdout
+
+
 @pytest.mark.parametrize("python_name", ["python3", "python"])
 @pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
 def test_pip_recovery_guidance_uses_selected_python_command(
@@ -2151,7 +2215,7 @@ def test_pip_recovery_guidance_uses_selected_python_command(
     python = root / "tools" / python_name
     python.write_text(
         "#!/bin/sh\n"
-        'if [ "$1" = "-c" ]; then printf \'3.10\\n\'; exit 0; fi\n'
+        'if [ "$1" = "-c" ]; then printf \'3.11\\n\'; exit 0; fi\n'
         'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi\n'
         "exit 1\n",
         encoding="ascii",
@@ -2183,7 +2247,7 @@ def test_missing_python_recovery_does_not_invent_pip_command(
         ldd.chmod(0o755)
     result = _run(installation, failure_stage=failure_stage)
     assert result.returncode == 1
-    assert "Install Python 3.10+ first" in result.stdout
+    assert "Install Python 3.11+ first" in result.stdout
     assert "-m pip install" not in result.stdout
     assert not any(
         line.strip().startswith(("pip install ", "pip3 install "))
@@ -2199,7 +2263,7 @@ def test_fail_closed_pip_recovery_never_prints_public_command(
     python = root / "tools/python3"
     python.write_text(
         "#!/bin/sh\n"
-        'if [ "$1" = "-c" ]; then printf \'3.10\\n\'; exit 0; fi\n'
+        'if [ "$1" = "-c" ]; then printf \'3.11\\n\'; exit 0; fi\n'
         'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi\n'
         "exit 1\n",
         encoding="ascii",
@@ -2246,7 +2310,7 @@ def test_ineligible_fallback_prints_no_pip_attempt_or_command(
 
 
 @pytest.mark.parametrize("kind", ["existing", "custom", "fresh"])
-@pytest.mark.parametrize("python_version", [None, "3.9", "3.10"])
+@pytest.mark.parametrize("python_version", [None, "3.10", "3.11"])
 @pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
 def test_binary_failure_advice_preserves_installation_ownership(
     installation: tuple[Path, dict[str, str]],
@@ -2275,11 +2339,11 @@ def test_binary_failure_advice_preserves_installation_ownership(
     result = _run(installation, failure_stage=failure_stage, **options)
     assert result.returncode == 1
     if kind == "fresh":
-        if python_version == "3.10":
+        if python_version == "3.11":
             assert "pip is not available" in result.stdout
             assert "python3 -m pip install --user apm-cli" in result.stdout
         else:
-            assert "Python 3.10+" in result.stdout
+            assert "Python 3.11+" in result.stdout
             assert "-m pip install" not in result.stdout
         assert not any(
             line.strip().startswith(("pip install ", "pip3 install "))

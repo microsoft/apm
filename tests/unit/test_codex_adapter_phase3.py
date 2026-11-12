@@ -590,7 +590,7 @@ class TestFormatServerConfig:
             cfg = adapter._format_server_config({"packages": [pkg]})
         assert cfg["env"].get("MY_TOKEN") == "env-value"
 
-    def test_id_added_from_server_info(self, tmp_path: Path) -> None:
+    def test_registry_id_is_not_a_native_setting(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
         pkg = {
             "registry_name": "npm",
@@ -601,7 +601,7 @@ class TestFormatServerConfig:
             "environment_variables": [],
         }
         cfg = adapter._format_server_config({"packages": [pkg], "id": "my-uuid-123"})
-        assert cfg["id"] == "my-uuid-123"
+        assert "id" not in cfg
 
 
 # ---------------------------------------------------------------------------
@@ -876,3 +876,231 @@ class TestProcessEnvironmentVariables:
         with patch.dict(os.environ, {"MY_TOKEN": "from-env", "CI": "true"}):
             result = adapter._process_environment_variables(env_vars)
         assert result.get("MY_TOKEN") == "from-env"
+
+
+# ---------------------------------------------------------------------------
+# _raw_stdio env forwarding (#3393)
+# ---------------------------------------------------------------------------
+
+
+def _raw_stdio_server(**env: str) -> dict:
+    """Self-defined stdio dep, the shape ``apm.yml`` dependencies.mcp produce."""
+    return {
+        "name": "figma",
+        "remotes": [],
+        "_raw_stdio": {
+            "command": "npx",
+            "args": ["-y", "figma-developer-mcp", "--stdio"],
+            "env": env,
+        },
+    }
+
+
+class TestForwardedStdioEnv:
+    """A ``${VAR}`` stdio value is forwarded to Codex instead of written out."""
+
+    def test_reference_is_forwarded_instead_of_written(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(_raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}"))
+        assert cfg["env_vars"] == ["FIGMA_API_KEY"]
+        assert "FIGMA_API_KEY" not in cfg["env"]
+        assert "example-token" not in tomlkit.dumps(cfg)
+
+    def test_reference_is_forwarded_when_variable_is_unset(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FIGMA_API_KEY", None)
+            cfg = adapter._format_server_config(_raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}"))
+        assert cfg["env_vars"] == ["FIGMA_API_KEY"]
+        assert cfg["env"] == {}
+
+    def test_env_prefixed_reference_is_forwarded(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        cfg = adapter._format_server_config(_raw_stdio_server(FIGMA_API_KEY="${env:FIGMA_API_KEY}"))
+        assert cfg["env_vars"] == ["FIGMA_API_KEY"]
+        assert cfg["env"] == {}
+
+    @pytest.mark.parametrize("value", [" ${TOKEN} ", "${TOKEN}\n"])
+    def test_value_with_surrounding_whitespace_is_not_forwarded(
+        self, tmp_path: Path, value: str
+    ) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch.dict(os.environ, {"TOKEN": "example-token"}):
+            cfg = adapter._format_server_config(_raw_stdio_server(TOKEN=value))
+        assert "env_vars" not in cfg
+        assert "TOKEN" in cfg["env"]
+
+    def test_extra_cannot_replace_forwarded_names(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}")
+        server["_extra"] = {"env_vars": ["PRIVATE_TOKEN"]}
+        cfg = adapter._format_server_config(server)
+        assert cfg["env_vars"] == ["FIGMA_API_KEY"]
+
+    def test_cwd_and_static_values_stay_intact(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}", LOG_LEVEL="debug")
+        server["_raw_stdio"]["cwd"] = "tools"
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(server)
+        assert cfg == {
+            "command": "npx",
+            "args": ["-y", "figma-developer-mcp", "--stdio"],
+            "env": {"LOG_LEVEL": "debug"},
+            "cwd": "tools",
+            "env_vars": ["FIGMA_API_KEY"],
+        }
+
+    def test_literal_value_keeps_env_block(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        cfg = adapter._format_server_config(_raw_stdio_server(LOG_LEVEL="debug"))
+        assert "env_vars" not in cfg
+        assert cfg["env"] == {"LOG_LEVEL": "debug"}
+
+    def test_reference_under_another_key_keeps_install_time_value(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(_raw_stdio_server(TOKEN="${FIGMA_API_KEY}"))
+        assert "env_vars" not in cfg
+        assert cfg["env"] == {"TOKEN": "example-token"}
+
+    def test_args_still_resolve_forwarded_names_from_the_environment(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}")
+        server["_raw_stdio"]["args"] = ["--token", "<FIGMA_API_KEY>"]
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(server)
+        assert cfg["args"] == ["--token", "example-token"]
+        assert cfg["env_vars"] == ["FIGMA_API_KEY"]
+
+    def test_written_config_keeps_env_vars_at_server_level(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(_raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}"))
+        assert adapter.update_config({"figma": cfg}) is True
+        content = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
+        server = tomlkit.parse(content).unwrap()["mcp_servers"]["figma"]
+        assert server["env_vars"] == ["FIGMA_API_KEY"]
+        assert "FIGMA_API_KEY" not in server.get("env", {})
+        assert "example-token" not in content
+
+
+class TestForwardedStdioEnvScope:
+    """User scope keeps resolving values; unforwardable references warn by name."""
+
+    def test_user_scope_resolves_value_and_has_no_env_vars(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(_raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}"))
+        assert "env_vars" not in cfg
+        assert cfg["env"] == {"FIGMA_API_KEY": "example-token"}
+
+    def test_user_scope_env_prefixed_reference_resolves(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(
+                _raw_stdio_server(FIGMA_API_KEY="${env:FIGMA_API_KEY}")
+            )
+        assert "env_vars" not in cfg
+        assert cfg["env"] == {"FIGMA_API_KEY": "example-token"}
+
+    def test_user_scope_never_matches_legacy_baseline(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        expected = {"command": "npx", "env_vars": ["TOKEN"], "env": {}}
+        native = {"command": "npx", "env": {"TOKEN": "${TOKEN}"}}
+        assert adapter.matches_legacy_managed_server_config(native, expected) is False
+
+    @pytest.mark.parametrize("user_scope", [False, True])
+    def test_mismatched_and_embedded_references_resolve(
+        self, tmp_path: Path, user_scope: bool
+    ) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=user_scope)
+        server = _raw_stdio_server(TOKEN="${OTHER}", AUTH="Bearer ${OTHER}")
+        with patch.dict(os.environ, {"OTHER": "example-token"}):
+            cfg = adapter._format_server_config(server)
+        assert cfg["env"] == {"TOKEN": "example-token", "AUTH": "Bearer example-token"}
+        assert "env_vars" not in cfg
+
+    def test_project_scope_warns_with_names_only(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server = _raw_stdio_server(TOKEN="${OTHER}", AUTH="Bearer <OTHER>", PLAIN="x")
+        with (
+            patch.dict(os.environ, {"OTHER": "example-token"}),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            adapter._format_server_config(server)
+        assert warning.call_count == 1
+        message = warning.call_args.args[0]
+        assert "TOKEN" in message
+        assert "AUTH" in message
+        assert "PLAIN" not in message
+        assert "example-token" not in message
+        assert "KEY: ${KEY}" in message
+
+    def test_user_scope_does_not_emit_the_forwarding_warning(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        with (
+            patch.dict(os.environ, {"OTHER": "example-token"}),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            adapter._format_server_config(_raw_stdio_server(TOKEN="${OTHER}"))
+        warning.assert_not_called()
+
+    def test_baseline_rendering_does_not_warn(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with (
+            patch.dict(os.environ, {"OTHER": "example-token"}),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            adapter.render_server_config(_raw_stdio_server(TOKEN="${OTHER}"))
+        warning.assert_not_called()
+
+    def test_forwarded_reference_does_not_warn(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch("apm_cli.adapters.client.codex._rich_warning") as warning:
+            adapter._format_server_config(_raw_stdio_server(TOKEN="${TOKEN}", B="${env:B}"))
+        warning.assert_not_called()
+
+
+class TestUserScopeStdioOutputUnchanged:
+    """User-scope Codex config keeps the exact pre-#3393 output and passthrough."""
+
+    def test_user_scope_written_config_matches_previous_output(self, tmp_path: Path) -> None:
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}")
+        server["_raw_stdio"]["cwd"] = "/srv/tools"
+        with patch.dict(
+            os.environ, {"FIGMA_API_KEY": "example-token", "CODEX_HOME": str(codex_home)}
+        ):
+            adapter = _make_adapter(user_scope=True)
+            cfg = adapter._format_server_config(server)
+            assert adapter.update_config({"figma": cfg}) is True
+        assert (codex_home / "config.toml").read_text(encoding="utf-8") == (
+            "[mcp_servers.figma]\n"
+            'command = "npx"\n'
+            'args = ["-y", "figma-developer-mcp", "--stdio"]\n'
+            'cwd = "/srv/tools"\n'
+            "\n"
+            "[mcp_servers.figma.env]\n"
+            'FIGMA_API_KEY = "example-token"\n'
+        )
+
+    def test_user_scope_extra_env_vars_passthrough_is_unchanged(self, tmp_path: Path) -> None:
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        dependency = MCPDependency.from_dict(
+            {
+                "name": "figma",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx",
+                "env": {"LOG_LEVEL": "debug"},
+                "extra": {"env_vars": ["PRIVATE_TOKEN"]},
+            }
+        )
+        adapter = _make_adapter(user_scope=True)
+        cfg = adapter._format_server_config(MCPIntegrator._build_self_defined_info(dependency))
+        assert cfg["env_vars"] == ["PRIVATE_TOKEN"]

@@ -280,8 +280,10 @@ def test_capture_rejects_target_relative_deployment_without_bounded_root(
         LifecycleStateSnapshot.capture(workspace, targets=("claude",))
 
 
+@pytest.mark.parametrize("legacy_absolute", [False, True])
 def test_capture_reads_two_bounded_roots_without_relative_path_collisions(
     tmp_path: Path,
+    legacy_absolute: bool,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -296,17 +298,19 @@ def test_capture_reads_two_bounded_roots_without_relative_path_collisions(
     claude_script.write_bytes(b"print('bounded')\n")
     records = (
         _record(
-            kind=LocatorKind.TARGET_RELATIVE,
+            kind=LocatorKind.PROJECT_RELATIVE if legacy_absolute else LocatorKind.TARGET_RELATIVE,
             target="claude",
-            scope="user",
-            value="hooks/fixture/check.py",
+            scope="project" if legacy_absolute else "user",
+            value=claude_script.as_posix() if legacy_absolute else "hooks/fixture/check.py",
             content_hash="sha256:script",
         ),
         _record(
-            kind=LocatorKind.TARGET_RELATIVE,
+            kind=LocatorKind.PROJECT_RELATIVE if legacy_absolute else LocatorKind.TARGET_RELATIVE,
             target="cursor",
-            scope="user",
-            value="rules/missing.mdc",
+            scope="project" if legacy_absolute else "user",
+            value=(cursor_root / "rules/missing.mdc").as_posix()
+            if legacy_absolute
+            else "rules/missing.mdc",
         ),
         _record(
             kind=LocatorKind.URI,
@@ -337,6 +341,8 @@ def test_capture_reads_two_bounded_roots_without_relative_path_collisions(
     )
 
     snapshot = LifecycleStateSnapshot.capture(workspace, external_roots=roots)
+    assert set(snapshot.deployment_records) == set(records)
+    assert snapshot.lockfile_bytes == (workspace / "apm.lock.yaml").read_bytes()
 
     claude_config = snapshot.file("settings.json", root_id="claude-user")
     cursor_config = snapshot.file("settings.json", root_id="cursor-user")
@@ -361,7 +367,10 @@ def test_capture_reads_two_bounded_roots_without_relative_path_collisions(
         snapshot.file("copilot-app-db://workflows/external", root_id="claude-user")
 
 
-def test_bounded_roots_fail_closed_before_outside_reads(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy_absolute", [False, True])
+def test_bounded_roots_fail_closed_before_outside_reads(
+    tmp_path: Path, legacy_absolute: bool
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     root = tmp_path / "user-root"
@@ -375,10 +384,12 @@ def test_bounded_roots_fail_closed_before_outside_reads(tmp_path: Path) -> None:
         workspace,
         (
             _record(
-                kind=LocatorKind.TARGET_RELATIVE,
+                kind=LocatorKind.PROJECT_RELATIVE
+                if legacy_absolute
+                else LocatorKind.TARGET_RELATIVE,
                 target="claude",
-                scope="user",
-                value="linked.json",
+                scope="project" if legacy_absolute else "user",
+                value=(root / "linked.json").as_posix() if legacy_absolute else "linked.json",
             ),
         ),
     )
@@ -410,6 +421,41 @@ def test_bounded_roots_fail_closed_before_outside_reads(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="outside bounded root"):
         LifecycleStateSnapshot.capture(workspace, external_roots=(escaping,))
     assert outside_file.read_bytes() == b'{"secret":"unchanged"}\n'
+
+
+@pytest.mark.parametrize("fault", ["unbounded", "wrong-target", "traversal", "linked-ancestor"])
+def test_legacy_absolute_deployments_require_matching_bounded_root(
+    tmp_path: Path, fault: str
+) -> None:
+    workspace, root, outside = (tmp_path / name for name in ("workspace", "root", "outside"))
+    for directory in (workspace, root, outside):
+        directory.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_bytes(b"outside-user-owned\n")
+    candidate = root / "missing.txt"
+    if fault == "unbounded":
+        candidate = secret
+    elif fault == "traversal":
+        candidate = root / ".." / "outside" / "secret.txt"
+    elif fault == "linked-ancestor":
+        (root / "link").symlink_to(outside, target_is_directory=True)
+        candidate = root / "link" / "secret.txt"
+    _write_lock(
+        workspace,
+        (
+            _record(
+                kind=LocatorKind.PROJECT_RELATIVE,
+                target="cursor" if fault == "wrong-target" else "claude",
+                value=candidate.as_posix(),
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match=r"bounded root|traversal sequence"):
+        LifecycleStateSnapshot.capture(
+            workspace,
+            external_roots=(LifecycleStateRoot("claude-user", "claude", "user", root),),
+        )
+    assert secret.read_bytes() == b"outside-user-owned\n"
 
 
 def test_bounded_root_identity_and_path_collisions_are_rejected(tmp_path: Path) -> None:

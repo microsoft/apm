@@ -4,7 +4,6 @@ Handles installation, configuration, and management of AI runtimes.
 """
 
 import logging
-import os
 import shutil
 import subprocess
 import sys
@@ -16,6 +15,7 @@ from colorama import Fore, Style
 
 from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
+from ..utils.subprocess_env import external_process_env
 from .registry import get_runtime_descriptor, runtime_descriptors
 
 logger = logging.getLogger(__name__)
@@ -165,7 +165,9 @@ class RuntimeManager:
                     cmd = ["bash", str(main_script)] + script_args  # noqa: RUF005
 
                 # Prepare environment with GitHub tokens for all authentication needs
-                env = os.environ.copy()
+                # Restore the caller's loader paths so a frozen binary's bundled
+                # libraries never leak into the setup script's python3/node children.
+                env = external_process_env()
 
                 # Set up comprehensive GitHub token environment for all runtimes
                 # New token precedence:
@@ -320,7 +322,12 @@ class RuntimeManager:
                 try:
                     version_cmd = [binary_name, "--version"]
                     result = subprocess.run(
-                        version_cmd, capture_output=True, text=True, encoding="utf-8", timeout=5
+                        version_cmd,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        timeout=5,
+                        env=external_process_env(),
                     )
                     if result.returncode == 0:
                         runtime_status["version"] = result.stdout.strip()
@@ -360,6 +367,7 @@ class RuntimeManager:
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
+                    env=external_process_env(),
                 )
                 if result.returncode == 0:
                     click.echo(

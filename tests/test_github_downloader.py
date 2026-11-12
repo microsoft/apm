@@ -24,6 +24,17 @@ from apm_cli.models.apm_package import (
     ValidationResult,
 )
 
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked clones carry no Git objects; real-git tests cover link materialization."""
+    with (
+        patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+    ):
+        yield
+
+
 _CRED_FILL_PATCH = patch(
     "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
     return_value=None,
@@ -1551,6 +1562,10 @@ class TestDownloaderCredentialFallback:
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
                 return_value=None,
             ),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_gh_cli",
+                return_value=None,
+            ),
         ):
             downloader = GitHubPackageDownloader()
             assert downloader.github_token is None
@@ -1643,7 +1658,14 @@ class TestRawContentCDNDownload:
 
     def test_raw_cdn_fallback_to_api_on_404(self):
         """If raw CDN returns 404, should fall through to the API path."""
-        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            _CRED_FILL_PATCH,
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_gh_cli",
+                return_value=None,
+            ),
+        ):
             downloader = GitHubPackageDownloader()
             dep_ref = DependencyReference.parse("owner/private-repo/agents/bot.agent.md")
 
@@ -1718,7 +1740,14 @@ class TestRawContentCDNDownload:
 
     def test_raw_cdn_no_branch_fallback_for_specific_ref(self):
         """For a specific ref (not main/master), raw CDN should not try branch fallback."""
-        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            _CRED_FILL_PATCH,
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_gh_cli",
+                return_value=None,
+            ),
+        ):
             downloader = GitHubPackageDownloader()
             dep_ref = DependencyReference.parse("owner/repo/agents/bot.agent.md")
 

@@ -123,6 +123,7 @@ def require_requested_components(
 
 def result_from_install_context(ctx: InstallContext) -> InstallResult:
     """Build and classify the canonical result carried by an install context."""
+    complete_dep_keys = getattr(ctx, "update_plan_complete_dep_keys", None)
     return finalize_install_result(
         InstallResult(
             ctx.installed_count,
@@ -133,6 +134,9 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
             target_decision=getattr(ctx, "target_decision", None),
             exec_allow_map=getattr(ctx, "exec_allow_map", None),
             exec_allow_resolved=getattr(ctx, "exec_trust_ctx", None) is not None,
+            active_package_keys=(
+                frozenset(complete_dep_keys) if complete_dep_keys is not None else None
+            ),
         ),
         force=bool(getattr(ctx, "force", False)),
     )

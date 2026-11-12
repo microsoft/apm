@@ -1381,7 +1381,7 @@ class TestCodexProjectScopedMCP:
                 {
                     "mcp_servers": {
                         "keep": {"command": "npx"},
-                        "stale": {"command": "npx"},
+                        "stale": {"command": "npx", "args": [], "env": {}},
                     }
                 }
             ),
@@ -1392,6 +1392,14 @@ class TestCodexProjectScopedMCP:
             {"stale"},
             runtime="codex",
             project_root=tmp_path,
+            stored_configs={
+                "stale": {
+                    "name": "stale",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "npx",
+                }
+            },
         )
 
         data = toml.loads(config_path.read_text(encoding="utf-8"))

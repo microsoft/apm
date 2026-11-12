@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.core.auth import AuthResolver
-from apm_cli.core.host_providers import classify_host_provider
+from apm_cli.core.host_providers import classify_host_provider, effective_host_provider_identity
 
 
 def test_gitlab_hint_does_not_route_global_pat_to_untrusted_host() -> None:
@@ -47,6 +47,25 @@ def test_user_trusted_gitlab_host_uses_global_pat() -> None:
 
     assert context.token == sentinel
     assert context.source == "GITLAB_APM_PAT"
+
+
+def test_effective_host_provider_identity_captures_backend_and_credential_route() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        assert effective_host_provider_identity("code.example.com") == (
+            "generic",
+            "generic_modules",
+        )
+        assert effective_host_provider_identity("code.example.com", host_type="gitlab") == (
+            "gitlab",
+            "generic_modules",
+        )
+
+
+def test_effective_host_provider_identity_equates_explicit_and_inferred_gitlab() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        assert effective_host_provider_identity("gitlab.com") == effective_host_provider_identity(
+            "gitlab.com", host_type="gitlab"
+        )
 
 
 class TestCustomAdoServerHostClassification:

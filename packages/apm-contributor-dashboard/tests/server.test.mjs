@@ -315,15 +315,29 @@ describe("POST /start-session", () => {
     before(() => setupServer());
     after(teardownServer);
 
+    it("starts with investigation and an explicit human approval gate, not label authority", async () => {
+        const before = mockState.sessionCalls.length;
+        await postJSON("/start-session", { number: 99, title: "Accepted by triage", model: "claude-opus-4.6" });
+        await new Promise(r => setTimeout(r, 10));
+        const prompt = mockState.sessionCalls[before].prompt;
+        assert.match(prompt, /kickoff\.mode "plan"/);
+        assert.match(prompt, /GOVERNANCE\.md, CONTRIBUTING\.md/);
+        assert.match(prompt, /status\/accepted and accepted.*are not approval/);
+        assert.match(prompt, /Without explicit responsible-maintainer scope approval and a review contact/);
+        assert.match(prompt, /limit work to investigation/);
+        assert.match(prompt, /ask the maintainer before implementation/);
+    });
+
     it("returns ok:true, adds to startedSessions, calls session.send", async () => {
+        const before = mockState.sessionCalls.length;
         const { json } = await postJSON("/start-session", { number: 42, title: "Test" });
         assert.equal(json.ok, true);
         assert.equal(mockState.startedSessions.has(42), true);
         // session.send is called via setTimeout -- wait a tick
         await new Promise(r => setTimeout(r, 10));
-        assert.equal(mockState.sessionCalls.length, 1);
-        assert.ok(mockState.sessionCalls[0].prompt.includes("42"));
-        assert.ok(mockState.sessionCalls[0].prompt.includes("Test"));
+        assert.equal(mockState.sessionCalls.length, before + 1);
+        assert.ok(mockState.sessionCalls.at(-1).prompt.includes("42"));
+        assert.ok(mockState.sessionCalls.at(-1).prompt.includes("Test"));
     });
 
     it("returns ok:false for malformed JSON", async () => {
@@ -554,8 +568,11 @@ describe("GET /api/triage", () => {
         assert.equal(item.number, 100);
         assert.equal(item.title, "Triaged bug");
         assert.equal(item.decision, "accept");
-        assert.equal(item.priority, "priority/high");
-        assert.equal(item.milestone, "0.9.x");
+        assert.equal(item.advisoryOnly, true);
+        assert.equal(item.legacy, true);
+        assert.equal(item.priority, undefined);
+        assert.equal(item.milestone, undefined);
+        assert.equal(item.status, undefined);
         assert.equal(item.nextAction, "Fix the bug");
         assert.equal(item.type, "type/bug");
         assert.deepEqual(item.labels, ["bug"]);
@@ -610,6 +627,39 @@ describe("GET /api/triage", () => {
             "second /api/triage call within TTL must be served from cache",
         );
         await new Promise(r => s.close(r));
+    });
+});
+
+describe("GET /api/triage v2 compatibility", () => {
+    before(async () => {
+        const v2 = {
+            schema_version: 2, advisory_only: true, recommendation: "defer-later",
+            classification: { type: "type/docs", areas: ["area/docs-site"], theme: null },
+            proposed_brief: { scope: "Clarify advice", done_when: "Docs build", exclusions: "No policy change", review_needs: "Core maintainer capacity" },
+            next_action: "Confirm review capacity",
+        };
+        await setupServer({ ghExec: async () => makeTriageGqlResponse([{
+            number: 102, title: "Re-triaged issue", labels: { nodes: [{ name: "status/accepted" }] },
+            comments: { nodes: [
+                { body: TRIAGE_DECISION_BLOCK, createdAt: "2025-01-01T00:00:00Z", author: { login: "bot" } },
+                { body: `\`\`\`json triage-recommendation\n${JSON.stringify(v2)}\n\`\`\``, createdAt: "2025-01-02T00:00:00Z", author: { login: "bot" } },
+                { body: TRIAGE_DECISION_BLOCK, isMinimized: true, createdAt: "2025-01-03T00:00:00Z" },
+            ] },
+        }]) });
+    });
+    after(teardownServer);
+
+    it("shows latest non-minimized advice rather than old accepted metadata", async () => {
+        const { json } = await getJSON("/api/triage");
+        assert.equal(json.items.length, 1);
+        const item = json.items[0];
+        assert.equal(item.decision, "defer-later");
+        assert.equal(item.legacy, false);
+        assert.equal(item.advisoryOnly, true);
+        assert.equal(item.proposedBrief.review_needs, "Core maintainer capacity");
+        assert.equal(item.nextAction, "Confirm review capacity");
+        assert.deepEqual(item.labels, ["status/accepted"]);
+        for (const field of ["status", "milestone", "priority"]) assert.equal(item[field], undefined);
     });
 });
 

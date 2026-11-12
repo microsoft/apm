@@ -114,12 +114,13 @@ class TestVersionFieldStaysInSync:
 
 
 def test_v3_lockfile_fails_closed_as_unsupported() -> None:
+    """Version 4 (next unknown) still fails closed."""
     with pytest.raises(
         UnsupportedLockfileVersionError,
-        match=r"Unsupported lockfile version '3'; supported versions: 1, 2",
+        match=r"Unsupported lockfile version '4'; supported versions: 1, 2, 3",
     ):
         LockFile.from_yaml(
-            "lockfile_version: '3'\n"
+            "lockfile_version: '4'\n"
             "dependencies: []\n"
             "installed_plugins:\n"
             "  - identity: stable-plugin\n"

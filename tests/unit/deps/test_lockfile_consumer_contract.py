@@ -17,6 +17,7 @@ pytestmark = pytest.mark.unit
 _LOCKED_DEPENDENCY_VALUES = {
     "repo_url": "apm-org/apm-project/consume-contract",
     "materialization_repo_url": None,
+    "alias": "my-skill.v2",
     "host": "dev.azure.com",
     "host_type": "gitlab",
     "port": 2222,
@@ -55,12 +56,15 @@ _LOCKED_DEPENDENCY_VALUES = {
     "declared_license": "MIT",
     "exec_status": "deployed",
     "name": "consume-contract",
+    "extensions": {"x-vendor": {"k": "v"}},
+    "replacement": None,
     "_unknown_fields": {"future_consumer_field": {"enabled": True}},
 }
 
 _RECONSTRUCTED_LOCK_FIELDS = {
     "repo_url",
     "materialization_repo_url",
+    "alias",
     "host",
     "host_type",
     "port",
@@ -77,6 +81,7 @@ _RECONSTRUCTED_LOCK_FIELDS = {
     "allow_insecure",
     "skill_subset",
     "target_subset",
+    "replacement",
 }
 
 _REFERENCE_TO_LOCK_FIELD = {
@@ -157,6 +162,7 @@ def test_reconstruction_declares_and_preserves_every_consumed_lock_field() -> No
 
     dependency = LockedDependency(
         repo_url="group/consume-contract",
+        alias="my-skill.v2",
         host="gitlab.example.invalid",
         host_type="gitlab",
         port=2222,
@@ -178,6 +184,7 @@ def test_reconstruction_declares_and_preserves_every_consumed_lock_field() -> No
     reconstructed = dependency.to_dependency_ref()
 
     assert reconstructed.repo_url == dependency.repo_url
+    assert reconstructed.alias == dependency.alias
     assert reconstructed.host == dependency.host
     assert reconstructed.host_type == dependency.host_type
     assert reconstructed.port == dependency.port

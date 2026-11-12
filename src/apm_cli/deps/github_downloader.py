@@ -21,7 +21,6 @@ from git.exc import GitCommandError
 
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
-    APMPackage,
     DependencyReference,
     GitReferenceType,
     PackageInfo,
@@ -30,7 +29,6 @@ from ..models.apm_package import (
     validate_apm_package,
 )
 from ..models.dependency.host_virtual import dependency_repository_owner, repository_path_segments
-from ..utils.atomic_io import atomic_write_text
 from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
@@ -44,7 +42,7 @@ from ..utils.git_env import (
 )
 from ..utils.git_sparse import (
     apply_sparse_cone,
-    repair_dangling_cone_symlinks,
+    materialize_tracked_symlinks,
     sparse_checkout_active,
     validate_materialized_symlinks,
 )
@@ -52,7 +50,6 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
-from ..utils.yaml_io import yaml_to_str
 from .bare_cache import (
     bare_clone_with_fallback,
     clone_with_fallback,
@@ -70,6 +67,7 @@ from .transport_selection import (
     ProtocolPreference,
     TransportSelector,
 )
+from .virtual_file import materialize_virtual_file_package
 
 _log = logging.getLogger(__name__)
 
@@ -381,7 +379,7 @@ class GitHubPackageDownloader:
                     sparse_paths=sparse_paths,
                 )
 
-            return self.auth_resolver.try_with_fallback(
+            checkout = self.auth_resolver.try_with_fallback(
                 dep_ref.host or default_host(),
                 _checkout,
                 org=org,
@@ -392,13 +390,23 @@ class GitHubPackageDownloader:
                 base_env=self.git_env,
             )
 
-        return cache.get_checkout(
-            repository_url,
-            ref,
-            locked_sha=locked_sha,
-            env=self._cache_git_env(dep_ref),
-            sparse_paths=sparse_paths,
-        )
+        else:
+            checkout = cache.get_checkout(
+                repository_url,
+                ref,
+                locked_sha=locked_sha,
+                env=self._cache_git_env(dep_ref),
+                sparse_paths=sparse_paths,
+            )
+        resolver = getattr(self, "_tiered_resolver", None)
+        if (
+            resolver is not None
+            and locked_sha
+            and dep_ref.reference
+            and resolver.remotely_resolved(dep_ref, locked_sha) is True
+        ):
+            cache.remember_resolved_ref(repository_url, dep_ref.reference, locked_sha)
+        return checkout
 
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
@@ -817,7 +825,12 @@ class GitHubPackageDownloader:
         return self._refs.resolve_commit_sha_for_ref(dep_ref, ref)
 
     def download_raw_file(
-        self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Download a single file from repository (GitHub or Azure DevOps).
 
@@ -826,6 +839,10 @@ class GitHubPackageDownloader:
             file_path: Path to file within the repository (e.g., "prompts/code-review.prompt.md")
             ref: Git reference (branch, tag, or commit SHA). Defaults to "main"
             verbose_callback: Optional callable for verbose logging (receives str messages)
+            raw_only: Skip the Contents API fallback on the public-github
+                anonymous-first path and report a miss via ``RuntimeError``
+                when the raw CDN does not have the file (microsoft/apm#3283
+                virtual-package marker sweep).  Ignored everywhere else.
 
         Returns:
             bytes: File content
@@ -867,7 +884,7 @@ class GitHubPackageDownloader:
 
         # GitHub API
         return self._download_github_file(
-            dep_ref, file_path, ref, verbose_callback=verbose_callback
+            dep_ref, file_path, ref, verbose_callback=verbose_callback, raw_only=raw_only
         )
 
     def _download_ado_file(
@@ -898,6 +915,7 @@ class GitHubPackageDownloader:
         file_path: str,
         ref: str = "main",
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
@@ -917,6 +935,7 @@ class GitHubPackageDownloader:
             file_path,
             ref=ref,
             verbose_callback=verbose_callback,
+            raw_only=raw_only,
         )
 
     def validate_virtual_package_exists(
@@ -1028,92 +1047,35 @@ class GitHubPackageDownloader:
         # Download the file content. A confirmed API throttle is
         # indeterminate, not an accessibility failure, so select the one
         # sparse-Git fallback and use its observed commit for lock provenance.
+        api_throttle: GitHubThrottleError | None = None
         try:
             file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
         except GitHubThrottleError as throttle:
+            api_throttle = throttle
+        except RuntimeError as e:
+            raise RuntimeError(f"Failed to download virtual package: {e}") from e
+
+        # Git is a separate attempt: do not attach the prior API throttle as
+        # implicit context to its auth failures. Keep it for fallback diagnostics.
+        if api_throttle is not None:
             fetched = self._strategies.download_github_file_via_throttle_fallback(
                 dep_ref,
                 dep_ref.virtual_path,
                 ref,
-                throttle,
+                api_throttle,
             )
             file_content = fetched.content
             resolved_commit = fetched.resolved_commit
-        except RuntimeError as e:
-            raise RuntimeError(f"Failed to download virtual package: {e}") from e
 
         # Update progress - processing
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=90, total=100)
 
-        # Create target directory structure
-        target_path.mkdir(parents=True, exist_ok=True)
-
-        # Determine the subdirectory based on file extension
-        subdirs = {
-            ".prompt.md": "prompts",
-            ".instructions.md": "instructions",
-            ".agent.md": "agents",
-        }
-
-        subdir = None
-        filename = dep_ref.virtual_path.split("/")[-1]
-        for ext, dir_name in subdirs.items():
-            if dep_ref.virtual_path.endswith(ext):
-                subdir = dir_name
-                break
-
-        if not subdir:
-            raise ValueError(f"Unknown file extension for {dep_ref.virtual_path}")
-
-        # Create .apm structure
-        apm_dir = target_path / ".apm" / subdir
-        apm_dir.mkdir(parents=True, exist_ok=True)
-
-        # Write the file
-        file_path = apm_dir / filename
-        file_path.write_bytes(file_content)
-
-        # Generate minimal apm.yml
-        package_name = dep_ref.get_virtual_package_name()
-
-        # Try to extract description from file frontmatter
-        description = f"Virtual package containing {filename}"
-        try:
-            content_str = file_content.decode("utf-8")
-            # Simple frontmatter parsing (YAML between --- markers)
-            if content_str.startswith("---\n"):
-                end_idx = content_str.find("\n---\n", 4)
-                if end_idx > 0:
-                    frontmatter = content_str[4:end_idx]
-                    # Look for description field
-                    for line in frontmatter.split("\n"):
-                        if line.startswith("description:"):
-                            description = line.split(":", 1)[1].strip().strip("\"'")
-                            break
-        except Exception:
-            # If frontmatter parsing fails, use default description
-            pass
-
-        apm_yml_data = {
-            "name": package_name,
-            "version": "1.0.0",
-            "description": description,
-            "author": dependency_repository_owner(dep_ref),
-        }
-        apm_yml_content = yaml_to_str(apm_yml_data)
-
-        apm_yml_path = target_path / "apm.yml"
-        atomic_write_text(apm_yml_path, apm_yml_content)
-
-        # Create APMPackage object
-        package = APMPackage(
-            name=package_name,
-            version="1.0.0",
-            description=description,
-            author=dependency_repository_owner(dep_ref),
-            source=dep_ref.to_github_url(),
-            package_path=target_path,
+        package = materialize_virtual_file_package(
+            dep_ref,
+            target_path,
+            dep_ref.virtual_path.split("/")[-1],
+            file_content,
         )
 
         # Build the resolved reference. On non-GitHub hosts or SHA-resolve
@@ -1157,17 +1119,10 @@ class GitHubPackageDownloader:
             temp_clone_path.mkdir(parents=True, exist_ok=True)
 
             def _repair(repo_env: dict[str, str]) -> bool:
-                dangling = repair_dangling_cone_symlinks(
-                    "git",
-                    temp_clone_path,
-                    [subdir_path],
-                    env=repo_env,
+                # Lenient: download_subdirectory_package rejects what remains.
+                materialize_tracked_symlinks(
+                    "git", temp_clone_path, [subdir_path], env=repo_env, strict=False
                 )
-                if dangling is not None:
-                    _log.info(
-                        "Sparse checkout widened to repair dangling symlink '%s' (#2707).",
-                        dangling.relative_to(temp_clone_path),
-                    )
                 return True
 
             public_github_anonymous_first = (
@@ -1633,6 +1588,13 @@ class GitHubPackageDownloader:
                         except Exception as e:
                             detail = self._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(f"Failed to checkout commit {ref}: {detail}") from e
+                    materialize_tracked_symlinks(
+                        "git",
+                        temp_clone_path,
+                        [subdir_path],
+                        env=self._git_env_dict(),
+                        strict=False,
+                    )
 
                     # Disable progress reporter after clone
                     if progress_reporter:
@@ -1908,6 +1870,9 @@ class GitHubPackageDownloader:
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                 )
+                # A shard keeps unresolvable links as text; the clone path
+                # below then raises the strict diagnostic (#3457).
+                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
                 from ..utils.file_ops import robust_copy2, robust_copytree
 
                 for item in _cached.iterdir():
@@ -2001,6 +1966,9 @@ class GitHubPackageDownloader:
             # Disable progress reporter to prevent late git updates
             if progress_reporter:
                 progress_reporter.disabled = True
+
+            # Links become their Git-object content while .git exists (#3457).
+            materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"

@@ -289,7 +289,7 @@ function Test-PythonRequirement {
                     $parts = $verStr.Split('.')
                     $major = [int]$parts[0]
                     $minor = [int]$parts[1]
-                    if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 9)) {
+                    if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 11)) {
                         return $cmd
                     }
                 }
@@ -303,7 +303,7 @@ function Test-PythonRequirement {
 function Install-ViaPip {
     $pythonCmd = Test-PythonRequirement
     if (-not $pythonCmd) {
-        Write-ErrorText "Python 3.9+ is not available - cannot fall back to pip."
+        Write-ErrorText "Python 3.11+ is not available - cannot fall back to pip."
         return $false
     }
     Write-Info "Attempting installation via pip ($pythonCmd)..."
@@ -445,6 +445,31 @@ function Test-AntivirusBlockError {
         $Text -match '0x800700E1' -or
         $Text -match '0x800700E2'
     )
+}
+
+function Invoke-StagedBinaryTest {
+    # Runs the staged binary and returns Output plus Failure ($null on
+    # success). Windows PowerShell 5.1 turns the first native stderr line
+    # into a terminating error under ErrorActionPreference=Stop, which
+    # truncated a multi-line traceback to its first line. Run under
+    # Continue (as Install-ViaPip does) and judge by exit code. Launch
+    # failures (Access is denied, AV block) still throw and keep their text.
+    param([string]$Path, [string[]]$Arguments)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $Path @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } catch {
+        return [pscustomobject]@{ Output = $null; Failure = "$_" }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        $lines = @("exit code $exitCode") + @($output | ForEach-Object { "$_" })
+        return [pscustomobject]@{ Output = $null; Failure = ($lines -join [Environment]::NewLine) }
+    }
+    return [pscustomobject]@{ Output = "$output"; Failure = $null }
 }
 
 function Write-AppControlGuidance {
@@ -902,13 +927,10 @@ try {
     }
 
     Write-Info "Testing binary..."
-    $testFailure = $null
-    try {
-        $testOutput = & $stagedExe --version 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE - $testOutput" }
-        Write-Success "Binary test successful: $testOutput"
-    } catch {
-        $testFailure = "$_"
+    $binaryTest = Invoke-StagedBinaryTest -Path $stagedExe -Arguments @('--version')
+    $testFailure = $binaryTest.Failure
+    if (-not $testFailure) {
+        Write-Success "Binary test successful: $($binaryTest.Output)"
     }
 
     if ($testFailure) {

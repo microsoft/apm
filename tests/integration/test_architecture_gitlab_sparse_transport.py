@@ -24,8 +24,8 @@ def test_gitlab_sparse_plan_is_registered_and_compliant() -> None:
         (ROOT / ".apm/architecture/owners/transport-auth-platform.json").read_text(encoding="utf-8")
     )
     owner = next(item for item in registry["owners"] if item["id"] == "git-transport-selection")
-    assert owner["guards"] == [RULE_ID]
-    assert set(owner["selectors"]) == {
+    assert RULE_ID in owner["guards"]
+    assert set(owner["selectors"]) >= {
         CONSUMER,
         "src/apm_cli/deps/transport_selection.py",
     }

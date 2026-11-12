@@ -15,6 +15,7 @@ test error paths, and verify no mocks interfere with Python code execution.
 import json
 import os
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ from apm_cli.integration.skill_integrator import (
 
 
 @pytest.fixture
-def tmp_apm_root(tmp_path):
+def tmp_apm_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Create a minimal APM project structure."""
     root = tmp_path / "test_apm"
     root.mkdir()
@@ -88,8 +89,22 @@ def tmp_apm_root(tmp_path):
     (root / ".copilot").mkdir()
     (root / ".codex").mkdir()
 
-    os.chdir(root)
+    monkeypatch.chdir(root)
     yield root
+
+
+def test_tmp_apm_root_restores_cwd(tmp_path: Path) -> None:
+    """The project fixture must not change later tests' working directory."""
+    original = Path.cwd()
+    try:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            fixture = tmp_apm_root.__wrapped__(tmp_path, monkeypatch)
+            root = next(fixture)
+            assert Path.cwd() == root
+            fixture.close()
+        assert Path.cwd() == original
+    finally:
+        os.chdir(original)
 
 
 @pytest.fixture

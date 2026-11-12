@@ -36,16 +36,12 @@ _APM_YML_SIMPLE = dedent("""\
     name: test-project
     version: 0.1.0
     description: Test project
-    owner:
-      name: test-org
 """)
 
 _APM_YML_WITH_DEPS = dedent("""\
     name: test-project
     version: 0.1.0
     description: Test project
-    owner:
-      name: test-org
     dependencies:
       apm:
         - test-org/test-dep
@@ -55,8 +51,6 @@ _APM_YML_TWO_DEPS = dedent("""\
     name: test-project
     version: 0.1.0
     description: Test project
-    owner:
-      name: test-org
     dependencies:
       apm:
         - test-org/pkg-alpha

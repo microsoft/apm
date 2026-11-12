@@ -24,8 +24,10 @@ from apm_cli.agent_plugins.errors import (
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.install.services import (
     IntegratorBundle,
+    PackageDeploymentPlan,
     enforce_agent_plugin_deployment_boundary,
     integrate_package_primitives,
+    prepare_package_deployment,
 )
 from apm_cli.install.sources import (
     DependencySource,
@@ -84,6 +86,7 @@ def run_integration_template(
     source: DependencySource,
     *,
     materialization: Materialization | None | object = _MATERIALIZATION_UNSET,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict[str, int] | None:
     """Run the shared post-acquire integration flow for one dependency.
 
@@ -97,7 +100,9 @@ def run_integration_template(
     if materialization is None:
         return None
 
-    return _integrate_materialization(source, cast(Materialization, materialization))
+    return _integrate_materialization(
+        source, cast(Materialization, materialization), deployment_plan=deployment_plan
+    )
 
 
 def prepare_integration_materialization(
@@ -131,6 +136,90 @@ def preflight_agent_plugin_materializations(
             enforce_agent_plugin_deployment_boundary(materialization.package_info)
         except AgentPluginTargetExcludedError:
             continue
+
+
+def preflight_skill_materializations(
+    ctx: InstallContext,
+    prepared: list[tuple[DependencySource, Materialization]],
+) -> tuple[dict[str, PackageDeploymentPlan], PackageDeploymentPlan | None]:
+    """Refuse known unmanaged collisions before any selected package deploys."""
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+    from apm_cli.install.errors import DirectDependencyError
+    from apm_cli.install.project_package import build_project_local_package_info
+    from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.integration.skill_preflight import format_skill_conflicts
+
+    if not ctx.targets:
+        return {}, None
+    plans: dict[str, PackageDeploymentPlan] = {}
+    conflicts = []
+    skill = ctx.integrators["skill"]
+    managed = BaseIntegrator.normalize_managed_files(
+        set(ctx.managed_files) | set(ctx.old_local_deployed)
+    )
+
+    def check(package_info, plan: PackageDeploymentPlan) -> None:
+        if plan.source_plan is None or admits_native_plugin(package_info):
+            return
+        conflicts.extend(
+            skill.find_unmanaged_conflicts(
+                package_info,
+                ctx.project_root,
+                targets=plan.projection_targets,
+                source_plan=plan.source_plan,
+                managed_files=managed,
+                force=ctx.force,
+                skip_bin=plan.skip_bin,
+            )
+        )
+
+    for source, materialization in prepared:
+        if materialization.package_info is None or not ctx.targets:
+            continue
+        try:
+            enforce_agent_plugin_deployment_boundary(materialization.package_info)
+        except AgentPluginTargetExcludedError:
+            continue
+        dependency = source.dep_ref
+        plan = prepare_package_deployment(
+            materialization.package_info,
+            ctx.project_root,
+            targets=ctx.targets,
+            diagnostics=ctx.diagnostics,
+            package_name=materialization.dep_key,
+            logger=ctx.logger,
+            scope=ctx.scope,
+            skill_subset=effective_deploy_skill_subset(
+                skill_subset_from_cli=ctx.skill_subset_from_cli,
+                cli_subset=ctx.skill_subset,
+                persisted_subset=dependency.skill_subset,
+            ),
+            dep_target_subset=dependency.target_subset,
+            ctx=ctx,
+            allow_executables=_effective_allow(ctx),
+            trust_bin=ctx.trust_bin,
+        )
+        plans[materialization.dep_key] = plan
+        check(materialization.package_info, plan)
+
+    local_plan = None
+    if ctx.root_has_local_primitives and ctx.targets:
+        local = build_project_local_package_info(ctx.source_root or ctx.project_root)
+        local_plan = prepare_package_deployment(
+            local,
+            ctx.project_root,
+            targets=ctx.targets,
+            diagnostics=ctx.diagnostics,
+            package_name="_local",
+            logger=ctx.logger,
+            scope=ctx.scope,
+            ctx=ctx,
+            is_first_party=True,
+        )
+        check(local, local_plan)
+    if conflicts:
+        raise DirectDependencyError(format_skill_conflicts(conflicts))
+    return plans, local_plan
 
 
 def preflight_agent_plugin_dry_run(
@@ -192,11 +281,13 @@ def preflight_agent_plugin_dry_run(
                     package_path,
                     source_path=package_path,
                     agent_plugin_detection=detection,
+                    read_only=True,
                 )
             else:
                 validation = validate_apm_package(
                     package_path,
                     agent_plugin_detection=detection,
+                    read_only=True,
                 )
             if validation.is_valid and validation.package is not None:
                 try:
@@ -340,6 +431,8 @@ def _record_agent_plugin_target_skip(
 def _integrate_materialization(
     source: DependencySource,
     m: Materialization,
+    *,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict[str, int]:
     """Apply security gate + primitive integration on a materialised package.
 
@@ -429,6 +522,7 @@ def _integrate_materialization(
             ctx=ctx,
             allow_executables=_effective_allow(ctx),
             trust_bin=getattr(ctx, "trust_bin", None),
+            deployment_plan=deployment_plan,
         )
         mutation_keys = (
             "prompts",
@@ -450,6 +544,11 @@ def _integrate_materialization(
         if int_result.get("native_plugin"):
             deltas["installed"] = 1
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
+        from apm_cli.core.deployment_state import CompletedReintegration
+
+        completed = int_result.get("completed_reintegration")
+        if isinstance(completed, CompletedReintegration) and completed.owner == dep_key:
+            ctx.package_completed_reintegrations[dep_key] = completed
     except Exception as e:
         # Per-source error wording: each DependencySource subclass
         # declares its own INTEGRATE_ERROR_PREFIX (Strategy pattern).

@@ -49,7 +49,7 @@ _HARNESS_CASES = [
         "cursor",
         ".cursor/hooks.json",
         ".cursor/apm-hooks.json",
-        "PreToolUse",
+        "preToolUse",
         id="cursor",
     ),
     pytest.param(
@@ -116,6 +116,18 @@ def _rewrite_source(
     target.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _user_owned_entry(target: str) -> dict:
+    """Return a user-owned hook entry in the target's native handler shape."""
+    if target == "cursor":
+        # Cursor-native v1 hooks use flat handlers.
+        return {"type": "command", "command": "echo user-owned", "matcher": "Shell"}
+    return {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo user-owned"}],
+    }
+
+
+@pytest.mark.lifecycle_smoke
 @pytest.mark.parametrize("target, settings_rel, sidecar_rel, event_key", _HARNESS_CASES)
 def test_root_hook_source_drift_heals_on_reinstall(
     tmp_path: Path,
@@ -178,12 +190,8 @@ def test_root_hook_source_drift_heals_on_reinstall(
     # Append a user-owned entry directly to the settings file (never in the sidecar).
     settings_path = project / settings_rel
     settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
-    settings_data.setdefault("hooks", {}).setdefault(event_key, []).append(
-        {
-            "matcher": "Bash",
-            "hooks": [{"type": "command", "command": "echo user-owned"}],
-        }
-    )
+    user_entry = _user_owned_entry(target)
+    settings_data.setdefault("hooks", {}).setdefault(event_key, []).append(user_entry)
     settings_path.write_text(json.dumps(settings_data), encoding="utf-8")
 
     # Second install: must heal the stale marker without touching the user-owned entry.
@@ -197,15 +205,96 @@ def test_root_hook_source_drift_heals_on_reinstall(
 
     settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
     entries = settings_data.get("hooks", {}).get(event_key, [])
-    user_owned = [
-        e
-        for e in entries
-        if isinstance(e, dict)
-        and isinstance(e.get("hooks"), list)
-        and e["hooks"]
-        and isinstance(e["hooks"][0], dict)
-        and e["hooks"][0].get("command") == "echo user-owned"
-    ]
+    user_owned = [e for e in entries if e == user_entry]
     assert len(user_owned) == 1, (
         f"User-owned hook entry must survive healing for {target}; entries={entries}"
     )
+
+
+@pytest.fixture
+def legacy_codex_project(tmp_path: Path) -> tuple[Path, dict, list[dict]]:
+    """Seed a flat root hook and its old ownership sidecar without installing."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: old-project\nversion: 0.0.0\ntargets:\n  - codex\n",
+        encoding="utf-8",
+    )
+    managed = {"type": "command", "command": "echo apm-managed"}
+    manual_entries = [
+        {"type": "command", "command": "echo manual-flat"},
+        {"hooks": [{"type": "command", "command": "echo manual-native"}]},
+    ]
+    hooks_dir = project / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "pre.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [managed]}}), encoding="utf-8"
+    )
+
+    # A fresh install would already produce nested entries and miss the regression.
+    codex_dir = project / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "hooks.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [*manual_entries, managed]}}),
+        encoding="utf-8",
+    )
+    (codex_dir / "apm-hooks.json").write_text(
+        json.dumps({"PreToolUse": [{**managed, "_apm_source": "_local/old-project"}]}),
+        encoding="utf-8",
+    )
+    return project, managed, manual_entries
+
+
+def _assert_codex_migration(
+    project: Path, managed: dict, manual_entries: list[dict], expected_sources: list[str]
+) -> None:
+    native = json.loads((project / ".codex/hooks.json").read_text(encoding="utf-8"))
+    entries = native["hooks"]["PreToolUse"]
+    assert len(entries) == len(manual_entries) + len(expected_sources)
+    for manual in manual_entries:
+        assert entries.count(manual) == 1, "Manual hooks must remain unchanged"
+    assert entries.count({"hooks": [managed]}) == len(expected_sources)
+    assert managed not in entries, "The owned legacy flat hook must be replaced"
+    assert "_apm_source" not in json.dumps(native)
+    sidecar = json.loads((project / ".codex/apm-hooks.json").read_text(encoding="utf-8"))
+    owned = sidecar["PreToolUse"]
+    assert len(owned) == len(expected_sources)
+    for source in expected_sources:
+        assert owned.count({"hooks": [managed], "_apm_source": source}) == 1
+
+
+def test_codex_legacy_flat_hook_migrates_on_install_after_rename(
+    legacy_codex_project: tuple[Path, dict, list[dict]], apm_binary_path: Path
+) -> None:
+    """Install replaces the renamed root's flat hook with one owned nested group."""
+    project, managed, manual_entries = legacy_codex_project
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("old-project", "new-project"),
+        encoding="utf-8",
+    )
+
+    result = _run(apm_binary_path, project, "install")
+    assert result.returncode == 0, result.stderr or result.stdout
+    _assert_codex_migration(project, managed, manual_entries, ["_local/new-project"])
+
+
+def test_codex_legacy_flat_hook_migrates_on_update_with_new_dependency(
+    legacy_codex_project: tuple[Path, dict, list[dict]], apm_binary_path: Path
+) -> None:
+    """Adding a dependency without hooks makes update integrate the renamed root."""
+    project, managed, manual_entries = legacy_codex_project
+    dependency = project / "empty-dep"
+    dependency.mkdir()
+    (dependency / "apm.yml").write_text("name: empty-dep\nversion: 0.0.0\n", encoding="utf-8")
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("old-project", "new-project")
+        + "dependencies:\n  apm:\n    - ./empty-dep\n",
+        encoding="utf-8",
+    )
+
+    result = _run(apm_binary_path, project, "update", "--yes")
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert (project / "apm_modules/_local/empty-dep/apm.yml").is_file()
+    _assert_codex_migration(project, managed, manual_entries, ["_local/new-project"])

@@ -22,6 +22,8 @@ import filecmp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -29,6 +31,7 @@ from apm_cli.integration.skill_integrator import (
     should_compile_instructions,
     validate_skill_name,
 )
+from apm_cli.integration.targets import TargetProfile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,6 +76,10 @@ def _make_target(
     mapping.deploy_root = deploy_root
     prim.__getitem__ = MagicMock(return_value=mapping)
     target.primitives = {"skills": mapping}
+    target.skills_rel_root = f"{deploy_root or root_dir}/skills"
+    target.skills_deploy_path.side_effect = lambda root: TargetProfile.skills_deploy_path(
+        target, root
+    )
     return target
 
 
@@ -383,8 +390,11 @@ class TestPromoteSubSkillsManagedFiles:
             mock_warn.assert_called_once()
         assert n == 0
 
-    def test_overwrite_warning_with_logger(self, tmp_path: Path) -> None:
-        """When warn=True and not self_overwrite, logger.warning is called."""
+    @pytest.mark.parametrize("previous_owner", ["other-pkg", None])
+    def test_overwrite_warning_with_logger(
+        self, tmp_path: Path, previous_owner: str | None
+    ) -> None:
+        """Replacement names known owners and tells users how to avoid the overlap."""
         skills_dir = tmp_path / ".apm" / "skills"
         sub = skills_dir / "my-skill"
         sub.mkdir(parents=True)
@@ -403,12 +413,17 @@ class TestPromoteSubSkillsManagedFiles:
             target_root,
             "parent-pkg",
             warn=True,
-            owned_by={"my-skill": "other-pkg"},
+            owned_by={"my-skill": previous_owner},
             logger=logger,
         )
-        # Overwrite warning emitted, skill is deployed (no force guard since not managed_files)
-        logger.warning.assert_called()
-        assert n >= 0
+        previous = "'other-pkg'" if previous_owner else "another package"
+        logger.warning.assert_called_once_with(
+            "Skill 'my-skill' from 'parent-pkg' replaced overlapping files "
+            f"from {previous}; separately owned assets were preserved "
+            "-- remove one package to avoid this"
+        )
+        assert n == 1
+        assert (existing / "SKILL.md").read_text(encoding="utf-8") == "# skill"
 
 
 # ---------------------------------------------------------------------------
@@ -628,16 +643,30 @@ class TestIntegrateNativeSkillCollision:
         with patch.object(
             SkillIntegrator,
             "_build_ownership_maps",
-            return_value=({}, {"my-skill": "prev-owner/pkg"}),
+            return_value=(
+                {},
+                {target_skill_dir.relative_to(tmp_path).as_posix(): "prev-owner/pkg"},
+            ),
         ):
-            _result = integrator._integrate_native_skill(
+            result = integrator._integrate_native_skill(
                 pi,
                 tmp_path,
                 skill_md,
                 logger=logger,
                 targets=[target],
             )
-        logger.warning.assert_called()
+        logger.warning.assert_called_once_with(
+            "Skill 'my-skill' from 'other/repo' replaced overlapping files "
+            "from 'prev-owner/pkg'; separately owned assets were preserved "
+            "-- remove one package to avoid this"
+        )
+        assert result.skill_updated is True
+        assert result.skill_created is False
+        assert result.skill_skipped is False
+        assert result.skill_path == target_skill_dir / "SKILL.md"
+        assert result.target_paths == [target_skill_dir]
+        assert result.references_copied == 1
+        assert (target_skill_dir / "SKILL.md").read_bytes() == skill_md.read_bytes() == b"# skill"
 
 
 # ---------------------------------------------------------------------------
