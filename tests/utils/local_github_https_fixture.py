@@ -191,17 +191,19 @@ class _GitHubHandler(BaseHTTPRequestHandler):
         return 404, b'{"message": "Not Found"}', "application/json"
 
     def _raw(self, path: str) -> tuple[int, bytes, str]:
-        parts = path.lstrip("/").split("/", 3)
+        parts = path.lstrip("/").split("/")
         if len(parts) < 4:
             return self._not_found()
         slug = f"{parts[0]}/{parts[1]}"
         if slug not in self.server.repositories or slug in self.server.private_repositories:
             # Real raw.githubusercontent.com answers 404 for private content.
             return self._not_found()
-        content = self._blob(slug, parts[2], parts[3])
-        if content is None:
-            return self._not_found()
-        return 200, content, "text/plain; charset=utf-8"
+        # Like the real host, accept slash-containing refs such as release/pilot.
+        for split in range(3, len(parts)):
+            content = self._blob(slug, "/".join(parts[2:split]), "/".join(parts[split:]))
+            if content is not None:
+                return 200, content, "text/plain; charset=utf-8"
+        return self._not_found()
 
     def _api(self, path: str, query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         parts = path.lstrip("/").split("/", 4)
