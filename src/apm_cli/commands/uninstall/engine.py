@@ -1207,7 +1207,9 @@ def _sync_integrations_after_uninstall(
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
     # their known-good merged settings (#3226).
-    _allow_executables = getattr(apm_package, "allow_executables", None)
+    from ...security.executables import resolve_project_exec_allow_map
+
+    _allow_executables = resolve_project_exec_allow_map(project_root, apm_package, logger=logger)
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only

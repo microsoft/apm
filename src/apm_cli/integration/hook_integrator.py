@@ -545,9 +545,12 @@ class HookIntegrator(BaseIntegrator):
         *,
         source_plan=None,
     ) -> HookSourceSelection:
-        """Read the plan's selection or build it; refuse retired-routing widening."""
-        selection = getattr(source_plan, "hook_source_selection", None)
-        if selection is None:
+        """Read the plan's selection (empty when unauthorized) or build one; refuse widening."""
+        if source_plan is not None:
+            selection = getattr(source_plan, "hook_source_selection", None)
+            if selection is None:
+                selection = HookSourceSelection({}, {})
+        else:
             selection = self.select_deployable_hook_sources(
                 package_info.install_path, (target_name,)
             )
@@ -1951,6 +1954,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
         )
+        from apm_cli.security.executables import resolve_project_exec_allow_map
 
         from .targets import resolve_targets
 
@@ -1967,6 +1971,7 @@ class HookIntegrator(BaseIntegrator):
         surviving_deps = surviving_dependency_refs_for_reintegration(
             apm_package, project_root, lockfile=lockfile
         )
+        allow_map = resolve_project_exec_allow_map(project_root, apm_package)
         survivor_plan = preflight_reintegration_survivors(
             surviving_deps,
             project_root / APM_MODULES_DIR,
@@ -1985,7 +1990,7 @@ class HookIntegrator(BaseIntegrator):
                 dep_ref,
                 pkg_info,
                 list(target_selection.targets),
-                getattr(apm_package, "allow_executables", None),
+                allow_map,
             )
             if source_plan.hook_source_selection is not None:
                 source_plan.hook_source_selection.require_deployable(pkg_info, _HOOK_EVENT_MAP)

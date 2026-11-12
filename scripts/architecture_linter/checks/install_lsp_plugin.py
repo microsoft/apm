@@ -35,6 +35,8 @@ _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 _ADOPT_MANIFEST_EDIT = "src/apm_cli/adopt/manifest_edit.py"
 _MCP_PIPELINE = "src/apm_cli/install/mcp/integration.py"
 _MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
+_UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
+_HOOK_INTEGRATOR = "src/apm_cli/integration/hook_integrator.py"
 
 
 def _missing_tokens(
@@ -85,6 +87,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
             _MCP_PIPELINE: ("allow_map = resolve_project_exec_allow_map(",),
             _MCP_VIEW: ("approval_keys=locked_dependency_approval_keys(dependency)",),
+            _UNINSTALL_ENGINE: ("_allow_executables = resolve_project_exec_allow_map(",),
+            _HOOK_INTEGRATOR: ("allow_map = resolve_project_exec_allow_map(",),
             _LOCAL_BUNDLE: (
                 "bundle_approval_key = local_bundle_approval_key(",
                 "approval_key=bundle_approval_key,",
