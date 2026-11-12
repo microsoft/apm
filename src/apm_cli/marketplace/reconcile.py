@@ -31,6 +31,7 @@ from .user_manifest import DeclaredMarketplace, parse_declared_marketplaces
 
 if TYPE_CHECKING:
     from ..core.command_logger import CommandLogger
+    from ..core.scope import InstallScope
 
 
 @dataclass
@@ -210,10 +211,12 @@ def reconcile_user_marketplaces_for_install(
 
 
 def reconcile_user_marketplaces_or_exit(
-    manifest_path: Path, *, user_scope: bool, logger: CommandLogger, dry_run: bool
+    manifest_path: Path, scope: InstallScope, *, logger: CommandLogger, dry_run: bool
 ) -> None:
     """``apm install`` hook: reconcile in user scope, exit 1 when it failed."""
-    if user_scope and not reconcile_user_marketplaces_for_install(
+    from ..core.scope import InstallScope
+
+    if scope is InstallScope.USER and not reconcile_user_marketplaces_for_install(
         manifest_path, logger=logger, dry_run=dry_run
     ):
         sys.exit(1)
