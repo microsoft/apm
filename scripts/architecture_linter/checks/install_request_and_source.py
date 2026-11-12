@@ -24,6 +24,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _lines,
     _present,
     _present_re,
+    _python_paths,
     _summary,
 )
 from scripts.architecture_linter.checks.tree_index import FUNCTION_NODES, TreeIndex
@@ -554,6 +555,22 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
                     "Install command adapters must route exit and success-summary gating through install/outcome.py",
                 )
             )
+    # A forwarding alias (``apm mcp install``) that runs a command
+    # non-standalone receives ctx.exit codes as return values and drops them.
+    for path in _python_paths(provider, f"{_SRC_PREFIX}commands/"):
+        for number, line in enumerate(_lines(provider.file_facts(path)), start=1):
+            column = line.find("standalone_mode=False")
+            if column >= 0 and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Forwarded commands must run standalone so install exit codes "
+                        "come from install/outcome.py",
+                        line=number,
+                        column=column + 1,
+                    )
+                )
     if not (
         _present(owner, "def result_from_install_context(")
         and _present(owner, "def finalize_install_result(")

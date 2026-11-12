@@ -128,11 +128,15 @@ def test_user_servers_survive_reinstall_removal_and_frozen(
     assert (chain.project / "opencode.json").read_text("utf-8").count('"theme": "dark"') == 1
 
 
-def test_policy_denied_mcp_fails_closed_through_install_mcp(
-    tmp_path: Path, apm_binary_path: Path
+@pytest.mark.parametrize("entry", ["install-mcp", "mcp-install"])
+def test_policy_denied_mcp_fails_closed_through_every_entry_point(
+    tmp_path: Path, apm_binary_path: Path, entry: str
 ) -> None:
-    """A denied server is never written, apm.yml is untouched, and the exit code is non-zero."""
-    chain = Chain(tmp_path / "install-mcp", apm_binary_path, dirs=(".claude", ".vscode"))
+    """A denied server is never written, apm.yml is untouched, and the exit code is non-zero.
+
+    ``apm mcp install`` exits exactly like ``apm install --mcp`` (#3666).
+    """
+    chain = Chain(tmp_path / entry, apm_binary_path, dirs=(".claude", ".vscode"))
     chain.seed_org_policy(
         "name: acme\nversion: 1.0.0\nenforcement: block\n"
         "mcp:\n  deny: ['evil-*']\n  transport:\n    allow: [stdio]\n  self_defined: allow\n"
@@ -141,8 +145,10 @@ def test_policy_denied_mcp_fails_closed_through_install_mcp(
     chain.ok("install", "--target", "claude,vscode")
     manifest = (chain.project / "apm.yml").read_bytes()
     lock = (chain.project / "apm.lock.yaml").read_bytes()
-    prefix = ("install", "--mcp")
+    prefix = ("mcp", "install") if entry == "mcp-install" else ("install", "--mcp")
 
+    usage = chain.run(*prefix, "bad", "--transport", "bogus", "--", "npx", "bad")
+    assert usage.returncode == 2, usage.stdout + usage.stderr
     denied_name = chain.run(*prefix, "evil-y", "--target", "claude,vscode", "--", "npx", "evil")
     denied_transport = chain.run(
         *prefix, "http-z", "--target", "claude,vscode", "--url", "https://z.example.invalid/mcp"

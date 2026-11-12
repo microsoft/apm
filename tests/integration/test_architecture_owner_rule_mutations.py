@@ -903,6 +903,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Install outcome owner stops defining the result finalizer.",
     ),
     MutationCase(
+        guard_id="install-deployment-outcome",
+        rule_id="install-deployment-outcome",
+        path="src/apm_cli/commands/mcp.py",
+        old='cli.main(args=forwarded, prog_name="apm")',
+        new="cli.main(args=forwarded, standalone_mode=False)",
+        intent="apm mcp install drops the forwarded install exit code (#3666).",
+    ),
+    MutationCase(
         guard_id="install-deployment-package-target-authorization",
         rule_id="install-deployment-package-target-authorization",
         path="src/apm_cli/install/target_filter.py",
