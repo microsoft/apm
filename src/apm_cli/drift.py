@@ -254,24 +254,34 @@ def should_force_ref_recheck(
     """Return whether an existing install path must reach the download owner.
 
     This is the single gate shared by the dependency resolver and its download
-    callback. A normal install rechecks only manifest/lock drift. An explicit
-    update rechecks semver ranges and hook-only packages. Hook replacements
-    must pass staged admission before any live content is replaced.
+    callback. The resolver reads a package's ``apm.yml`` from whatever path this
+    gate leaves in place, so returning False means "the materialized copy is
+    current". A normal install rechecks local packages (their source can change
+    without any ref moving) and manifest/lock drift. An explicit update also
+    rechecks mutable Git refs, semver ranges and hook-only packages. Hook
+    replacements must pass staged admission before any live content is replaced.
+
+    This gate decides ref/content freshness only. Slot ownership is a separate
+    staging fact: when several local sources share one ``_local/<name>`` slot,
+    the download callback reuses the copy this run already staged for it
+    (``ResolutionStagingSession.owns_path``) instead of staging it twice.
     """
     if locked_dep is not None and not locked_dep.matches_replacement(dep_ref):
         return True
-    if dep_ref.replacement is not None and dep_ref.is_local:
+    if dep_ref.is_local:
+        # #3401 / #3501: the apm_modules copy is from the previous install, so
+        # reading it would resolve transitive deps from a stale manifest.
         return True
-    if dep_ref.is_local or getattr(dep_ref, "artifactory_prefix", None):
+    if getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:
         return True
     if update_refs:
+        from apm_cli.deps.revision_pins import is_full_revision_pin
+
         if update_keys is not None and dep_ref.get_unique_key() not in update_keys:
             return False
         if dep_ref.replacement is not None:
-            from apm_cli.deps.revision_pins import is_full_revision_pin
-
             return not is_full_revision_pin(dep_ref.reference)
         if getattr(dep_ref, "ref_kind", None) == "semver":
             return True
@@ -281,8 +291,32 @@ def should_force_ref_recheck(
             package_type, _ = detect_package_type(package_path)
             if package_type is PackageType.HOOK_PACKAGE:
                 return True
+        if _refetches_mutable_ref_during_resolution(dep_ref):
+            # #3392: a branch (or tag, or default-branch) ref of a plain Git
+            # package may point at a new commit whose apm.yml re-pins children.
+            # Fetch it here, during resolution, so transitive deps come from that
+            # commit. The download phase skips packages the callback already
+            # fetched, so this moves the update fetch earlier rather than adding
+            # one.
+            return not is_full_revision_pin(dep_ref.reference)
         return False
     return detect_ref_change(dep_ref, locked_dep, update_refs=False)
+
+
+def _refetches_mutable_ref_during_resolution(dep_ref: DependencyReference) -> bool:
+    """Return whether an update fetches *dep_ref*'s mutable ref while resolving.
+
+    Only whole-repository Git packages qualify. Registry, marketplace and
+    virtual (subdirectory or file) packages are re-resolved later in the update
+    pipeline; fetching them here would pin the stale selection. Callers have
+    already excluded local and Artifactory-proxied dependencies.
+    """
+    return not (
+        dep_ref.source == "registry"
+        or getattr(dep_ref, "is_marketplace", False)
+        or getattr(dep_ref, "marketplace_name", None)
+        or getattr(dep_ref, "is_virtual", False)
+    )
 
 
 # ---------------------------------------------------------------------------
