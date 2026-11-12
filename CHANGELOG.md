@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- CI: PR checks reach `gate` faster: the Windows Compatibility Gate and Linux unit shards use all four runner cores, superseded PR runs are cancelled, apt installs and release uploads are time-boxed, and pylint is bumped to 4.1.3 for a faster duplication check. (#3582)
+- CI: PR checks reach `gate` faster: the Windows Compatibility Gate runs on all four runner cores, superseded PR runs are cancelled, apt installs and release uploads are time-boxed, and pylint is bumped to 4.1.3 for a faster duplication check. (#3582)
 
 ## [0.35.1] - 2026-11-11
 

@@ -160,12 +160,16 @@ jobs:
 
     # Four xdist workers use the runner's four vCPUs; loadgroup keeps
     # every xdist_group (HOME-mutating integration tests) on one worker.
+    # xdist nests each worker's tmp_path one level deeper (popen-gwN),
+    # which pushed the deepest Git cache probe of
+    # test_audit_workspace_identity_lifecycle past Windows MAX_PATH. A
+    # short base temp on C: (8.3 aliases enabled) restores the headroom.
     - name: Run cross-platform contract family
       env:
         APM_E2E_TESTS: '1'
       run: >-
         uv run --extra dev pytest -p no:cacheprovider -v
-        -n 4 --dist loadgroup
+        -n 4 --dist loadgroup --basetemp=C:\apm-pt
         -m windows_compat
         tests/unit
         tests/integration
@@ -459,8 +463,9 @@ jobs:
       run: uv sync --frozen --extra dev
 
     # --splits 2 --group N matches the layout used by ci-integration.yml.
-    # -n 4 --dist worksteal parallelises within the shard across all four
-    # vCPUs of the hosted ubuntu-24.04 runner.
+    # -n 2 --dist worksteal parallelises within the shard. -n 4 was measured
+    # on #3582: per-worker collection of ~13k tests added 40-60 s while
+    # execution gained 0-25 s, so both shards got slower.
     #
     # Per-shard floor of 60% catches regressions at PR time on roughly
     # half the codebase (observed per-shard coverage today is ~65%).
@@ -472,7 +477,7 @@ jobs:
       run: |
         uv run pytest tests/unit tests/test_console.py tests/red_team \
           --splits 2 --group ${{ matrix.shard }} \
-          -n 4 --dist worksteal \
+          -n 2 --dist worksteal \
           --cov --cov-report= --cov-fail-under=60
 
     - name: Rename coverage data for shard

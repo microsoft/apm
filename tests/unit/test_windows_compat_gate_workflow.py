@@ -80,8 +80,9 @@ def _gate_pytest_command(step: dict) -> list[str]:
     return matches[0]
 
 
-# xdist scheduling flags and their values: irrelevant to selection, and
-# the plugin-free --collect-only re-invocation cannot parse them.
+# xdist scheduling flags and their values (and the --basetemp location):
+# irrelevant to selection, and the plugin-free --collect-only
+# re-invocation cannot parse them.
 _SCHEDULING_FLAGS = ("-n", "--dist")
 
 
@@ -100,6 +101,8 @@ def _gate_pytest_args(step: dict) -> list[str]:
             continue
         if arg in _SCHEDULING_FLAGS:
             skip_next = True
+            continue
+        if arg.startswith("--basetemp="):
             continue
         if arg != "-v":
             args.append(arg)
