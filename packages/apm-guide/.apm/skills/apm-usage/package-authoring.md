@@ -647,7 +647,11 @@ Review the requested change.
 
 Absent settings stay absent. APM does not translate model names, choose
 defaults, or validate model availability or supported effort values.
-Non-string values are dropped with a warning. Other frontmatter,
+Non-string values are dropped with a warning. The one model check is by
+name only: a Claude model alias (`opus`, `sonnet`, `haiku`, `inherit`)
+or `claude-*` id is still kept as written, with a warning naming the
+agent, because Codex does not recognize it; use a Codex-specific agent
+source or remove `model`. Other frontmatter,
 including other native Codex settings and a `codex:` block, is dropped
 with a warning; APM provides no arbitrary or namespaced passthrough.
 Remove unnecessary fields or do not rely on their settings in the
@@ -660,8 +664,8 @@ agent with Codex.
 
 Agent files and model ids belong to each harness vendor. APM writes a
 string `model` verbatim to every agent target (a Claude `sonnet` also
-lands in the Codex TOML); a warning for Claude-specific values in Codex output is
-tracked in #3477. APM does not add a per-target model map or `codex:`
+lands in the Codex TOML, with a warning naming the agent). APM does
+not add a per-target model map or `codex:`
 override block (#3324). Workarounds:
 
 1. Omit `model` from the shared agent so each harness uses its default.

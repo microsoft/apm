@@ -10,7 +10,9 @@ Covers W1-logger deliverables from issue #827:
 - _render_policy_group renders blocked vs warn items correctly
 """
 
+import re
 from unittest.mock import call, patch  # noqa: F401
+from urllib.parse import urlsplit
 
 import pytest  # noqa: F401
 
@@ -344,6 +346,67 @@ class TestPolicyResolved:
             source="acme/.github/apm-policy.yml",
             cached=False,
             enforcement="warn",
+        )
+        mock_info.assert_not_called()
+
+    @staticmethod
+    def _coordinate(ref):
+        """Return the (host, path) of an ``org:host/namespace/repo`` source."""
+        parts = urlsplit(f"//{ref.removeprefix('org:')}")
+        return parts.hostname, parts.path
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_subgroup_scoped_visible_non_verbose_warn(self, mock_info):
+        """#2753: a composed GitLab subgroup policy names its ordered extends
+        chain (ancestors, root first) at info even in non-verbose warn mode."""
+        chain = [
+            "gitlab.com/acme/apm-policy",
+            "gitlab.com/acme/dept-a/apm-policy",
+        ]
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/dept-a/apm-policy",
+            cached=False,
+            enforcement="warn",
+            subgroup_scoped=True,
+            chain=chain,
+        )
+        mock_info.assert_called_once()
+        msg = mock_info.call_args[0][0]
+        match = re.fullmatch(
+            r"Policy: (?P<source>\S+) \(extends chain: (?P<chain>[^)]*)\) -- enforcement=warn",
+            msg,
+        )
+        assert match is not None, msg
+        assert self._coordinate(match["source"]) == ("gitlab.com", "/acme/dept-a/apm-policy")
+        assert [self._coordinate(ref) for ref in match["chain"].split(" -> ")] == [
+            ("gitlab.com", "/acme/apm-policy"),
+        ]
+        assert mock_info.call_args[1].get("symbol") == "info"
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_subgroup_scoped_off_stays_silent_non_verbose(self, mock_info):
+        """An ``off`` composed policy needs no action: silent without --verbose."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/dept-a/apm-policy",
+            cached=False,
+            enforcement="off",
+            subgroup_scoped=True,
+            chain=["gitlab.com/acme/apm-policy", "gitlab.com/acme/dept-a/apm-policy"],
+        )
+        mock_info.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_top_level_scope_stays_silent_non_verbose_warn(self, mock_info):
+        """A top-level (non-subgroup) policy keeps the pre-#2753 silence:
+        non-verbose + warn emits nothing when subgroup_scoped is False."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/apm-policy",
+            cached=False,
+            enforcement="warn",
+            subgroup_scoped=False,
         )
         mock_info.assert_not_called()
 

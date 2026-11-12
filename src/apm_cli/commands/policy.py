@@ -133,6 +133,9 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[s
     """
     if result.policy is None:
         return []
+    if result.chain_sources:
+        # Composed GitLab ancestry (#2753): ordered, redacted, root first.
+        return [_redact_policy_ref(ref) for ref in result.chain_sources[:-1]]
 
     # Try cache lookup first (org / URL paths populate chain_refs in meta).
     repo_ref = result.cache_ref or _strip_source_prefix(result.source)
@@ -140,12 +143,16 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[s
         try:
             entry = _read_cache_entry(repo_ref, project_root, ttl=MAX_STALE_TTL)
             if entry is not None and entry.chain_refs:
-                # Drop the leaf itself from the visible chain.
-                safe_repo_ref = _redact_policy_ref(repo_ref)
+                # Drop the leaf itself from the visible chain (a composed
+                # GitLab ancestry entry is keyed apart from its leaf).
+                leaf_refs = {
+                    _redact_policy_ref(repo_ref),
+                    _redact_policy_ref(_strip_source_prefix(result.source)),
+                }
                 tail = [
                     _redact_policy_ref(ref)
                     for ref in entry.chain_refs
-                    if _redact_policy_ref(ref) != safe_repo_ref
+                    if _redact_policy_ref(ref) not in leaf_refs
                 ]
                 if tail:
                     return tail
