@@ -20,7 +20,7 @@ apm view --file PATH [-g]
 
 `apm view` has two modes, selected by the optional `FIELD` argument:
 
-- **No field** -- read installed package metadata from `apm_modules/` (or `~/.apm/apm_modules/` with `-g`). Local-only; the package must be installed.
+- **No field** -- read installed package metadata from `apm_modules/` (or `$APM_HOME/apm_modules/`, default `~/.apm/apm_modules/`, with `-g`). Local-only; the package must be installed.
 - **`versions` field** -- query available versions. Git packages list remote tags and branches without requiring a local install. Registry packages list version and published-timestamp columns. See the `apm view <package> versions` subcommand below for the full registry-routing precedence and escape-hatch details.
 
 With `--file PATH`, `apm view` works the other way round: it starts from one deployed file and reports which package recorded it. See [`apm view --file PATH`](#apm-view---file-path).
@@ -45,7 +45,7 @@ For git packages, output is a table with name, type (`tag` or `branch`), and sho
 
 ### `apm view --file PATH`
 
-Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`~/.apm/apm.lock.yaml` with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. Unlike [`apm find`](../find/), which lists package names (and optionally sources) from `deployed_files`, it reports the active writer, ref and commit, and the current file status, with exit codes for scripting.
+Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`$APM_HOME/apm.lock.yaml`, default `~/.apm/apm.lock.yaml`, with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. Unlike [`apm find`](../find/), which lists package names (and optionally sources) from `deployed_files`, it reports the active writer, ref and commit, and the current file status, with exit codes for scripting.
 
 For each matching record it prints:
 
@@ -79,7 +79,7 @@ Before editing an installed skill, run this command. If the owner is a dependenc
 
 | Option              | Description                                  |
 | ------------------- | -------------------------------------------- |
-| `-g`, `--global`    | Inspect a package installed in user scope (`~/.apm/apm_modules/`). With `--file`, read the user-scope lockfile |
+| `-g`, `--global`    | Inspect a package installed in user scope (`$APM_HOME/apm_modules/`, default `~/.apm/apm_modules/`). With `--file`, read the user-scope lockfile |
 | `--file PATH`       | Show the recorded owner(s) of one deployed file (read-only, exact path). Cannot be combined with `PACKAGE`, `FIELD` or `--registry` |
 | `--registry [NAME]` | List versions from a registry. Omit a value to use the lockfile entry or configured default; provide `NAME` to force a specific named registry. Only valid with the `versions` field. |
 

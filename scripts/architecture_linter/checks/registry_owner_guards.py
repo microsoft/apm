@@ -22,6 +22,8 @@ registry-delegation-build-id-verification Build IDs are verified in their
                                         canonical owner
 registry-delegation-bootstrap-project-  AC18 ``lint-bootstrap-project-name``
 name                                    (ported semantically)
+registry-delegation-apm-home-resolution APM-owned user metadata must route
+                                        through core/scope.py
 ======================================  ==================================
 
 Every rule check consumes only :class:`FactsProvider` inventory and cached
@@ -192,6 +194,25 @@ _USER_INVOCABLE_OWNED_DEFS: tuple[str, ...] = ("resolve_user_invocable",)
 _USER_INVOCABLE_REDERIVE_PATTERN = (
     r'\.get\(\s*["\']user-invocable["\']\s*\)|\.get\(\s*["\']visibility["\']\s*\)'
 )
+
+
+_APM_HOME_OWNER = "src/apm_cli/core/scope.py"
+
+
+_APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
+    "src/apm_cli/config.py": "CONFIG_DIR = os.fspath(get_apm_home())",
+    "src/apm_cli/core/lifecycle_scripts.py": 'return get_apm_home() / "apm.yml"',
+    "src/apm_cli/core/script_trust.py": 'return get_apm_home() / "scripts-trust.json"',
+    "src/apm_cli/core/script_executors.py": 'return get_apm_home() / "logs" / "scripts.log"',
+    "src/apm_cli/install/locking.py": "lock_path = get_apm_home() / _LIFECYCLE_LOCK_NAME",
+    "src/apm_cli/deps/registry/config_loader.py": (
+        "workspace_yml = get_manifest_path(InstallScope.USER)"
+    ),
+    "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
+    "src/apm_cli/core/deployment_ledger.py": (
+        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+    ),
+}
 
 
 def _count_fixed_lines(facts: FileFacts, needle: str) -> int:
@@ -795,6 +816,75 @@ def _check_user_invocable_resolution(provider: FactsProvider) -> Iterable[Violat
     return findings
 
 
+def _check_apm_home_resolution(provider: FactsProvider) -> Iterable[Violation]:
+    """APM-owned user metadata must consume one canonical home resolver."""
+    rule_id = "registry_delegation.apm_home_resolution"
+    required_paths = (_APM_HOME_OWNER, *_APM_HOME_CONSUMER_NEEDLES)
+    facts_by_path, failures = _read_required(provider, rule_id, required_paths)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+    definers, def_failures = _defining_files(
+        provider,
+        rule_id,
+        "get_apm_home",
+        kinds=("function",),
+    )
+    findings.extend(def_failures)
+    if definers != frozenset({_APM_HOME_OWNER}):
+        findings.append(
+            violation(
+                rule_id,
+                _APM_HOME_OWNER,
+                "get_apm_home must be defined only by core/scope.py",
+            )
+        )
+
+    owner = facts_by_path[_APM_HOME_OWNER]
+    if _count_fixed_lines(owner, 'os.environ.get("APM_HOME")') != 1:
+        findings.append(
+            violation(
+                rule_id,
+                _APM_HOME_OWNER,
+                "the APM_HOME environment lookup must exist exactly once in its owner",
+            )
+        )
+
+    for path, needle in _APM_HOME_CONSUMER_NEEDLES.items():
+        if not _has_fixed(facts_by_path[path], needle):
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "APM-owned user metadata path must route through get_apm_home",
+                )
+            )
+
+    for path in _python_paths(provider, under=_SRC):
+        if path == _APM_HOME_OWNER:
+            continue
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            if isinstance(node, ast.Constant) and node.value == "APM_HOME":
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "APM_HOME must be read only by core/scope.py::get_apm_home",
+                        line=getattr(node, "lineno", 1),
+                        column=getattr(node, "col_offset", 0) + 1,
+                    )
+                )
+    return findings
+
+
 def _is_name(node: ast.AST | None, name: str) -> bool:
     return isinstance(node, ast.Name) and node.id == name
 
@@ -1039,6 +1129,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-version-rendering",),
         description="CLI version rendering must route through version_output.py.",
         check=_check_version_rendering,
+    ),
+    Rule(
+        id="registry_delegation.apm_home_resolution",
+        group=GROUP,
+        guard_ids=("registry-delegation-apm-home-resolution",),
+        description="APM-owned user metadata paths must share core/scope.py::get_apm_home.",
+        check=_check_apm_home_resolution,
     ),
 )
 

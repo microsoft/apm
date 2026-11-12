@@ -1131,6 +1131,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Discovery allows package admission to mutate the source it is inventorying.",
     ),
     MutationCase(
+        guard_id="registry-delegation-apm-home-resolution",
+        rule_id="registry_delegation.apm_home_resolution",
+        path="src/apm_cli/core/scope.py",
+        old='configured = os.environ.get("APM_HOME")',
+        new='configured = os.environ.get("APM_ROOT")',
+        intent="APM user metadata stops reading its canonical environment variable.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-audit-target-selection",
         rule_id="registry_delegation.audit_target_selection",
         path="src/apm_cli/install/drift.py",

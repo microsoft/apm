@@ -102,6 +102,13 @@
         "src/apm_cli/entrypoint.py"
       ],
       "guards": ["registry-delegation-version-rendering"]
+    },
+    {
+      "id": "apm-home-resolution",
+      "decision": "APM-owned user metadata root",
+      "owner": "core/scope.py (get_apm_home)",
+      "selectors": ["src/apm_cli/core/scope.py"],
+      "guards": ["registry-delegation-apm-home-resolution"]
     }
   ]
 }
