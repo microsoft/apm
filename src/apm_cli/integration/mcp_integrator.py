@@ -787,7 +787,10 @@ class MCPIntegrator:
             target_runtimes.discard(exclude)
 
         from apm_cli.core.scope import InstallScope
-        from apm_cli.install.mcp.ownership import require_removable_mcp_connections
+        from apm_cli.install.mcp.ownership import (
+            project_mcp_cleanup_reachable,
+            require_removable_mcp_connections,
+        )
 
         # Scope filtering: at USER scope, only clean global-capable runtimes.
         if scope is InstallScope.USER:
@@ -900,7 +903,9 @@ class MCPIntegrator:
 
         # Project scope is opt-in; user scope uses ~/.config/opencode/.
         if "opencode" in target_runtimes:
-            if clean_user_scope or (project_root_path / ".opencode").is_dir():
+            if clean_user_scope or project_mcp_cleanup_reachable(
+                project_root_path, ".opencode", runtime_scoped=runtime is not None
+            ):
                 from apm_cli.adapters.client.opencode import (
                     V2_MCP_SETTINGS,
                     OpenCodeClientAdapter,
@@ -1020,9 +1025,11 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
+        # Clean Claude Code project .mcp.json when it is reachable for cleanup.
         if clean_claude_project:
-            claude_project_enabled = (project_root_path / ".claude").is_dir()
+            claude_project_enabled = project_mcp_cleanup_reachable(
+                project_root_path, ".claude", runtime_scoped=runtime is not None
+            )
             if claude_project_enabled or stored_configs:
                 if _reject_symlink_config(
                     project_root_path / ".mcp.json",

@@ -143,6 +143,20 @@ def compare_native_mcp_connection(
     )
 
 
+def project_mcp_cleanup_reachable(
+    project_root: Path, opt_in_dir: str, *, runtime_scoped: bool
+) -> bool:
+    """Return whether stale entries may be removed from a project runtime config.
+
+    The runtime's opt-in directory (``.claude/``, ``.opencode/``) gates first
+    writes. Cleanup scoped to one runtime comes from the ownership ledger, so it
+    stays reachable after install or uninstall prunes that directory because it
+    held only APM-deployed files (#3664). Broadcast cleanup (no runtime) still
+    skips a project that never opted in to the runtime.
+    """
+    return runtime_scoped or (project_root / opt_in_dir).is_dir()
+
+
 def require_removable_mcp_connections(
     client: Any,
     names: set[str],

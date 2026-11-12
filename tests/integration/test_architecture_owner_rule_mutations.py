@@ -863,6 +863,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Native MCP connection ownership loses its canonical baseline comparator.",
     ),
     MutationCase(
+        guard_id="install-deployment-mcp-ownership-migration",
+        rule_id="install-deployment-mcp-ownership-migration",
+        path="src/apm_cli/integration/mcp_integrator.py",
+        old="claude_project_enabled = project_mcp_cleanup_reachable(",
+        new='claude_project_enabled = (project_root_path / ".claude").is_dir() or bool(',
+        intent="Stale Claude MCP cleanup re-gates on the write opt-in dir (#3664).",
+    ),
+    MutationCase(
         guard_id="install-deployment-mcp-registry-resolution",
         rule_id="install-deployment-mcp-registry-resolution",
         path="src/apm_cli/registry/client.py",

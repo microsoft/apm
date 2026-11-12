@@ -259,6 +259,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             pattern=re.compile(
                 r"^[ \t]*(?:def (?:compare_native_mcp_connection|"
                 r"require_removable_mcp_connections|mcp_native_hash|"
+                r"project_mcp_cleanup_reachable|"
                 r"retain_deferred_mcp_claims)\(|class NativeMcpConnectionState\b)"
             ),
             owner=_MCP_OWNERSHIP_OWNER,
@@ -271,6 +272,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         "require_removable_mcp_connections",
         "mcp_native_hash",
         "retain_deferred_mcp_claims",
+        "project_mcp_cleanup_reachable",
     ):
         if not _present_re(owner, re.compile(rf"^def {name}\(")):
             findings.append(
@@ -315,6 +317,11 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "remove_stale",
             "require_removable_mcp_connections",
         ),
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "remove_stale",
+            "project_mcp_cleanup_reachable",
+        ),
         (_MCP_OWNERSHIP_OWNER, "compare_native_mcp_connection", "mcp_native_hash"),
         (
             "src/apm_cli/install/mcp/integration.py",
@@ -352,6 +359,17 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                 )
             )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
+    opt_in_gate = re.compile(r'/ "\.(?:claude|opencode)"\)\.is_dir\(\)')
+    for number, line in enumerate(_lines(cleanup), start=1):
+        if opt_in_gate.search(line):
+            findings.append(
+                violation(
+                    rule_id,
+                    "src/apm_cli/integration/mcp_integrator.py",
+                    "Stale MCP cleanup must gate opt-in dirs through project_mcp_cleanup_reachable",
+                    line=number,
+                )
+            )
     index = cleanup.tree_index
     if index is not None:
         for node in index.nodes:
