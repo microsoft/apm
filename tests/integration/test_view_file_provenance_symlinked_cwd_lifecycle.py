@@ -1,4 +1,4 @@
-"""C5: `apm view --file PATH` reverse provenance (#3608) against a real install.
+"""`apm view --file PATH` reverse provenance (#3608) holds against a real install (#3649).
 
 Promises (CHANGELOG / `apm view --help`): read-only exact-path lookup; exit 0
 when provenance is recorded, 1 when unrecorded or an owner is unresolved, 2 on
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.redteam_0_36._c5_support import (
-    C5World,
+from tests.integration._marketplace_pack_kit import (
+    MarketplacePackWorld,
     output,
     remote_url,
     skill_md,
@@ -21,14 +21,18 @@ from tests.integration.redteam_0_36._c5_support import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+]
 
 _SKILL = ".claude/skills/vf/SKILL.md"
 _AGENT = ".claude/agents/vfa.md"
 
 
-def _installed(tmp_path: Path, binary: Path) -> tuple[C5World, Path]:
-    world = C5World.create(tmp_path, binary)
+def _installed(tmp_path: Path, binary: Path) -> tuple[MarketplacePackWorld, Path]:
+    world = MarketplacePackWorld.create(tmp_path, binary)
     pkg = world.isolated.package_root / "viewpkg"
     write(pkg / "apm.yml", "name: viewpkg\nversion: 2.1.0\ndescription: v\n")
     write(pkg / "skills" / "vf" / "SKILL.md", skill_md("vf"))

@@ -1,4 +1,4 @@
-"""Shared hermetic fixtures for the C5 marketplace / pack / export-patch scenarios."""
+"""Shared hermetic fixtures for marketplace, pack, export-patch and view lifecycle chains."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def output(result: CommandResult) -> str:
 
 
 @dataclass
-class C5World:
+class MarketplacePackWorld:
     """Isolated APM home, local git origins with HTTPS rewrites, and a runner."""
 
     isolated: IsolatedApmEnvironment
@@ -58,7 +58,7 @@ class C5World:
     env: dict[str, str]
 
     @classmethod
-    def create(cls, root: Path, binary: Path) -> C5World:
+    def create(cls, root: Path, binary: Path) -> MarketplacePackWorld:
         isolated = IsolatedApmEnvironment.create(root / "isolated", base_env=dict(os.environ))
         env = isolated.subprocess_env()
         repos = LocalGitRepositoryFactory(isolated.repository_root, env=env)
@@ -74,7 +74,7 @@ class C5World:
         self.env = self.repos.url_rewrite_subprocess_env_many(self.rewrites)
         return repository, commit
 
-    def apm(self, cwd: Path, *args: str, expect: int | None = 0, sid: str = "c5") -> CommandResult:
+    def apm(self, cwd: Path, *args: str, expect: int | None = 0, sid: str = "mp") -> CommandResult:
         result = self.runner.run(args, scenario_id=sid, cwd=cwd, env=self.env)
         if expect is not None:
             assert result.returncode == expect, evidence(result)

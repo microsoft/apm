@@ -1,4 +1,4 @@
-"""C5: marketplace producer -> consumer CHAIN, asserting disk + lock + exit code per step.
+"""Marketplace producer -> consumer chain keeps disk, lock and exit codes coherent (#3649).
 
 Covers #3534 (sha pins, malformed sha refused before any write), #3543
 (marketplace check on commit-SHA refs), #1994 (registered ref), #2637
@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.integration.redteam_0_36._c5_support import (
-    C5World,
+from tests.integration._marketplace_pack_kit import (
+    MarketplacePackWorld,
     lock_dep,
     output,
     remote_url,
@@ -39,8 +39,8 @@ def _plugins(path: Path) -> dict[str, dict]:
     return {p["name"]: p for p in json.loads(path.read_text())["plugins"]}
 
 
-def _build(tmp_path: Path, binary: Path) -> tuple[C5World, dict]:
-    world = C5World.create(tmp_path, binary)
+def _build(tmp_path: Path, binary: Path) -> tuple[MarketplacePackWorld, dict]:
+    world = MarketplacePackWorld.create(tmp_path, binary)
     src = world.isolated.package_root
 
     skillpack = src / "skillpack"
@@ -109,7 +109,7 @@ def _build(tmp_path: Path, binary: Path) -> tuple[C5World, dict]:
     }
 
 
-def _publish_producer(world: C5World, ctx: dict) -> None:
+def _publish_producer(world: MarketplacePackWorld, ctx: dict) -> None:
     producer = ctx["producer"]
     if "m_repo" not in ctx:
         ctx["m_repo"], _ = world.publish("market", producer)

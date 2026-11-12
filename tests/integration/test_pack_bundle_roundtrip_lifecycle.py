@@ -1,4 +1,4 @@
-"""C5: `apm pack` bundle roundtrip (#3408 version coherence, #3604 bundle vs source routing).
+"""`apm pack` bundles carry coherent versions and install as bundles (#3408, #3604, #3649).
 
 Chain: stale authored plugin.json (root + .claude-plugin) -> pack every bundle
 format -> every bundled plugin.json carries the apm.yml version, sources are
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.redteam_0_36._c5_support import (
-    C5World,
+from tests.integration._marketplace_pack_kit import (
+    MarketplacePackWorld,
     output,
     skill_md,
     tree_bytes,
@@ -25,7 +25,7 @@ from tests.integration.redteam_0_36._c5_support import (
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 
-def _producer(world: C5World) -> Path:
+def _producer(world: MarketplacePackWorld) -> Path:
     root = world.isolated.work_root / "bundler"
     write(
         root / "apm.yml",
@@ -51,7 +51,7 @@ def _stable(tree: dict[str, bytes]) -> dict[str, bytes]:
 def test_pack_bundle_versions_sources_and_determinism(
     tmp_path: Path, apm_binary_path: Path, fmt: tuple[str, ...]
 ) -> None:
-    world = C5World.create(tmp_path, apm_binary_path)
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     producer = _producer(world)
     world.apm(producer, "install", "--no-policy")
     sources_before = tree_bytes(producer)
@@ -75,7 +75,7 @@ def test_pack_bundle_versions_sources_and_determinism(
 def test_packed_bundle_installs_as_bundle_not_source(
     tmp_path: Path, apm_binary_path: Path, archive: bool
 ) -> None:
-    world = C5World.create(tmp_path, apm_binary_path)
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     producer = _producer(world)
     world.apm(producer, "install", "--no-policy")
     args = ("pack", "-o", str(tmp_path / "out"))
@@ -103,7 +103,7 @@ def test_source_package_with_plugin_json_installs_as_local_dependency(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """#3604: `apm install DIR` of an APM source package with a root plugin.json."""
-    world = C5World.create(tmp_path, apm_binary_path)
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     producer = _producer(world)
     consumer = world.consumer("source-consumer", targets=("claude",))
     world.apm(consumer, "install", str(producer), "--no-policy")
