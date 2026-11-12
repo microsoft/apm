@@ -207,7 +207,7 @@ def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str,
             stdin=subprocess.DEVNULL,
             check=True,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    except (subprocess.SubprocessError, OSError):
         _log.debug("Could not pin sparse completeness for %s", checkout_dir)
 
 
@@ -237,7 +237,8 @@ def _sparse_checkout_is_complete(
     try:
         # Local index scan only; a short bound limits shard-lock hold time.
         missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    # SubprocessError also covers GitOutputDecodeError (#3056).
+    except (subprocess.SubprocessError, OSError):
         return False
     if missing:
         return False

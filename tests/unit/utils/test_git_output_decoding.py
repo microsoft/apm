@@ -248,3 +248,16 @@ def test_bare_clone_decode_rejection_removes_staged_tree(
     assert len(staged) == (2 if partial else 1)
     assert not any(stage.exists() for stage in staged)
     assert [p.name for p in cache._db_root.iterdir() if not p.name.endswith(".lock")] == []
+
+
+def test_sparse_probe_decode_rejection_counts_as_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        raise _decode_error(argv)
+
+    monkeypatch.setattr(git_cache_module, "run_git_text", fake_run)
+
+    # An unpinned sparse shard whose ls-files output is not UTF-8 is rebuilt,
+    # not trusted, and the decode error does not escape the cache-hit path.
+    assert not git_cache_module._sparse_checkout_is_complete(tmp_path, ["skills"], env=None)
