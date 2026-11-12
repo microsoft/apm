@@ -224,6 +224,26 @@ def _ctx(tmp_path: Path, logger) -> InstallContext:
     return ctx
 
 
+class TestClosePipelineAttempt:
+    def test_exit_sequence_runs_in_order(self, tmp_path: Path) -> None:
+        from apm_cli.install.finalization import close_pipeline_attempt
+
+        calls = MagicMock()
+        ctx = _ctx(tmp_path, MagicMock())
+        ctx.tui = calls.tui
+        with (
+            patch("apm_cli.install.phases.copilot_plugins.deactivate", calls.deactivate),
+            patch("apm_cli.install.failure_residue.report_failed_install_residue", calls.report),
+        ):
+            close_pipeline_attempt(ctx)
+
+        assert [name for name, _args, _kwargs in calls.mock_calls] == [
+            "deactivate",
+            "tui.__exit__",
+            "report",
+        ]
+
+
 class _CoworkTarget:
     """Minimal file-backed dynamic-root target for locator decoding."""
 
