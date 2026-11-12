@@ -48,7 +48,7 @@ from ..models.dependency.host_virtual import (
     dependency_repository_owner,
     repository_owner_and_repo,
 )
-from ..utils.git_env import get_git_executable, git_subprocess_error_text
+from ..utils.git_env import get_git_executable, git_subprocess_error_text, run_git_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
@@ -853,11 +853,10 @@ def _path_exists_in_tree_at_ref(
             return False
 
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 [git_exe, "--git-dir", str(bare), "ls-tree", "-d", "FETCH_HEAD", vpath],
                 check=True,
                 capture_output=True,
-                text=True,
                 env=remote_env,
             )
             output = result.stdout

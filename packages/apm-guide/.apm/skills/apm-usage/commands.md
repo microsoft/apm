@@ -7,6 +7,22 @@ checkouts, including forks and worktrees, show their revision when Git can
 verify it; otherwise the SHA is omitted.
 Standalone `apm --version` does not require Git to be installed.
 
+## User metadata root
+
+`APM_HOME` is the root for APM-owned user metadata: `apm.yml`,
+`apm.lock.yaml`, `apm_modules/`, `config.json`, `marketplaces.json`, lifecycle
+trust, logs, lock, and deployment receipts. It defaults to `~/.apm` (empty
+counts as unset); every `~/.apm` path below describes that default. Global
+install, update, uninstall, deps, lock, compile, marketplace, lifecycle, and
+config commands honor it. Target deployments do not: target-specific home
+variables take precedence for their own destinations, with the operating-system
+home as the fallback. Runtimes (`~/.apm/runtimes/`), the `--global`
+`.apm-local/` identity in your home, and the download cache stay outside it.
+A relative `APM_HOME` resolves against the starting directory (APM errors if that directory is gone). State-changing
+commands also hold `~/.apm-local/.apm-lifecycle.lock`, so different `APM_HOME`
+values serialize instead of racing on shared projects or target directories.
+APM does not migrate an existing `~/.apm`.
+
 ## Project setup
 
 | Command | Purpose | Key flags |
@@ -84,7 +100,7 @@ Fix unreadable sources before retrying, not by resetting the lockfile. See
 
 Loose-skill updates use local receipts of successful final rendered writes, not
 the checked-out lock as proof of the previous local deployment. Keep the ignored
-`.apm-local/` identity and `~/.apm/deployment-receipts/` local; do not commit or
+`.apm-local/` identity and `$APM_HOME/deployment-receipts/` local; do not commit or
 share them. The identity lives in the project root, or your home for `--global`;
 configured external skill roots retain the same ownership and receipt checks.
 On Linux and macOS a receipt survives a reboot or remount that changes only the
@@ -677,10 +693,10 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path, or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. Without `--path`, the catalog is discovered at `marketplace.json`, `.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json` (first wins). `--path` selects a repository-relative catalog JSON (for example one per audience, `catalogs/frontend/marketplace.json`), is saved in the registration, and must stay inside the repository; not for hosted `marketplace.json` URLs or a direct file. Separate catalogs are not access control. | `-n NAME`, `-r REF`, `--host HOST`, `--path PATH` |
+| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path (including a local `apm.yml` read as a live catalog), or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. Without `--path`, the catalog is discovered at `marketplace.json`, `.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json` (first wins). `--path` selects a repository-relative catalog JSON (for example one per audience, `catalogs/frontend/marketplace.json`), is saved in the registration, and must stay inside the repository; not for hosted `marketplace.json` URLs or a direct file. Separate catalogs are not access control. | `-n NAME`, `-r REF`, `--host HOST`, `--path PATH`, `--offline` (local `apm.yml` only) |
 | `apm marketplace list` | List registered marketplaces | -- |
-| `apm marketplace browse NAME` | Browse marketplace plugins | -- |
-| `apm marketplace update [NAME]` | Update marketplace index | -- |
+| `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs | `--offline` (local YAML only) |
+| `apm marketplace update [NAME]` | Update marketplace index; reread live local `apm.yml` catalogs | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
 | `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
@@ -688,6 +704,18 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
 
 ## Marketplace authoring
+
+For a live local preview, run `apm marketplace add ./apm.yml --name alice-dev`.
+The file must contain a valid `marketplace:` declaration. Browse, view, update
+and selected installs reread it on later invocations; relative package paths
+resolve from the file's directory. Registration neither installs inventory nor
+executes hooks, publishes packages or writes generated catalogs. `add --offline`
+and `browse --offline` are limited to local YAML: local entries and commit SHAs
+need no network, while uncached remote tags/ranges fail. Ref caches are not
+persisted across CLI invocations. Remote entries install
+through their actual dependency source and existing lock resolution, so locked
+replay does not require the preview. Local directory dependencies remain local.
+Native generated JSON and repository registration retain their existing flow.
 
 > Source of truth is the `marketplace:` block in `apm.yml`. `apm pack` produces `.claude-plugin/marketplace.json` whenever that block is present. The legacy standalone `marketplace.yml` is deprecated -- use `apm marketplace migrate` to fold it in.
 

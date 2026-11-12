@@ -298,6 +298,7 @@ _ADD_EPILOG = """
 \b
 Examples:
   apm marketplace add owner/repo
+  apm marketplace add ./apm.yml --name alice-dev
   apm marketplace add github.com/owner/repo
   apm marketplace add https://github.com/owner/repo#v1.0.0
   apm marketplace add https://catalog.example.com/marketplace.json --name catalog
@@ -336,8 +337,13 @@ Examples:
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Read local apm.yml without network (remote entries need commit SHAs)",
+)
 @serialized_lifecycle
-def add(source, name, ref, branch, host, catalog_path, verbose):
+def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
@@ -345,7 +351,8 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
     Gitea, Bitbucket Server, or any self-hosted git server), a hosted
     ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git`` or
     ``ssh://git@host:2222/org/repo.git``),
-    a local filesystem path, or a ``file://`` URI.
+    a local filesystem path (including an explicitly selected ``apm.yml``),
+    or a ``file://`` URI.
 
     Without --path, APM looks for marketplace.json at the repository root,
     then .github/plugin/, then .claude-plugin/. Use --path to select another
@@ -357,6 +364,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
             _auto_detect_path_with_payload,
             _fetch_file,
             fetch_marketplace,
+            is_local_authoring_source,
         )
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
@@ -483,6 +491,12 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
             ref="" if is_direct_url else effective_ref,
             path="" if is_direct_url else "marketplace.json",
         )
+        if offline and not is_local_authoring_source(probe_source):
+            logger.error(
+                "--offline requires an explicitly selected local apm.yml. "
+                "Omit --offline to register a JSON or repository source."
+            )
+            sys.exit(1)
         if is_direct_url or _local_source_points_to_file(probe_source):
             if explicit_path is not None:
                 logger.error(
@@ -509,10 +523,16 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
             detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
 
         if detected_path is None:
+            hint = (
+                " To register a local authoring catalog, pass the apm.yml file "
+                "itself (for example ./my-catalog/apm.yml)."
+                if probe_source.kind == "local"
+                else ""
+            )
             logger.error(
                 f"No marketplace.json found in '{probe_source.display_source}'. "
                 f"Checked: marketplace.json, .github/plugin/marketplace.json, "
-                f".claude-plugin/marketplace.json",
+                f".claude-plugin/marketplace.json.{hint}",
                 symbol="error",
             )
             sys.exit(1)
@@ -529,6 +549,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
             # Reuse the catalog response the probe above just fetched from
             # the same url/ref/path instead of re-fetching it (apm#3283).
             discovery_payload=discovered_manifest,
+            offline=offline,
         )
         plugin_count = len(manifest.plugins)
 
@@ -654,8 +675,11 @@ def _local_source_points_to_file(source: MarketplaceSource) -> bool:
     """Return True when a local marketplace source points directly to a file."""
     if source.kind != "local":
         return False
+    from ...marketplace.client import is_local_authoring_source
+
     try:
-        return Path(source.local_path).expanduser().is_file()
+        path = Path(source.local_path).expanduser()
+        return path.is_file() or is_local_authoring_source(source)
     except OSError:
         return False
 
@@ -799,7 +823,12 @@ def list_cmd(verbose):
 @marketplace.command(help="Browse plugins in a marketplace")
 @click.argument("name", required=True)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def browse(name, verbose):
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Read local apm.yml without network (remote entries need commit SHAs)",
+)
+def browse(name, verbose, offline=False):
     """Show available plugins in a marketplace."""
     logger = CommandLogger("marketplace-browse", verbose=verbose)
     try:
@@ -809,7 +838,7 @@ def browse(name, verbose):
         source = get_marketplace_by_name(name)
         logger.start(f"Fetching plugins from '{name}'...", symbol="search")
 
-        manifest = fetch_marketplace(source, force_refresh=True)
+        manifest = fetch_marketplace(source, force_refresh=True, offline=offline)
 
         if not manifest.plugins:
             logger.warning(f"Marketplace '{name}' has no plugins")

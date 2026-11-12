@@ -16,7 +16,7 @@ repository references with the normal host authentication chain.
 
 ## User config trust boundary
 
-`~/.apm/config.json` is user-scoped state, not org policy. Keep durable config
+`$APM_HOME/config.json` (default `~/.apm/config.json`) is user-scoped state, not org policy. Keep durable config
 additive and narrow: `apm config` may persist non-secret defaults such as
 install targets, transport preferences, and self-update installer preferences
 (`self-update.channel`, `self-update.install-dir`). Do not use self-update

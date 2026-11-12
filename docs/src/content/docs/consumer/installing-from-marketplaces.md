@@ -33,6 +33,15 @@ Most read `.claude-plugin/marketplace.json` (Anthropic-compatible
 schema); Codex reads `.agents/plugins/marketplace.json`. Producers
 who enable both outputs reach every runtime from one repo.
 
+## Local authoring previews through APM
+
+To preview an author's catalog before it is published, run
+`apm marketplace add ./apm.yml --name alice-dev`, then
+`apm install my-tool@alice-dev`. APM rereads the file on each command;
+registration does not install its inventory or publish anything. See
+[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
+for offline and locked-replay rules.
+
 ## Codex compatibility bundles through APM
 
 APM recognizes a compatibility-only `.codex-plugin/plugin.json` without
