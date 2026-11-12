@@ -127,3 +127,30 @@ def test_transitive_denial_install_chain_is_atomic(tmp_path: Path, apm_binary_pa
         # An unrelated allowed package installs once the denied graph is gone.
         run_step(runner, ("install", f"{other.slug}#v1.0.0"), cwd=project, env=env, step="9-other")
         assert lock_repo_urls(project) == {other.slug}
+
+
+@pytest.mark.lifecycle_smoke
+def test_audit_no_cache_fetches_fresh_auto_discovered_policy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """--no-cache bypasses a fresh cache for auto-discovered policy (#3659)."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-b")
+    world.publish_policy(_ALLOW_ALL)
+    project = world.consumer(dependencies=[f"{pkg.slug}#v1.0.0"])
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("install",), cwd=project, env=env, step="1-install")
+        world.publish_policy(_deny(pkg.slug))
+        # The cache is still fresh: a cached read keeps the old verdict.
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="2-audit-cached")
+        r = run_step(
+            runner,
+            ("audit", "--ci", "--no-cache"),
+            cwd=project,
+            env=env,
+            step="3-audit-no-cache",
+            expected=1,
+        )
+        assert "pkg-b" in output(r), output(r)
