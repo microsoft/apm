@@ -829,12 +829,14 @@ def configured_git_url_policy(
     return snapshot.rewrites, snapshot.http_headers
 
 
-# issue #2545: the only two keys inherited from the ambient (non-isolated)
-# git config into APM's anonymous-first github.com attempt. Deliberately
-# narrow -- credential.helper and other auth-bearing config are never read
-# here, so the credential-leakage boundary the isolated environment exists
-# for is unaffected.
-_TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset({"http.sslbackend", "http.sslcainfo"})
+# issue #2545: the only keys inherited from the ambient (non-isolated) git
+# config into APM's isolated github.com environments. Deliberately narrow --
+# credential.helper and other auth-bearing config are never read here, so the
+# credential-leakage boundary the isolated environment exists for is
+# unaffected.
+_TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset(
+    {"http.sslbackend", "http.sslcainfo", "http.sslcapath"}
+)
 
 # Module-level cache for the ambient (env=None) TLS probe -- see
 # real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
@@ -848,7 +850,7 @@ _real_git_tls_config_lock = threading.Lock()
 
 
 def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
-    """Return the ambient ``http.sslBackend``/``http.sslCAInfo`` git config.
+    """Return the ambient ``http.sslBackend``/``sslCAInfo``/``sslCAPath`` config.
 
     Reads the *non-isolated* config a plain ``git clone`` would see -- the
     settings that let it succeed behind a TLS-inspecting proxy whose
@@ -895,6 +897,9 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
             snapshot = _read_effective_git_config(git_subprocess_env(env))
             values: dict[str, str] = {}
             for entry in snapshot.entries:
+                # Defense in depth: repository config is never a trust source.
+                if entry.scope in {"local", "worktree"}:
+                    continue
                 normalized = entry.key.lower()
                 if normalized in _TLS_TRANSPORT_CONFIG_KEYS:
                     values[normalized] = entry.value

@@ -1,7 +1,7 @@
 """Tests for ``real_git_tls_config`` (issue #2545).
 
-Reads the ambient (non-isolated) ``http.sslBackend``/``http.sslCAInfo`` git
-config that lets a plain ``git clone`` succeed behind a TLS-inspecting proxy
+Reads the ambient (non-isolated) ``http.sslBackend``/``http.sslCAInfo``/
+``http.sslCAPath`` git config that lets a plain ``git clone`` succeed behind a TLS-inspecting proxy
 whose intercepting CA chain has no revocation info.
 """
 
@@ -48,6 +48,25 @@ class TestRealGitTlsConfig:
                 "http.sslbackend": "schannel",
                 "http.sslcainfo": "/etc/ssl/corp-ca.pem",
             }
+
+    def test_returns_ssl_ca_path(self) -> None:
+        snapshot = _snapshot(("http.sslcapath", "/etc/ssl/corp-certs"))
+        with patch("apm_cli.utils.git_env._read_effective_git_config", return_value=snapshot):
+            assert real_git_tls_config() == {"http.sslcapath": "/etc/ssl/corp-certs"}
+
+    def test_repository_scoped_entries_are_never_trusted(self) -> None:
+        """Local/worktree config from a repository is not a trust source."""
+        snapshot = _GitConfigSnapshot(
+            (
+                GitConfigEntry("global", "http.sslcainfo", "/user/ca.pem"),
+                GitConfigEntry("local", "http.sslcainfo", "/repo/evil-ca.pem"),
+                GitConfigEntry("worktree", "http.sslcapath", "/repo/evil-certs"),
+            ),
+            (),
+            (),
+        )
+        with patch("apm_cli.utils.git_env._read_effective_git_config", return_value=snapshot):
+            assert real_git_tls_config() == {"http.sslcainfo": "/user/ca.pem"}
 
     def test_ignores_unrelated_config_keys(self) -> None:
         """credential.helper and insteadOf rewrites are never read here."""
