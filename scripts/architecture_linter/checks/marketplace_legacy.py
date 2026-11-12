@@ -56,7 +56,7 @@ _PACK_COMMAND = "src/apm_cli/commands/pack.py"
 _PLUGIN_INIT_COMMAND = "src/apm_cli/commands/plugin/init.py"
 _INSTALL_COMMAND = "src/apm_cli/commands/install.py"
 _MARKETPLACE_RESOLVER = "src/apm_cli/marketplace/resolver.py"
-_MARKETPLACE_CHECK = "src/apm_cli/commands/marketplace/check.py"
+_MARKETPLACE_REF_RESOLVER = "src/apm_cli/marketplace/ref_resolver.py"
 _PLUGIN_PARSER = "src/apm_cli/deps/plugin_parser.py"
 _YAML_IO = "src/apm_cli/utils/yaml_io.py"
 
@@ -431,7 +431,7 @@ def check_bundle_format_authority(provider: FactsProvider, rule_id: str) -> tupl
 # --------------------------------------------------------------------------
 _DEF_BOUNDARY = re.compile(r"^def ")
 _PACKED_SOURCE_DEF = re.compile(r"^def _dependency_reference_from_packed_source\(")
-_ENTRY_COORDINATES_DEF = re.compile(r"^def _entry_coordinates\(")
+_ENTRY_COORDINATES_DEF = re.compile(r"^def package_entry_coordinates\(")
 _PACKED_SOURCE_REQUIRED = (
     'entry: dict[str, object] = {"git": remote.strip()}',
     'entry["path"] = path',
@@ -504,12 +504,12 @@ def check_marketplace_source_parsing(
             provider,
             inv,
             rule_id,
-            path=_MARKETPLACE_CHECK,
+            path=_MARKETPLACE_REF_RESOLVER,
             opener=_ENTRY_COORDINATES_DEF,
             required=_ENTRY_COORDINATES_REQUIRED,
             parallel=_ENTRY_COORDINATES_PARALLEL,
             ignore=(),
-            message="Marketplace check source coordinates must use DependencyReference parsing",
+            message="Marketplace entry coordinates must use DependencyReference parsing",
         ),
     )
 

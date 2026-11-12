@@ -105,7 +105,8 @@ class HeadNotAllowedError(BuildError):
         super().__init__(
             f"Package '{package}' resolves to branch/HEAD ref '{ref}'. "
             f"Branch refs are mutable and not recommended for reproducible builds. "
-            f"Pin to a tag or SHA, or pass --allow-head to override.",
+            f"Pin 'ref' to a tag or a full 40-character commit SHA "
+            f"(for example: apm marketplace package set {package} --ref <tag-or-sha>).",
             package=package,
         )
 

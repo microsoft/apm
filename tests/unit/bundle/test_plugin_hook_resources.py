@@ -454,3 +454,41 @@ def test_dependency_collision_cannot_substitute_a_first_party_hook_resource(
         "hooks/scripts/other.py",
         "hooks/scripts/support.txt",
     } <= packed_lock["pack"]["bundle_files"].keys()
+
+
+def test_relative_hook_script_is_packed_like_install_resolves_it(tmp_path: Path) -> None:
+    """``./scripts/x`` resolves from the hook directory first (as install does)."""
+    factory = LocalPackageFactory(tmp_path)
+    package = factory.create("rel", version="1.0.0")
+    factory.add_hook(
+        package,
+        "fmt",
+        {
+            "hooks": {
+                "PostToolUse": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": "./scripts/fmt.sh && ./missing.sh"},
+                            {"type": "command", "command": "cd ./src && make"},
+                        ]
+                    }
+                ]
+            }
+        },
+    )
+    script = package.root / ".apm/hooks/scripts/fmt.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\necho fmt\n", encoding="utf-8")
+    (package.root / "src").mkdir()
+
+    result = export_plugin_bundle(package.root, package.root / "dist")
+
+    handlers = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))["hooks"][
+        "PostToolUse"
+    ][0]["hooks"]
+    # Existing files are packed and repointed; directories and missing files
+    # are left exactly as authored, matching install.
+    assert handlers[0]["command"] == "./hooks/scripts/fmt.sh && ./missing.sh"
+    assert handlers[1]["command"] == "cd ./src && make"
+    assert (result.bundle_path / "hooks/scripts/fmt.sh").read_bytes() == script.read_bytes()
+    assert "hooks/scripts/fmt.sh" in result.files

@@ -350,7 +350,9 @@ Add a package entry to the authoring config. `SOURCE` may be an
 `owner/repo` shorthand, a `host.tld/owner/repo` shorthand, or a full
 `https://host.tld/path/to/repo[.git]` URL with two or more repository
 path segments. Mutable refs (`HEAD`, branches) are auto-resolved to a
-concrete SHA at write time.
+concrete SHA at write time. A tag passed to `--ref` must exist on the
+remote, as `apm marketplace check` requires; otherwise the command exits
+`2` without changing `apm.yml`. `--no-verify` stores it unchecked.
 
 | Flag | Description |
 |---|---|

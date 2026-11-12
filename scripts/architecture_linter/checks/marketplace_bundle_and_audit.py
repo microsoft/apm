@@ -369,7 +369,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id=_RID_SOURCE_PARSING,
         group=GROUP,
-        guard_ids=(),
+        guard_ids=(_RID_SOURCE_PARSING,),
         description="Marketplace source coordinates parse through DependencyReference.",
         check=_check_marketplace_source_parsing,
     ),

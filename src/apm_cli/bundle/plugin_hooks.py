@@ -15,11 +15,16 @@ from apm_cli.integration.hook_bundle import (
 )
 from apm_cli.integration.hook_command_paths import (
     iter_plugin_root_paths,
+    iter_relative_script_paths,
     normalize_quoted_plugin_root,
     plugin_root_relative_path,
     relocated_plugin_root_reference,
+    splice_references,
 )
-from apm_cli.integration.hook_source_selection import resolve_plugin_root_hook_script
+from apm_cli.integration.hook_source_selection import (
+    resolve_plugin_root_hook_script,
+    resolve_relative_hook_script,
+)
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -197,6 +202,7 @@ class PluginHookResources:
                 self._collect_bundle(source, descriptor)
                 replacement = relocated_plugin_root_reference(match, output)
                 rewritten = rewritten[: match.start()] + replacement + rewritten[match.end() :]
+            rewritten = self._rewrite_relative_scripts(rewritten, descriptor)
             cursor = data
             pointer = declaration.json_pointer.split("/")[1:]
             for token in pointer[:-1]:
@@ -204,6 +210,26 @@ class PluginHookResources:
                 cursor = cursor[int(decoded)] if isinstance(cursor, list) else cursor[decoded]
             cursor[declaration.key] = rewritten
         return data
+
+    def _rewrite_relative_scripts(self, command: str, descriptor: Path) -> str:
+        """Pack ``./`` script references exactly as install resolves them.
+
+        Install copies an existing file named by a relative reference (hook
+        directory first, then package root); the bundle must carry that file
+        and point the reference at its packed location under the bundle root,
+        where the packed ``hooks.json`` lives. Non-file references are left
+        untouched, matching install.
+        """
+        edits: list[tuple[int, int, str]] = []
+        for match in iter_relative_script_paths(command):
+            relative = match.group(1)[2:].replace("\\", "/")
+            source = resolve_relative_hook_script(self.root, descriptor.parent, relative)
+            if source is None or not source.is_file():
+                continue
+            output = self._add_resource(source)
+            self._collect_bundle(source, descriptor)
+            edits.append((*match.span(1), f"./{output}"))
+        return splice_references(command, edits)
 
     def validate_outputs(
         self, file_map: dict[str, tuple[Path, str]], *, reserved: set[str]

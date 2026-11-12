@@ -33,6 +33,17 @@
       "guards": ["marketplace-integrations-source-admission"]
     },
     {
+      "id": "marketplace-entry-ref-verification",
+      "decision": "Which remote an authored marketplace entry resolves against, and whether its explicit ref exists there",
+      "owner": "marketplace/ref_resolver.py (package_entry_coordinates, explicit_ref_error); consumers: apm marketplace check and marketplace package add/set. Build-time sibling: builder._remote_source_coordinates",
+      "selectors": [
+        "src/apm_cli/commands/marketplace/check.py",
+        "src/apm_cli/commands/marketplace/plugin/__init__.py",
+        "src/apm_cli/commands/marketplace/plugin/set.py"
+      ],
+      "guards": ["marketplace-integrations-source-parsing"]
+    },
+    {
       "id": "local-marketplace-version-precedence",
       "decision": "Local marketplace package-version manifest precedence",
       "owner": "marketplace/version_check.py (_read_local_version)",

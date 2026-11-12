@@ -87,7 +87,7 @@ def _relative_hook_script_bases(
     return bases
 
 
-def _resolve_relative_hook_script(
+def resolve_relative_hook_script(
     package_path: Path,
     hook_file_dir: Path | None,
     rel_path: str,
@@ -148,7 +148,7 @@ def _referenced_hook_source_files(
             if source_file.is_file():
                 source_files.add(source_file)
         for match in iter_relative_script_paths(command):
-            source_file = _resolve_relative_hook_script(
+            source_file = resolve_relative_hook_script(
                 package_path,
                 hook_file_dir,
                 match.group(1)[2:].replace("\\", "/"),

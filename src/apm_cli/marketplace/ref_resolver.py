@@ -24,6 +24,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..deps.git_remote_ops import tag_commit_shas
 from ..utils.git_env import redact_git_diagnostic, run_git_text
@@ -41,11 +42,16 @@ from ._git_utils import redact_token as _redact_token  # noqa: F401
 from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
 
+if TYPE_CHECKING:
+    from .yml_schema import PackageEntry
+
 __all__ = [
     "RefCache",
     "RefResolver",
     "RemoteRef",
+    "explicit_ref_error",
     "is_commit_pin_ref",
+    "package_entry_coordinates",
 ]
 
 # ---------------------------------------------------------------------------
@@ -814,3 +820,84 @@ class RefResolver:
         self._cache.clear()
         with self._lock:
             self._remote_locks.clear()
+
+
+def package_entry_coordinates(
+    entry: PackageEntry, source_base: str | None
+) -> tuple[str | None, str, str | None, str | None]:
+    """Return ``(host, owner_repo, org, display_url)`` for *entry*, mirroring the build-time
+    routing in ``MarketplaceBuilder._remote_source_coordinates`` so that
+    ``check``, ``package set`` and ``pack`` resolve every entry against the
+    same host AND the same per-org auth hint.
+
+    - Full HTTPS entries retain their encoded display URL while
+      ``DependencyReference`` supplies decoded repository and ADO coordinates.
+    - A host-prefixed shorthand (``host.tld/owner/repo``) is an override with
+      no org hint, matching the builder.
+    - Otherwise, when ``marketplace.sourceBase`` is set, a host-less source
+      composes onto the base. ``DependencyReference`` supplies its decoded
+      identity and ADO org hint, while a non-ADO sourceBase keeps its decoded
+      leading path segment as the per-org hint.
+    - Otherwise the source stays a default-host ``owner/repo`` with no hint.
+    """
+    from ..models.dependency.host_virtual import repository_owner
+    from ..models.dependency.reference import DependencyReference
+
+    if entry.host:
+        if entry.source_url is not None:
+            dependency = DependencyReference.parse(entry.source_url)
+            return (
+                dependency.host,
+                dependency.repo_url,
+                dependency.ado_organization,
+                entry.source_url,
+            )
+        return entry.host, entry.source, None, None
+    if source_base:
+        source_url = f"{source_base}/{entry.source}"
+        dependency = DependencyReference.parse(source_url)
+        org = dependency.ado_organization or repository_owner(dependency.repo_url)
+        return dependency.host, dependency.repo_url, org, source_url
+    return None, entry.source, None, None
+
+
+_HEX_REF_RE = re.compile(r"[0-9a-fA-F]{7,64}")
+
+
+def explicit_ref_error(
+    ref: str,
+    refs: list[RemoteRef],
+    *,
+    resolver: RefResolver,
+    owner_repo: str,
+    offline: bool,
+) -> str:
+    """Return an error for an explicit ``ref``, or ``""`` when it resolves.
+
+    Shared by ``apm marketplace check`` and ``apm marketplace package
+    add/set`` so authoring never stores a ref that check would reject.
+
+    Tag and branch names match first, as before. A full commit SHA that no
+    name matches is accepted when it is a branch tip or when the
+    remote serves that commit; ``ls-remote`` alone never lists it.
+    """
+    for r in refs:
+        short = r.name
+        if short.startswith("refs/tags/"):
+            short = short[len("refs/tags/") :]
+        elif short.startswith("refs/heads/"):
+            short = short[len("refs/heads/") :]
+        if ref in (short, r.name):
+            return ""
+    if is_commit_pin_ref(ref):
+        # Only a branch tip is necessarily a commit; a tag may name a tree or blob.
+        if any(r.name.startswith("refs/heads/") and r.sha == ref for r in refs):
+            return ""
+        if offline:
+            return f"Commit '{ref}' cannot be verified offline"
+        if resolver.commit_exists(owner_repo, ref):
+            return ""
+        return f"Commit '{ref}' not reachable on remote"
+    if _HEX_REF_RE.fullmatch(ref):
+        return f"Ref '{ref}' not found; commit pins need the full 40-char lowercase SHA"
+    return f"Ref '{ref}' not found"

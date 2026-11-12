@@ -1155,6 +1155,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Marketplace client reintroduces source-host parsing outside the owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-source-parsing",
+        rule_id="marketplace-integrations-source-parsing",
+        path="src/apm_cli/marketplace/ref_resolver.py",
+        old="dependency = DependencyReference.parse(source_url)",
+        new="dependency = urlparse(source_url)",
+        intent="Marketplace entry coordinates stop parsing through DependencyReference.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-tag-pattern",
         rule_id="marketplace-integrations-tag-pattern",
         path="src/apm_cli/marketplace/tag_pattern.py",

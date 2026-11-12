@@ -73,8 +73,8 @@ from apm_cli.integration.hook_source_selection import (
     HookSourceSelection,
     _parse_hook_json,
     _referenced_hook_source_files,
-    _resolve_relative_hook_script,
     resolve_plugin_root_hook_script,
+    resolve_relative_hook_script,
     select_hook_sources,
 )
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -677,7 +677,7 @@ class HookIntegrator(BaseIntegrator):
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            source_file = _resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
+            source_file = resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
             if source_file is None:
                 continue
             if source_file.exists() and source_file.is_file():
