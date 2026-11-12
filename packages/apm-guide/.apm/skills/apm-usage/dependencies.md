@@ -91,10 +91,11 @@ things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when
 APM checks out dependencies with `core.autocrlf=false` and `core.eol=lf` on
 its own Git commands only, so `text` / `text=auto` files keep their committed
 LF bytes on every platform and the `content_hash` matches. Explicit
-`.gitattributes` `eol=crlf` / `eol=lf`, binary files and blobs committed with
-CRLF keep their repository-defined bytes. A lockfile written by an older APM
-on Windows may hold a CRLF hash; `--frozen` refuses it, and a reviewed
-`apm install --update` re-records the hash at the same pin.
+`.gitattributes` `eol=` attributes, binary files and blobs committed with CRLF
+keep their repository bytes. A lockfile written by an older APM on Windows may
+hold a CRLF hash that `--frozen` refuses; see [Content hash
+mismatch](https://microsoft.github.io/apm/troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b)
+to recover.
 
 ### Custom git ports
 

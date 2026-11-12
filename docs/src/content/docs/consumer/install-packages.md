@@ -248,13 +248,13 @@ and the full flag reference, or run `apm install --help`.
   only on its own Git commands and does not change your Git configuration.
   Cached checkouts made by older APM versions are re-created automatically.
 - **Line endings differ across platforms.** APM checks out dependencies with
-  `core.autocrlf=false` and `core.eol=lf` on its own Git commands, so files
-  under `.gitattributes` `text` or `text=auto` keep their committed LF bytes
-  on Windows, macOS and Linux. Explicit `eol=crlf` / `eol=lf` attributes,
-  binary files and blobs committed with CRLF keep their repository bytes.
-  Your Git configuration is not changed, and older cached checkouts are
-  re-created automatically. A lockfile recorded by an older APM on Windows
-  can still fail `--frozen` with `Content hash mismatch`; see
+  `core.autocrlf=false` and `core.eol=lf` on its own Git commands, so
+  `text` / `text=auto` files keep their committed LF bytes on every platform
+  (details in the [`content_hash` field](../../reference/lockfile-spec/)).
+  Your Git configuration is not changed. Older cached checkouts are
+  re-created on their next use, so the first install after upgrading can
+  take longer. A lockfile recorded by an older APM on Windows can still fail
+  `--frozen` with `Content hash mismatch`; see
   [the recovery steps](../../troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b).
 - **Critical security finding.** Install aborts with the offending
   characters and file path. Patch upstream when you can; use
