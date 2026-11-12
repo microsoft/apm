@@ -22,6 +22,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.deps.carried_license import is_license_file_name
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -55,8 +56,12 @@ def render_skill_markdown(
     """Return the rendered markdown text and the number of links it rewrites.
 
     The deployer writes the rendered text only when the count is nonzero;
-    otherwise the member stays a byte copy of its source.
+    otherwise the member stays a byte copy of its source. Licence files
+    (``LICENSE.md`` and friends, #3556) are never read or rewritten, so they
+    deploy as uninterpreted byte copies whatever their encoding.
     """
+    if is_license_file_name(source_file.name):
+        return "", 0
     content = source_file.read_text(encoding="utf-8")
     return resolve_links(content, source_file, target_file, preserved_source_root=source_root)
 

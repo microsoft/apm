@@ -28,6 +28,7 @@ from hypothesis import given, seed, settings
 from hypothesis import strategies as st
 
 from apm_cli.core.host_providers import accepted_host_types
+from apm_cli.deps.carried_license import CarriedLicense
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.provider_coordinates import ProviderCoordinateMixin
 from apm_cli.models.dependency.reference import DependencyReference
@@ -164,6 +165,10 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     kwargs["resolved_tag"] = maybe(None, st.just("v1.2.3"))
     kwargs["resolved_at"] = maybe(None, st.just("2026-01-01T00:00:00+00:00"))
     kwargs["declared_license"] = maybe(None, st.just("MIT"))
+    kwargs["carried_licenses"] = maybe(
+        (),
+        st.just((CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)),
+    )
     kwargs["exec_status"] = maybe(None, st.sampled_from(_ALLOWED_EXEC_STATUS))
     kwargs["name"] = maybe(None, st.just("consume-contract"))
     # Empty maps are omitted from to_dict(); from_dict restores {}. Include
