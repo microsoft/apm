@@ -16,6 +16,7 @@ from apm_cli.marketplace.models import (
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.resolver import (
     _dependency_reference_from_packed_source,
+    _extract_in_repo_path_and_ref,
     _resolve_git_subdir_source,
     _resolve_github_source,
     _resolve_relative_source,
@@ -305,6 +306,30 @@ class TestSourceShaPin:
     def test_empty_sha_falls_back_to_ref(self):
         source = {"type": "github", "repo": "owner/repo", "ref": "v1.0.0", "sha": ""}
         assert _resolve_github_source(source) == "owner/repo#v1.0.0"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            {"type": "github", "path": "plugins/demo"},
+            {"type": "git-subdir", "subdir": "plugins/demo"},
+            {"type": "gitlab", "path": "plugins/demo"},
+        ],
+    )
+    @pytest.mark.parametrize("ref", [None, "main"])
+    def test_in_marketplace_source_uses_sha(self, source, ref):
+        source = {**source, "sha": self.SHA}
+        if ref is not None:
+            source["ref"] = ref
+        plugin = MarketplacePlugin(name="demo", source=source)
+        assert _extract_in_repo_path_and_ref(plugin) == ("plugins/demo", self.SHA)
+
+    def test_in_marketplace_source_rejects_malformed_sha(self):
+        plugin = MarketplacePlugin(
+            name="demo",
+            source={"type": "github", "path": "plugins/demo", "ref": "main", "sha": "abc123"},
+        )
+        with pytest.raises(ValueError, match="40-character commit SHA"):
+            _extract_in_repo_path_and_ref(plugin)
 
 
 class TestResolveRelativeSource:
