@@ -9,6 +9,9 @@ Strategy: hermetic -- mocks registry, runtime, console.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -18,15 +21,72 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.uninstall.engine import _cleanup_stale_mcp
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.apm_package import clear_apm_yml_cache
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def test_uninstall_cleanup_preserves_same_named_server_in_other_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime ownership must prevent cross-runtime same-name deletion."""
+    home = tmp_path / "home"
+    hermes_config = home / ".hermes" / "config.yaml"
+    codex_config = home / ".codex" / "config.toml"
+    hermes_config.parent.mkdir(parents=True)
+    codex_config.parent.mkdir(parents=True)
+    hermes_config.write_text(
+        "mcp_servers:\n  shared-name:\n    command: managed\n",
+        encoding="utf-8",
+    )
+    codex_config.write_text(
+        '[mcp_servers."shared-name"]\ncommand = "user-command"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HERMES_HOME", str(hermes_config.parent))
+    lockfile = LockFile(
+        mcp_servers=["shared-name"],
+        mcp_target_servers={"hermes": ["shared-name"]},
+    )
+    view = SimpleNamespace(dependencies=[], configs={}, provenance={})
+
+    with patch(
+        "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
+        return_value=view,
+    ):
+        _cleanup_stale_mcp(
+            MagicMock(),
+            lockfile,
+            tmp_path / "apm.lock.yaml",
+            {"shared-name"},
+            modules_dir=tmp_path / "apm_modules",
+            user_scope=True,
+            scope=InstallScope.USER,
+            persist=False,
+        )
+
+    assert (
+        "shared-name"
+        not in yaml.safe_load(hermes_config.read_text(encoding="utf-8"))["mcp_servers"]
+    )
+    assert (
+        tomlkit.parse(codex_config.read_text(encoding="utf-8"))["mcp_servers"]["shared-name"][
+            "command"
+        ]
+        == "user-command"
+    )
 
 
 def _make_registry_dep(
@@ -258,6 +318,329 @@ def test_install_loopback_http_remote_is_byte_idempotent_for_requested_targets(
     assert (codex_config_path.read_bytes(), copilot_config_path.read_bytes()) == first_configs
 
 
+def test_install_preserves_safe_opencode_passthrough_fields(tmp_path, monkeypatch) -> None:
+    """OpenCode writes safe extras without accepting its modeled env alias."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / ".opencode").mkdir()
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    manifest = _self_defined_remote_manifest(
+        targets=["opencode"],
+        url="https://mcp.slack.com/mcp",
+    )
+    server = manifest["dependencies"]["mcp"][0]
+    server.update(
+        {
+            "oauth": {"clientId": "client", "callbackPort": 3118},
+            "myField": "somevalue",
+            "environment": {"NODE_OPTIONS": "--require ./payload.js"},
+            "id": "manifest-supplied-id",
+        }
+    )
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    normalized_output = " ".join(result.output.split())
+    assert "reserved passthrough key(s) ignored" in normalized_output
+    assert "environment, id" in normalized_output
+    assert "unknown key(s) preserved in extra: myField, oauth" in normalized_output
+    config = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
+    rendered = config["mcp"]["loopback-remote"]
+    rendered_url = urlparse(rendered["url"])
+    assert (rendered_url.scheme, rendered_url.hostname, rendered_url.path) == (
+        "https",
+        "mcp.slack.com",
+        "/mcp",
+    )
+    assert rendered["oauth"] == {"clientId": "client", "callbackPort": 3118}
+    assert rendered["myField"] == "somevalue"
+    assert rendered["enabled"] is True
+    assert "environment" not in rendered
+    assert "id" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("server_kind", "enabled"),
+    [
+        ("local", False),
+        ("local", "false"),
+        ("local", None),
+        ("remote", False),
+        ("remote", "false"),
+        ("remote", None),
+    ],
+)
+def test_install_preserves_opencode_enabled_value_and_type(
+    tmp_path, monkeypatch, server_kind, enabled
+):
+    """Explicit OpenCode values pass through for local and remote MCP servers."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / ".opencode").mkdir()
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    if server_kind == "local":
+        manifest = _self_defined_manifest(targets=["opencode"])
+    else:
+        manifest = _self_defined_remote_manifest(
+            targets=["opencode"],
+            url="https://mcp.slack.com/mcp",
+        )
+    server = manifest["dependencies"]["mcp"][0]
+    server["enabled"] = enabled
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    config = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
+    server_name = "apm-managed" if server_kind == "local" else "loopback-remote"
+    rendered = config["mcp"][server_name]
+    assert rendered["type"] == ("local" if server_kind == "local" else "remote")
+    assert rendered["enabled"] == enabled
+    assert type(rendered["enabled"]) is type(enabled)
+
+
+@pytest.fixture
+def codex_remote_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Use isolated roots and credentials for real in-process manifest installs."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "codex", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    for name in tuple(os.environ):
+        if name not in environment:
+            monkeypatch.delenv(name)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(isolated.work_root)
+    monkeypatch.setattr(
+        "requests.sessions.Session.request",
+        MagicMock(side_effect=AssertionError("Self-defined MCP install must not use HTTP")),
+    )
+    LockFile().write(isolated.work_root / "apm.lock.yaml")
+    return isolated.work_root
+
+
+def _write_codex_remote_manifest(project: Path, server_fields: dict[str, object]) -> None:
+    """Write source inputs through the real manifest parser on the next install."""
+    manifest = _self_defined_remote_manifest(
+        targets=["codex"],
+        url="https://mcp.example.invalid/mcp",
+    )
+    manifest["dependencies"]["mcp"][0].update(server_fields)
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+
+
+@pytest.mark.parametrize("placement", ["top-level", "extra"])
+@pytest.mark.parametrize("alias", ["bearer_token_env_var", "env_http_headers"])
+def test_install_codex_rejects_native_header_passthrough(
+    codex_remote_project: Path, placement: str, alias: str
+) -> None:
+    """Reserved native aliases cannot bypass modeled headers in persisted TOML."""
+    injected_secret = "synthetic-passthrough-secret"
+    extra: dict[str, object] = {
+        alias: (
+            injected_secret
+            if alias == "bearer_token_env_var"
+            else {"Authorization": injected_secret}
+        ),
+        "myField": "safe-user-setting",
+    }
+    fields = extra if placement == "top-level" else {"extra": extra}
+    _write_codex_remote_manifest(
+        codex_remote_project,
+        {**fields, "headers": {"X-Static": "literal-header"}},
+    )
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "reserved passthrough key(s) ignored" in output
+    assert alias in output
+    assert injected_secret not in output
+    config_text = (codex_remote_project / ".codex" / "config.toml").read_text(encoding="utf-8")
+    server = tomlkit.parse(config_text)["mcp_servers"]["loopback-remote"]
+    assert server["http_headers"] == {"X-Static": "literal-header"}
+    assert server["myField"] == "safe-user-setting"
+    assert "bearer_token_env_var" not in server
+    assert "env_http_headers" not in server
+    assert injected_secret not in config_text
+
+
+@pytest.mark.parametrize("environment_set", [False, True], ids=["unset", "set"])
+@pytest.mark.parametrize(
+    ("header_name", "value", "expected"),
+    [
+        ("X-Key", "${APM_TEST_HEADER}", {"env_http_headers": {"X-Key": "APM_TEST_HEADER"}}),
+        ("X-Key", "${env:APM_TEST_HEADER}", {"env_http_headers": {"X-Key": "APM_TEST_HEADER"}}),
+        ("Authorization", "Bearer ${APM_TEST_HEADER}", {"bearer_token_env_var": "APM_TEST_HEADER"}),
+        (
+            "aUtHoRiZaTiOn",
+            "bEaReR ${env:APM_TEST_HEADER}",
+            {"bearer_token_env_var": "APM_TEST_HEADER"},
+        ),
+        (
+            "Authorization",
+            "${APM_TEST_HEADER}",
+            {"env_http_headers": {"Authorization": "APM_TEST_HEADER"}},
+        ),
+        (
+            "Authorization",
+            "${env:APM_TEST_HEADER}",
+            {"env_http_headers": {"Authorization": "APM_TEST_HEADER"}},
+        ),
+    ],
+    ids=["bare-env", "prefixed-env", "bearer", "mixed-case-bearer", "whole-auth", "prefixed-auth"],
+)
+def test_install_codex_exact_runtime_headers_do_not_materialize_secrets(
+    codex_remote_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment_set: bool,
+    header_name: str,
+    value: str,
+    expected: dict[str, object],
+) -> None:
+    """Set and absent environment variables produce identical native references."""
+    secret = "synthetic-runtime-header-secret"
+    if environment_set:
+        monkeypatch.setenv("APM_TEST_HEADER", secret)
+    else:
+        monkeypatch.delenv("APM_TEST_HEADER", raising=False)
+    _write_codex_remote_manifest(
+        codex_remote_project,
+        {"headers": {"X-Static": "literal-header", header_name: value}},
+    )
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    config_text = (codex_remote_project / ".codex" / "config.toml").read_text(encoding="utf-8")
+    server = dict(tomlkit.parse(config_text)["mcp_servers"]["loopback-remote"])
+    endpoint = urlparse(server.pop("url"))
+    assert (endpoint.scheme, endpoint.hostname, endpoint.path) == (
+        "https",
+        "mcp.example.invalid",
+        "/mcp",
+    )
+    assert "id" not in server
+    assert server == {"http_headers": {"X-Static": "literal-header"}, **expected}
+    assert secret not in config_text
+    assert secret not in result.output
+    assert "Skipping header" not in result.output
+    assert "Enter" not in result.output
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "${CONTEXT7_API_KEY:-}",
+        "${APM_TEST_HEADER:-synthetic-default-secret}",
+        "prefix-secret ${APM_TEST_HEADER}",
+        "${APM_TEST_HEADER} suffix-secret",
+        "Bearer ${APM_TEST_HEADER}",
+        "${APM_TEST_HEADER",
+        "${env:APM_TEST_HEADER",
+        "${BAD-NAME}",
+        "${}",
+    ],
+    ids=[
+        "issue-shell-default",
+        "secret-shell-default",
+        "mixed-prefix",
+        "mixed-suffix",
+        "non-authorization-bearer",
+        "unclosed",
+        "unclosed-prefixed",
+        "invalid-name",
+        "empty-name",
+    ],
+)
+def test_install_codex_warns_and_omits_unsupported_headers(
+    codex_remote_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsupported: str,
+) -> None:
+    """Malformed references never become misleading native or literal headers."""
+    secret = "synthetic-unsupported-header-secret"
+    monkeypatch.setenv("APM_TEST_HEADER", secret)
+    monkeypatch.setenv("CONTEXT7_API_KEY", secret)
+    _write_codex_remote_manifest(
+        codex_remote_project,
+        {"headers": {"X-Unsupported": unsupported, "X-Static": "literal-header"}},
+    )
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Skipping header(s) X-Unsupported" in output
+    assert "loopback-remote" in output
+    assert "export the whole header value as one variable" in output
+    for hidden in (
+        unsupported,
+        secret,
+        "synthetic-default-secret",
+        "prefix-secret",
+        "suffix-secret",
+    ):
+        assert hidden not in output
+    config_text = (codex_remote_project / ".codex" / "config.toml").read_text(encoding="utf-8")
+    server = tomlkit.parse(config_text)["mcp_servers"]["loopback-remote"]
+    assert server["http_headers"] == {"X-Static": "literal-header"}
+    assert "env_http_headers" not in server
+    assert "bearer_token_env_var" not in server
+    assert "env" not in server
+    assert secret not in config_text
+
+
+def test_install_codex_retains_input_header_warning(codex_remote_project: Path) -> None:
+    """VS Code input placeholders retain their existing literal-plus-warning path."""
+    _write_codex_remote_manifest(
+        codex_remote_project,
+        {"headers": {"X-Input": "${input:apiKey}", "X-Static": "literal-header"}},
+    )
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Codex CLI does not support input variable prompts" in output
+    assert "Skipping header" not in output
+    server = tomlkit.parse(
+        (codex_remote_project / ".codex" / "config.toml").read_text(encoding="utf-8")
+    )["mcp_servers"]["loopback-remote"]
+    assert server["http_headers"] == {
+        "X-Input": "${input:apiKey}",
+        "X-Static": "literal-header",
+    }
+    assert "env_http_headers" not in server
+
+
+@pytest.mark.parametrize("control", ["\r", "\n"], ids=["CR", "LF"])
+@pytest.mark.parametrize("location", ["name", "value"])
+def test_install_codex_rejects_header_crlf_at_manifest_validation(
+    codex_remote_project: Path, control: str, location: str
+) -> None:
+    """Invalid manifests fail before the formatter; do not bypass CR/LF validation."""
+    name = f"X-Key{control}" if location == "name" else "X-Key"
+    value = f"${{APM_TEST_HEADER}}{control}" if location == "value" else "${APM_TEST_HEADER}"
+    _write_codex_remote_manifest(codex_remote_project, {"headers": {name: value}})
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code != 0
+    assert "(CR/LF) not allowed in keys or values" in " ".join(result.output.split())
+    assert not (codex_remote_project / ".codex" / "config.toml").exists()
+    lockfile = LockFile.read(codex_remote_project / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.mcp_target_servers == {}
+    assert DeploymentLedgerCodec.from_lockfile(lockfile).records == {}
+
+
 def test_install_rejects_nonloopback_http_without_ownership_claim(tmp_path, monkeypatch) -> None:
     """A rejected Codex HTTP remote cannot create target or deployment state."""
     monkeypatch.chdir(tmp_path)
@@ -347,6 +730,106 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     contracted_lock = LockFile.read(tmp_path / "apm.lock.yaml")
     assert contracted_lock is not None
     assert contracted_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
+
+
+def test_global_manifest_removal_cleans_antigravity_config_and_lock(tmp_path, monkeypatch):
+    """Removing global MCP deps cleans Antigravity's user config and ownership state."""
+    home = tmp_path / "home"
+    apm_home = home / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr("pathlib.Path.home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+
+    manifest = _self_defined_manifest(targets=["antigravity"])
+    (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    LockFile().write(apm_home / "apm.lock.yaml")
+
+    installed = CliRunner().invoke(cli, ["install", "--global", "--no-policy"])
+    assert installed.exit_code == 0, installed.output
+
+    config_path = home / ".gemini" / "config" / "mcp_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["mcpServers"]["user-authored"] = {"command": "keep"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    manifest["dependencies"]["mcp"] = []
+    (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+    removed = CliRunner().invoke(cli, ["install", "--global", "--no-policy"])
+
+    assert removed.exit_code == 0, removed.output
+    servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "apm-managed" not in servers
+    assert servers["user-authored"]["command"] == "keep"
+    lockfile = LockFile.read(apm_home / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.mcp_servers == []
+    assert lockfile.mcp_target_servers == {}
+
+
+def test_prune_removes_only_owned_antigravity_mcp(tmp_path, monkeypatch):
+    """Pruning an orphan package reconciles its MCP config before saving the lock."""
+    package = tmp_path / "orphan-package"
+    package.mkdir()
+    (package / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "orphan-package",
+                "version": "1.0.0",
+                "dependencies": {
+                    "mcp": [
+                        {
+                            "name": "orphan-server",
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "echo",
+                            "args": ["orphan"],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    (project / "apm.yml").write_text(
+        "name: prune-mcp\nversion: 0.0.1\ndependencies:\n  apm: []\n  mcp: []\n",
+        encoding="utf-8",
+    )
+
+    installed = CliRunner().invoke(
+        cli,
+        ["install", str(package), "--target", "antigravity", "--no-policy"],
+    )
+    assert installed.exit_code == 0, installed.output
+
+    config_path = project / ".agents" / "mcp_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "orphan-server" in config["mcpServers"]
+    config["mcpServers"]["user-authored"] = {"command": "keep"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"] = []
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+
+    pruned = CliRunner().invoke(cli, ["prune"])
+    assert pruned.exit_code == 0, pruned.output
+
+    servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "orphan-server" not in servers
+    assert servers["user-authored"]["command"] == "keep"
+    lockfile = LockFile.read(project / "apm.lock.yaml")
+    if lockfile is not None:
+        assert "orphan-server" not in lockfile.mcp_servers
+        assert all(
+            "orphan-server" not in servers for servers in lockfile.mcp_target_servers.values()
+        )
 
 
 def test_legacy_vscode_ownership_migrates_to_copilot_without_rewriting_vscode(
@@ -999,10 +1482,11 @@ class TestExcludeRuntime:
         self,
         tmp_path,
     ) -> None:
-        """A failed adapter write emits an error and records no durable owner."""
+        """A failed write retains target selection but no owned names or hashes."""
         dep = _make_self_defined_dep("write-failure")
         logger = MagicMock()
         managed_target_servers: dict[str, set[str]] = {}
+        native_hashes: dict[str, dict[str, str]] = {}
 
         with (
             patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
@@ -1017,12 +1501,29 @@ class TestExcludeRuntime:
                 logger=logger,
                 project_root=tmp_path,
                 managed_target_servers=managed_target_servers,
+                native_hashes=native_hashes,
             )
 
         assert result == 0
         install_for_runtime.assert_called_once()
-        assert managed_target_servers == {}
+        assert managed_target_servers == {"copilot": set()}
+        assert native_hashes == {}
         logger.error.assert_called_once_with("write-failure -- failed for copilot")
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        MCPIntegrator.update_lockfile(
+            {dep.name},
+            lock_path=lock_path,
+            mcp_target_servers=managed_target_servers,
+            native_hashes=native_hashes,
+            fail_on_write_error=True,
+        )
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        assert lock.mcp_servers == [dep.name]
+        assert lock.mcp_target_servers == {}
+        assert DeploymentLedgerCodec.mcp_native_hashes(lock) == {}
+        assert DeploymentLedgerCodec.from_lockfile(lock).records == {}
 
 
 # ---------------------------------------------------------------------------

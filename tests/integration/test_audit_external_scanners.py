@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from subprocess import CompletedProcess
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from click.testing import CliRunner
@@ -238,6 +240,43 @@ def test_default_skillspector_argv_has_no_llm(runner, monkeypatch, tmp_path):
     assert result.exit_code in (0, 1)
     assert "cmd" in captured
     assert "--no-llm" in captured["cmd"]
+
+
+@pytest.mark.parametrize(
+    "external_args",
+    [
+        "--baseline .skillspector-baseline.yaml",
+        "--baseline=.skillspector-baseline.yaml",
+    ],
+    ids=["separate", "inline"],
+)
+def test_skillspector_baseline_symlink_escape_fails_closed(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, external_args: str
+) -> None:
+    """Keep real symlink containment wired through audit's external-args surface."""
+    import apm_cli.security.external.skillspector as ss
+
+    _inject_flag(monkeypatch, enabled=True)
+    scan_root = tmp_path / "scan"
+    scan_root.mkdir()
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("suppressions: []\n", encoding="utf-8")
+    (scan_root / ".skillspector-baseline.yaml").symlink_to(outside)
+    monkeypatch.chdir(scan_root)
+    scanner_run = Mock(
+        return_value=CompletedProcess([], 0, stdout='{"version": "2.1.0", "runs": []}', stderr="")
+    )
+    monkeypatch.setattr(ss.shutil, "which", lambda _binary: "/usr/bin/skillspector")
+    monkeypatch.setattr(ss.subprocess, "run", scanner_run)
+
+    result = runner.invoke(
+        audit,
+        ["--external", "skillspector", "--no-external-llm", "--external-args", external_args],
+    )
+
+    assert result.exit_code == 3
+    assert "resolves outside the scan directory" in " ".join(result.output.split())
+    scanner_run.assert_not_called()
 
 
 def test_flag_on_warning_only_exits_2(runner, monkeypatch, tmp_path):

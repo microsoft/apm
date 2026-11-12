@@ -35,7 +35,16 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
 ## Install APM
 
 <Tabs syncKey="os">
-  <TabItem label="macOS / Linux" icon="apple">
+  <TabItem label="macOS (Homebrew)" icon="apple">
+    Already use Homebrew?
+
+    ```bash
+    brew install apm
+    ```
+
+    No custom tap needed. Update with `brew upgrade apm`.
+  </TabItem>
+  <TabItem label="Linux / macOS (no Homebrew)" icon="document">
     ```bash
     curl -sSL https://aka.ms/apm-unix | sh
     ```
@@ -47,6 +56,11 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
   </TabItem>
 </Tabs>
 
+Homebrew is optional. See [all installation options](./getting-started/installation/)
+for pip, Scoop, and manual installs. For standalone Unix installs, follow the
+installer's shell-specific `PATH` guidance if the current terminal cannot find
+`apm`.
+
 Then try it on a sample package:
 
 ```bash
@@ -54,6 +68,10 @@ apm install microsoft/apm-sample-package
 ```
 
 ## The manifest
+
+This example omits `$schema` and uses APM's working-draft contract. For an
+explicit schema, see [contract selection and the corrected schema candidate](./reference/manifest-schema/#2-document-structure);
+the older published schemas reject the Git-plus-path form shown below.
 
 ```yaml
 # apm.yml -- ships with your repo, like package.json
@@ -100,4 +118,4 @@ That's it. Each selected harness receives the primitives it supports in one comm
 
 ---
 
-APM is open source under the [microsoft](https://github.com/microsoft/apm) org, MIT-licensed. Built on [AGENTS.md](https://agents.md), [Agent Skills](https://agentskills.io), [MCP](https://modelcontextprotocol.io). See the [changelog](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for what shipped recently.
+APM is open source under the [microsoft](https://github.com/microsoft/apm) org. Software and the software-facing OpenAPM specification use [Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE); general documentation uses [CC-BY-4.0](https://github.com/microsoft/apm/blob/main/LICENSE-DOCS), with [scope and exclusions](https://github.com/microsoft/apm/blob/main/LICENSING.md). Built on [AGENTS.md](https://agents.md), [Agent Skills](https://agentskills.io), [MCP](https://modelcontextprotocol.io). See the [changelog](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for what shipped recently.

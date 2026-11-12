@@ -3,19 +3,36 @@
 import errno
 import os
 import re
+import shutil
+import stat
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
-from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 
 
-def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
+def discover_primitives(*args: Any, **kwargs: Any) -> Any:
+    from apm_cli.primitives.discovery import discover_primitives as _discover_primitives
+
+    return _discover_primitives(*args, **kwargs)
+
+
+def _managed_absolute_target_root(
+    candidate: Path,
+    targets: Any,
+    *,
+    allow_final_symlink: bool = False,
+) -> Path | None:
     """Return the managed root for *candidate*, or ``None`` if unmanaged."""
     from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -29,7 +46,7 @@ def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
             if scoped is not None:
                 source.append(scoped)
     try:
-        resolved = candidate.resolve()
+        resolved = (candidate.parent if allow_final_symlink else candidate).resolve()
         for target_profile in source:
             if target_profile is None:
                 continue
@@ -37,15 +54,18 @@ def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
             if deploy_root is None:
                 continue
             resolved_root = deploy_root.resolve()
+            if has_symlink_component(deploy_root, candidate.parent):
+                continue
             for mapping in target_profile.primitives.values():
                 if not mapping.subdir:
                     continue
-                primitive_root = (resolved_root / mapping.subdir).resolve()
+                primitive_path = deploy_root / mapping.subdir
+                primitive_root = primitive_path.resolve()
                 try:
                     contained = ensure_path_within(resolved, primitive_root)
                 except PathTraversalError:
                     continue
-                if contained != primitive_root:
+                if allow_final_symlink or contained != primitive_root:
                     return resolved_root
             if target_profile.hooks_config_display:
                 hooks_file = resolved_root / Path(target_profile.hooks_config_display).name
@@ -232,6 +252,142 @@ class BaseIntegrator:
         return {p.replace("\\", "/") for p in managed_files}
 
     @staticmethod
+    def walk_source_tree(source: Path) -> Iterator[tuple[str, list[str], list[str]]]:
+        """Enumerate an expected source tree without silently losing unreadable members."""
+
+        def fail(error: OSError) -> None:
+            raise OSError(
+                f"Cannot enumerate source {source}: {error}. "
+                "Restore readable source files and retry installation."
+            ) from error
+
+        try:
+            if not stat.S_ISDIR(source.stat().st_mode):
+                raise NotADirectoryError(f"{source} is not a directory")
+        except OSError as error:
+            fail(error)
+        yield from os.walk(source, followlinks=False, onerror=fail)
+
+    def copy_directory_files(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        ignore: Callable[[str, list[str]], list[str]],
+        path_entry: Callable[[Path], str],
+        is_managed: Callable[[str], bool],
+        recorded_hashes: Mapping[str, str],
+        write_allowed: Callable[[str], bool] | None = None,
+        on_member_skipped: Callable[[Path], None] | None = None,
+        baseline_hash: Callable[[Path], str | None] | None = None,
+        on_member_written: Callable[[Path], None] | None = None,
+        requires_write: Callable[[Path], bool] | None = None,
+        unchanged: bool = False,
+        force: bool = False,
+        diagnostics=None,
+        package: str = "",
+    ) -> list[Path]:
+        """Copy admitted members through the shared skill containment boundary.
+
+        Skill copies route here for symlink and destination-containment checks,
+        without deleting or inventorying destination siblings. *package* is the
+        owning dependency key used to attribute refusal diagnostics.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        copied: list[Path] = []
+        destination_existed = destination.exists()
+        for directory, directories, filenames in self.walk_source_tree(source):
+            ignored = set(ignore(directory, [*directories, *filenames]))
+            directories[:] = sorted(name for name in directories if name not in ignored)
+            for name in sorted(filenames):
+                if name in ignored:
+                    continue
+                source_file = Path(directory) / name
+                target_file = destination / source_file.relative_to(source)
+                if has_symlink_component(destination.parent, target_file, raise_on_error=True):
+                    raise PathTraversalError(
+                        f"Skill destination {target_file} contains a symlink -- refusing to deploy"
+                    )
+                ensure_path_within(target_file, destination)
+                entry = path_entry(target_file)
+                if write_allowed is not None and not write_allowed(entry):
+                    if on_member_skipped is not None:
+                        on_member_skipped(target_file)
+                    continue
+                if target_file.exists() and not target_file.is_file():
+                    raise IsADirectoryError(
+                        f"Cannot deploy {entry}: destination is not a regular file. "
+                        "Move the blocking directory before reinstalling."
+                    )
+                if (
+                    unchanged
+                    and self.is_content_identical_to_source(target_file, source_file)
+                    and not (requires_write is not None and requires_write(target_file))
+                ):
+                    copied.append(target_file)
+                    continue
+                if self.check_collision(
+                    target_file,
+                    entry,
+                    {entry} if is_managed(entry) else set(),
+                    force,
+                    diagnostics=diagnostics,
+                ):
+                    if on_member_skipped is not None:
+                        on_member_skipped(target_file)
+                    continue
+                expected = (
+                    baseline_hash(target_file)
+                    if baseline_hash is not None
+                    else recorded_hashes.get(entry)
+                )
+                if (
+                    not force
+                    and target_file.is_file()
+                    and (
+                        (baseline_hash is not None and expected is None)
+                        or (expected is not None and compute_file_hash(target_file) != expected)
+                    )
+                ):
+                    reason = (
+                        "no trustworthy local deployment baseline"
+                        if expected is None
+                        else "modified since deployment"
+                    )
+                    if expected is None:
+                        message = (
+                            f"Skipped {entry}: {reason}. Move the conflicting file aside "
+                            "and retry; use --force only to intentionally overwrite it."
+                        )
+                    else:
+                        message = (
+                            f"Skipped {entry}: {reason}. "
+                            "Preserve your changes before reinstalling with --force."
+                        )
+                    if diagnostics is not None:
+                        if expected is None:
+                            diagnostics.error(message, package=package)
+                        else:
+                            diagnostics.warn(message)
+                    else:
+                        _rich_warning(message)
+                    if on_member_skipped is not None:
+                        on_member_skipped(target_file)
+                    continue
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.copy2(source_file, target_file)
+                except OSError:
+                    if not destination_existed:
+                        self.cleanup_empty_parents([target_file], destination.parent)
+                    raise
+                copied.append(target_file)
+                if on_member_written is not None:
+                    on_member_written(target_file)
+        return copied
+
+    @staticmethod
     def is_content_identical_to_source(
         target_path: Path,
         source_path: Path,
@@ -387,6 +543,28 @@ class BaseIntegrator:
             return True
         return False
 
+    @staticmethod
+    def is_content_identical_to_text(
+        target_path: Path,
+        expected_content: str,
+        *,
+        lf_normalized_deploy: bool = False,
+    ) -> bool:
+        """Return whether a target matches already-prepared deployment text."""
+        try:
+            if not target_path.exists() or target_path.is_symlink():
+                return False
+            try:
+                target_bytes = _read_bytes_no_follow(target_path)
+            except _SymlinkRaceError:
+                return False
+            expected = (
+                normalize_crlf_to_lf(expected_content) if lf_normalized_deploy else expected_content
+            ).encode("utf-8")
+            return target_bytes == expected
+        except OSError:
+            return False
+
     def _check_adopt_or_skip(
         self,
         target_path: Path,
@@ -396,6 +574,8 @@ class BaseIntegrator:
         force: bool,
         diagnostics,
         target_paths: list,
+        *,
+        expected_content: str | None = None,
     ) -> tuple[bool, bool]:
         """Check whether *target_path* should be adopted or skipped.
 
@@ -431,9 +611,20 @@ class BaseIntegrator:
             is ``True`` only when the existing file already matched the
             deployed content and has been silently adopted.
         """
-        if self.is_content_identical_to_source(
-            target_path, source_file, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
-        ):
+        identical = (
+            self.is_content_identical_to_text(
+                target_path,
+                expected_content,
+                lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
+            )
+            if expected_content is not None
+            else self.is_content_identical_to_source(
+                target_path,
+                source_file,
+                lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
+            )
+        )
+        if identical:
             target_paths.append(target_path)
             return True, True
         if self.check_collision(
@@ -457,6 +648,9 @@ class BaseIntegrator:
         allowed_prefixes: tuple | None = None,
         targets=None,
         user_scope: bool = False,
+        *,
+        resolved_project_root: Path | None = None,
+        allow_final_symlink: bool = False,
     ) -> bool:
         """Return True if *rel_path* is safe for APM to deploy or remove.
 
@@ -466,6 +660,8 @@ class BaseIntegrator:
         When *targets* is provided, allowed prefixes are derived from
         those (scope-resolved) profiles.  Otherwise uses all known
         project prefixes, plus known user roots when *user_scope* is true.
+        Callers validating multiple paths may pass precomputed values.
+        Set *allow_final_symlink* only when unlinking the final path itself.
 
         Checks:
         1. No path-traversal components (``..``)
@@ -480,7 +676,14 @@ class BaseIntegrator:
 
         candidate = Path(rel_path)
         if candidate.is_absolute():
-            return _managed_absolute_target_root(candidate, targets) is not None
+            return (
+                _managed_absolute_target_root(
+                    candidate,
+                    targets,
+                    allow_final_symlink=allow_final_symlink,
+                )
+                is not None
+            )
 
         if allowed_prefixes is None:
             allowed_prefixes = BaseIntegrator._get_integration_prefixes(
@@ -512,11 +715,37 @@ class BaseIntegrator:
             return False
         target = project_root / rel_path
         try:
-            if not target.resolve().is_relative_to(project_root.resolve()):
+            if has_symlink_component(project_root, target.parent):
+                return False
+            root = resolved_project_root or project_root.resolve()
+            containment_target = target.parent if allow_final_symlink else target
+            if not containment_target.resolve().is_relative_to(root):
                 return False
         except (ValueError, OSError):
             return False
         return True
+
+    @staticmethod
+    def resolve_deploy_path(
+        rel_path: str,
+        project_root: Path,
+        allowed_prefixes: tuple | None = None,
+        targets=None,
+    ) -> Path:
+        """Return a safe project deployment path without following symlinks."""
+        target = project_root / rel_path
+        if has_symlink_component(project_root, target):
+            raise PathTraversalError(
+                f"Refusing deployment through a symlinked path component: {rel_path}"
+            )
+        if not BaseIntegrator.validate_deploy_path(
+            rel_path,
+            project_root,
+            allowed_prefixes=allowed_prefixes,
+            targets=targets,
+        ):
+            raise PathTraversalError(f"Refusing unsafe deployment path: {rel_path}")
+        return ensure_path_within(target, project_root)
 
     # Backward-compat aliases mapping raw ``{prim}_{target}`` keys to
     # the bucket names that existing callers expect.  Shared between
@@ -625,6 +854,12 @@ class BaseIntegrator:
         # "single pass, O(1) per path" property from the original
         # component_map approach while supporting multi-level roots like
         # .config/opencode/.
+        #
+        # Cross-target hooks/skills prefixes are registered in the trie too
+        # so a deeper prefix (e.g. ``.copilot/hooks/``) wins over a shallow
+        # catch-all prefix from another primitive (e.g. the user-scope
+        # Copilot instructions root ``.copilot/``). Without this, hook paths
+        # under a catch-all root would be misrouted and never cleaned up.
         trie: dict = {}
         for prefix, bucket_key in prefix_map.items():
             segments = [s for s in prefix.split("/") if s]
@@ -636,6 +871,17 @@ class BaseIntegrator:
                     node[segment] = child
                 node = child
             node["_bucket"] = bucket_key
+        for prefix, bucket_key in ((skill_tuple, "skills"), (hook_tuple, "hooks")):
+            for cross_prefix in prefix:
+                segments = [s for s in cross_prefix.split("/") if s]
+                node = trie
+                for segment in segments:
+                    child = node.get(segment)
+                    if child is None:
+                        child = {}
+                        node[segment] = child
+                    node = child
+                node["_bucket"] = bucket_key
 
         for p in managed_files:
             # Walk the trie; keep the deepest bucket match (longest prefix).
@@ -713,9 +959,19 @@ class BaseIntegrator:
 
         Used to scope discovery to ``.apm/`` and ``.github/`` instead of
         walking the entire project tree -- see issue #1507.
+
+        During drift replay *project_root* is the scratch directory;
+        fall back to ``root_local_project_root`` when set (same pattern
+        as ``HookIntegrator._is_root_local_package``).
         """
         try:
-            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+            resolved_install = Path(package_info.install_path).resolve()
+            if resolved_install == Path(project_root).resolve():
+                return True
+            root_local = getattr(package_info, "root_local_project_root", None)
+            if root_local is not None:
+                return resolved_install == Path(root_local).resolve()
+            return False
         except (OSError, RuntimeError):
             return False
 

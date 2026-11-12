@@ -424,6 +424,7 @@ class TestCleanRemovesEmptyShells:
         assert not result.success
         assert stale_shell.exists()
 
+    @pytest.mark.windows_compat
     @pytest.mark.parametrize("dry_run", [False, True])
     def test_managed_orphan_retention_reports_path_and_manual_action(
         self, project_with_stale_shell, dry_run: bool
@@ -434,7 +435,8 @@ class TestCleanRemovesEmptyShells:
             f"# Team guidance\n{AGENTS_MD_GENERATED_MARKER}\n"
             "<!-- apm:start -->\nold APM content\n<!-- apm:end -->\n"
         )
-        stale_shell.write_text(team_owned_content, encoding="utf-8")
+        team_owned_bytes = team_owned_content.replace("\n", "\r\n").encode()
+        stale_shell.write_bytes(team_owned_bytes)
 
         compiler = AgentsCompiler(str(tmp_path))
         result = compiler._compile_distributed(
@@ -449,7 +451,7 @@ class TestCleanRemovesEmptyShells:
 
         assert result.success
         assert stale_shell.exists()
-        assert stale_shell.read_bytes() == team_owned_content.encode()
+        assert stale_shell.read_bytes() == team_owned_bytes
         retained_orphan_warning = (
             "Retained managed AGENTS.md orphan: AGENTS.md -- "
             "remove it manually when its team-owned content is no longer needed"
@@ -464,6 +466,7 @@ class TestCleanRemovesEmptyShells:
             "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
         )
 
+    @pytest.mark.windows_compat
     def test_plain_compile_reports_managed_orphan_retention(self, project_with_stale_shell) -> None:
         """Without --clean, team-owned managed orphans remain actionable."""
         tmp_path, primitives, stale_shell = project_with_stale_shell
@@ -471,7 +474,8 @@ class TestCleanRemovesEmptyShells:
             f"# Team guidance\n{AGENTS_MD_GENERATED_MARKER}\n"
             "<!-- apm:start -->\nold APM content\n<!-- apm:end -->\n"
         )
-        stale_shell.write_text(team_owned_content, encoding="utf-8")
+        team_owned_bytes = team_owned_content.replace("\n", "\r\n").encode()
+        stale_shell.write_bytes(team_owned_bytes)
 
         result = AgentsCompiler(str(tmp_path))._compile_distributed(
             CompilationConfig(
@@ -484,7 +488,7 @@ class TestCleanRemovesEmptyShells:
 
         assert result.success
         assert stale_shell.exists()
-        assert stale_shell.read_bytes() == team_owned_content.encode()
+        assert stale_shell.read_bytes() == team_owned_bytes
         retained_orphan_warning = (
             "Retained managed AGENTS.md orphan: AGENTS.md -- "
             "remove it manually when its team-owned content is no longer needed"

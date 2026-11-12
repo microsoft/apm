@@ -11,7 +11,11 @@ from apm_cli.output.script_formatters import ScriptExecutionFormatter
 
 def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):
     """Yield (path_tuple, command) for every command reachable under group."""
-    for name, cmd in group.commands.items():
+    ctx = click.Context(group)
+    for name in group.list_commands(ctx):
+        cmd = group.get_command(ctx, name)
+        if cmd is None:
+            continue
         path = (*prefix, name)
         yield path, cmd
         if isinstance(cmd, click.Group):
@@ -186,17 +190,18 @@ def test_deps_update_target_help_uses_current_catalog():
     assert "apm update" in help_text
 
 
-def test_compile_target_all_exclusion_lists_agent_skills_and_intellij():
-    """Regression for #2451: compile --target help must list agent-skills and intellij
-    as excluded from 'all', consistent with install --target help.
-    """
+def test_compile_target_all_exclusion_lists_explicit_only_targets():
+    """Compile help lists stable explicit-only targets excluded from ``all``."""
     result = CliRunner().invoke(cli, ["compile", "--help"])
 
     assert result.exit_code == 0
     help_text = result.output
     # Assert the full exclusion sentence (normalize whitespace from help-text wrapping)
     normalized = " ".join(help_text.split())
-    assert "excludes agent-skills, antigravity, experimental targets, and intellij" in normalized
+    assert (
+        "excludes agent-skills, antigravity, grok-bot, hermes, experimental targets, and intellij"
+        in normalized
+    )
 
 
 def test_mcp_install_help_lists_target_global_and_trust_transitive():
@@ -213,18 +218,14 @@ def test_mcp_install_help_lists_target_global_and_trust_transitive():
 
 
 def test_mcp_install_help_forwarded_options_complete():
-    """Regression trap for FU-3: mcp install --help forwarded-options block must
-    enumerate all flags declared in the block, not just the three added in #2451.
-
-    This test prevents silent omission when new install flags are added: if a flag
-    appears in mcp.py's forwarded-options block it must appear in the rendered help.
+    """Regression trap for FU-3 / #3588: every install option that
+    ``apm mcp install`` forwards must appear in its help with the exact flag
+    spelling and help text that ``apm install`` declares, so the two surfaces
+    cannot drift.
     """
-    result = CliRunner().invoke(cli, ["mcp", "install", "--help"])
+    from apm_cli.commands.install import install as install_command
 
-    assert result.exit_code == 0
-    help_text = result.output
-    # All flags currently declared in the forwarded-options block of mcp.py
-    expected_flags = [
+    forwarded_flags = [
         "--transport",
         "--url",
         "--env",
@@ -240,10 +241,27 @@ def test_mcp_install_help_forwarded_options_complete():
         "--verbose",
         "--no-policy",
     ]
-    for flag in expected_flags:
-        assert flag in help_text, (
-            f"mcp install --help missing forwarded flag: {flag!r}. "
-            "Add it to the forwarded-options block in src/apm_cli/commands/mcp.py."
+    install_ctx = click.Context(install_command, info_name="install")
+    install_records = {}
+    for param in install_command.params:
+        for flag in getattr(param, "opts", ()):
+            install_records[flag] = param.get_help_record(install_ctx)
+
+    result = CliRunner().invoke(cli, ["mcp", "install", "--help"])
+
+    assert result.exit_code == 0
+    forwarded_section = result.output.split("Forwarded install options:", 1)
+    assert len(forwarded_section) == 2, "mcp install --help lost its forwarded section"
+    # Click may wrap long help at spaces or hyphens; compare whitespace-free.
+    normalized = "".join(forwarded_section[1].split())
+    for flag in forwarded_flags:
+        assert flag in install_records, f"apm install no longer declares {flag!r}"
+        flags_text, help_text = install_records[flag]
+        assert "".join(flags_text.split()) in normalized, (
+            f"mcp install --help is missing forwarded install option {flag!r}."
+        )
+        assert "".join(help_text.split()) in normalized, (
+            f"mcp install --help text for {flag!r} drifted from apm install."
         )
 
 
@@ -283,8 +301,8 @@ def test_deps_update_target_help_values_catalog_sorted():
         )
 
 
-def test_compile_and_deps_exclusion_clause_matches_catalog():
-    """Regression: 'all' exclusion clause in compile and deps help must match
+def test_install_compile_and_deps_exclusion_clause_matches_catalog():
+    """Regression: 'all' exclusion clause in install, compile, and deps help must match
     target_all_exclusion_help(), not a hand-maintained static string.
 
     Adding a new explicit-only or mcp-only target to the catalog must automatically
@@ -293,6 +311,10 @@ def test_compile_and_deps_exclusion_clause_matches_catalog():
     from apm_cli.core.target_catalog import target_all_exclusion_help
 
     expected_clause = target_all_exclusion_help()
+
+    install_result = CliRunner().invoke(cli, ["install", "--help"])
+    assert install_result.exit_code == 0
+    assert expected_clause in " ".join(install_result.output.split())
 
     compile_result = CliRunner().invoke(cli, ["compile", "--help"])
     assert compile_result.exit_code == 0

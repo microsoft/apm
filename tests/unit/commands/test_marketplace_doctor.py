@@ -182,6 +182,32 @@ class TestDoctorNetworkCheck:
         assert "timed out" in result.output.lower()
 
     @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_unsafe_rewrite_preserves_recovery_guidance(
+        self,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
+    ):
+        from apm_cli.utils.git_env import GitUrlRewriteError
+
+        monkeypatch.chdir(tmp_path)
+        mock_run.return_value = _make_run_result(0, stdout="git version 2.40.0")
+        with patch(
+            "apm_cli.utils.git_env.git_network_env",
+            side_effect=GitUrlRewriteError(
+                "https-downgrade",
+                "HTTPS Git remote must not rewrite to insecure HTTP",
+            ),
+        ):
+            result = runner.invoke(cli, ["doctor"])
+
+        normalized = " ".join(result.output.split())
+        assert result.exit_code == 1
+        assert "git config" in normalized
+        assert "--show-origin" in normalized
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_network_auth_error(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -311,7 +337,7 @@ _APM_YML_CLAUDE_ONLY = textwrap.dedent("""\
           version: "^1.0.0"
 """)
 
-_APM_YML_BOTH_FORMATS = textwrap.dedent("""\
+_APM_YML_ALL_FORMATS = textwrap.dedent("""\
     name: demo
     description: d
     version: 0.1.0
@@ -320,6 +346,7 @@ _APM_YML_BOTH_FORMATS = textwrap.dedent("""\
       outputs:
         claude: {}
         codex: {}
+        copilot: {}
       packages:
         - name: pkg
           source: acme/pkg
@@ -351,7 +378,7 @@ class TestDoctorFormatCoverage:
     @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_full_coverage_passes_silently(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "apm.yml").write_text(_APM_YML_BOTH_FORMATS, encoding="utf-8")
+        (tmp_path / "apm.yml").write_text(_APM_YML_ALL_FORMATS, encoding="utf-8")
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),

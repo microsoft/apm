@@ -3,38 +3,9 @@ Integrates hook JSON files and referenced scripts during package installation.
 Supports VSCode Copilot (.github/hooks/), Claude Code
 (.claude/settings.json), and Cursor (.cursor/hooks.json) targets.
 
-Hook JSON format (Claude Code  -- nested matcher groups):
-    {
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "hooks": [
-                        {"type": "command", "command": "./scripts/validate.sh", "timeout": 10}
-                    ]
-                }
-            ]
-        }
-    }
-
-Hook JSON format (GitHub Copilot  -- flat arrays with bash/powershell keys):
-    {
-        "version": 1,
-        "hooks": {
-            "preToolUse": [
-                {"type": "command", "bash": "./scripts/validate.sh", "timeoutSec": 10}
-            ]
-        }
-    }
-
-Hook JSON format (Cursor  -- flat arrays with command key):
-    {
-        "version": 1,
-        "hooks": {
-            "afterFileEdit": [
-                {"command": "./hooks/format.sh"}
-            ]
-        }
-    }
+Native handler layouts are declared in the merge-target registry below and
+converted through ``hook_native_formats``: Claude uses nested matcher groups,
+GitHub Copilot accepts bash/powershell commands, and Cursor uses flat commands.
 
 Script path handling:
     - Supported plugin-root aliases -> package-relative path rewritten for target
@@ -71,13 +42,19 @@ from apm_cli.integration.hook_command_paths import (
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
     plugin_root_relative_path,
+    splice_references,
     unresolved_plugin_root_references,
+    wrapping_quote,
 )
 from apm_cli.integration.hook_command_warnings import warn_unresolved_plugin_root
+from apm_cli.integration.hook_cursor_preflight import preflight_cursor_hooks
 from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.integration.hook_native_formats import (
+    _legacy_hook_entries,
     _to_antigravity_hook_entries,
     _to_claude_hook_entries,
+    _to_codex_hook_entries,
+    _to_cursor_hook_entries,
     _to_gemini_hook_entries,
 )
 from apm_cli.integration.hook_ownership import (
@@ -96,6 +73,7 @@ from apm_cli.integration.hook_source_selection import (
     _parse_hook_json,
     _referenced_hook_source_files,
     _resolve_relative_hook_script,
+    resolve_plugin_root_hook_script,
     select_hook_sources,
 )
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -103,14 +81,16 @@ from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
     PathTraversalError,
-    ensure_path_within,
 )
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import UserHookHomeReference
 
 _log = logging.getLogger(__name__)
+
+_DOT_NAMED_HOOK_ROOTS = frozenset({"cursor", "codex", "windsurf", "kiro"})
 
 # Testability seam: tests can patch deprecated filename routing without
 # replacing the imported helper for every call site.
@@ -154,18 +134,13 @@ class _MergeHookConfig:
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
     schema_strict: bool = True  # Ownership always lives outside native files.
-    # Top-level JSON key the merged event map lives under.  Defaults to
-    # "hooks" (Claude/Cursor/Codex/Gemini/Windsurf).  Antigravity's native
-    # schema keys hooks by an arbitrary hook *name*, so APM reserves the
-    # single name "apm" as its container and leaves sibling user hook-names
-    # untouched.
+    # Antigravity reserves "apm" instead of "hooks"; sibling names belong to users.
     event_container_key: str = "hooks"
-    # Target-specific top-level keys to inject into the config file when
-    # absent.  Used to emit required schema fields (e.g. "version": 1 for
-    # Cursor) that APM does not otherwise write.  Existing keys are never
-    # overwritten -- the guard in _integrate_merged_hooks() preserves any
-    # value the user has set manually.
+    # Native defaults are injected only when absent, never over user values.
     top_level_defaults: dict[str, Any] = field(default_factory=dict)
+    prompt_handler_types: tuple[str, ...] = ()
+    named_containers: bool = False
+    nested_handlers: bool | None = None
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -178,8 +153,8 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "preToolUse": "preToolUse",
         "PostToolUse": "postToolUse",
         "postToolUse": "postToolUse",
-        "UserPromptSubmit": "userPromptSubmit",
-        "userPromptSubmit": "userPromptSubmit",
+        **dict.fromkeys(("UserPromptSubmit", "userPromptSubmit"), "userPromptSubmitted"),
+        "userPromptSubmitted": "userPromptSubmitted",
         **dict.fromkeys(("SessionStart", "sessionStart"), "sessionStart"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "agentStop"),
         "PreTaskExecution": "preTaskExecution",
@@ -193,6 +168,16 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postToolUse": "PostToolUse",
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
+    },
+    "cursor": {  # Values must stay within CURSOR_NATIVE_EVENTS.
+        "PreToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+        "UserPromptSubmit": "beforeSubmitPrompt",
+        "Stop": "stop",
+        "SubagentStop": "subagentStop",
+        "SessionStart": "sessionStart",
+        "SessionEnd": "sessionEnd",
+        "PreCompact": "preCompact",
     },
     "gemini": {
         # Copilot / Claude -> Gemini
@@ -236,7 +221,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "copilot": "camelCase",
     "vscode": "PascalCase",
     "claude": "PascalCase",
-    "cursor": "PascalCase",
+    "cursor": "camelCase",
     "codex": "PascalCase",
     "gemini": "PascalCase",
     "antigravity": "PascalCase",
@@ -336,28 +321,35 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="claude",
         require_dir=False,
         schema_strict=True,
+        prompt_handler_types=("prompt", "agent"),
+        nested_handlers=True,
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="cursor",
         require_dir=True,
         top_level_defaults={"version": 1},
+        prompt_handler_types=("prompt",),
+        nested_handlers=False,
     ),
     "codex": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="codex",
         require_dir=True,
+        nested_handlers=True,
     ),
     "gemini": _MergeHookConfig(
         config_filename="settings.json",
         target_key="gemini",
         require_dir=True,
+        nested_handlers=True,
     ),
     "antigravity": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="antigravity",
         require_dir=True,
         event_container_key="apm",
+        named_containers=True,
     ),
     "windsurf": _MergeHookConfig(
         config_filename="hooks.json",
@@ -367,6 +359,11 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
 }
 
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
+
+
+def native_hook_config(target_name: str) -> _MergeHookConfig | None:
+    """Return the canonical native container and content contract for a target."""
+    return _MERGE_HOOK_TARGETS.get(target_name)
 
 
 class HookIntegrator(BaseIntegrator):
@@ -588,11 +585,15 @@ class HookIntegrator(BaseIntegrator):
         target_rel: str,
         deploy_root: Path | None,
         source_key: str | None = None,
-        path_is_quoted: bool = False,
+        path_quote: str = "",
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> str:
         """Return a target-native script reference without sacrificing portability."""
         if deploy_root is not None:
-            return str((deploy_root / target_rel).resolve())
+            path = (deploy_root / target_rel).resolve()
+            if home_reference is None:
+                return str(path)
+            return home_reference.anchor(path, source_key, quote=path_quote)
         if target != "claude":
             return target_rel
 
@@ -605,7 +606,7 @@ class HookIntegrator(BaseIntegrator):
         ):
             return f"$env:{project_dir}/{target_rel}"
         path = f"${{{project_dir}}}/{target_rel}"
-        return path if path_is_quoted else f'"{path}"'
+        return path if path_quote else f'"{path}"'
 
     def _rewrite_command_for_target(
         self,
@@ -617,30 +618,23 @@ class HookIntegrator(BaseIntegrator):
         root_dir: str | None = None,
         deploy_root: Path | None = None,
         source_key: str | None = None,
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> tuple[str, list[tuple[Path, str]]]:
         """Rewrite plugin-root and relative script references for a target."""
         scripts_to_copy = []
         command = normalize_quoted_plugin_root(command)
-        new_command = command
+        edits: list[tuple[int, int, str]] = []
 
         if target == "vscode":
-            base_root = root_dir or ".github"
-            scripts_base = f"{base_root}/hooks/scripts/{package_name}"
-        elif target == "cursor":
-            base_root = root_dir or ".cursor"
-            scripts_base = f"{base_root}/hooks/{package_name}"
-        elif target == "codex":
-            base_root = root_dir or ".codex"
-            scripts_base = f"{base_root}/hooks/{package_name}"
-        elif target == "windsurf":
-            base_root = root_dir or ".windsurf"
-            scripts_base = f"{base_root}/hooks/{package_name}"
-        elif target == "kiro":
-            base_root = root_dir or ".kiro"
-            scripts_base = f"{base_root}/hooks/{package_name}"
+            scripts_base = f"{root_dir or '.github'}/hooks/scripts/{package_name}"
         else:
-            base_root = root_dir or ".claude"
-            scripts_base = f"{base_root}/hooks/{package_name}"
+            default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
+            scripts_base = f"{root_dir or default_root}/hooks/{package_name}"
+
+        def scoped(target_rel: str, quote: str) -> str:
+            return self._project_scoped_command_path(
+                command, target, target_rel, deploy_root, source_key, quote, home_reference
+            )
 
         handled_plugin_root_refs: set[str] = set()
         traversal_plugin_root_refs: set[str] = set()
@@ -649,7 +643,7 @@ class HookIntegrator(BaseIntegrator):
             rel_path = plugin_root_relative_path(match.group(1))
 
             try:
-                source_file = ensure_path_within(package_path / rel_path, package_path)
+                source_file = resolve_plugin_root_hook_script(package_path, rel_path)
             except PathTraversalError:
                 traversal_plugin_root_refs.add(full_var)
                 continue
@@ -657,18 +651,8 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                resolved_cmd = self._project_scoped_command_path(
-                    command,
-                    target,
-                    target_rel,
-                    deploy_root,
-                    source_key,
-                    match.start() > 0
-                    and match.end() < len(command)
-                    and command[match.start() - 1] in "\"'"
-                    and command[match.end()] == command[match.start() - 1],
-                )
-                new_command = new_command.replace(full_var, resolved_cmd)
+                resolved_cmd = scoped(target_rel, wrapping_quote(command, match))
+                edits.append((match.start(), match.end(), resolved_cmd))
             else:
                 # File absent: always warn so a misconfigured hook is never
                 # silently deployed.  For user-scope (deploy_root set) also
@@ -683,8 +667,9 @@ class HookIntegrator(BaseIntegrator):
                     f"{printable_ascii_text(str(source_file))}"
                 )
                 if deploy_root is not None:
-                    new_command = new_command.replace(full_var, str(source_file))
+                    edits.append((match.start(), match.end(), str(source_file)))
 
+        new_command = splice_references(command, edits)
         # Keep matcher misses visible instead of silently deploying them.
         for residual in unresolved_plugin_root_references(new_command):
             if residual in handled_plugin_root_refs:
@@ -699,6 +684,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             warn_unresolved_plugin_root(new_command, residual, package_label)
 
+        edits = []
         for match in iter_relative_script_paths(new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
@@ -710,18 +696,8 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                resolved_cmd = self._project_scoped_command_path(
-                    command,
-                    target,
-                    target_rel,
-                    deploy_root,
-                    source_key,
-                    match.start() > 0
-                    and match.end() < len(command)
-                    and command[match.start() - 1] in "\"'"
-                    and command[match.end()] == command[match.start() - 1],
-                )
-                new_command = new_command.replace(rel_ref, resolved_cmd)
+                resolved_cmd = scoped(target_rel, wrapping_quote(new_command, match))
+                edits.append((*match.span(1), resolved_cmd))
             else:
                 # File absent: always warn (see ${PLUGIN_ROOT} branch above
                 # for the project-scope vs user-scope rationale).
@@ -731,9 +707,9 @@ class HookIntegrator(BaseIntegrator):
                     f"{printable_ascii_text(str(source_file))}"
                 )
                 if deploy_root is not None:
-                    new_command = new_command.replace(rel_ref, str(source_file))
+                    edits.append((*match.span(1), str(source_file)))
 
-        return new_command, scripts_to_copy
+        return splice_references(new_command, edits), scripts_to_copy
 
     def _rewrite_hooks_data(
         self,
@@ -744,6 +720,7 @@ class HookIntegrator(BaseIntegrator):
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
         deploy_root: Path | None = None,
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> tuple[dict, list[tuple[Path, str]]]:
         """Rewrite all command paths in a hooks JSON structure.
 
@@ -757,7 +734,7 @@ class HookIntegrator(BaseIntegrator):
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
             deploy_root: Absolute root of the deployment directory.  When provided,
-                all rewritten script paths are resolved to absolute paths so the
+                all rewritten script paths are pinned to the deploy root so the
                 target can locate scripts regardless of the working directory.
                 When *None*, paths remain relative (backward-compatible behaviour).
 
@@ -789,6 +766,7 @@ class HookIntegrator(BaseIntegrator):
                             root_dir=root_dir,
                             deploy_root=deploy_root,
                             source_key=key,
+                            home_reference=home_reference and home_reference.for_handler(matcher),
                         )
                         if scripts:
                             _log.debug(
@@ -817,6 +795,7 @@ class HookIntegrator(BaseIntegrator):
                                 root_dir=root_dir,
                                 deploy_root=deploy_root,
                                 source_key=key if key != "command" else hook.get("shell"),
+                                home_reference=home_reference and home_reference.for_handler(hook),
                             )
                             if scripts:
                                 _log.debug(
@@ -1004,6 +983,14 @@ class HookIntegrator(BaseIntegrator):
         # User scope needs cwd-independent paths; project scope stays portable.
         return project_root if user_scope else None
 
+    @staticmethod
+    def _home_reference_for_hook_rewrite(target, user_scope: bool):
+        """Return the target's verified home reference for user-scope hook rewrites."""
+        from apm_cli.integration.targets import UserHookHomeReference
+
+        reference = getattr(target, "user_hook_home_reference", None) if user_scope else None
+        return reference if isinstance(reference, UserHookHomeReference) else None
+
     def integrate_package_hooks(
         self,
         package_info,
@@ -1026,8 +1013,8 @@ class HookIntegrator(BaseIntegrator):
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
-            user_scope: If True, rewrite hook script commands to absolute paths
-                so global hooks resolve from any working directory
+            user_scope: If True, rewrite hook script commands so global hooks
+                resolve from any working directory
 
         Returns:
             HookIntegrationResult: Results of the integration operation
@@ -1042,16 +1029,14 @@ class HookIntegrator(BaseIntegrator):
 
         if not hook_files:
             return HookIntegrationResult(
-                files_integrated=0,
-                files_updated=0,
-                files_skipped=0,
-                target_paths=[],
+                files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
             )
 
         root_dir = target.root_dir if target else ".github"
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
+        home_reference = self._home_reference_for_hook_rewrite(target, user_scope)
 
         hooks_integrated = 0
         scripts_copied = 0
@@ -1074,6 +1059,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
                 deploy_root=deploy_root_for_rewrite,
+                home_reference=home_reference,
             )
 
             # Generate target filename (clean, no -apm suffix)
@@ -1215,18 +1201,11 @@ class HookIntegrator(BaseIntegrator):
         target=None,
         user_scope: bool = False,
         source_plan=None,
+        retiring_targets: frozenset[str] = frozenset(),
     ) -> HookIntegrationResult:
-        """Integrate hooks by merging into a target-specific JSON config.
-
-        This is the shared implementation for Claude, Cursor, and Codex
-        targets that merge hook entries into a single JSON file (as
-        opposed to Copilot which uses individual JSON files).
-        """
+        """Merge native hook entries into a shared target-specific JSON config."""
         _empty = HookIntegrationResult(
-            files_integrated=0,
-            files_updated=0,
-            files_skipped=0,
-            target_paths=[],
+            files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
         )
 
         root_dir = target.root_dir if target else f".{config.target_key}"
@@ -1238,6 +1217,7 @@ class HookIntegrator(BaseIntegrator):
             return _empty
 
         _deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
+        _home_reference = self._home_reference_for_hook_rewrite(target, user_scope)
 
         package_name = self._get_package_name(package_info, project_root)
         hook_sources = self.select_hook_sources_for_target(
@@ -1259,20 +1239,30 @@ class HookIntegrator(BaseIntegrator):
             package_name,
             dependency_sources,
         )
+        # Always re-check authorized Cursor/import sources at this write
+        # boundary, even if preflight_hooks_for_targets already ran for this
+        # plan. A plan object can be reused across projects or after a
+        # Claude import file is added mid-install; a cached "already
+        # preflighted" flag would silently bypass the check in exactly that
+        # case (#3129). Forward retiring_targets: this fallback also needs it.
+        if config.target_key in {"cursor", "claude"}:
+            preflight_cursor_hooks(
+                self,
+                package_info,
+                project_root,
+                hook_sources,
+                _HOOK_EVENT_MAP,
+                user_scope=user_scope,
+                retiring_targets=retiring_targets,
+            )
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
         target_paths: list[Path] = []
         display_payloads: list = []
-        # Per-file display metadata is captured during the merge loop but
-        # the payloads are BUILT after the JSON config is finalized (Gemini
-        # transform applied, schema-strict _apm_source stripped) so that
-        # rendered_json reflects the actual on-disk/executed content.
+        # Finalize display JSON after native conversion and ownership extraction.
         pending_display: list = []
-        # Events whose prior-owned entries have already been cleared on
-        # this install run. Packages can contribute to the same event
-        # from multiple hook files -- we must only strip once so earlier
-        # files' fresh entries aren't wiped by later iterations.
+        # Clear once so later files do not erase earlier contributions.
         cleared_events: set = set()
 
         # Read existing JSON config
@@ -1308,18 +1298,23 @@ class HookIntegrator(BaseIntegrator):
             if sidecar_data and container in json_config:
                 _reinject_apm_source_from_sidecar(json_config[container], sidecar_data)
 
-        # Top-level container key for the merged event map.  Most targets
-        # use "hooks"; Antigravity nests its events under the reserved
-        # hook-name "apm" so sibling user hook-names are preserved.  Only
-        # the container key is created so non-"hooks" targets never gain a
-        # stray empty "hooks" object in their native file.
+        # Antigravity reserves "apm"; leave sibling user containers untouched.
         if container not in json_config:
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
-        # Inject any target-specific top-level defaults (e.g. "version": 1 for
-        # Cursor) that are absent from the existing file.  Existing values are
-        # never overwritten so a user-set "version" is preserved across reinstalls.
+        if config.target_key == "cursor":
+            for event in list(json_config[container]):
+                json_config[container][event] = [
+                    entry
+                    for entry in json_config[container][event]
+                    if not isinstance(entry, dict)
+                    or entry.get("_apm_source") not in {source_marker, *legacy_source_markers}
+                ]
+                if not json_config[container][event]:
+                    del json_config[container][event]
+
+        # Defaults never overwrite existing user fields.
         injected_keys: list[str] = []
         for key, value in config.top_level_defaults.items():
             if key not in json_config:
@@ -1346,6 +1341,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
                 deploy_root=_deploy_root_for_rewrite,
+                home_reference=_home_reference,
             )
 
             # Merge hooks into config (additive)
@@ -1358,7 +1354,6 @@ class HookIntegrator(BaseIntegrator):
             reverse_map: dict[str, set[str]] = {}
             for source_name, norm_name in event_map.items():
                 reverse_map.setdefault(norm_name, set()).add(source_name)
-
             entries_appended_for_file = False
             file_event_entries: dict = {}
             for raw_event_name, entries in hooks.items():
@@ -1367,11 +1362,19 @@ class HookIntegrator(BaseIntegrator):
                 event_name = event_map.get(raw_event_name, raw_event_name)
                 if event_name not in json_config[container]:
                     json_config[container][event_name] = []
-
-                # Transform flat Copilot entries to the target's nested /
-                # native hook shape.
+                legacy_content_keys = {
+                    self._hook_entry_content_key(entry)
+                    for entry in _legacy_hook_entries(entries, config.target_key)
+                    if isinstance(entry, dict)
+                }
                 if config.target_key == "claude":
                     entries = _to_claude_hook_entries(entries)
+                elif config.target_key == "cursor":
+                    entries = _to_cursor_hook_entries(
+                        entries, event_name, foreign=raw_event_name in event_map
+                    )
+                elif config.target_key == "codex":
+                    entries = _to_codex_hook_entries(entries)
                 elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
                 elif config.target_key == "antigravity":
@@ -1381,20 +1384,14 @@ class HookIntegrator(BaseIntegrator):
                 for entry in entries:
                     if isinstance(entry, dict):
                         entry["_apm_source"] = source_marker
-                fresh_content_keys = {
+                fresh_content_keys = legacy_content_keys | {
                     self._hook_entry_content_key(entry)
                     for entry in entries
                     if isinstance(entry, dict)
                 }
 
-                # Idempotent upsert: drop any prior entries owned by this
-                # package before appending fresh ones. Without this, every
-                # `apm install` re-run duplicates the package's hooks
-                # because `.extend()` is unconditional. See microsoft/apm#708.
-                # Only strip once per event per install run -- a package
-                # with multiple hook files targeting the same event
-                # contributes each file's entries in turn, and stripping
-                # on every iteration would erase earlier files' work.
+                # Replace owned entries once per event to prevent reinstall duplicates
+                # without erasing earlier hook files' contributions (#708).
                 remove_current_source = event_name not in cleared_events
                 if remove_current_source or heal_stale_root_source:
                     # Clear from the normalised event
@@ -1475,12 +1472,7 @@ class HookIntegrator(BaseIntegrator):
                         deduped.append(entry)
                 json_config[container][event_name] = deduped
                 entries_appended_for_file = True
-                # Capture the actual entry objects this file contributed to
-                # the merged config. They are the same dict references that
-                # the schema-strict strip mutates in place below, so building
-                # the display payload from them after finalization yields
-                # rendered_json that matches the on-disk/executed content
-                # (Gemini-transformed, _apm_source stripped where required).
+                # Retain references so ownership stripping also cleans display JSON.
                 file_event_entries.setdefault(event_name, []).extend(
                     e for e in entries if isinstance(e, dict)
                 )
@@ -1496,15 +1488,7 @@ class HookIntegrator(BaseIntegrator):
                     )
                 )
             else:
-                # Diagnostic for the fail-closed silent-skip path introduced
-                # by the integrated-counter fix (microsoft/apm#1499): a hook
-                # file that parsed cleanly but contributed zero entries (all
-                # events empty / non-list) used to bump the counter and lie
-                # to the user.  Now we skip it -- emit a user-visible warning
-                # (the original #1499 symptom was that authors saw nothing
-                # bad AND nothing good, so a structured-logger-only message
-                # would re-introduce the silent-failure UX) and a parallel
-                # _log.warning for operators consuming structured logs.
+                # Empty sources must not produce misleading success (#1499).
                 rel_hook = hook_file.name
                 _rich_warning(
                     f"Hook file {rel_hook} contributed no entries to "
@@ -1534,9 +1518,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
 
-        # Write JSON config back
-        # Don't track the config file in target_paths -- it's a shared
-        # file cleaned via _apm_source markers, not file-level deletion
+        # Shared configs are cleaned by ownership, never file-level deletion.
         json_path.parent.mkdir(parents=True, exist_ok=True)
 
         if config.schema_strict:
@@ -1552,10 +1534,7 @@ class HookIntegrator(BaseIntegrator):
             elif sidecar_path.exists():
                 sidecar_path.unlink()
 
-        # Build display payloads from the finalized entry objects (post
-        # Gemini transform and post schema-strict _apm_source strip) so the
-        # CLI summary and rendered_json faithfully reflect what is written
-        # to disk and executed -- not the pre-transform per-file data.
+        # Display only finalized, schema-clean native entries.
         for _label, _path, _hook_file, _file_event_entries in pending_display:
             display_payloads.append(
                 self._build_display_payload(
@@ -1566,10 +1545,8 @@ class HookIntegrator(BaseIntegrator):
                 )
             )
 
-        # Write the (now schema-clean) config
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(json_config, f, indent=2)
-            f.write("\n")
+        # Cursor's strict config must not be observable half-written by its watcher.
+        atomic_write_text(json_path, json.dumps(json_config, indent=2) + "\n")
 
         return HookIntegrationResult(
             files_integrated=hooks_integrated,
@@ -1653,6 +1630,28 @@ class HookIntegrator(BaseIntegrator):
             user_scope=user_scope,
         )
 
+    def preflight_hooks_for_targets(
+        self,
+        package_info: Any,
+        project_root: Path,
+        source_plan: Any,
+        *,
+        user_scope: bool = False,
+        retiring_targets: frozenset[str] = frozenset(),
+    ) -> None:
+        """Check authorized Cursor/import sources before any primitive is written."""
+        selection = source_plan.hook_source_selection
+        if selection is not None:
+            preflight_cursor_hooks(
+                self,
+                package_info,
+                project_root,
+                selection,
+                _HOOK_EVENT_MAP,
+                user_scope=user_scope,
+                retiring_targets=retiring_targets,
+            )
+
     def integrate_hooks_for_target(
         self,
         target,
@@ -1667,6 +1666,7 @@ class HookIntegrator(BaseIntegrator):
         dep_targets_active: bool = False,
         allowed_targets: set[str] | None = None,
         source_plan=None,
+        retiring_targets: frozenset[str] = frozenset(),
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
@@ -1674,11 +1674,8 @@ class HookIntegrator(BaseIntegrator):
         All other merge-based targets are dispatched via the
         ``_MERGE_HOOK_TARGETS`` registry.
 
-        ``user_scope`` controls whether merged-hook ``command`` paths are
-        rewritten to absolute paths (required when deploying to
-        ``~/.claude/settings.json`` -- see #1310 / #1354) or left
-        repo-relative so checked-in project-scope configs stay portable
-        across clones, contributors, and CI runners (#1394).
+        ``user_scope`` requires cwd-independent paths (#1310 / #1354);
+        project configs retain portable repo-relative paths (#1394).
         """
         if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
             raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
@@ -1721,6 +1718,7 @@ class HookIntegrator(BaseIntegrator):
                 target=target,
                 user_scope=user_scope,
                 source_plan=source_plan,
+                retiring_targets=retiring_targets,
             )
 
         return HookIntegrationResult(
@@ -1868,6 +1866,7 @@ class HookIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set = None,  # noqa: RUF013
+        managed_file_hashes: dict[str, str] | None = None,
         targets=None,
     ) -> dict:
         """Remove APM-managed hook files.
@@ -1875,52 +1874,51 @@ class HookIntegrator(BaseIntegrator):
         Uses *managed_files* (relative paths) to surgically remove only
         APM-tracked files; falls back to legacy ``*-apm.json`` glob when
         *managed_files* is ``None``. **Never** calls ``shutil.rmtree``.
-        Also cleans APM entries from merged-hook JSON files via the
-        ``_apm_source`` marker.
-
-        ``targets`` (#2250) scopes ONLY the merged-hook JSON cleanup below,
-        NOT the ``managed_files`` prefix guard (union of ``KNOWN_TARGETS``
-        + ``targets``): that guard defends against deleting outside a
-        recognized ``hooks/`` dir, and narrowing it would strand real
-        files deployed under a since-dropped target.
+        Also cleans ``_apm_source`` entries from merged-hook JSON files.
+        ``targets`` (#2250) scopes only the merged-hook JSON cleanup below.
         """
         from .targets import KNOWN_TARGETS
 
-        stats: dict[str, int] = {"files_removed": 0, "errors": 0}
-
-        # Prefix guard: union of KNOWN_TARGETS + caller `targets`, never
-        # narrower than the unscoped default -- see docstring above.
+        stats: dict[str, Any] = {"files_removed": 0, "errors": 0}
         guard_targets = list(KNOWN_TARGETS.values())
         if targets is not None:
             guard_targets = guard_targets + list(targets)
         hook_prefixes = [
-            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/"
+            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
             for t in guard_targets
             if t.supports("hooks")
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
-
         if managed_files is not None:
-            # Manifest-based removal -- only remove tracked files
-            deleted: list = []
+            from apm_cli.integration.cleanup import remove_stale_deployed_files
+            from apm_cli.utils.diagnostics import DiagnosticCollector
+
+            cleanup_paths: set[str] = set()
             for rel_path in managed_files:
-                normalized = rel_path.replace("\\", "/")
-                if not normalized.startswith(hook_prefix_tuple):
+                if not (normalized := rel_path.replace("\\", "/")).startswith(hook_prefix_tuple):
                     continue
-                if ".." in rel_path:
-                    continue
-                target_file = project_root / rel_path
-                if target_file.exists() and target_file.is_file():
-                    try:
-                        target_file.unlink()
-                        stats["files_removed"] += 1
-                        deleted.append(target_file)
-                    except Exception:
-                        stats["errors"] += 1
-            # Batch parent cleanup -- single bottom-up pass
-            self.cleanup_empty_parents(deleted, stop_at=project_root)
+                cleanup_paths.add(rel_path if Path(rel_path).is_absolute() else normalized)
+
+            cleanup_diagnostics = DiagnosticCollector()
+            cleanup = remove_stale_deployed_files(
+                cleanup_paths,
+                project_root,
+                dep_key="<uninstall hooks>",
+                targets=guard_targets,
+                diagnostics=cleanup_diagnostics,
+                recorded_hashes=managed_file_hashes,
+                failed_path_retained=False,
+                allow_final_symlink=True,
+            )
+            cleanup_diagnostics.render_summary()
+            stats["files_removed"] += len(cleanup.deleted)
+            retained = cleanup.retained
+            if retained:
+                stats["errors"] += len(retained)
+                stats.setdefault("failed_paths", []).extend(retained)
+            stats.setdefault("unsafe_paths", []).extend(cleanup.skipped_unmanaged)
+            self.cleanup_empty_parents(cleanup.deleted_targets, stop_at=project_root)
         else:
-            # Legacy fallback  -- glob for old -apm suffix files
             hooks_dir = project_root / ".github" / "hooks"
             if hooks_dir.exists():
                 for hook_file in hooks_dir.glob("*-apm.json"):
@@ -1929,6 +1927,7 @@ class HookIntegrator(BaseIntegrator):
                         stats["files_removed"] += 1
                     except Exception:
                         stats["errors"] += 1
+                        stats.setdefault("failed_paths", []).append(hook_file.as_posix())
 
         # Clean APM entries from merged-hook JSON configs, scoped to
         # `targets` when supplied -- matches the rebuild phase (#2250).
@@ -2043,7 +2042,7 @@ class HookIntegrator(BaseIntegrator):
     @staticmethod
     def _clean_apm_entries_from_json(
         json_path: Path,
-        stats: dict[str, int],
+        stats: dict[str, Any],
         container: str = "hooks",
         sidecar_path: Path | None = None,
     ) -> None:
@@ -2096,3 +2095,4 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_path.unlink()
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1
+            stats.setdefault("failed_paths", []).append(json_path.as_posix())

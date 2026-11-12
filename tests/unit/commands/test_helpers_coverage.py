@@ -115,9 +115,9 @@ class TestPrintVersionShaFalsy:
 
         mock_console = MagicMock()
         with (
-            patch("apm_cli.commands._helpers.get_version", return_value="1.2.3"),
-            patch("apm_cli.commands._helpers.get_build_sha", return_value=""),
-            patch("apm_cli.commands._helpers._get_console", return_value=mock_console),
+            patch("apm_cli.version_output.get_version", return_value="1.2.3"),
+            patch("apm_cli.version_output.get_build_sha", return_value=""),
+            patch("apm_cli.version_output._get_console", return_value=mock_console),
         ):
             print_version(ctx, None, True)
 
@@ -139,10 +139,10 @@ class TestPrintVersionConsoleException:
         mock_console.print.side_effect = Exception("markup failure")
 
         with (
-            patch("apm_cli.commands._helpers.get_version", return_value="2.3.4"),
-            patch("apm_cli.commands._helpers.get_build_sha", return_value="abc1234"),
-            patch("apm_cli.commands._helpers._get_console", return_value=mock_console),
-            patch("apm_cli.commands._helpers.click") as mock_click,
+            patch("apm_cli.version_output.get_version", return_value="2.3.4"),
+            patch("apm_cli.version_output.get_build_sha", return_value="abc1234"),
+            patch("apm_cli.version_output._get_console", return_value=mock_console),
+            patch("apm_cli.version_output.click") as mock_click,
         ):
             # Suppress is_enabled import error if experimental module absent
             print_version(ctx, None, True)
@@ -161,10 +161,10 @@ class TestPrintVersionNoConsole:
         ctx.resilient_parsing = False
 
         with (
-            patch("apm_cli.commands._helpers.get_version", return_value="3.0.0"),
-            patch("apm_cli.commands._helpers.get_build_sha", return_value=""),
-            patch("apm_cli.commands._helpers._get_console", return_value=None),
-            patch("apm_cli.commands._helpers.click") as mock_click,
+            patch("apm_cli.version_output.get_version", return_value="3.0.0"),
+            patch("apm_cli.version_output.get_build_sha", return_value=""),
+            patch("apm_cli.version_output._get_console", return_value=None),
+            patch("apm_cli.version_output.click") as mock_click,
         ):
             print_version(ctx, None, True)
 

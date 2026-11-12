@@ -2,6 +2,35 @@
   "version": 1,
   "owners": [
     {
+      "id": "audit-finding-serialization",
+      "decision": "Ordinary and CI finding artifact, pointer and coordinate serialization",
+      "owner": "security/audit_report.py (finding_to_json, finding_to_sarif)",
+      "selectors": [
+        "src/apm_cli/security/audit_report.py",
+        "src/apm_cli/policy/models.py"
+      ],
+      "guards": ["audit-finding-serialization"]
+    },
+    {
+      "id": "audit-primitive-discovery",
+      "decision": "Registry-derived deployed primitive discovery and applicable prompt coverage",
+      "owner": "security/primitive_discovery.py (primitive_surfaces), security/file_scanner.py (scan_project_result) through target skills_deploy_path and native hook contracts",
+      "selectors": [
+        "src/apm_cli/security/primitive_discovery.py",
+        "src/apm_cli/security/file_scanner.py"
+      ],
+      "guards": ["audit-primitive-discovery"]
+    },
+    {
+      "id": "native-instruction-projection",
+      "decision": "Native instruction filename and rendered content projection shared by installation and per-source user-root coverage",
+      "owner": "integration/instruction_integrator.py (InstructionIntegrator._prepare_rule_plan, deployed_rule_matches)",
+      "selectors": [
+        "src/apm_cli/integration/instruction_integrator.py"
+      ],
+      "guards": ["hooks-integrations-native-instruction-projection"]
+    },
+    {
       "id": "mcp-target-selection-precedence",
       "decision": "MCP target-selection precedence",
       "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes)",
@@ -10,12 +39,13 @@
     },
     {
       "id": "neutral-hook-contract",
-      "decision": "Neutral hook source grammar, per-target native shape, and shared-config APM-owned drift projection",
-      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries)",
+      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, and ownership-sidecar comparison",
+      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar)",
       "selectors": [
         "src/apm_cli/hook_contract.py",
         "src/apm_cli/integration/hook_ir.py",
         "src/apm_cli/integration/hook_native_formats.py",
+        "src/apm_cli/integration/hook_cursor_preflight.py",
         "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/integration/hook_ownership.py"
       ],
@@ -23,17 +53,21 @@
     },
     {
       "id": "plugin-root-hook-command-vocabulary",
-      "decision": "Plugin-root hook command vocabulary + parsing",
-      "owner": "integration/hook_command_paths.py",
-      "selectors": ["src/apm_cli/integration/hook_command_paths.py"],
+      "decision": "Plugin-root hook command vocabulary, parsing and contained source resolution",
+      "owner": "integration/hook_command_paths.py; integration/hook_source_selection.py (resolve_plugin_root_hook_script)",
+      "selectors": [
+        "src/apm_cli/integration/hook_command_paths.py",
+        "src/apm_cli/integration/hook_source_selection.py",
+        "src/apm_cli/bundle/plugin_hooks.py"
+      ],
       "guards": ["hooks-integrations-hook-command-vocabulary"]
     },
     {
       "id": "mcp-declaration-scope",
-      "decision": "Root vs dependency MCP declaration scope",
+      "decision": "Root vs dependency MCP declaration scope and dependency-bound intentional omission evidence",
       "owner": "integration/mcp_config_view.py (CurrentMcpConfigView)",
       "selectors": ["src/apm_cli/integration/mcp_config_view.py"],
-      "guards": ["hooks-integrations-mcp-declaration-scope"]
+      "guards": ["hooks-integrations-mcp-declaration-scope", "hooks-integrations-mcp-omission-evidence"]
     },
     {
       "id": "mcp-package-launcher",
@@ -43,11 +77,32 @@
       "guards": ["hooks-integrations-mcp-package-launcher"]
     },
     {
+      "id": "mcp-passthrough-denylist",
+      "decision": "MCP passthrough denylist and OpenCode enabled manifest intent",
+      "owner": "models/dependency/mcp.py (_EXTRA_DENYLIST, OpenCodeEnabled, opencode_enabled_value, opencode_enabled_matches)",
+      "selectors": [
+        "src/apm_cli/models/dependency/mcp.py",
+        "src/apm_cli/integration/mcp_integrator.py",
+        "src/apm_cli/adapters/client/opencode.py"
+      ],
+      "guards": [
+        "hooks-integrations-mcp-passthrough-denylist",
+        "hooks-integrations-opencode-enabled-intent"
+      ]
+    },
+    {
       "id": "jetbrains-copilot-mcp-config-path",
       "decision": "JetBrains Copilot MCP config path",
       "owner": "adapters/client/intellij.py",
       "selectors": ["src/apm_cli/adapters/client/intellij.py"],
       "guards": ["hooks-integrations-jetbrains-mcp-path"]
+    },
+    {
+      "id": "claude-mcp-config-paths",
+      "decision": "Claude user-scope MCP config path",
+      "owner": "adapters/client/claude.py (ClaudeClientAdapter.resolve_user_claude_json_path)",
+      "selectors": ["src/apm_cli/adapters/client/claude.py"],
+      "guards": ["hooks-integrations-claude-mcp-paths"]
     },
     {
       "id": "copilot-cli-mcp-config-paths",
@@ -58,10 +113,13 @@
     },
     {
       "id": "user-root-scoped-instruction-eligibility",
-      "decision": "User-root scoped instruction eligibility",
-      "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context)",
+      "decision": "User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
+      "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context, TargetProfile.user_hook_home_reference, UserHookHomeReference.reference_for)",
       "selectors": ["src/apm_cli/integration/targets.py"],
-      "guards": ["hooks-integrations-user-root-scope"]
+      "guards": [
+        "hooks-integrations-user-hook-home-reference",
+        "hooks-integrations-user-root-scope"
+      ]
     }
   ]
 }

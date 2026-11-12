@@ -17,6 +17,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from apm_cli.deps.lockfile import LockedDependency
     from apm_cli.install.context import InstallContext
     from apm_cli.install.logger import InstallLogger
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -205,3 +208,45 @@ def finalize_native_plugin(
 
     result["native_plugin"] = True
     return result
+
+
+def verify_native_plugin_cache(
+    lock_dep: LockedDependency,
+    source: Path,
+    replay_path: Path,
+    live_modules: Path,
+    scratch_root: Path,
+) -> None:
+    """Compare an admitted native unit without inventing deployed-file claims.
+
+    Local replay follows the original source, just like ordinary local
+    primitives. Reuse install's validated copy so in-package symlinks have
+    exactly the same materialized bytes. Remote units use the existing locked
+    package digest; a pin marker alone cannot prove their file contents.
+    """
+    from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+    from apm_cli.install.phases.local_content import _copy_tree_dereferencing_validated
+    from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash
+    from apm_cli.utils.path_security import ensure_path_within
+
+    candidate = lock_dep.to_dependency_ref().get_install_path(live_modules)
+    ensure_path_within(candidate, live_modules)
+    if lock_dep.is_local_source:
+        ensure_path_within(replay_path, scratch_root)
+        _copy_tree_dereferencing_validated(source, replay_path, source)
+        expected_hash = compute_package_hash(replay_path)
+    else:
+        expected_hash = lock_dep.content_hash
+        # Cold-cache CI has already materialized the pinned unit in scratch.
+        if not candidate.exists():
+            candidate = source
+        if not expected_hash:
+            raise AgentPluginDeploymentBoundaryError(
+                f"Native Agent Plugin {lock_dep.get_unique_key()} has no content hash; "
+                "run 'apm install' to regenerate its integrity baseline"
+            )
+    if not candidate.is_dir() or not verify_package_hash(candidate, expected_hash):
+        raise AgentPluginDeploymentBoundaryError(
+            f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
+            "run 'apm install' to restore the package"
+        )

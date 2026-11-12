@@ -252,6 +252,15 @@ class TestMCPClientAdapterInfrastructure:
         key = MCPClientAdapter._determine_config_key("my-server", None)
         assert key == "my-server"
 
+    def test_determine_config_key_self_defined(self) -> None:
+        """Self-defined servers with slashes keep their declared name."""
+        key = MCPClientAdapter._determine_config_key(
+            "com.azure.dev/mcp-remote",
+            None,
+            {"name": "com.azure.dev/mcp-remote", "is_self_defined": True},
+        )
+        assert key == "com.azure.dev/mcp-remote"
+
     def test_infer_registry_name_npm_scoped(self) -> None:
         """Scoped npm package name infers npm."""
         pkg = {"name": "@azure/mcp"}
@@ -730,7 +739,8 @@ class TestClaudeClientAdapter:
     def test_get_config_path_user_scope(self) -> None:
         """User-scope returns ~/.claude.json path."""
         adapter = ClaudeClientAdapter(user_scope=True)
-        assert adapter.get_config_path() == str(Path.home() / ".claude.json")
+        # The adapter resolves symlinks (macOS /var -> /private/var).
+        assert Path(adapter.get_config_path()) == (Path.home() / ".claude.json").resolve()
 
     def test_get_current_config_missing_file(self, tmp_path: Path) -> None:
         """Returns empty mcpServers when config file does not exist."""
@@ -2282,6 +2292,15 @@ class TestKiroAdapterConfigure:
         with pytest.raises(ValueError, match="Unsupported remote transport"):
             adapter._format_server_config(server_info)
 
+    def test_configure_mcp_server_fetch_raises_returns_false(self, tmp_path: Path) -> None:
+        """configure_mcp_server returns False without UnboundLocalError when fetch raises."""
+        kiro_dir = tmp_path / ".kiro"
+        kiro_dir.mkdir()
+        adapter = KiroClientAdapter(project_root=tmp_path)
+        with patch.object(adapter, "_fetch_server_info", side_effect=RuntimeError("network error")):
+            result = adapter.configure_mcp_server("test/server")
+        assert result is False
+
 
 # ===========================================================================
 # 22. More adapters/client/gemini.py -- configure_mcp_server
@@ -2712,7 +2731,13 @@ class TestCodexFormatServerConfig:
         assert result["command"] in ("npx", "npm")
 
     def test_format_server_config_remote_with_headers(self, tmp_path: Path) -> None:
-        """HTTP remote with headers gets http_headers in config."""
+        """HTTP remote with headers carries them into the config.
+
+        A header whose value is exactly ``${VAR}`` belongs in
+        ``env_http_headers``: Codex reads the variable at server start, whereas
+        ``http_headers`` is documented as static values and would send the
+        placeholder as literal text.
+        """
         adapter = CodexClientAdapter(project_root=tmp_path)
         server_info = {
             "id": "abc",
@@ -2728,8 +2753,8 @@ class TestCodexFormatServerConfig:
         result = adapter._format_server_config(server_info)
         assert result is not None
         assert "url" in result
-        # Headers resolved (or passed through) should be in http_headers
-        assert "http_headers" in result
+        assert result["env_http_headers"] == {"Authorization": "MY_TOKEN"}
+        assert "http_headers" not in result
 
     def test_format_server_config_hybrid_prefers_package(self, tmp_path: Path) -> None:
         """Hybrid server (remote + packages) prefers packages."""
@@ -3022,26 +3047,6 @@ class TestMarketplaceClientFetchPaths:
         source = MarketplaceSource(name="no-market", url=str(tmp_path), ref="main")
         path = _auto_detect_path(source)
         assert path is None
-
-    def test_host_from_url_http_url(self) -> None:
-        """_host_from_url extracts host from HTTP URL."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        host = _host_from_url("https://gitea.example.com/org/repo")
-        assert host == "gitea.example.com"
-
-    def test_host_from_url_scp_like(self) -> None:
-        """_host_from_url handles SCP-like git URLs."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        host = _host_from_url("git@github.com:org/repo.git")
-        assert host == "github.com"
-
-    def test_host_from_url_empty_returns_empty(self) -> None:
-        """_host_from_url returns empty string for empty input."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        assert _host_from_url("") == ""
 
     def test_fetch_file_local_kind_dispatches(self, tmp_path: Path) -> None:
         """_fetch_file dispatches local kind to _fetch_local."""
@@ -4036,7 +4041,7 @@ class TestDependencyTypes:
 
 
 class TestMCPConflictMatrix:
-    """Tests for MCP flag conflict validation (E1-E15)."""
+    """Tests for MCP flag conflict validation."""
 
     def _base_kwargs(self, **overrides) -> dict:
         """Return base valid kwargs for validate_mcp_conflicts."""
@@ -4050,7 +4055,6 @@ class TestMCPConflictMatrix:
             "headers": {},
             "mcp_version": None,
             "command_argv": None,
-            "global_": False,
             "only": None,
             "update": False,
             "any_transport_flag": False,
@@ -4121,15 +4125,6 @@ class TestMCPConflictMatrix:
 
         with pytest.raises(click.UsageError, match="cannot mix"):
             validate_mcp_conflicts(**self._base_kwargs(pre_dash_packages=["owner/repo"]))
-
-    def test_e2_global_with_mcp(self) -> None:
-        """--global with --mcp raises UsageError."""
-        import click
-
-        from apm_cli.install.mcp.conflicts import validate_mcp_conflicts
-
-        with pytest.raises(click.UsageError, match="--global is not supported"):
-            validate_mcp_conflicts(**self._base_kwargs(global_=True))
 
     def test_e3_only_apm_with_mcp(self) -> None:
         """--only apm with --mcp raises UsageError."""

@@ -4,21 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.29.0"
+version = "0.35.1"
 description = "MCP configuration tool"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [
     {name = "Daniel Meppiel", email = "user@example.com"}
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -30,7 +28,6 @@ dependencies = [
     "python-frontmatter>=1.0.0",
     "llm>=0.28",
     "llm-github-models>=0.18.0",
-    "tomli>=1.2.0; python_version<'3.11'",
     "toml>=0.10.2",
     "tomlkit>=0.13",
     "rich>=13.0.0",
@@ -38,7 +35,7 @@ dependencies = [
     "watchdog>=3.0.0",
     "GitPython>=3.1.0",
     "ruamel.yaml>=0.18.0",
-    "filelock>=3.12",
+    "filelock>=4.2.1",
     "websockets>=12,<17",
 ]
 
@@ -56,11 +53,14 @@ dev = [
     "mutmut==3.6.0",
 ]
 build = [
-    "pyinstaller>=6.0.0",
+    "pyinstaller>=6.17.0",
 ]
 
 [project.scripts]
-apm = "apm_cli.cli:main"
+apm = "apm_cli.entrypoint:main"
+
+[tool.setuptools]
+license-files = ["LICENSE", "LICENSE-DOCS", "LICENSING.md", "NOTICE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -74,7 +74,7 @@ include = ["apm_cli*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -98,6 +98,7 @@ ignore = [
     "S602",     # subprocess-popen-with-shell -- intentional in CLI wrapping git/pip
     # --- Deferred rules: enable in dedicated future PRs ---
     "SIM102",   # collapsible-if -- 28 violations, auto-fixable style improvement
+    "UP042",    # replace-str-enum -- StrEnum changes str()/format() output; migrate deliberately
 ]
 
 [tool.ruff.lint.pylint]
@@ -205,12 +206,14 @@ markers = [
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
     "windows_compat: load-bearing cross-platform regression contract family (CRLF-safe atomic writes, portable path formatting, git-executable resolution, socket/thread shutdown); runs on every OS and is additionally selected by the PR-time Windows Compatibility Gate -- NOT a requires_windows skip-gate, do not use requires_windows for this",
+    "trusted_executable: native trusted git/gh discovery and real consumer regressions; additionally selected on Windows Python 3.11",
     "requires_e2e_mode: requires APM_E2E_TESTS=1",
     "requires_github_token: requires GITHUB_APM_PAT or GITHUB_TOKEN",
     "requires_ado_pat: requires ADO_APM_PAT",
     "requires_ado_bearer: requires az CLI logged in + APM_TEST_ADO_BEARER=1",
     "requires_network_integration: requires APM_RUN_INTEGRATION_TESTS=1",
     "requires_windows: requires a Windows host",
+    "requires_windows_native_standard_user: requires the disposable Windows runner's verified non-admin token and symlink denial",
     "requires_apm_binary: requires built apm binary on PATH (or APM_BINARY_PATH)",
     "requires_runtime_codex: requires codex runtime installed",
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",
@@ -219,4 +222,5 @@ markers = [
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
     "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
     "lifecycle_merge_group: unique lifecycle contracts retained in the full merge-group integration suite",
+    "xdist_group(name): assigns HOME-mutating tests to one pytest-xdist loadgroup for process-level serialization",
 ]

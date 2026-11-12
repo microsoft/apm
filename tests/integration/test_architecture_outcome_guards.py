@@ -75,13 +75,14 @@ def test_missing_declared_plugin_component_fails_before_commit(
     monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
 
     result = CliRunner().invoke(cli, ["install"])
+    normalized_output = " ".join(result.output.split())
 
     assert result.exit_code != 0, result.output
     assert "missing-components" in result.output
     assert "agents" in result.output
     assert "./agents/does-not-exist.agent.md" in result.output
-    assert "plugin root" in result.output
-    assert "remove the declaration" in result.output
+    assert "plugin root" in normalized_output
+    assert "remove the declaration" in normalized_output
     assert not (consumer / "apm.lock.yaml").exists()
     assert not (consumer / ".claude" / "agents").exists()
     assert plugin.is_dir()
@@ -315,6 +316,8 @@ def test_staged_plugin_skill_is_not_promoted_after_empty_declaration(
         tmp_path,
         {"name": "staged-skills", "version": "1.0.0", "skills": []},
     )
+    # An eligible apm.yml plus .apm/ is an APM package, not a plugin.
+    (plugin / "apm.yml").unlink()
     staged = plugin / ".apm" / "skills" / "staged"
     staged.mkdir(parents=True)
     (staged / "SKILL.md").write_text(
@@ -454,7 +457,7 @@ def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
 
     result = CliRunner().invoke(cli, ["install"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Skill selection matched no available skills" in result.output
     assert "Requested:" in result.output
     assert "missing" in result.output

@@ -2,6 +2,15 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    # gh-aw lock files and agentics-maintenance.yml are compiler-generated;
+    # refresh them with `gh aw compile` instead of letting Dependabot edit them.
+    exclude-paths:
+      - ".github/workflows/*.lock.yml"
+      - ".github/workflows/agentics-maintenance.yml"
+    ignore:
+      # gh-aw actions are pinned to the repository's gh-aw compiler version
+      # (see .github/aw/actions-lock.json); bump them via a compiler upgrade.
+      - dependency-name: "github/gh-aw-actions/*"
     groups:
       github-actions:
         patterns: ["*"]

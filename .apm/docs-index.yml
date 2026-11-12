@@ -144,9 +144,9 @@ pages:
     persona: consumer
     promise: 1
     documents_symbols:
-      cli: [apm marketplace add, apm install]
-      flags: []
-      schemas: [marketplace.json]
+      cli: [apm marketplace add, apm install, apm uninstall]
+      flags: [--target, -g, --frozen]
+      schemas: [marketplace.json, .codex-plugin/plugin.json]
 
   - path: docs/src/content/docs/consumer/copilot-agent-plugins.md
     title: "Install Agent Plugins for Copilot"
@@ -261,13 +261,34 @@ pages:
       cli: [apm audit]
       flags: [--external, --external-sarif]
 
+  - path: docs/src/content/docs/reference/cli/install.md
+    title: "apm install"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apm install]
+
+  - path: docs/src/content/docs/reference/cli/audit.md
+    title: "apm audit"
+    persona: enterprise
+    promise: 3
+    documents_symbols:
+      cli: [apm audit]
+
+  - path: docs/src/content/docs/enterprise/drift-detection.md
+    title: "Drift detection"
+    persona: enterprise
+    promise: 3
+    documents_symbols:
+      cli: [apm audit]
+
 # Symbol-to-page reverse index. The localizer skill consults this
 # to translate a diff symbol (e.g. a new flag) into a page list.
 # Bootstrap: derived from the pages[] above. Regenerated on every
 # structural verdict.
 symbol_index:
   cli:
-    "apm install": [docs/src/content/docs/consumer/install-packages.md, docs/src/content/docs/consumer/installing-from-marketplaces.md, docs/src/content/docs/consumer/copilot-agent-plugins.md]
+    "apm install": [docs/src/content/docs/consumer/install-packages.md, docs/src/content/docs/consumer/installing-from-marketplaces.md, docs/src/content/docs/consumer/copilot-agent-plugins.md, docs/src/content/docs/reference/cli/install.md]
     "apm compile": [docs/src/content/docs/producer/compile.md]
     "apm pack": [docs/src/content/docs/producer/pack-a-bundle.md, docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
     "apm plugin init": [docs/src/content/docs/producer/repo-shapes.md, docs/src/content/docs/reference/cli/plugin.md]
@@ -276,7 +297,7 @@ symbol_index:
     "apm marketplace check": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
     "apm marketplace package add": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
     "apm marketplace publish": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
-    "apm audit": [docs/src/content/docs/enterprise/apm-policy.md, docs/src/content/docs/enterprise/security.md, docs/src/content/docs/integrations/external-scanners.md]
+    "apm audit": [docs/src/content/docs/enterprise/apm-policy.md, docs/src/content/docs/enterprise/security.md, docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md, docs/src/content/docs/enterprise/drift-detection.md]
   flags:
     "--check-versions": [docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
     "--check-clean": [docs/src/content/docs/producer/releasing-from-any-ci.md]
@@ -288,6 +309,7 @@ symbol_index:
     "apm.yml.marketplace": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
     "apm.yml.marketplace.versioning": [docs/src/content/docs/producer/versioning-strategies.md]
     "marketplace.json": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
+    ".codex-plugin/plugin.json": [docs/src/content/docs/consumer/installing-from-marketplaces.md, docs/src/content/docs/reference/package-types.md]
     "apm-policy.yml": [docs/src/content/docs/enterprise/apm-policy.md]
     "SKILL.md": [docs/src/content/docs/producer/author-primitives/skills.md]
     ".agent.md": [docs/src/content/docs/producer/author-primitives/instructions-and-agents.md]

@@ -15,26 +15,34 @@ import builtins
 import copy
 import json
 import logging
+import os
 import re
 import shutil
 import warnings
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tomlkit
+import yaml
 from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
+from apm_cli.deps.lockfile import (
+    LockFile,
+    LockfileSymlinkError,
+    get_lockfile_path,
+    installed_apm_version,
+)
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
+from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
@@ -42,12 +50,64 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
+from apm_cli.utils.staging_guard import assert_no_staging_paths
+from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
 
 _log = logging.getLogger(__name__)
+
+
+def _reject_symlink_config(
+    config_path: Path,
+    label: str,
+    logger: CommandLogger | None,
+    *,
+    fail_on_write_error: bool,
+) -> bool:
+    """Reject MCP cleanup through a symlink without reading its target."""
+    protected_markers = {".claude", ".config", ".cursor", ".vscode"}
+    symlink_candidates = {config_path, config_path.parent}
+    parts = config_path.parts
+    for index, part in enumerate(parts):
+        if part in protected_markers:
+            current = Path(*parts[: index + 1])
+            symlink_candidates.add(current)
+            for child in parts[index + 1 :]:
+                current = current / child
+                symlink_candidates.add(current)
+            break
+    try:
+        has_symlink = any(path.is_symlink() for path in symlink_candidates)
+    except OSError:
+        has_symlink = True
+    if not has_symlink:
+        return False
+    message = (
+        f"Refusing to clean symlinked MCP config: {label} ({config_path}). "
+        "Replace the symlink with a regular file or directory, then retry."
+    )
+    if fail_on_write_error:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        raise RequiredIntegrationError(message)
+    if logger is not None:
+        logger.warning(message)
+    else:
+        _rich_warning(message, symbol="warning")
+    return True
+
+
+def _cleanup_failure_message(label: str, exc: Exception) -> str:
+    """Return an ASCII-safe cleanup failure with the underlying cause."""
+    cause = str(exc) or exc.__class__.__name__
+    ascii_cause = cause.encode("ascii", "backslashreplace").decode("ascii")
+    return (
+        f"MCP cleanup failed for {label}: {ascii_cause}. "
+        "Check the config path and permissions, then retry."
+    )
 
 
 def _is_vscode_available(project_root: Path | str | None = None) -> bool:
@@ -76,6 +136,8 @@ def _clean_json_mcp_config(
     trailing_newline: bool = False,
     use_rich: bool = False,
     fail_on_write_error: bool = False,
+    nested_servers: Callable[[dict], dict | None] | None = None,
+    nested_settings: frozenset[str] = frozenset(),
 ) -> int:
     """Remove stale entries from a JSON-based MCP config file.
 
@@ -88,23 +150,55 @@ def _clean_json_mcp_config(
         trailing_newline: When True, append a trailing newline after JSON serialisation.
         use_rich: When True, emit removal notices via ``_rich_success``; otherwise use
             ``logger.progress``.
+        nested_servers: Returns a second server map inside the parsed config,
+            or ``None``.  Stale names are removed from it as well, for layouts
+            such as OpenCode v2 that keep servers below the top-level key.
+            A top-level entry is then removed only when the nested map does
+            not declare the same name, since that entry is not APM's.
+        nested_settings: Top-level keys that hold settings rather than
+            servers whenever ``nested_servers`` returns a map.
 
     Returns:
         Number of entries removed.
     """
-    if not config_path.exists():
+    if (
+        _reject_symlink_config(
+            config_path,
+            label,
+            logger,
+            fail_on_write_error=fail_on_write_error,
+        )
+        or not config_path.exists()
+    ):
         return 0
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError(f"{label} root must be a mapping")
         servers = config.get(servers_key, {})
-        removed = [n for n in stale_names if n in servers]
+        if not isinstance(servers, dict):
+            raise ValueError(f"{label} {servers_key} must be a mapping")
+        nested = nested_servers(config) if nested_servers else None
+        if nested is None:
+            removed = [n for n in stale_names if n in servers]
+        else:
+            removed = [
+                n
+                for n in stale_names
+                if n in servers and n not in nested and n not in nested_settings
+            ]
         for name in removed:
             del servers[name]
+        if nested:
+            nested_removed = [n for n in stale_names if n in nested]
+            for name in nested_removed:
+                del nested[name]
+            removed = sorted(builtins.set(removed) | builtins.set(nested_removed))
         if removed:
             text = json.dumps(config, indent=2)
             if trailing_newline:
                 text += "\n"
-            write_text_lf(config_path, text)
+            atomic_write_text(config_path, text, new_file_mode=0o600)
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:
@@ -117,9 +211,52 @@ def _clean_json_mcp_config(
         if fail_on_write_error:
             from apm_cli.install.errors import RequiredIntegrationError
 
-            raise RequiredIntegrationError(
-                f"MCP cleanup failed for {label}. Check the config path and permissions, then retry."
-            ) from exc
+            raise RequiredIntegrationError(_cleanup_failure_message(label, exc)) from exc
+        return 0
+
+
+def _clean_hermes_mcp_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    logger,
+    fail_on_write_error: bool = False,
+) -> int:
+    """Atomically remove stale servers from Hermes' YAML config."""
+    label = "Hermes config.yaml"
+    if (
+        _reject_symlink_config(
+            config_path,
+            label,
+            logger,
+            fail_on_write_error=fail_on_write_error,
+        )
+        or not config_path.exists()
+    ):
+        return 0
+    try:
+        config = load_yaml(config_path)
+        if config is None:
+            config = {}
+        if not isinstance(config, dict):
+            raise ValueError("Hermes config root must be a mapping")
+        servers = config.get("mcp_servers", {})
+        if not isinstance(servers, dict):
+            raise ValueError("Hermes mcp_servers must be a mapping")
+        removed = [name for name in stale_names if name in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            config["mcp_servers"] = servers
+            atomic_write_text(config_path, yaml_to_str(config), new_file_mode=0o600)
+            for name in removed:
+                logger.progress(f"Removed stale MCP server '{name}' from {label}")
+        return len(removed)
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        if fail_on_write_error:
+            from apm_cli.install.errors import RequiredIntegrationError
+
+            raise RequiredIntegrationError(_cleanup_failure_message(label, exc)) from exc
         return 0
 
 
@@ -145,13 +282,21 @@ def _clean_toml_mcp_config(
     Returns:
         Number of entries removed.
     """
-    if not config_path.exists():
+    if (
+        _reject_symlink_config(
+            config_path,
+            label,
+            logger,
+            fail_on_write_error=fail_on_write_error,
+        )
+        or not config_path.exists()
+    ):
         return 0
     try:
         config = tomlkit.parse(config_path.read_text(encoding="utf-8"))
         servers = config.get("mcp_servers", {})
         if not isinstance(servers, MutableMapping):
-            return 0
+            raise ValueError("mcp_servers must be a table")
         removed = [n for n in stale_names if n in servers]
         for name in removed:
             del servers[name]
@@ -164,14 +309,12 @@ def _clean_toml_mcp_config(
                 elif logger is not None:
                     logger.progress(msg)
         return len(removed)
-    except (OSError, TOMLKitError, UnicodeDecodeError) as exc:
+    except (OSError, TOMLKitError, UnicodeDecodeError, ValueError) as exc:
         _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
         if fail_on_write_error:
             from apm_cli.install.errors import RequiredIntegrationError
 
-            raise RequiredIntegrationError(
-                f"MCP cleanup failed for {label}. Check the config path and permissions, then retry."
-            ) from exc
+            raise RequiredIntegrationError(_cleanup_failure_message(label, exc)) from exc
         return 0
 
 
@@ -181,6 +324,7 @@ def _clean_claude_config(
     logger,
     is_user_scope: bool = False,
     fail_on_write_error: bool = False,
+    label: str | None = None,
 ) -> int:
     """Remove stale entries from a Claude Code JSON config file.
 
@@ -194,25 +338,40 @@ def _clean_claude_config(
         logger: Command logger for progress messages.
         is_user_scope: When True, validates that the top-level config is a dict
             (``~/.claude.json`` guard) and uses the user-scope log label.
+        fail_on_write_error: When True, raise RequiredIntegrationError on write failure.
+        label: Optional human-readable config label used in log messages.
 
     Returns:
         Number of entries removed.
     """
-    label = "~/.claude.json" if is_user_scope else ".mcp.json"
-    if not config_path.exists():
+    if label is None:
+        label = str(config_path) if is_user_scope else ".mcp.json"
+    if (
+        _reject_symlink_config(
+            config_path,
+            label,
+            logger,
+            fail_on_write_error=fail_on_write_error,
+        )
+        or not config_path.exists()
+    ):
         return 0
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
-        if is_user_scope and not isinstance(config, dict):
-            return 0
+        if not isinstance(config, dict):
+            raise ValueError(f"{label} root must be a mapping")
         servers = config.get("mcpServers", {})
         if not isinstance(servers, dict):
-            servers = {}
+            raise ValueError(f"{label} mcpServers must be a mapping")
         removed = [n for n in stale_names if n in servers]
         for name in removed:
             del servers[name]
         if removed:
-            write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
+            atomic_write_text(
+                config_path,
+                json.dumps(config, indent=2) + "\n",
+                new_file_mode=0o600,
+            )
             for name in removed:
                 logger.progress(f"Removed stale MCP server '{name}' from {label}")
         return len(removed)
@@ -221,9 +380,7 @@ def _clean_claude_config(
         if fail_on_write_error:
             from apm_cli.install.errors import RequiredIntegrationError
 
-            raise RequiredIntegrationError(
-                f"MCP cleanup failed for {label}. Check the config path and permissions, then retry."
-            ) from exc
+            raise RequiredIntegrationError(_cleanup_failure_message(label, exc)) from exc
         return 0
 
 
@@ -238,6 +395,30 @@ class MCPIntegrator:
     # ------------------------------------------------------------------
     # Dependency resolution
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def prevalidate_registry_dependencies(
+        mcp_deps: list,
+        *,
+        registry_url: str | None,
+        verbose: bool,
+        logger,
+        registry_source: str | None = None,
+        retry_args: tuple[str, ...] = (),
+    ) -> builtins.dict[str, builtins.dict]:
+        """Validate direct-install registry identities before any write."""
+        from apm_cli.integration.mcp_integrator_install import (
+            prevalidate_registry_dependencies,
+        )
+
+        return prevalidate_registry_dependencies(
+            mcp_deps,
+            registry_url=registry_url,
+            verbose=verbose,
+            logger=logger,
+            registry_source=registry_source,
+            retry_args=retry_args,
+        )
 
     @staticmethod
     def collect_transitive(
@@ -280,7 +461,10 @@ class MCPIntegrator:
         Mimics the structure returned by the MCP registry so that existing
         adapter code can consume self-defined deps without changes.
         """
-        info: dict = {"name": dep.name}
+        info: dict = {
+            "name": dep.name,
+            "is_self_defined": True,
+        }
 
         # For stdio self-defined deps, store raw command/args so adapters
         # can bypass registry-specific formatting (npm, docker, etc.).
@@ -302,7 +486,10 @@ class MCPIntegrator:
                 "url": dep.url or "",
             }
             if dep.headers:
-                remote["headers"] = [{"name": k, "value": v} for k, v in dep.headers.items()]
+                remote["headers"] = [
+                    {"name": k, "value": ManifestHeaderValue(v) if isinstance(v, str) else v}
+                    for k, v in dep.headers.items()
+                ]
             info["remotes"] = [remote]
         else:
             # Build as a stdio package
@@ -334,10 +521,13 @@ class MCPIntegrator:
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
 
+        dep.apply_opencode_enabled(info)
+
         # Pass through harness-specific extra keys for adapters to merge
         if dep.extra:
             info["_extra"] = dict(dep.extra)
 
+        assert_no_staging_paths(info, f"MCP client configuration for '{dep.name}'")
         return info
 
     @staticmethod
@@ -350,6 +540,8 @@ class MCPIntegrator:
         info = server_info_cache.get(dep.name)
         if not info:
             return
+
+        dep.apply_opencode_enabled(info)
 
         # Transport overlay: select matching transport from available options
         if dep.transport:
@@ -378,10 +570,20 @@ class MCPIntegrator:
                 existing_headers = remote.get("headers", [])
                 if isinstance(existing_headers, builtins.list):
                     for k, v in dep.headers.items():
-                        existing_headers.append({"name": k, "value": v})
+                        existing_headers.append(
+                            {
+                                "name": k,
+                                "value": ManifestHeaderValue(v) if isinstance(v, str) else v,
+                            }
+                        )
                     remote["headers"] = existing_headers
                 elif isinstance(existing_headers, builtins.dict):
-                    existing_headers.update(dep.headers)
+                    existing_headers.update(
+                        {
+                            k: ManifestHeaderValue(v) if isinstance(v, str) else v
+                            for k, v in dep.headers.items()
+                        }
+                    )
 
         # Args overlay: merge into package runtime arguments
         if dep.args and "packages" in info:
@@ -394,6 +596,12 @@ class MCPIntegrator:
                     for k, v in dep.args.items():
                         existing_args.append({"value_hint": f"--{k}={v}"})
                 pkg["runtime_arguments"] = existing_args
+
+        # Registry data cannot supply authored overlay metadata.
+        info.pop("_apm_env_overlay", None)
+        # Keep authored values separate from collected install-time values.
+        if dep.env:
+            info["_apm_env_overlay"] = dict(dep.env)
 
         # Tools overlay: embed for adapters to pick up
         if dep.tools:
@@ -472,13 +680,17 @@ class MCPIntegrator:
         previously stored config in the lockfile.  Only dependencies that
         have a stored baseline *and* whose config has changed are returned.
         """
+        from apm_cli.models.dependency.mcp import opencode_enabled_matches
+
         drifted: builtins.set = builtins.set()
         for dep in mcp_deps:
             if not hasattr(dep, "to_dict") or not hasattr(dep, "name"):
                 continue
             current_config = dep.to_dict()
             stored = stored_configs.get(dep.name)
-            if stored is not None and stored != current_config:
+            if stored is not None and (
+                stored != current_config or not opencode_enabled_matches(current_config, stored)
+            ):
                 drifted.add(dep.name)
         return drifted
 
@@ -541,6 +753,8 @@ class MCPIntegrator:
         logger=None,
         scope=None,
         fail_on_write_error: bool = False,
+        stored_configs: builtins.dict | None = None,
+        native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
     ) -> None:
         """Remove MCP server entries that are no longer required by any dependency.
 
@@ -572,9 +786,10 @@ class MCPIntegrator:
         if exclude:
             target_runtimes.discard(exclude)
 
-        # Scope filtering: at USER scope, only clean global-capable runtimes.
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.mcp.ownership import require_removable_mcp_connections
 
+        # Scope filtering: at USER scope, only clean global-capable runtimes.
         if scope is InstallScope.USER:
             from apm_cli.factory import ClientFactory as _CF
 
@@ -588,12 +803,14 @@ class MCPIntegrator:
             target_runtimes = supported
 
         # Claude Code: when scope is unspecified, fail safely toward the project
-        # config only -- never touch ~/.claude.json on the user's behalf without
+        # config only -- never touch user config on the user's behalf without
         # an explicit USER scope, since that file is shared across all Claude
         # Code projects on the host.
-        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
-        clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
-        if "claude" in target_runtimes and scope is None:
+        clean_claude_user = "claude" in target_runtimes and (
+            scope is InstallScope.USER or user_scope
+        )
+        clean_claude_project = "claude" in target_runtimes and not clean_claude_user
+        if "claude" in target_runtimes and scope is None and not user_scope:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
                 "project .mcp.json only; pass -g/--global to also clean ~/.claude.json"
@@ -641,40 +858,56 @@ class MCPIntegrator:
         if "codex" in target_runtimes:
             from apm_cli.factory import ClientFactory
 
-            codex_cfg = Path(
-                ClientFactory.create_client(
-                    "codex",
-                    project_root=project_root,
-                    user_scope=user_scope,
-                ).get_config_path()
+            codex_client = ClientFactory.create_client(
+                "codex",
+                project_root=project_root,
+                user_scope=user_scope,
+            )
+            codex_cfg = Path(codex_client.get_config_path())
+            if _reject_symlink_config(
+                codex_cfg, "Codex CLI config", logger, fail_on_write_error=fail_on_write_error
+            ):
+                return
+            verified_keys = require_removable_mcp_connections(
+                codex_client, stale_names, stored_configs or {}, (native_hashes or {}).get("codex")
             )
             _clean_toml_mcp_config(
                 codex_cfg,
-                expanded_stale,
+                verified_keys,
                 "Codex CLI config",
                 fail_on_write_error=fail_on_write_error,
             )
 
+        clean_user_scope = user_scope or scope is InstallScope.USER
         if "cursor" in target_runtimes:
+            from apm_cli.adapters.client.cursor import CursorClientAdapter
+
             _clean_json_mcp_config(
-                project_root_path / ".cursor" / "mcp.json",
+                CursorClientAdapter.config_path_for(project_root_path, clean_user_scope),
                 expanded_stale,
                 logger,
-                ".cursor/mcp.json",
+                "Cursor MCP config",
                 use_rich=True,
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean opencode.json (only if .opencode/ directory exists)
+        # Project scope is opt-in; user scope uses ~/.config/opencode/.
         if "opencode" in target_runtimes:
-            if (project_root_path / ".opencode").is_dir():
+            if clean_user_scope or (project_root_path / ".opencode").is_dir():
+                from apm_cli.adapters.client.opencode import (
+                    V2_MCP_SETTINGS,
+                    OpenCodeClientAdapter,
+                )
+
                 _clean_json_mcp_config(
-                    project_root_path / "opencode.json",
+                    OpenCodeClientAdapter.config_path_for(project_root_path, clean_user_scope),
                     expanded_stale,
                     logger,
-                    "opencode.json",
+                    "OpenCode MCP config",
                     servers_key="mcp",
                     fail_on_write_error=fail_on_write_error,
+                    nested_servers=OpenCodeClientAdapter.native_v2_servers,
+                    nested_settings=V2_MCP_SETTINGS,
                 )
 
         if "windsurf" in target_runtimes:
@@ -733,35 +966,120 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean .agents/mcp_config.json (only if .agents/ directory exists)
+        # Clean the scope-resolved Antigravity mcp_config.json.
         if "antigravity" in target_runtimes:
-            if (project_root_path / ".agents").is_dir():
-                _clean_json_mcp_config(
-                    project_root_path / ".agents" / "mcp_config.json",
-                    expanded_stale,
-                    logger,
-                    ".agents/mcp_config.json",
-                    fail_on_write_error=fail_on_write_error,
-                )
+            from apm_cli.factory import ClientFactory
+
+            antigravity_cfg = Path(
+                ClientFactory.create_client(
+                    "antigravity",
+                    project_root=project_root_path,
+                    user_scope=user_scope or scope is InstallScope.USER,
+                ).get_config_path()
+            )
+            _clean_json_mcp_config(
+                antigravity_cfg,
+                expanded_stale,
+                logger,
+                "Antigravity MCP config",
+                fail_on_write_error=fail_on_write_error,
+            )
+
+        if "hermes" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            hermes_home = os.environ.get("HERMES_HOME", "").strip()
+            unresolved_cfg = (
+                Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
+            ) / "config.yaml"
+            if _reject_symlink_config(
+                unresolved_cfg,
+                "Hermes config.yaml",
+                logger,
+                fail_on_write_error=fail_on_write_error,
+            ):
+                return
+            hermes_cfg = Path(
+                ClientFactory.create_client(
+                    "hermes",
+                    project_root=project_root_path,
+                    user_scope=user_scope or scope is InstallScope.USER,
+                ).get_config_path()
+            )
+            _clean_hermes_mcp_config(
+                hermes_cfg,
+                expanded_stale,
+                logger,
+                fail_on_write_error=fail_on_write_error,
+            )
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
-            if (project_root_path / ".claude").is_dir():
+            claude_project_enabled = (project_root_path / ".claude").is_dir()
+            if claude_project_enabled or stored_configs:
+                if _reject_symlink_config(
+                    project_root_path / ".mcp.json",
+                    ".mcp.json",
+                    logger,
+                    fail_on_write_error=fail_on_write_error,
+                ):
+                    return
+                project_client = ClientFactory.create_client(
+                    "claude", project_root=project_root_path, user_scope=False
+                )
+                verified_keys = require_removable_mcp_connections(
+                    project_client,
+                    stale_names,
+                    stored_configs or {},
+                    (native_hashes or {}).get("claude"),
+                )
+            if claude_project_enabled:
                 _clean_claude_config(
                     project_root_path / ".mcp.json",
-                    expanded_stale,
+                    verified_keys,
                     logger,
                     fail_on_write_error=fail_on_write_error,
                 )
 
-        # Clean Claude Code user ~/.claude.json (USER scope only)
+        # Clean Claude Code user ~/.claude.json or $CLAUDE_CONFIG_DIR/.claude.json (USER scope only)
         if clean_claude_user:
+            from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+            claude_label = "Claude user config"
+            try:
+                unresolved_cfg = ClaudeClientAdapter.resolve_user_claude_unresolved_path()
+                claude_label = str(unresolved_cfg)
+                if _reject_symlink_config(
+                    unresolved_cfg,
+                    claude_label,
+                    logger,
+                    fail_on_write_error=fail_on_write_error,
+                ):
+                    return
+                claude_cfg = ClaudeClientAdapter.resolve_user_claude_json_path(unresolved_cfg)
+            except Exception as exc:
+                _log.debug("Failed to resolve Claude user-scope config path", exc_info=True)
+                if fail_on_write_error:
+                    from apm_cli.install.errors import RequiredIntegrationError
+
+                    raise RequiredIntegrationError(
+                        _cleanup_failure_message(claude_label, exc)
+                    ) from exc
+                return
+
+            user_client = ClientFactory.create_client(
+                "claude", project_root=project_root_path, user_scope=True
+            )
+            verified_keys = require_removable_mcp_connections(
+                user_client, stale_names, stored_configs or {}, (native_hashes or {}).get("claude")
+            )
             _clean_claude_config(
-                Path.home() / ".claude.json",
-                expanded_stale,
+                claude_cfg,
+                verified_keys,
                 logger,
                 is_user_scope=True,
                 fail_on_write_error=fail_on_write_error,
+                label=claude_label,
             )
 
     # ------------------------------------------------------------------
@@ -776,6 +1094,7 @@ class MCPIntegrator:
         mcp_configs: builtins.dict | None = None,
         mcp_target_servers: builtins.dict | None = None,
         mcp_config_provenance: builtins.dict | None = None,
+        native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
         logger: CommandLogger | None = None,
         fail_on_write_error: bool = False,
     ) -> None:
@@ -839,6 +1158,7 @@ class MCPIntegrator:
                         for target, servers in sorted(mcp_target_servers.items())
                         if servers
                     },
+                    native_hashes=native_hashes,
                 )
             if mcp_config_provenance is not None:
                 lockfile.mcp_config_provenance = mcp_config_provenance
@@ -865,7 +1185,7 @@ class MCPIntegrator:
                 lock_path,
                 exc_info=True,
             )
-            if creating:
+            if creating and not isinstance(exc, LockfileSymlinkError):
                 # Failing to UPDATE leaves a usable lockfile behind, but failing
                 # to CREATE one reproduces #2373 exactly -- install reports
                 # success and the next audit says "run 'apm install'". Debug
@@ -881,6 +1201,8 @@ class MCPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
+                if isinstance(exc, LockfileSymlinkError):
+                    raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "MCP lockfile update failed. Check apm.lock.yaml permissions, then retry."
                 ) from exc
@@ -968,6 +1290,9 @@ class MCPIntegrator:
         user_scope: bool = False,
         logger=None,
         replace_existing: bool = False,
+        installed_servers: builtins.set[str] | None = None,
+        managed_fields: builtins.set[str] | None = None,
+        written_native_hashes: builtins.dict[str, str] | None = None,
     ) -> bool:
         """Install MCP dependencies for a specific runtime.
 
@@ -991,11 +1316,16 @@ class MCPIntegrator:
                         project_root=project_root,
                         user_scope=user_scope,
                         replace_existing=replace_existing,
+                        managed_fields=managed_fields,
                     )
                     if result["failed"]:
                         logger.error(f"  Failed to install {dep}")
                         all_ok = False
-                    elif logger and runtime == "codex":
+                    elif result.get("installed") and installed_servers is not None:
+                        installed_servers.add(dep)
+                        if written_native_hashes is not None:
+                            written_native_hashes.update(result.get("native_hashes", {}))
+                    if not result["failed"] and logger and runtime == "codex":
                         from apm_cli.factory import ClientFactory
 
                         config_path = ClientFactory.create_client(
@@ -1016,7 +1346,8 @@ class MCPIntegrator:
                     all_ok = False
 
             # Emit aggregated post-install diagnostics for runtimes that
-            # support runtime env-var substitution (currently Copilot CLI).
+            # support runtime env-var substitution (currently Copilot CLI;
+            # Claude Code's are emitted once per run by run_mcp_install).
             # Safe no-op for runtimes whose adapter doesn't aggregate state.
             try:
                 if runtime == "copilot":
@@ -1254,7 +1585,7 @@ class MCPIntegrator:
         return out
 
     @staticmethod
-    def install(
+    def install(  # noqa: PLR0913
         mcp_deps: list,
         runtime: str = None,  # noqa: RUF013
         exclude: str = None,  # noqa: RUF013
@@ -1269,7 +1600,9 @@ class MCPIntegrator:
         diagnostics=None,
         scope=None,
         managed_target_servers: builtins.dict | None = None,
+        prevalidated_registry_servers: builtins.dict[str, builtins.dict] | None = None,
         fail_on_write_error: bool = False,
+        native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1314,5 +1647,7 @@ class MCPIntegrator:
             diagnostics=diagnostics,
             scope=scope,
             managed_target_servers=managed_target_servers,
+            prevalidated_registry_servers=prevalidated_registry_servers,
             fail_on_write_error=fail_on_write_error,
+            native_hashes=native_hashes,
         )

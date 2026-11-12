@@ -149,6 +149,7 @@ def _check_catalog_manifest(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _RID_CONTRACT = "marketplace-integrations-agent-plugin-contract"
+_RID_FORMAT_PRECEDENCE = "marketplace-integrations-package-format-precedence"
 
 
 _LOADER = "src/apm_cli/agent_plugins/loader.py"
@@ -161,6 +162,9 @@ _ASSETS = "src/apm_cli/agent_plugins/assets.py"
 
 
 _LOCAL_BUNDLE = "src/apm_cli/bundle/local_bundle.py"
+
+
+_PRIMITIVE_CLASSIFICATION = "src/apm_cli/install/primitive_classification.py"
 
 
 _FORMAT_DETECTION = "src/apm_cli/models/format_detection.py"
@@ -476,10 +480,12 @@ def _check_component_ir(provider: FactsProvider, inv: frozenset[str]) -> tuple[V
             _VALIDATION,
             (
                 "agent_plugin_detection: AgentPluginDetection | None = None",
+                "pkg_type, plugin_json_path = detect_package_type(",
+                "agent_plugin_detection=native_detection",
                 "result.agent_plugin = plugin",
                 "detection.manifest_path.parent.resolve() != package_root",
             ),
-            "same-root detection reuse or cross-root rejection changed",
+            "validation must reuse detection while routing precedence through the planner",
         )
     )
     findings.extend(
@@ -503,13 +509,23 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            _LOCAL_BUNDLE,
+            _PRIMITIVE_CLASSIFICATION,
             (
                 re.compile(r"^class PluginSchemaRoute\(Enum\):"),
                 re.compile(r"^def classify_plugin_manifest_schema\("),
-                re.compile(r"^def route_agent_plugin_package\("),
+                re.compile(r"^def classify_plugin_manifest\("),
             ),
-            "bundle/local_bundle.py must own plugin schema routing",
+            "primitive_classification.py must own plugin schema routing",
+        )
+    )
+    findings.extend(
+        _require_res(
+            provider,
+            inv,
+            _RID_CONTRACT,
+            _LOCAL_BUNDLE,
+            (re.compile(r"^def route_agent_plugin_package\("),),
+            "bundle/local_bundle.py must route package admission through the classifier",
         )
     )
     findings.extend(
@@ -517,8 +533,12 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            _LOCAL_BUNDLE,
-            ("if schema_id == PLUGIN_SCHEMA_ID:",),
+            _PRIMITIVE_CLASSIFICATION,
+            (
+                "if schema_id == PLUGIN_SCHEMA_ID:",
+                "PluginSchemaRoute.AGENT_PLUGIN",
+                "PluginSchemaRoute.LEGACY",
+            ),
             "plugin schema routing must select exact schema IDs",
         )
     )
@@ -527,7 +547,7 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            (_LOCAL_BUNDLE,),
+            (_PRIMITIVE_CLASSIFICATION,),
             re.compile(
                 r"is_agent_plugin_schema_id|supports_plugin_schema_id|validate_plugin_manifest_document"
             ),
@@ -540,7 +560,7 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            (_LOCAL_BUNDLE,),
+            (_PRIMITIVE_CLASSIFICATION,),
             re.compile(
                 r"agent_plugin_(runtime|state)|install\.mcp|security\.executables|lockfile.*v3"
             ),
@@ -554,7 +574,7 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             inv,
             _RID_CONTRACT,
             _LOADER,
-            (("sub", "classify_plugin_manifest_schema", 4, "ge"),),
+            (("sub", "classify_plugin_manifest", 4, "ge"),),
             "Agent Plugin loading and legacy admission must share the schema router",
         )
     )
@@ -635,6 +655,136 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
     return tuple(findings)
 
 
+def _check_package_format_precedence(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _FORMAT_DETECTION,
+            ("class NormalizationPlanner:", "if has_eligible_apm_yml:"),
+            "NormalizationPlanner must own eligible-manifest precedence",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _VALIDATION,
+            (
+                "pkg_type, plugin_json_path = detect_package_type(",
+                "agent_plugin_detection=native_detection",
+            ),
+            "validation must delegate package-format precedence to the planner",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _LOCAL_BUNDLE,
+            (
+                "package_type, _ = detect_package_type(",
+                "if package_type != PackageType.AGENT_PLUGIN:",
+            ),
+            "Agent Plugin ingress must delegate package-format precedence to the planner",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            "src/apm_cli/deps/apm_resolver.py",
+            (
+                "package_type, _ = detect_package_type(install_path)",
+                "PackageType.HOOK_PACKAGE,",
+                "validation = validate_apm_package(",
+                "update_keys=self._update_keys,",
+                "self._update_keys.add(sub_dep.get_unique_key())",
+                "and dep_ref.get_unique_key() not in self._scoped_rechecked",
+            ),
+            "Resolver hook admission must use canonical package classification and validation",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _VALIDATION,
+            (
+                "hook_files = HookIntegrator().find_hook_files(package_path)",
+                "parse_hook_source(json.load(handle))",
+                "_validate_hook_descriptors(package_path, result)",
+            ),
+            "Hook-only validation must reuse hook discovery and the neutral source grammar",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            "src/apm_cli/drift.py",
+            (
+                "package_type, _ = detect_package_type(package_path)",
+                "if package_type is PackageType.HOOK_PACKAGE:",
+                "if update_keys is not None and dep_ref.get_unique_key() not in update_keys:",
+            ),
+            "Hook update rechecks must use canonical package classification",
+        )
+    )
+    for path, snippets in (
+        (
+            "src/apm_cli/install/phases/resolve.py",
+            (
+                "update_keys=update_keys,",
+                "content_hash = compute_package_hash(candidate_path)",
+                "selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps)",
+            ),
+        ),
+        (
+            "src/apm_cli/install/package_selection.py",
+            ("_selected_dependency_reference(spec, dependencies).get_unique_key()",),
+        ),
+        (
+            "src/apm_cli/install/phases/integrate.py",
+            (
+                "receipt[0] == install_path.resolve()",
+                "if verify_package_hash(install_path, receipt[1]):",
+                "and (update_refs or ctx.refresh)",
+            ),
+        ),
+    ):
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_FORMAT_PRECEDENCE,
+                path,
+                snippets,
+                "Hook replacement reuse must preserve selected scope and validated path/hash evidence",
+            )
+        )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            ("src/apm_cli/deps/apm_resolver.py",),
+            re.compile(r"\.(?:rglob|glob)\("),
+            "Resolver must not discover hook layouts independently of package classification",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 def _calls_in_scope_match(facts: FileFacts, scope: str, terminals: frozenset[str]) -> bool:
     return any(
         call.scope == scope
@@ -692,6 +842,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_CONTRACT,),
         description="Agent Plugins v1 contract and component IR stay owned by agent_plugins/loader.py.",
         check=_check_agent_plugin_contract,
+    ),
+    Rule(
+        id=_RID_FORMAT_PRECEDENCE,
+        group=GROUP,
+        guard_ids=(_RID_FORMAT_PRECEDENCE,),
+        description="Package ingress delegates format precedence to NormalizationPlanner.",
+        check=_check_package_format_precedence,
     ),
 )
 

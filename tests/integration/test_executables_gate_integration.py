@@ -439,19 +439,25 @@ class TestCheckExecutableApprovalIntegration:
         assert hooks_ok is True
         assert bin_ok is True
 
-    def test_fallback_to_name_version_key(self, tmp_path: Path) -> None:
+    def test_canonical_dependency_does_not_fallback_to_manifest_name(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "hook.json").write_text("{}", encoding="utf-8")
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
         dep_ref = MagicMock()
         dep_ref.canonical_string.return_value = "./packages/local-ref"
         pkg_info.dependency_ref = dep_ref
+        ctx = MagicMock()
+        ctx.blocked_executables = []
 
-        # Approved under name#version, not dep-ref
+        # A package-controlled manifest name is not an authorization identity.
         allow = {"pkg#1.0": {"hooks": True, "bin": True}}
         hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
-            "pkg", pkg_info, allow
+            "pkg", pkg_info, allow, ctx=ctx
         )
-        assert hooks_ok is True
-        assert bin_ok is True
+        assert hooks_ok is False
+        assert bin_ok is False
+        assert ctx.blocked_executables[0].package_key == "./packages/local-ref"
 
     def test_blocked_packages_tracked_on_context(self, tmp_path: Path) -> None:
         # Create hooks so scan finds them

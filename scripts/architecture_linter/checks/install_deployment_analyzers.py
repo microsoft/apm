@@ -29,12 +29,30 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
     _GUARD_FROZEN,
+    _GUARD_LIFECYCLE_SERIALIZATION,
     _GUARD_MCP_OWNERSHIP,
     _GUARD_UNINSTALL_REACHABILITY,
     check_audit_replay,
     check_frozen,
+    check_lifecycle_serialization,
     check_mcp_ownership_migration,
     check_uninstall_reachability,
+)
+from scripts.architecture_linter.checks.install_lock_parent_placement import (
+    GUARD_LOCK_PARENT_PLACEMENT,
+    check_lock_parent_placement,
+)
+from scripts.architecture_linter.checks.install_lsp_plugin import (
+    GUARD_EXECUTABLE_TRUST,
+    GUARD_LSP_LIFECYCLE,
+    GUARD_LSP_TARGET_CONTRACT,
+    check_executable_trust_context,
+    check_lsp_lifecycle,
+    check_lsp_target_contract,
+)
+from scripts.architecture_linter.checks.install_manifest_snapshot import (
+    GUARD_MANIFEST_SNAPSHOT,
+    check_manifest_snapshot,
 )
 from scripts.architecture_linter.checks.install_package_target_authorization import (
     _GUARD_PACKAGE_TARGET,
@@ -42,16 +60,38 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
 )
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_request_and_source import (
+    _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
+    _GUARD_PRIMITIVE_CLASSIFICATION,
     _GUARD_REQUEST_DEFAULTS,
     _GUARD_SOURCE_PLAN,
+    check_install_scope_selection,
     check_outcome,
+    check_primitive_classification,
     check_request_defaults,
     check_source_plan,
 )
+from scripts.architecture_linter.checks.install_single_file import (
+    GUARD as _GUARD_SINGLE_FILE,
+)
+from scripts.architecture_linter.checks.install_single_file import (
+    check_single_file_materialization,
+)
+from scripts.architecture_linter.checks.install_skill_preflight import (
+    GUARD_SKILL_PREFLIGHT,
+    check_skill_preflight,
+)
+from scripts.architecture_linter.checks.install_skills_root_derivation import (
+    _GUARD_SKILLS_ROOT,
+    check_skills_root_derivation,
+)
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
+    _GUARD_IMMUTABLE_REQUIREMENTS,
+    _GUARD_ORPHAN_SELECTION,
     _GUARD_RESOLUTION_REPLACEMENT,
     _GUARD_UNINSTALL_SELECTION,
+    check_immutable_requirements,
+    check_orphan_selection,
     check_resolution_replacement,
     check_uninstall_selection,
 )
@@ -59,13 +99,28 @@ from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
     _rule(
+        _GUARD_SINGLE_FILE,
+        "Local and remote single-file dependencies share package materialization and admission.",
+        check_single_file_materialization,
+    ),
+    _rule(
+        _GUARD_ORPHAN_SELECTION,
+        "Prune and orphan warnings share declaration-aware package selection.",
+        check_orphan_selection,
+    ),
+    _rule(
+        _GUARD_IMMUTABLE_REQUIREMENTS,
+        "Immutable dependency compatibility is checked by one owner before hoisting.",
+        check_immutable_requirements,
+    ),
+    _rule(
         _GUARD_PACKAGE_TARGET,
         "Restriction-only package target authorization has one owner (install/target_filter.py).",
         check_package_target_authorization,
     ),
     _rule(
         _GUARD_MCP_OWNERSHIP,
-        "Legacy MCP runtime ownership-key migration stays owned by install/mcp/ownership.py.",
+        "Native MCP baselines, safe removal and legacy migration share install/mcp/ownership.py.",
         check_mcp_ownership_migration,
     ),
     _rule(
@@ -94,6 +149,11 @@ RULES: tuple[Rule, ...] = (
         check_frozen,
     ),
     _rule(
+        GUARD_MANIFEST_SNAPSHOT,
+        "Acquired-manifest metadata and version authority route through their snapshot owners.",
+        check_manifest_snapshot,
+    ),
+    _rule(
         _GUARD_DRY_RUN_PLAN,
         "Prospective dry-run state and selection stay owned by ProspectiveInstallPlan.",
         check_prospective_dry_run_plan,
@@ -104,9 +164,24 @@ RULES: tuple[Rule, ...] = (
         check_source_plan,
     ),
     _rule(
+        GUARD_SKILL_PREFLIGHT,
+        "The complete selected skill plan is checked before native deployment.",
+        check_skill_preflight,
+    ),
+    _rule(
+        _GUARD_PRIMITIVE_CLASSIFICATION,
+        "Primitive kind classification is declaration-first and has one owner.",
+        check_primitive_classification,
+    ),
+    _rule(
         _GUARD_REQUEST_DEFAULTS,
         "Install invocation option defaults stay owned by install/request.py.",
         check_request_defaults,
+    ),
+    _rule(
+        _GUARD_INSTALL_SCOPE,
+        "Direct MCP installs consume the install command's single scope decision.",
+        check_install_scope_selection,
     ),
     _rule(
         _GUARD_BASE_INTEGRATOR,
@@ -114,9 +189,29 @@ RULES: tuple[Rule, ...] = (
         check_base_integrator,
     ),
     _rule(
+        GUARD_EXECUTABLE_TRUST,
+        "Install and update consume one effective executable-trust owner.",
+        check_executable_trust_context,
+    ),
+    _rule(
+        GUARD_LSP_TARGET_CONTRACT,
+        "LSP target shape and deployment paths route through LSPIntegrator.",
+        check_lsp_target_contract,
+    ),
+    _rule(
+        GUARD_LSP_LIFECYCLE,
+        "LSP collection and reconciliation route through install/lsp/integration.py.",
+        check_lsp_lifecycle,
+    ),
+    _rule(
         _GUARD_UNINSTALL_REACHABILITY,
         "Post-uninstall dependency reachability routes through deps/reachability.py.",
         check_uninstall_reachability,
+    ),
+    _rule(
+        GUARD_LOCK_PARENT_PLACEMENT,
+        "Legacy lockfile parent placement routes through deps/lock_parent_placement.py.",
+        check_lock_parent_placement,
     ),
     _rule(
         _GUARD_AUDIT_REPLAY,
@@ -124,9 +219,19 @@ RULES: tuple[Rule, ...] = (
         check_audit_replay,
     ),
     _rule(
+        _GUARD_LIFECYCLE_SERIALIZATION,
+        "Lifecycle mutators route through install/locking.py.",
+        check_lifecycle_serialization,
+    ),
+    _rule(
         _GUARD_UNINSTALL_SELECTION,
         "Dependency CLI parsing + uninstall selection route through dependency/selection.py.",
         check_uninstall_selection,
+    ),
+    _rule(
+        _GUARD_SKILLS_ROOT,
+        "Skills roots come from TargetProfile.skills_rel_root, not open-coded <root>/skills.",
+        check_skills_root_derivation,
     ),
     *EXTRA_RULES,
 )

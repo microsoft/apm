@@ -13,6 +13,7 @@ from apm_cli.agent_plugins import (
     project_agent_plugin_package,
 )
 from apm_cli.agent_plugins.loader import detect_agent_plugin
+from apm_cli.bundle.local_bundle import route_agent_plugin_package
 from apm_cli.deps.package_validator import PackageValidator, stamp_plugin_version
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.validation import PackageType, validate_apm_package
@@ -67,7 +68,8 @@ def test_native_validation_projects_ir_without_filesystem_mutation(tmp_path: Pat
     apm_yml = tmp_path / "apm.yml"
     dump_yaml(
         {
-            "dependencies": {"apm": ["owner/repo#v1.0.0"]},
+            "name": "bridge.plugin",
+            "version": "1.2.3",
             "targets": ["copilot"],
             "type": "skill",
         },
@@ -92,7 +94,6 @@ def test_native_validation_projects_ir_without_filesystem_mutation(tmp_path: Pat
     assert result.package.package_path == result.agent_plugin.root
     assert result.package.source_path == result.agent_plugin.root
     assert result.package.canonical_targets == ("copilot",)
-    assert [dep.repo_url for dep in result.package.get_apm_dependencies()] == ["owner/repo"]
     assert tuple(skill.name for skill in result.package.agent_plugin.components.skills) == (
         "bridge-skill",
     )
@@ -105,6 +106,23 @@ def test_native_validation_projects_ir_without_filesystem_mutation(tmp_path: Pat
         if path.is_file()
     }
     assert after == before
+
+
+def test_eligible_apm_manifest_bypasses_agent_plugin_projection(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    (tmp_path / ".apm").mkdir()
+    dump_yaml(
+        {"name": "bridge.plugin", "version": "1.2.3"},
+        tmp_path / "apm.yml",
+    )
+
+    detection = route_agent_plugin_package(tmp_path)
+    result = validate_apm_package(tmp_path)
+
+    assert detection is None
+    assert result.is_valid
+    assert result.package_type == PackageType.APM_PACKAGE
+    assert result.agent_plugin is None
 
 
 def test_native_validation_isolates_component_error(tmp_path: Path) -> None:

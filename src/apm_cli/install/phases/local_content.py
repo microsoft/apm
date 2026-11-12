@@ -29,13 +29,21 @@ _copy_local_package
 """
 
 import shutil
+import tempfile
+from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 
+import yaml
+
+from apm_cli.deps.virtual_file import materialize_virtual_file_package, virtual_file_subdirectory
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     safe_rmtree,
 )
+from apm_cli.utils.yaml_io import load_frontmatter
 
 # ---------------------------------------------------------------------------
 # Root primitive detection helpers
@@ -86,6 +94,123 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 # Local-path dependency copy
 # ---------------------------------------------------------------------------
+
+
+def compute_local_package_hash(source: Path) -> str:
+    """Hash the validated local-copy image without changing installed content.
+
+    Use the same directory copier or selected-file materializer as install
+    before the existing package hash, rather than hashing transformed output.
+    """
+    from apm_cli.config import get_apm_temp_dir
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    with tempfile.TemporaryDirectory(prefix="apm-local-snapshot-", dir=get_apm_temp_dir()) as stage:
+        snapshot = Path(stage) / "package"
+        if source.is_dir():
+            _copy_tree_dereferencing_validated(source, snapshot, source)
+        else:
+            dependency = DependencyReference.parse(source.absolute().as_posix())
+            admitted = read_local_package_source(dependency, source.parent)
+            if admitted.content is None:
+                raise LocalPackageError(
+                    f"Local single-file source changed kind during hashing: {source}"
+                )
+            materialize_virtual_file_package(
+                dependency, snapshot, admitted.path.name, admitted.content
+            )
+        return compute_package_hash(snapshot)
+
+
+class LocalPackageError(ValueError):
+    """A local dependency cannot be admitted without changing existing output."""
+
+
+@dataclass(frozen=True)
+class LocalPackageSource:
+    """An admitted directory or an already-read, validated primitive file."""
+
+    path: Path
+    content: bytes | None = None
+
+
+def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> LocalPackageSource:
+    """Admit local input before replacing a prior package or target output."""
+    from apm_cli.deps._shared import has_marketplace_deployable_manifest
+    from apm_cli.install.primitive_classification import (
+        PrimitiveKind,
+        classify_agent_source_file,
+    )
+    from apm_cli.utils.helpers import find_plugin_json
+
+    selected = Path(dep_ref.local_path).expanduser()
+    if not selected.is_absolute():
+        selected = base_dir / selected
+    try:
+        local = selected.resolve(strict=True)
+        if local.is_dir():
+            if (
+                (local / "apm.yml").exists()
+                or (local / "SKILL.md").exists()
+                or find_plugin_json(local, include_codex=True) is not None
+                or has_marketplace_deployable_manifest(dep_ref)
+            ):
+                return LocalPackageSource(local)
+            raise LocalPackageError(
+                "Local package is not a valid APM package "
+                f"(no apm.yml, SKILL.md, or plugin.json): {dep_ref.local_path}. "
+                "Select a package directory or a supported single-file primitive."
+            )
+        if not local.is_file():
+            raise LocalPackageError(
+                f"Unsupported local source kind: {dep_ref.local_path}. "
+                "Select a regular primitive file or a directory package."
+            )
+        if selected.is_symlink():
+            raise LocalPackageError(
+                f"Local single-file dependency is a symlink: {dep_ref.local_path}. "
+                "Select a real file or use a directory package with in-package symlinks."
+            )
+        try:
+            subdirectory = virtual_file_subdirectory(selected.name)
+        except ValueError as exc:
+            raise LocalPackageError(str(exc)) from exc
+        content = local.read_bytes()
+        load_frontmatter(BytesIO(content))
+        if subdirectory == "agents":
+            classification = classify_agent_source_file(local, local.parent)
+            if classification.kind is not PrimitiveKind.AGENT:
+                raise LocalPackageError(
+                    f"Invalid primitive content in {dep_ref.local_path}: {classification.warning}"
+                )
+        return LocalPackageSource(local, content)
+    except FileNotFoundError as exc:
+        raise LocalPackageError(
+            f"Local package path does not exist: {dep_ref.local_path}. "
+            "Restore the source or correct the dependency path, then rerun apm install."
+        ) from exc
+    except OSError as exc:
+        raise LocalPackageError(
+            f"Cannot read local package: {dep_ref.local_path}: {exc}. "
+            "Check the source permissions and symlink target, then rerun apm install."
+        ) from exc
+    except (UnicodeError, yaml.YAMLError) as exc:
+        raise LocalPackageError(
+            f"Invalid primitive content in {dep_ref.local_path}: {exc}. "
+            "Use UTF-8 Markdown with valid YAML frontmatter, then rerun apm install."
+        ) from exc
+
+
+def materialize_local_file_for_replay(
+    dep_ref: DependencyReference, base_dir: Path, modules_dir: Path
+) -> Path:
+    """Admit the authored leaf before materializing a scratch replay package."""
+    source = read_local_package_source(dep_ref, base_dir)
+    if source.content is None:
+        raise ValueError(f"Local single-file source changed kind during audit: {source.path}")
+    replay_path = dep_ref.get_install_path(modules_dir)
+    materialize_virtual_file_package(dep_ref, replay_path, source.path.name, source.content)
+    return replay_path
 
 
 def _copy_tree_dereferencing_validated(
@@ -238,33 +363,12 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
 
         logger = NullCommandLogger()
 
-    local = Path(dep_ref.local_path).expanduser()
-    # Anchor on the *declaring* package's directory (#857). For direct deps
-    # from the root, ``base_dir`` IS ``project_root`` so behavior is
-    # unchanged. For transitive deps, ``base_dir`` is the parent package's
-    # source dir. Absolute paths bypass anchoring.
-    if not local.is_absolute():  # noqa: SIM108
-        local = (base_dir / local).resolve()
-    else:
-        local = local.resolve()
-
-    if not local.is_dir():
-        logger.error(f"Local package path does not exist: {dep_ref.local_path}")
+    try:
+        source = read_local_package_source(dep_ref, base_dir)
+    except LocalPackageError as exc:
+        logger.error(str(exc))
         return None
-    from apm_cli.deps._shared import has_marketplace_deployable_manifest
-    from apm_cli.utils.helpers import find_plugin_json
-
-    if (
-        not (local / "apm.yml").exists()
-        and not (local / "SKILL.md").exists()
-        and find_plugin_json(local) is None
-        and not has_marketplace_deployable_manifest(dep_ref)
-    ):
-        logger.error(
-            "Local package is not a valid APM package "
-            f"(no apm.yml, SKILL.md, or plugin.json): {dep_ref.local_path}"
-        )
-        return None
+    local = source.path
 
     # Ensure parent exists and clean target (always re-copy for local deps)
     install_path.parent.mkdir(parents=True, exist_ok=True)
@@ -282,7 +386,10 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
     # On any PathTraversalError, clean up install_path to prevent dangling
     # partial-copy content from a malicious package.
     try:
-        _copy_tree_dereferencing_validated(local, install_path, local)
+        if source.content is None:
+            _copy_tree_dereferencing_validated(local, install_path, local)
+        else:
+            materialize_virtual_file_package(dep_ref, install_path, local.name, source.content)
     except PathTraversalError:
         if install_path.exists():
             safe_rmtree(install_path, install_path.parent.parent)

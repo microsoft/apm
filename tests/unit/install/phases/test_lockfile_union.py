@@ -13,6 +13,7 @@ gate (deployed-files-present, content-integrity, drift).
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -45,6 +46,28 @@ def _ctx(*, package_deployed_files, existing_lockfile, targets, project_root):
         targets=targets,
         project_root=project_root,
     )
+
+
+def test_target_attribution_setup_does_not_scale_with_file_count() -> None:
+    """Canonical attribution builds each target's prefix set once per reconciliation."""
+    from apm_cli.install import manifest_reconcile
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    target = KNOWN_TARGETS["claude"]
+    files = [f".claude/skills/shared/{name}.md" for name in ("SKILL", "extra", "notes")]
+    hashes = dict.fromkeys(files, "sha256:" + "a" * 64)
+    with patch.object(
+        manifest_reconcile, "install_governance", wraps=manifest_reconcile.install_governance
+    ) as governance:
+        actual_files, actual_hashes, ledger = manifest_reconcile.union_preserving(
+            files, hashes, [], {}, [target], declared_targets=[target], include_ledger=True
+        )
+
+    assert actual_files == files
+    assert actual_hashes == hashes
+    assert {record.locator.target for record in ledger.records.values()} == {"claude"}
+    assert {record.locator.value for record in ledger.records.values()} == set(files)
+    assert sum(call.args == ([target],) for call in governance.call_args_list) == 1
 
 
 class TestAttachDeployedFilesUnion:
@@ -222,6 +245,31 @@ class TestCurrentInstallGovernance:
         assert ".agents/skills/" in file_prefixes
         assert ".agents/" not in file_prefixes
 
+    def test_bounded_governance_partitions_dedicated_roots(self):
+        from apm_cli.install.manifest_reconcile import install_governance
+
+        file_prefixes, _ = install_governance([_known("claude"), _known("codex")], bounded=True)
+
+        assert ".claude/skills/" in file_prefixes
+        assert ".claude/hooks/" in file_prefixes
+        assert ".codex/hooks.json" in file_prefixes
+        assert ".agents/skills/" in file_prefixes
+        assert ".claude/" not in file_prefixes
+        assert ".codex/" not in file_prefixes
+
+    def test_bounded_governance_keeps_generated_files_under_dedicated_roots(self):
+        from apm_cli.install.manifest_reconcile import install_governance
+
+        target = SimpleNamespace(
+            name="stub",
+            root_dir=".stub",
+            primitives={"skills": SimpleNamespace(subdir="skills", extension="/SKILL.md")},
+            generated_files=("index.json",),
+        )
+        file_prefixes, _ = install_governance([target], bounded=True)
+
+        assert file_prefixes == {".stub/skills/", ".stub/index.json"}
+
     def test_shared_root_filename_governance_requires_exact_match(self):
         from apm_cli.install.manifest_reconcile import union_preserving
 
@@ -244,7 +292,7 @@ class TestCurrentInstallGovernance:
         assert any(s.startswith("copilot-app-db://") for s in uri_schemes)
 
     def test_generic_agents_rows_contract_from_current_skill_claims(self, tmp_path):
-        """Current claims supersede legacy generic rows and remove stale twins."""
+        """Explicit caller governance may contract generic rows alongside current claims."""
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -289,6 +337,7 @@ class TestCurrentInstallGovernance:
             declared_targets=[_known("cursor")],
             diagnostics=DiagnosticCollector(),
             prior_ledger=DeploymentLedger(records=generic_records),
+            generic_governed_values=frozenset({alpha_only}),
         )
 
         assert files == [shared, beta_only]
@@ -385,6 +434,307 @@ class TestCurrentInstallGovernance:
         assert files == [alpha_only]
         assert hashes == {alpha_only: original_hash}
         assert alpha_path.read_text(encoding="utf-8") == "original"
+
+    @pytest.mark.parametrize(
+        ("manifest", "active"),
+        [
+            (("claude", "copilot"), ("claude", "copilot")),
+            (("claude", "copilot"), ("copilot",)),
+            (("vscode",), ("copilot",)),
+            (("vscode", "codex"), ("codex",)),
+        ],
+        ids=[
+            "all-manifest-targets-active",
+            "narrowed-to-copilot",
+            "alias-target-active",
+            "alias-target-narrowed-away",
+        ],
+    )
+    @pytest.mark.parametrize("owner", [".", "owner/pkg"], ids=["local", "dependency"])
+    def test_generic_agents_row_requires_more_than_declared_target_governance(
+        self,
+        tmp_path: Path,
+        manifest: tuple[str, ...],
+        active: tuple[str, ...],
+        owner: str,
+    ) -> None:
+        """Full and narrowed installs preserve unknown history but attribute current proofs."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.install.phases.targets import declared_target_profiles
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        declared = "".join(f"  - {name}\n" for name in manifest)
+        (tmp_path / "apm.yml").write_text(f"targets:\n{declared}", encoding="utf-8")
+        ctx = SimpleNamespace(apm_package=SimpleNamespace(package_path=tmp_path), scope=None)
+        kept = ".agents/skills/kept/SKILL.md"
+        renamed = ".agents/skills/renamed/SKILL.md"
+        for path in (kept, renamed):
+            target = tmp_path / path
+            target.parent.mkdir(parents=True)
+            target.write_text(path, encoding="utf-8")
+        prior_hashes = {path: compute_file_hash(tmp_path / path) for path in (kept, renamed)}
+        records = {}
+        for path in (kept, renamed):
+            locator = DeploymentLocator(
+                kind=LocatorKind.PROJECT_RELATIVE,
+                target="legacy",
+                value=path,
+                runtime=None,
+                scope="project",
+            )
+            records[locator.key] = DeploymentRecord(
+                locator=locator,
+                owners=(owner,),
+                active_owner=owner,
+                content_hash=prior_hashes[path],
+            )
+
+        files, hashes, ledger = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="<local .apm/>",
+            current_files=[kept],
+            current_hashes={kept: prior_hashes[kept]},
+            prior_files=[kept, renamed],
+            prior_hashes=prior_hashes,
+            active_targets=[_known(name) for name in active],
+            declared_targets=declared_target_profiles(ctx),
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=DeploymentLedger(records=records),
+            owner=owner,
+            include_ledger=True,
+        )
+
+        assert renamed in files
+        assert hashes[renamed] == prior_hashes[renamed]
+        assert (tmp_path / renamed).read_text(encoding="utf-8") == renamed
+        targets_by_value = {
+            record.locator.value: record.locator.target for record in ledger.records.values()
+        }
+        assert targets_by_value[renamed] == "legacy"
+        assert targets_by_value[kept] in active
+
+    @pytest.mark.parametrize(
+        ("declared_names", "owners", "trusted", "lock_only"),
+        [
+            (("claude", "copilot"), (".", "local-bundle"), True, False),
+            (("openclaw",), (".",), True, False),
+            ((), (".",), True, False),
+            (("claude", "copilot"), (".",), False, False),
+            (("claude", "copilot"), (".",), True, True),
+            (("claude", "copilot", "codex"), ("owner/pkg",), True, False),
+            (("claude", "copilot"), ("owner/pkg",), False, False),
+            (("claude", "copilot"), ("owner/pkg",), True, True),
+        ],
+        ids=[
+            "local-bundle-row",
+            "no-manifest-target",
+            "empty-declared-universe",
+            "untrusted-run",
+            "lock-only",
+            "dependency-narrowed-run",
+            "dependency-untrusted-run",
+            "dependency-lock-only",
+        ],
+    )
+    def test_generic_agents_row_survives_without_contraction_evidence(
+        self,
+        tmp_path: Path,
+        declared_names: tuple[str, ...],
+        owners: tuple[str, ...],
+        trusted: bool,
+        lock_only: bool,
+    ) -> None:
+        """Bundle output, unproven runs, and ``apm lock`` never sweep generic rows."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        path = ".agents/skills/kept/SKILL.md"
+        deployed = tmp_path / path
+        deployed.parent.mkdir(parents=True)
+        deployed.write_text("kept", encoding="utf-8")
+        content_hash = compute_file_hash(deployed)
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="legacy",
+            value=path,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=owners,
+                    active_owner=owners[-1],
+                    content_hash=content_hash,
+                )
+            }
+        )
+
+        dependency = owners[0] != "."
+        files, _ = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key=owners[0] if dependency else "<local .apm/>",
+            current_files=[],
+            current_hashes={},
+            prior_files=[path],
+            prior_hashes={path: content_hash},
+            active_targets=[_known("claude"), _known("copilot")],
+            declared_targets=[_known(name) for name in declared_names],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+            current_run_trusted=trusted,
+            owner=owners[0] if dependency else "legacy",
+            apply_disk_deletion=not lock_only,
+        )
+
+        assert files == [path]
+        assert deployed.exists()
+
+    def test_hashless_generic_file_row_is_never_swept(self, tmp_path: Path) -> None:
+        """Without a recorded hash the user-edit gate cannot run, so the file row stays."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        path = ".agents/skills/old/SKILL.md"
+        deployed = tmp_path / path
+        deployed.parent.mkdir(parents=True)
+        deployed.write_text("user edit", encoding="utf-8")
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="legacy",
+            value=path,
+            runtime=None,
+            scope="project",
+        )
+        targets = [_known("claude"), _known("copilot")]
+
+        files, _ = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="<local .apm/>",
+            current_files=[],
+            current_hashes={},
+            prior_files=[path],
+            prior_hashes={},
+            active_targets=targets,
+            declared_targets=targets,
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=DeploymentLedger(
+                records={
+                    locator.key: DeploymentRecord(
+                        locator=locator, owners=(".",), active_owner=".", content_hash=None
+                    )
+                }
+            ),
+        )
+
+        assert files == [path]
+        assert deployed.read_text(encoding="utf-8") == "user edit"
+
+    def test_explicit_generic_sweep_never_reaches_bundle_output(self, tmp_path: Path) -> None:
+        """A caller-supplied sweep set (selected-owner uninstall) still exempts bundle rows."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        path = ".agents/skills/bundled/SKILL.md"
+        deployed = tmp_path / path
+        deployed.parent.mkdir(parents=True)
+        deployed.write_text("bundled", encoding="utf-8")
+        content_hash = compute_file_hash(deployed)
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="legacy",
+            value=path,
+            runtime=None,
+            scope="project",
+        )
+
+        files, _ = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[],
+            current_hashes={},
+            prior_files=[path],
+            prior_hashes={path: content_hash},
+            active_targets=[_known("copilot")],
+            declared_targets=[_known("copilot")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=DeploymentLedger(
+                records={
+                    locator.key: DeploymentRecord(
+                        locator=locator,
+                        owners=("owner/pkg", "local-bundle"),
+                        active_owner="local-bundle",
+                        content_hash=content_hash,
+                    )
+                }
+            ),
+            owner="owner/pkg",
+            generic_governed_values=frozenset({path}),
+        )
+
+        assert files == [path]
+        assert deployed.exists()
+
+    @pytest.mark.parametrize(
+        "manifest",
+        [("vscode",), ("vscode", "copilot")],
+        ids=["alias-only", "alias-and-canonical"],
+    )
+    def test_declared_universe_resolves_manifest_aliases_once(
+        self, tmp_path: Path, manifest: tuple[str, ...]
+    ) -> None:
+        """Every declared-universe consumer sees an alias as its canonical target, once."""
+        from apm_cli.install.manifest_reconcile import declared_target_profiles
+
+        declared = "".join(f"  - {name}\n" for name in manifest)
+        (tmp_path / "apm.yml").write_text(f"targets:\n{declared}", encoding="utf-8")
+
+        names = [profile.name for profile in declared_target_profiles(tmp_path) or ()]
+
+        assert names.count("copilot") == 1
+        assert "vscode" not in names
+
+    def test_unattributed_uri_row_is_left_to_its_native_adapter(self, tmp_path: Path) -> None:
+        """The generic sweep only contracts file rows; URI rows keep their own cleanup."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        uri = "cowork://skills/kept/SKILL.md"
+        locator = DeploymentLocator(
+            kind=LocatorKind.URI,
+            target="cowork",
+            value=uri,
+            runtime=None,
+            scope="project",
+        )
+        targets = [_known("copilot"), _known("copilot-cowork")]
+
+        with patch("apm_cli.integration.cleanup.remove_stale_deployed_files") as cleanup:
+            files, _ = reconcile_deployed_block(
+                project_root=tmp_path,
+                dep_key="<local .apm/>",
+                current_files=[],
+                current_hashes={},
+                prior_files=[uri],
+                prior_hashes={},
+                active_targets=targets,
+                declared_targets=targets,
+                diagnostics=DiagnosticCollector(),
+                prior_ledger=DeploymentLedger(
+                    records={
+                        locator.key: DeploymentRecord(
+                            locator=locator,
+                            owners=(".",),
+                            active_owner=".",
+                            content_hash=None,
+                        )
+                    }
+                ),
+            )
+
+        cleanup.assert_not_called()
+        assert files == [uri]
 
     def test_cleanup_retention_never_rehashes_a_user_edited_path(self, tmp_path):
         """A cleanup refusal keeps its original provenance instead of adopting edits."""
@@ -732,6 +1082,105 @@ def _known(name):
     return KNOWN_TARGETS[name]
 
 
+def _seed_multiple_cowork_mounts(home: Path) -> None:
+    cloud_storage = home / "Library" / "CloudStorage"
+    for dirname in ("OneDrive-Org", "OneDrive-SharedLibraries-Team"):
+        (cloud_storage / dirname).mkdir(parents=True)
+
+
+def _isolate_cowork_config(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+    from apm_cli import config
+
+    config_dir = home / ".apm"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("ONEDRIVECOMMERCIAL", raising=False)
+    monkeypatch.delenv("ONEDRIVE", raising=False)
+    monkeypatch.setattr(config, "CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(config, "CONFIG_FILE", str(config_dir / "config.json"))
+    monkeypatch.setattr(config, "_config_cache", None)
+
+
+class TestInactiveExperimentalResolverGating:
+    def test_declared_profiles_skip_inactive_resolvers_with_multiple_mounts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from apm_cli.install.manifest_reconcile import declared_target_profiles
+        from apm_cli.utils.diagnostics import CATEGORY_INFO, DiagnosticCollector
+
+        home = tmp_path / "home"
+        _seed_multiple_cowork_mounts(home)
+        _isolate_cowork_config(monkeypatch, home)
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: inactive-resolver-consumer\n"
+            "version: 0.1.0\n"
+            "targets:\n"
+            "  - copilot\n"
+            "  - claude\n"
+            "  - codex\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector(verbose=True)
+
+        profiles = declared_target_profiles(
+            project,
+            user_scope=True,
+            active_targets=[_known("copilot"), _known("claude"), _known("codex")],
+            diagnostics=diagnostics,
+        )
+
+        names = {profile.name for profile in profiles or []}
+        assert {"copilot", "claude", "codex"} <= names
+        cowork_profile = next(
+            profile for profile in profiles or [] if profile.name == "copilot-cowork"
+        )
+        assert cowork_profile.resolved_deploy_root is None
+        info_messages = {
+            diagnostic.message for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
+        }
+        assert (
+            "Skipped inactive experimental resolver for target 'copilot-cowork' "
+            "during lockfile reconciliation."
+        ) in info_messages
+
+    @pytest.mark.windows_compat
+    def test_explicit_experimental_resolver_failure_is_not_silenced(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
+        from apm_cli.integration.targets import resolve_targets
+
+        home = tmp_path / "home"
+        _seed_multiple_cowork_mounts(home)
+        _isolate_cowork_config(monkeypatch, home)
+        config_dir = home / ".apm"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text(
+            '{"default_client":"vscode","experimental":{"copilot_cowork":true}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            "APM_COPILOT_COWORK_SKILLS_DIR",
+            str(home / ".." / "outside-cowork" / "skills"),
+        )
+
+        with pytest.raises(
+            CoworkResolutionError,
+            match="contains a traversal sequence",
+        ):
+            resolve_targets(
+                tmp_path,
+                user_scope=True,
+                explicit_target="copilot-cowork",
+            )
+
+
 class TestInactiveTargetGhostDrop:
     """Issue #2059: a prior ``deployed_files`` entry for a target the consumer
     never DECLARES (e.g. a dependency's package-declared ``windsurf`` skill
@@ -998,6 +1447,7 @@ def _dropped_target_block(tmp_path):
         active_targets=[_known("cursor")],
         declared_targets=[_known("cursor")],
         prior_ledger=DeploymentLedger(records=records),
+        generic_governed_values=frozenset({alpha_only}),
     )
     return kwargs, alpha_only, prior_hashes
 

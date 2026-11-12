@@ -252,7 +252,7 @@ def _result_observation(result: discovery.PolicyFetchResult) -> tuple[Any, ...]:
 
 def _cache_bytes(project_root: Path) -> dict[str, bytes]:
     """Read one policy cache entry as a filename-to-bytes map."""
-    cache_dir = project_root / "apm_modules" / discovery.POLICY_CACHE_DIR
+    cache_dir = discovery._get_cache_dir(project_root)
     return {path.name: path.read_bytes() for path in sorted(cache_dir.iterdir())}
 
 

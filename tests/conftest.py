@@ -29,6 +29,18 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture
+def valid_hook_package(tmp_path: Path) -> Path:
+    """Materialize the minimum valid manifestless hook package."""
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    (hooks / "lint.json").write_text(
+        '{"hooks":{"preToolUse":[{"bash":"echo fixture"}]}}', encoding="utf-8"
+    )
+    return tmp_path
+
+
 _TMP_HOME = Path(tempfile.mkdtemp(prefix="apm-test-home-"))
 
 

@@ -94,6 +94,7 @@ def test_service_only_required_failure_renders_before_exit(tmp_path: Path) -> No
             dry_run=False,
             logger=logger,
             verbose=False,
+            force=False,
         )
 
     assert exc_info.value.code == 1

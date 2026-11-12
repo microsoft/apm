@@ -2,6 +2,9 @@
 
 A comprehensive reference for the APM (Agent Package Manager) Dev Container Feature: what it does, how it's structured, how to use it, how it's tested, and where it's supported.
 
+> [!NOTE]
+> This feature is not published to GHCR. See [section 4](#4-how-to-use-devcontainer-in-your-project) for supported ways to use APM in a dev container.
+
 ---
 
 ## 1. Feature Overview
@@ -11,7 +14,7 @@ The APM Dev Container Feature packages the `apm-cli` tool as a reusable, declara
 **What it installs**
 
 - [uv](https://github.com/astral-sh/uv) -- Astral's fast Python tool (installed to `/usr/local/bin`)
-- Python 3.10+ -- only if not already present
+- Python 3.11+ -- only if not already present
 - `git` -- required by `apm-cli` (uses GitPython at startup)
 - `apm-cli` -- installed via `pip` (with automatic PEP 668 fallback)
 
@@ -70,7 +73,7 @@ When a devcontainer is built, the CLI injects each option as an uppercased envir
 1. **Validates `VERSION`** -- accepts `latest` or a strict semver `X.Y.Z`; otherwise exits `1`.
 2. **Verifies it is running as root** -- fails with a clear message otherwise.
 3. **Installs `uv`** (idempotent) -- installs `curl` first via the detected package manager if needed, downloads `https://astral.sh/uv/install.sh`, and runs it with `UV_INSTALL_DIR=/usr/local/bin`. The installer temp file is cleaned up via `trap` on exit.
-4. **Ensures Python 3.10+ is present** -- if `python3` is missing, installs `python3`, `python3-pip`, and `git` using `apt-get`, `apk`, or `dnf`. Then asserts `python3 --version` is >= 3.10.
+4. **Ensures Python 3.11+ is present** -- if `python3` is missing, installs `python3`, `python3-pip`, and `git` using `apt-get`, `apk`, or `dnf`. Then asserts `python3 --version` is >= 3.11.
 5. **Ensures `git` is present** -- installs via the detected package manager if absent.
 6. **Locates a working `pip`** -- prefers `pip3`, falls back to `pip`, then bootstraps via `python3 -m ensurepip --upgrade`.
 7. **Installs `apm-cli`** -- `pip install apm-cli` (or `apm-cli==<version>` when pinned). On Ubuntu 24.04+ `pip` rejects the install under PEP 668 ("externally-managed-environment"); the script detects that specific error and retries with `--break-system-packages`.
@@ -85,57 +88,17 @@ When a devcontainer is built, the CLI injects each option as an uppercased envir
 
 ## 4. How to use `devcontainer` in your project
 
-### Quick start -- add the published feature
-
-Add the published feature to any `.devcontainer/devcontainer.json`:
-
-```json
-{
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
-  "features": {
-    "ghcr.io/microsoft/apm/apm-cli:1": {}
-  }
-}
-```
-
-Rebuild the container in VS Code (Dev Containers: Rebuild Container), GitHub Codespaces, or JetBrains Gateway. The `apm` binary is on `PATH`; verify with `apm --version`.
-
-### Pin a specific apm-cli release
-
-```json
-{
-  "features": {
-    "ghcr.io/microsoft/apm/apm-cli:1": {
-      "version": "0.10.0"
-    }
-  }
-}
-```
-
-### Combine with the official Python feature
-
-The APM feature declares `installsAfter` for the upstream Python feature, so ordering is automatic:
-
-```json
-{
-  "image": "ubuntu:24.04",
-  "features": {
-    "ghcr.io/devcontainers/features/python:1": {},
-    "ghcr.io/microsoft/apm/apm-cli:1": {}
-  }
-}
-```
-
-### Tag selection
-
-| Tag                                       | Resolves to              | Use when                              |
-| ----------------------------------------- | ------------------------ | ------------------------------------- |
-| `ghcr.io/microsoft/apm/apm-cli:1`         | latest 1.x.y             | recommended default                   |
-| `ghcr.io/microsoft/apm/apm-cli:1.0`       | latest 1.0.x             | locked to a minor line                |
-| `ghcr.io/microsoft/apm/apm-cli:1.0.0`     | exact patch              | maximum reproducibility               |
-| `ghcr.io/microsoft/apm/apm-cli:latest`    | newest published         | not recommended (crosses majors)      |
-
-The feature manifest version is independent of the `apm-cli` PyPI release. To pin the CLI, use the `version` option above.
+> [!IMPORTANT]
+> This feature is **not published**. `ghcr.io/microsoft/apm/apm-cli` does not
+> exist, and an official Dev Container Feature was declined in [#1273](https://github.com/microsoft/apm/issues/1273)
+> (cleanup tracked in [#3520](https://github.com/microsoft/apm/issues/3520)). To use APM in a dev container, use a supported
+> route from the [installation guide](https://microsoft.github.io/apm/getting-started/installation/):
+>
+> - `postCreateCommand`: `curl -sSL https://aka.ms/apm-unix | sh` (prebuilt
+>   Linux binaries need glibc 2.28+), or
+> - add `ghcr.io/devcontainers/features/python:1` and run `pip install apm-cli`, or
+> - the community-maintained `ghcr.io/postfinance/devcontainer-features/apm`
+>   (maintained outside this project).
 
 ### Local development -- test an unpublished build
 
@@ -160,7 +123,7 @@ This constraint only affects local consumption and is primarily meant for local 
 - Linux (Debian/Ubuntu, Alpine, or Fedora family -- see [#7](#7-supported-environments-os-and-shells)).
 - Root on install (the feature runs as root; most base images already do).
 - A reachable network (needs to fetch `uv` and `apm-cli`).
-- Either a pre-installed Python 3.10+ or one of `apt-get` / `apk` / `dnf` available so the feature can install it.
+- Either a pre-installed Python 3.11+ or one of `apt-get` / `apk` / `dnf` available so the feature can install it.
 
 ---
 
@@ -181,7 +144,7 @@ This makes it possible to exhaustively cover every branch -- success paths, each
 - Root check and error message.
 - `VERSION` validation: `latest`, valid semver, empty string, two-part, four-part, prerelease, build metadata, default.
 - Python install branches across `apt-get` / `apk` / `dnf`; failure when no package manager is found.
-- Python version boundary: continues at exactly 3.10; fails at 3.9.
+- Python version boundary: continues at exactly 3.11; fails at 3.10.
 - `git` install branch and its no-package-manager failure.
 - `pip` location: prefers `pip3`, falls back to `pip`, bootstraps via `ensurepip`, fails cleanly if bootstrapping fails.
 - `apm-cli` install: pins on semver; retries with `--break-system-packages` on PEP 668; fails on non-PEP-668 errors; fails if the retry itself fails.
@@ -230,7 +193,7 @@ For each entry in `scenarios.json` the CLI:
 | `default-debian-12`   | `debian:12`                     | `apt-get` path (no PEP 668 enforcement)          |
 | `default-alpine-3`    | `alpine:3.20`                   | `apk` path; confirms `bash` is installed         |
 | `default-fedora`      | `fedora:41`                     | `dnf` path                                       |
-| `pinned-version`      | `ubuntu:22.04`                  | `version: "0.8.11"` option end-to-end            |
+| `pinned-version`      | `ubuntu:24.04`                  | `version: "0.8.11"` option end-to-end            |
 | `with-python-feature` | `ubuntu:24.04` + Python feature | `installsAfter` ordering with the Python feature |
 
 ### Shared checks
@@ -279,12 +242,11 @@ devcontainer features test \
 | OS family | Version       | Package manager | PEP 668 enforced |
 | --------- | ------------- | --------------- | ---------------- |
 | Ubuntu    | 24.04 (noble) | `apt-get`       | Yes              |
-| Ubuntu    | 22.04 (jammy) | `apt-get`       | No               |
 | Debian    | 12 (bookworm) | `apt-get`       | No               |
 | Alpine    | 3.20          | `apk`           | No               |
 | Fedora    | 41            | `dnf`           | No               |
 
-**Not supported:** `ubuntu:focal` (20.04) and earlier -- Python 3.10+ is not available from the default repos, and the feature's Python version check fails fast with a clear error. macOS and Windows as host OSes are fine (Dev Containers runs Linux inside Docker on both); they are not valid feature-install targets.
+**Not supported:** `ubuntu:jammy` (22.04) and earlier -- their default `python3` is older than 3.11, and the feature's Python version check fails fast with a clear error. macOS and Windows as host OSes are fine (Dev Containers runs Linux inside Docker on both); they are not valid feature-install targets.
 
 ### Shells
 

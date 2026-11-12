@@ -364,7 +364,9 @@ class TestLSPTargetSpec:
 
         spec = _LSP_TARGET_SPECS["claude"]
         path = spec.path(tmp_path, user_scope=False)
-        assert path == tmp_path / ".lsp.json"
+        assert path == (
+            tmp_path / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        )
 
     def test_user_scope_label(self) -> None:
         """User-scope label differs from project-scope label."""
@@ -373,12 +375,23 @@ class TestLSPTargetSpec:
         spec = _LSP_TARGET_SPECS["copilot"]
         assert spec.label(user_scope=True) != spec.label(user_scope=False)
 
-    def test_servers_key_project_scope(self) -> None:
-        """Claude project scope has None servers_key (top-level map)."""
+    def test_claude_user_scope_uses_personal_skills_plugin(self, tmp_path: Path) -> None:
+        """Claude user LSP config uses the documented personal skills plugin."""
         from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
 
         spec = _LSP_TARGET_SPECS["claude"]
-        assert spec.servers_key(user_scope=False) is None
+        assert spec.path(tmp_path, user_scope=True) == (
+            Path.home() / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        )
+        assert spec.label(user_scope=True) == "~/.claude/skills/apm-lsp/.claude-plugin/plugin.json"
+        assert ("name", "apm-lsp") in spec.config_defaults(user_scope=True)
+
+    def test_servers_key_project_scope(self) -> None:
+        """Claude project plugin manifest uses the lspServers wrapper key."""
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        spec = _LSP_TARGET_SPECS["claude"]
+        assert spec.servers_key(user_scope=False) == "lspServers"
 
     def test_servers_key_user_scope(self) -> None:
         """Claude user scope uses lspServers wrapper key."""
@@ -450,8 +463,8 @@ class TestLSPReadWriteHelpers:
         )
         assert len(changed2) == 0
 
-    def test_write_claude_project_no_wrapper(self, tmp_path: Path) -> None:
-        """Claude project scope writes to top-level (no servers_key wrapper)."""
+    def test_write_claude_project_plugin_manifest(self, tmp_path: Path) -> None:
+        """Claude project scope writes a discoverable plugin manifest."""
         from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS, LSPIntegrator
 
         spec = _LSP_TARGET_SPECS["claude"]
@@ -459,8 +472,8 @@ class TestLSPReadWriteHelpers:
         LSPIntegrator._write_target_config(spec, servers, project_root=tmp_path, user_scope=False)
         config_path = spec.path(tmp_path, user_scope=False)
         data = json.loads(config_path.read_text(encoding="utf-8"))
-        assert "python" in data
-        assert "lspServers" not in data
+        assert data["name"] == "apm-lsp"
+        assert "python" in data["lspServers"]
 
 
 class TestLSPCleanTargetConfig:
@@ -1029,78 +1042,6 @@ class TestWsClientRecv:
 
 class TestInstructionIntegratorHelpers:
     """Tests for InstructionIntegrator helper methods."""
-
-    def test_strip_frontmatter_removes_yaml(self) -> None:
-        """YAML frontmatter is stripped from content."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        content = "---\napplyTo: '**/*.py'\n---\n# Body\n"
-        result = InstructionIntegrator._strip_frontmatter(content)
-        assert result == "# Body\n"
-
-    def test_strip_frontmatter_no_op_without_fm(self) -> None:
-        """Content without frontmatter is returned unchanged."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        content = "# Just a header\n\nSome body."
-        assert InstructionIntegrator._strip_frontmatter(content) == content
-
-    def test_is_apm_managed_copilot_detects_header(self) -> None:
-        """_is_apm_managed_copilot returns True for APM managed content."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        managed = InstructionIntegrator._APM_COPILOT_HEADER + "\n# content\n"
-        assert InstructionIntegrator._is_apm_managed_copilot(managed) is True
-
-    def test_is_apm_managed_copilot_false_for_plain(self) -> None:
-        """_is_apm_managed_copilot returns False for user-authored content."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        assert InstructionIntegrator._is_apm_managed_copilot("# Normal content") is False
-
-    def test_build_copilot_section(self) -> None:
-        """_build_copilot_section wraps body in provenance markers."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        section = InstructionIntegrator._build_copilot_section("pkg/source", "# Body")
-        assert "<!-- apm:source:pkg/source -->" in section
-        assert "# Body" in section
-        assert "<!-- /apm:source -->" in section
-
-    def test_build_copilot_section_sanitizes_close_tag(self) -> None:
-        """Source string with --> is sanitized in provenance marker."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        section = InstructionIntegrator._build_copilot_section("evil-->src", "body")
-        assert (
-            "-->"
-            not in section.split("<!-- /apm:source -->")[0]
-            .split("<!-- apm:source:")[1]
-            .split(" -->")[0]
-        )
-
-    def test_update_copilot_managed_replaces_existing_section(self) -> None:
-        """_update_copilot_managed replaces an existing source section."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        header = InstructionIntegrator._APM_COPILOT_HEADER
-        old_section = InstructionIntegrator._build_copilot_section("my-pkg", "Old body")
-        existing = f"{header}\n{old_section}\n"
-
-        new_section = InstructionIntegrator._build_copilot_section("my-pkg", "New body")
-        result = InstructionIntegrator._update_copilot_managed(existing, "my-pkg", new_section)
-        assert "Old body" not in result
-        assert "New body" in result
-
-    def test_update_copilot_managed_appends_new_section(self) -> None:
-        """_update_copilot_managed appends a new source section."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        header = InstructionIntegrator._APM_COPILOT_HEADER
-        existing = f"{header}\n"
-        new_section = InstructionIntegrator._build_copilot_section("pkg2", "Pkg2 body")
-        result = InstructionIntegrator._update_copilot_managed(existing, "pkg2", new_section)
-        assert "Pkg2 body" in result
 
     def test_convert_to_cursor_rules_maps_apply_to(self) -> None:
         """applyTo frontmatter is converted to globs in cursor rules format."""
@@ -1835,12 +1776,13 @@ class TestInstructionConverters:
         assert '  - "**/*.pyi"' in result
 
     def test_convert_to_cursor_rules_multiple_globs(self) -> None:
-        """Multiple globs result in a YAML list in cursor rules."""
+        """Multiple globs join into a single comma-separated scalar in cursor rules (#3002)."""
         from apm_cli.integration.instruction_integrator import InstructionIntegrator
 
         content = "---\napplyTo: '**/*.py,**/*.pyi'\n---\n# Body\n"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "globs:" in result
+        assert "globs: **/*.py, **/*.pyi" in result
+        assert "  - " not in result
 
     def test_convert_to_cursor_rules_generates_description(self) -> None:
         """Description is generated from first body line when not in frontmatter."""
@@ -1850,126 +1792,6 @@ class TestInstructionConverters:
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert "description:" in result
         assert "Ruby coding style" in result
-
-
-class TestIntegrateCopilotUserInstructions:
-    """Tests for _integrate_copilot_user_instructions()."""
-
-    def _make_pkg_info(self, install_path: Path, name: str = "mypkg") -> Any:
-        """Build minimal PackageInfo-like object."""
-        pkg = MagicMock()
-        pkg.name = name
-        pkg.source = f"github/org/{name}"
-        info = MagicMock()
-        info.install_path = install_path
-        info.package = pkg
-        return info
-
-    def test_creates_new_managed_file(self, tmp_path: Path) -> None:
-        """New file is created with APM managed header."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        pkg_dir = tmp_path / "pkg"
-        instr_dir = pkg_dir / ".apm" / "instructions"
-        instr_dir.mkdir(parents=True)
-        (instr_dir / "rules.instructions.md").write_text(
-            "---\napplyTo: '**'\n---\n# Content here", encoding="utf-8"
-        )
-
-        deploy_dir = tmp_path / "deploy"
-        deploy_dir.mkdir()
-
-        integrator = InstructionIntegrator()
-        self._make_pkg_info(pkg_dir)
-        result = integrator._integrate_copilot_user_instructions(
-            list(instr_dir.glob("*.instructions.md")),
-            deploy_dir,
-            tmp_path,
-            pkg_source="github/org/mypkg",
-        )
-        assert result.files_integrated == 1
-        dest = deploy_dir / "copilot-instructions.md"
-        assert dest.exists()
-        content = dest.read_text(encoding="utf-8")
-        assert InstructionIntegrator._APM_COPILOT_HEADER in content
-
-    def test_updates_existing_managed_file(self, tmp_path: Path) -> None:
-        """Existing APM-managed file gets its section updated."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        pkg_dir = tmp_path / "pkg"
-        instr_dir = pkg_dir / ".apm" / "instructions"
-        instr_dir.mkdir(parents=True)
-        (instr_dir / "rules.instructions.md").write_text("# New content", encoding="utf-8")
-
-        deploy_dir = tmp_path / "deploy"
-        deploy_dir.mkdir()
-        header = InstructionIntegrator._APM_COPILOT_HEADER
-        existing_section = InstructionIntegrator._build_copilot_section(
-            "github/org/mypkg", "# Old content"
-        )
-        (deploy_dir / "copilot-instructions.md").write_text(
-            f"{header}\n{existing_section}\n", encoding="utf-8"
-        )
-
-        integrator = InstructionIntegrator()
-        result = integrator._integrate_copilot_user_instructions(
-            list(instr_dir.glob("*.instructions.md")),
-            deploy_dir,
-            tmp_path,
-            pkg_source="github/org/mypkg",
-        )
-        assert result.files_integrated == 1
-        content = (deploy_dir / "copilot-instructions.md").read_text(encoding="utf-8")
-        assert "New content" in content
-
-    def test_skips_user_authored_file(self, tmp_path: Path) -> None:
-        """User-authored (no APM header) file triggers collision skip."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        pkg_dir = tmp_path / "pkg"
-        instr_dir = pkg_dir / ".apm" / "instructions"
-        instr_dir.mkdir(parents=True)
-        (instr_dir / "rules.instructions.md").write_text("# Content", encoding="utf-8")
-
-        deploy_dir = tmp_path / "deploy"
-        deploy_dir.mkdir()
-        # User-authored file (no APM header)
-        (deploy_dir / "copilot-instructions.md").write_text("# User authored", encoding="utf-8")
-
-        integrator = InstructionIntegrator()
-        result = integrator._integrate_copilot_user_instructions(
-            list(instr_dir.glob("*.instructions.md")),
-            deploy_dir,
-            tmp_path,
-            pkg_source="github/org/mypkg",
-        )
-        # Should skip (files_skipped=1) or return 0 integrated
-        assert result.files_integrated == 0
-
-    def test_force_overwrites_user_authored_file(self, tmp_path: Path) -> None:
-        """force=True overwrites user-authored file."""
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        pkg_dir = tmp_path / "pkg"
-        instr_dir = pkg_dir / ".apm" / "instructions"
-        instr_dir.mkdir(parents=True)
-        (instr_dir / "rules.instructions.md").write_text("# Content", encoding="utf-8")
-
-        deploy_dir = tmp_path / "deploy"
-        deploy_dir.mkdir()
-        user_file = deploy_dir / "copilot-instructions.md"
-        user_file.write_text("# User authored", encoding="utf-8")
-
-        integrator = InstructionIntegrator()
-        result = integrator._integrate_copilot_user_instructions(
-            list(instr_dir.glob("*.instructions.md")),
-            deploy_dir,
-            tmp_path,
-            pkg_source="github/org/mypkg",
-            force=True,
-        )
-        assert result.files_integrated == 1
 
 
 # ---------------------------------------------------------------------------

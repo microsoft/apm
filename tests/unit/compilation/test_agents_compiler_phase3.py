@@ -614,7 +614,7 @@ class TestCleanupCopilotRootInstructions(unittest.TestCase):
         self.assertTrue(out.exists())
         self.assertEqual(result.stats["copilot_root_instructions_removed"], 0)
 
-    def test_apm_generated_file_removed(self) -> None:
+    def test_legacy_generated_file_retained_without_build_id(self) -> None:
         compiler = AgentsCompiler(self.tmp)
         out = Path(self.tmp) / ".github" / "copilot-instructions.md"
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -626,8 +626,8 @@ class TestCleanupCopilotRootInstructions(unittest.TestCase):
         base_result = _make_result(stats={})
         result = compiler._cleanup_copilot_root_instructions(out, base_result)
 
-        self.assertFalse(out.exists())
-        self.assertEqual(result.stats["copilot_root_instructions_removed"], 1)
+        self.assertTrue(out.exists())
+        self.assertEqual(result.stats["copilot_root_instructions_removed"], 0)
 
     def test_oserror_on_read_adds_error(self) -> None:
         compiler = AgentsCompiler(self.tmp)

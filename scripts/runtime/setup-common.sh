@@ -14,19 +14,19 @@ NC='\033[0m' # No Color
 
 # Logging functions
 log_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
+    echo -e "${BLUE}[i] $1${NC}"
 }
 
 log_success() {
-    echo -e "${GREEN}✅ $1${NC}"
+    echo -e "${GREEN}[+] $1${NC}"
 }
 
 log_warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
+    echo -e "${YELLOW}[!] $1${NC}"
 }
 
 log_error() {
-    echo -e "${RED}❌ $1${NC}"
+    echo -e "${RED}[x] $1${NC}"
 }
 
 # Platform detection matching build-release.yml
@@ -133,13 +133,26 @@ download_file() {
     log_info "Downloading $description from $url"
     
     if command -v curl >/dev/null 2>&1; then
-        curl -L --progress-bar "$url" -o "$output"
+        # Use curl's transient-error policy, never retry every error or a bad digest.
+        # The retry window limits new attempts; max-time also bounds each transfer.
+        if curl --fail -L --progress-bar \
+            --retry 3 --retry-delay 1 --retry-max-time 30 \
+            --connect-timeout 10 --max-time 120 "$url" -o "$output"; then
+            return 0
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget --progress=bar "$url" -O "$output"
+        if wget --progress=bar "$url" -O "$output"; then
+            return 0
+        fi
     else
         log_error "Neither curl nor wget is available. Please install one of them."
         exit 1
     fi
+
+    rm -f -- "$output"
+    log_error "Failed to download $description. Check your connection and retry."
+    # Exit explicitly while the caller's temporary-directory trap is still in scope.
+    exit 1
 }
 
 # Verify file was downloaded and is executable

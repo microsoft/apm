@@ -697,18 +697,21 @@ class TestGetTokenForHost:
     def test_returns_github_token_env_for_github_host(self) -> None:
         with (
             patch(
-                "apm_cli.core.token_manager.GitHubTokenManager",
+                "apm_cli.core.auth.AuthResolver.resolve",
                 side_effect=Exception("unavailable"),
             ),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}),
+            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
         ):
             token = _get_token_for_host("github.com")
         assert token == "mytoken"
 
     def test_returns_none_for_non_github_host_on_failure(self) -> None:
-        with patch(
-            "apm_cli.core.token_manager.GitHubTokenManager",
-            side_effect=Exception("unavailable"),
+        with (
+            patch(
+                "apm_cli.core.auth.AuthResolver.resolve",
+                side_effect=Exception("unavailable"),
+            ),
+            patch.dict(os.environ, {}, clear=True),
         ):
             token = _get_token_for_host("dev.azure.com")
         assert token is None
@@ -716,16 +719,13 @@ class TestGetTokenForHost:
     def test_prefers_github_apm_pat(self) -> None:
         with (
             patch(
-                "apm_cli.core.token_manager.GitHubTokenManager",
+                "apm_cli.core.auth.AuthResolver.resolve",
                 side_effect=Exception("unavailable"),
             ),
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=False),
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
         ):
-            env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_TOKEN",)}
-            with patch.dict(os.environ, env, clear=True):
-                with patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}):
-                    token = _get_token_for_host("github.com")
-        assert token in ("apmtoken", None)  # depends on env ordering
+            token = _get_token_for_host("github.com")
+        assert token == "apmtoken"
 
 
 # ---------------------------------------------------------------------------

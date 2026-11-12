@@ -20,7 +20,7 @@ RUNTIME_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-runtime.yml"
 HERO_NODE = f"{HERO_MODULE_PATH}::TestGuardrailingHeroScenario::test_2_minute_guardrailing_flow"
 HERO_STEP = "Run live guardrailing hero"
 TRUSTED_EVENT_CONDITION = (
-    "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    "github.event_name == 'schedule' || github.event_name == 'repository_dispatch'"
 )
 EXPECTED_MARKERS = {
     "e2e",
@@ -66,7 +66,8 @@ def test_runtime_workflow_runs_live_hero_once_on_trusted_linux_x64() -> None:
     workflow = load_workflow(RUNTIME_WORKFLOW)
     triggers = workflow["on"]
     assert "pull_request" not in triggers
-    assert {"schedule", "workflow_dispatch"} <= set(triggers)
+    assert {"schedule", "repository_dispatch"} <= set(triggers)
+    assert "workflow_dispatch" not in triggers
 
     job = workflow_job(workflow, "live-inference-smoke")
     assert job["runs-on"] == "ubuntu-24.04"

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -16,6 +17,7 @@ from apm_cli.deps.plugin_parser import (
     _map_plugin_artifacts,
     _mcp_servers_to_apm_deps,
     _union_dep_list,
+    has_normalized_plugin_skill_sources_receipt,
     normalize_plugin_directory,
     normalized_plugin_skill_sources,
     parse_plugin_manifest,
@@ -261,6 +263,28 @@ class TestMapPluginArtifacts:
         assert declared is True
         assert not (apm_dir / "skills" / "alpha").exists()
         assert not (apm_dir / "skills" / "beta").exists()
+
+    def test_skill_receipt_presence_rejects_symlinked_paths(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir(parents=True)
+        external = tmp_path / "external-receipt.json"
+        external.write_text("{}", encoding="ascii")
+        try:
+            (apm_dir / ".plugin-skill-sources.json").symlink_to(external)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        assert not has_normalized_plugin_skill_sources_receipt(plugin_dir)
+
+        (apm_dir / ".plugin-skill-sources.json").unlink()
+        apm_dir.rmdir()
+        external_apm = tmp_path / "external-apm"
+        external_apm.mkdir()
+        (external_apm / ".plugin-skill-sources.json").write_text("{}", encoding="ascii")
+        apm_dir.symlink_to(external_apm, target_is_directory=True)
+
+        assert not has_normalized_plugin_skill_sources_receipt(plugin_dir)
 
     def test_skill_receipt_removes_prior_skills_for_file_only_declaration(self, tmp_path):
         """A file-only declaration must remove prior parser-owned skill directories."""
@@ -612,7 +636,7 @@ class TestMapPluginArtifacts:
         # Undeclared siblings stay out: the entry is a requirement, not a hint.
         assert not (normalized / "pairing").exists()
 
-    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path, caplog):
+    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path):
         """An entry that is neither a skill nor a container must say so.
 
         A container whose skills sit two levels down reaches no deployable
@@ -629,14 +653,15 @@ class TestMapPluginArtifacts:
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
-        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
             _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
 
-        assert "skills" in caplog.text
-        assert "no SKILL.md" in caplog.text
-        assert "--skill" in caplog.text
+        warning = rich_warning.call_args.args[0]
+        assert "skills" in warning
+        assert "no SKILL.md" in warning
+        assert "--skill" in warning
 
-    def test_declared_skills_container_does_not_warn(self, tmp_path, caplog):
+    def test_declared_skills_container_does_not_warn(self, tmp_path):
         """The healthy shapes stay quiet -- a warning nobody can act on is noise."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
@@ -646,10 +671,10 @@ class TestMapPluginArtifacts:
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
-        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
             _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
 
-        assert "no SKILL.md" not in caplog.text
+        rich_warning.assert_not_called()
 
     def test_custom_commands_path(self, tmp_path):
         """Manifest commands field redirects command discovery."""
@@ -1097,6 +1122,196 @@ class TestExtractMCPServers:
         result = _extract_mcp_servers(plugin_dir, manifest)
         abs_root = str(plugin_dir.resolve())
         assert result["local-srv"]["args"] == [f"{abs_root}/server.js"]
+
+
+_FLAT_MCP_SERVERS = {
+    "linear": {"type": "http", "url": "https://mcp.linear.app/mcp"},
+    "local": {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"]},
+}
+
+
+class TestMCPJsonShapes:
+    """Wrapped and flat ``.mcp.json`` shapes (#3499)."""
+
+    _FLAT = _FLAT_MCP_SERVERS
+
+    @staticmethod
+    def _plugin(tmp_path: Path, name: str, payload) -> Path:
+        plugin_dir = tmp_path / "flat-plugin"
+        plugin_dir.mkdir(exist_ok=True)
+        target = plugin_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(payload, str):
+            target.write_text(payload, encoding="utf-8")
+        else:
+            target.write_text(json.dumps(payload), encoding="utf-8")
+        return plugin_dir
+
+    @staticmethod
+    def _extract(plugin_dir: Path, manifest: dict, **kwargs):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
+            result = _extract_mcp_servers(plugin_dir, manifest, **kwargs)
+        return result, [call.args[0] for call in rich_warning.call_args_list]
+
+    @pytest.mark.parametrize("name", ["mcp.json", ".mcp.json", ".github/.mcp.json"])
+    def test_flat_auto_discovered(self, tmp_path, name):
+        plugin_dir = self._plugin(tmp_path, name, self._FLAT)
+
+        result, warnings = self._extract(plugin_dir, {"name": "flat"})
+
+        abs_root = str(plugin_dir.resolve())
+        assert set(result) == {"linear", "local"}
+        assert result["linear"] == self._FLAT["linear"]
+        assert result["local"]["args"] == [f"{abs_root}/server.js"]
+        assert warnings == []
+
+    def test_flat_file_named_by_plugin_json(self, tmp_path):
+        plugin_dir = self._plugin(tmp_path, "config/servers.json", self._FLAT)
+
+        result, warnings = self._extract(
+            plugin_dir, {"name": "flat", "mcpServers": "config/servers.json"}
+        )
+
+        assert set(result) == {"linear", "local"}
+        assert warnings == []
+
+    def test_flat_files_in_plugin_json_array(self, tmp_path):
+        plugin_dir = self._plugin(tmp_path, "a.json", {"a": {"command": "a"}})
+        self._plugin(tmp_path, "b.json", {"mcpServers": {"b": {"command": "b"}}})
+
+        result, _ = self._extract(plugin_dir, {"name": "flat", "mcpServers": ["a.json", "b.json"]})
+
+        assert result == {"a": {"command": "a"}, "b": {"command": "b"}}
+
+    def test_wrapped_output_unchanged(self, tmp_path):
+        wrapped = {"mcpServers": {"ctx": {"command": "npx", "args": ["ctx"]}, "bad": "x"}}
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", wrapped)
+
+        result, warnings = self._extract(plugin_dir, {"name": "wrapped"})
+
+        assert result == wrapped["mcpServers"]
+        assert warnings == []
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"mcpServers": {}},
+            {"mcpServers": ["not", "a", "map"]},
+            {"mcpServers": {"only": "SECRET-VALUE-1"}},
+            {"linear": {"url": "https://mcp.linear.app/mcp"}, "token": "SECRET-VALUE-1"},
+            {"linear": "SECRET-VALUE-1"},
+            ["SECRET-VALUE-1"],
+            "{not json SECRET-VALUE-1",
+        ],
+        ids=[
+            "empty-object",
+            "empty-wrapper",
+            "non-map-wrapper",
+            "wrapper-without-server-objects",
+            "flat-mixed-values",
+            "flat-scalar-values",
+            "json-array",
+            "invalid-json",
+        ],
+    )
+    def test_no_usable_server_warns_names_only(self, tmp_path, payload):
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", payload)
+
+        result, warnings = self._extract(plugin_dir, {"name": "linear"})
+
+        if isinstance(payload, dict) and "mcpServers" in payload:
+            assert result == (
+                dict(payload["mcpServers"]) if isinstance(payload["mcpServers"], dict) else {}
+            )
+        else:
+            assert result == {}
+        assert len(warnings) == 1
+        assert "'.mcp.json'" in warnings[0]
+        assert "plugin 'linear'" in warnings[0]
+        assert "SECRET-VALUE-1" not in warnings[0]
+        assert str(tmp_path) not in warnings[0]
+
+    def test_no_usable_server_warning_for_plugin_json_path(self, tmp_path):
+        plugin_dir = self._plugin(tmp_path, "config/servers.json", {"x": 1})
+
+        result, warnings = self._extract(
+            plugin_dir, {"name": "flat", "mcpServers": "config/servers.json"}
+        )
+
+        assert result == {}
+        assert len(warnings) == 1
+        assert "'config/servers.json'" in warnings[0]
+
+    def test_unreadable_file_logs_no_warning_with_absolute_path(self, tmp_path, caplog):
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", "{not json")
+
+        for warn in (True, False):
+            caplog.clear()
+            with caplog.at_level(logging.WARNING):
+                result, warnings = self._extract(
+                    plugin_dir, {"name": "linear"}, warn_on_invalid=warn
+                )
+            assert result == {}
+            assert len(warnings) == (1 if warn else 0)
+            assert [r for r in caplog.records if str(tmp_path) in r.getMessage()] == []
+
+    def test_warning_suppressed_when_requested(self, tmp_path):
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", {})
+
+        result, warnings = self._extract(plugin_dir, {"name": "quiet"}, warn_on_invalid=False)
+
+        assert result == {}
+        assert warnings == []
+
+    def test_flat_oversize_file_refused(self, tmp_path):
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", self._FLAT)
+
+        with patch("apm_cli.deps.plugin_parser._MAX_PLUGIN_JSON_BYTES", 8):
+            result, warnings = self._extract(plugin_dir, {"name": "big"})
+
+        assert result == {}
+        assert len(warnings) == 1
+
+    def test_flat_path_escaping_plugin_root_refused(self, tmp_path):
+        (tmp_path / "outside.json").write_text(json.dumps(self._FLAT), encoding="utf-8")
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+
+        result, _ = self._extract(plugin_dir, {"name": "esc", "mcpServers": "../outside.json"})
+
+        assert result == {}
+
+    def test_flat_symlink_refused(self, tmp_path):
+        external = tmp_path / "external.json"
+        external.write_text(json.dumps(self._FLAT), encoding="utf-8")
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        try:
+            (plugin_dir / ".mcp.json").symlink_to(external)
+            (plugin_dir / "named.json").symlink_to(external)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        discovered, _ = self._extract(plugin_dir, {"name": "link"})
+        named, _ = self._extract(plugin_dir, {"name": "link", "mcpServers": "named.json"})
+
+        assert discovered == {}
+        assert named == {}
+
+    def test_flat_file_synthesizes_mcp_dependencies(self, tmp_path):
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", self._FLAT)
+
+        with patch("apm_cli.deps.plugin_parser._rich_warning"):
+            apm_yml = synthesize_apm_yml_from_plugin(plugin_dir, {"name": "linear"})
+
+        parsed = yaml.safe_load(apm_yml.read_text(encoding="utf-8"))
+        mcp = {entry["name"]: entry for entry in parsed["dependencies"]["mcp"]}
+        assert set(mcp) == {"linear", "local"}
+        assert mcp["linear"]["transport"] == "http"
+        assert mcp["linear"]["url"] == "https://mcp.linear.app/mcp"
+        assert mcp["local"]["transport"] == "stdio"
+        assert mcp["local"]["args"] == [f"{plugin_dir.resolve()}/server.js"]
 
 
 class TestMCPServersToDeps:

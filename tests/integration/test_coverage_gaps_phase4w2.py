@@ -364,7 +364,7 @@ class TestDepAggregator:
                 ),
             ),
             patch("builtins.open", MagicMock()),
-            patch("frontmatter.load", return_value=mock_metadata),
+            patch("apm_cli.deps.aggregator.load_frontmatter", return_value=mock_metadata),
         ):
             result = scan_workflows_for_dependencies()
         assert "server-a" in result
@@ -385,7 +385,7 @@ class TestDepAggregator:
                 ),
             ),
             patch("builtins.open", MagicMock()),
-            patch("frontmatter.load", return_value=mock_metadata),
+            patch("apm_cli.deps.aggregator.load_frontmatter", return_value=mock_metadata),
         ):
             result = scan_workflows_for_dependencies()
         assert result == set()
@@ -424,7 +424,7 @@ class TestDepAggregator:
         with (
             patch("glob.glob", side_effect=_glob),
             patch("builtins.open", MagicMock()),
-            patch("frontmatter.load", return_value=mock_metadata),
+            patch("apm_cli.deps.aggregator.load_frontmatter", return_value=mock_metadata),
         ):
             result = scan_workflows_for_dependencies()
         # Even though glob returned same file twice, should only count once
@@ -1626,7 +1626,7 @@ class TestFileScannerScanLockfilePackages:
             patch("apm_cli.security.file_scanner.ContentScanner") as mock_scanner,
         ):
             mock_lf.read.return_value = mock_lock
-            mock_scanner.scan_file.return_value = [finding]
+            mock_scanner.scan_text.return_value = [finding]
             findings, scanned = scan_lockfile_packages(tmp_path)
 
         assert scanned == 1

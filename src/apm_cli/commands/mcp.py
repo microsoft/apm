@@ -1,10 +1,11 @@
 """APM mcp command group."""
 
 import builtins
-import os
+import copy
 import sys
 
 import click
+from click.core import ParameterSource
 
 from ..core.command_logger import CommandLogger
 from ._helpers import _get_console
@@ -18,55 +19,63 @@ MCP_REGISTRY_ENV = "MCP_REGISTRY_URL"
 def _build_registry_with_diag(console, logger):
     """Construct ``RegistryIntegration`` honouring the registry URL precedence chain.
 
-    Resolution order: MCP_REGISTRY_URL env > apm config mcp-registry-url > default.
+    Resolution order (MCP_REGISTRY_URL env > apm config mcp-registry-url >
+    default) is owned by
+    :func:`~apm_cli.registry.client.resolve_mcp_registry_url`, which the client
+    applies for itself. The URL is therefore NOT pre-resolved here and passed
+    in: a caller-supplied URL is by definition the ``"explicit"`` layer, so
+    doing that would relabel every ambient source and leave
+    ``registry_url_source`` unable to tell an env override from a persisted
+    config entry.
+
     Emits a one-line diagnostic naming the resolved registry URL whenever
     a non-default source is in effect, so enterprise users can confirm they
     are hitting the override and not the public default. Stays silent for the
     default public registry (defaults are quiet, overrides are visible).
     """
+    from ..registry.client import REGISTRY_SOURCE_LABELS, redact_mcp_registry_url
     from ..registry.integration import RegistryIntegration
 
-    override = os.environ.get(MCP_REGISTRY_ENV)
-    config_url = None
-    if not override:
-        from ..config import get_mcp_registry_url as _get_mcp_registry_url
-
-        config_url = _get_mcp_registry_url()
-    registry = (
-        RegistryIntegration(config_url)
-        if config_url
-        else RegistryIntegration()  # architecture-authority-exempt: env/default fallback
-    )
-    if override:
-        url = registry.client.registry_url
+    registry = RegistryIntegration()
+    # The label table holds exactly the ambient layers worth announcing, so a
+    # missing entry (the public default) is the "stay quiet" case -- no second
+    # condition needed, and nothing can raise on an unexpected source.
+    label = REGISTRY_SOURCE_LABELS.get(registry.client.registry_url_source)
+    if label:
+        safe_url = redact_mcp_registry_url(registry.client.registry_url)
+        line = f"Registry: {safe_url} ({label})"
         if console:
-            console.print(f"[muted]Registry: {url} (from MCP_REGISTRY_URL)[/muted]")
+            console.print(f"[muted]{line}[/muted]")
         else:
-            logger.progress(f"Registry: {url} (from MCP_REGISTRY_URL)")
-    elif config_url:
-        url = registry.client.registry_url
-        if console:
-            console.print(f"[muted]Registry: {url} (from apm config)[/muted]")
-        else:
-            logger.progress(f"Registry: {url} (from apm config)")
+            logger.progress(line)
     return registry
 
 
 def _handle_registry_network_error(exc, registry, console, logger, action):
-    """Render a registry network failure with env-var-aware guidance.
+    """Render a registry network failure with override-aware guidance.
 
     ``action`` is a short verb phrase like ``"reach"`` so the message reads
-    naturally: ``Could not <action> MCP registry at <url>``. Returns once
-    the message is emitted; caller is responsible for ``sys.exit(1)``.
+    naturally: ``Could not <action> MCP registry at <url>``. The hint names the
+    precedence layer that actually supplied the URL, so a user who persisted it
+    with ``apm config`` is not sent looking at an env var they never exported.
+    Returns once the message is emitted; caller is responsible for
+    ``sys.exit(1)``.
     """
     if registry is None:
         # Fell over before the registry was constructed; let the caller
         # emit its generic error path with the original exception.
         return False
-    url = registry.client.registry_url
-    override = os.environ.get(MCP_REGISTRY_ENV)
-    if override:
+    from ..registry.client import redact_mcp_registry_url
+
+    url = redact_mcp_registry_url(registry.client.registry_url)
+    source = registry.client.registry_url_source
+    if source == "env":
         hint = f"{MCP_REGISTRY_ENV} is set -- verify the URL is correct and reachable."
+    elif source == "config":
+        hint = (
+            "mcp-registry-url is set in apm config -- verify the URL is correct "
+            "and reachable, or run 'apm config unset mcp-registry-url'."
+        )
     else:
         hint = "The registry may be temporarily unavailable. Retry shortly."
 
@@ -88,26 +97,138 @@ def mcp():
     pass
 
 
+# ``apm install`` parameters that ``apm mcp install`` shows in its help. Only
+# the selection lives here: flags, type, choices, metavar and help text are
+# borrowed from the ``apm install`` command itself, so help, validation and
+# shell completion cannot drift from it.
+_FORWARDED_INSTALL_PARAMS: tuple[str, ...] = (
+    "transport",
+    "url",
+    "env_pairs",
+    "header_pairs",
+    "target",
+    "registry_url",
+    "mcp_version",
+    "global_",
+    "trust_transitive_mcp",
+    "dev",
+    "dry_run",
+    "force",
+    "verbose",
+    "no_policy",
+)
+# Supplied by the alias itself, so it stays an unknown pass-through token.
+_ALIAS_OWNED_INSTALL_PARAMS = frozenset({"mcp_name"})
+_FORWARDED_RAW_KEY = "apm_cli.commands.mcp.forwarded_install_args"
+
+
+class _ForwardedInstallOption(click.Option):
+    """An ``apm install`` option re-declared on ``apm mcp install``.
+
+    Click still converts and validates the value here (same errors as
+    ``apm install``), but the raw command-line value is recorded so it can be
+    re-emitted verbatim to ``apm install``.
+    """
+
+    @classmethod
+    def from_install_option(cls, source, *, hidden=False):
+        """Clone an ``apm install`` option; ``__init__`` is never called.
+
+        A shallow copy keeps every attribute of ``source`` (flags, type,
+        help, metavar), and the class swap adds only this class's methods, so
+        subclass state must not depend on ``__init__``.
+        """
+        if source.nargs != 1:
+            raise TypeError(f"Cannot forward multi-value install option {source.name!r}")
+        clone = copy.copy(source)
+        clone.__class__ = cls
+        # Values are forwarded raw; the alias callback never receives them.
+        clone.expose_value = False
+        clone.hidden = hidden or source.hidden
+        return clone
+
+    def consume_value(self, ctx, opts):
+        value, source = super().consume_value(ctx, opts)
+        if source is ParameterSource.COMMANDLINE:
+            ctx.meta.setdefault(_FORWARDED_RAW_KEY, {})[self.name] = value
+        return value, source
+
+    def to_install_args(self, raw):
+        """Rebuild the ``apm install`` tokens for a raw command-line value."""
+        flag = next((opt for opt in self.opts if opt.startswith("--")), self.opts[0])
+        if self.is_flag:
+            if raw == self.flag_value:
+                return [flag]
+            return self.secondary_opts[:1]
+        values = raw if self.multiple else [raw]
+        return [token for value in values for token in (flag, value)]
+
+
+def _borrow_install_options():
+    """Clone every ``apm install`` option the alias forwards.
+
+    The selected options are shown in help and completion. The rest are
+    hidden but still parsed with install's own arity, so a pass-through
+    value such as ``--root --dry-run`` is never split from its option.
+    """
+    from .install import install as install_command
+
+    by_name = {
+        param.name: param
+        for param in install_command.params
+        if isinstance(param, click.Option) and param.name not in _ALIAS_OWNED_INSTALL_PARAMS
+    }
+    shown = [by_name[name] for name in _FORWARDED_INSTALL_PARAMS]
+    hidden = [param for name, param in by_name.items() if name not in _FORWARDED_INSTALL_PARAMS]
+    return [
+        *(_ForwardedInstallOption.from_install_option(param) for param in shown),
+        *(_ForwardedInstallOption.from_install_option(param, hidden=True) for param in hidden),
+    ]
+
+
+class _InstallAliasCommand(click.Command):
+    """``apm mcp install``: borrows its forwarded options from ``apm install``.
+
+    The borrowed options load on first use so ``apm`` startup keeps
+    ``apm install`` lazily imported.
+    """
+
+    _forwarded_loaded = False
+
+    def get_params(self, ctx):
+        if not self._forwarded_loaded:
+            self.params.extend(_borrow_install_options())
+            self._forwarded_loaded = True
+        return super().get_params(ctx)
+
+    def format_options(self, ctx, formatter):
+        own, forwarded = [], []
+        for param in self.get_params(ctx):
+            record = param.get_help_record(ctx)
+            if record is not None:
+                is_forwarded = isinstance(param, _ForwardedInstallOption)
+                (forwarded if is_forwarded else own).append(record)
+        if own:
+            with formatter.section("Options"):
+                formatter.write_dl(own)
+        if forwarded:
+            with formatter.section("Forwarded install options"):
+                formatter.write_dl(forwarded)
+
+
 @mcp.command(
     name="install",
+    cls=_InstallAliasCommand,
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
     help=(
         "Add an MCP server to apm.yml. Alias for 'apm install --mcp'.\n\n"
         "Examples:\n\n"
         "  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n"
         "  apm mcp install api --transport http --url https://example.com/mcp\n\n"
-        "\b\n"
-        "Forwarded install options (see 'apm install --help' for the full list):\n"
-        "  --transport [stdio|http|sse|streamable-http]\n"
-        "  --url URL              Server URL for remote transports\n"
-        "  --env KEY=VALUE        Environment variable (repeatable)\n"
-        "  --header KEY=VALUE     HTTP header (repeatable)\n"
-        "  -t, --target TARGET    Agent target(s) to deploy to\n"
-        "  --registry URL         Custom registry URL\n"
-        "  --mcp-version VER      Pin registry entry to a specific version\n"
-        "  -g, --global           Install to user scope (~/.apm/)\n"
-        "  --trust-transitive-mcp Trust MCP servers from transitive dependencies\n"
-        "  --dev / --dry-run / --force / --verbose / --no-policy"
+        "The forwarded install options below are defined by 'apm install'; "
+        "'--mcp NAME' is implied, so their '(requires --mcp)' notes are already "
+        "met. Other 'apm install' options are passed through unchanged; see "
+        "'apm install --help' for the full list."
     ),
 )
 @click.argument("name", required=True)
@@ -130,12 +251,19 @@ def mcp_install(ctx, name):
     # ``-y`` would be re-parsed as Click options when forwarded to
     # ``cli.main()``.  Re-insert the boundary by inspecting the raw
     # process argv (same seam the ``install`` command uses).
+    raw_values = ctx.meta.get(_FORWARDED_RAW_KEY, {})
+    option_args = [
+        token
+        for param in ctx.command.get_params(ctx)
+        if isinstance(param, _ForwardedInstallOption) and param.name in raw_values
+        for token in param.to_install_args(raw_values[param.name])
+    ]
     _, post_dd = _split_argv_at_double_dash(_get_invocation_argv())
     if post_dd:
         pre_args = ctx.args[: len(ctx.args) - len(post_dd)]
-        forwarded = ["install", "--mcp", name, *pre_args, "--", *post_dd]
+        forwarded = ["install", "--mcp", name, *option_args, *pre_args, "--", *post_dd]
     else:
-        forwarded = ["install", "--mcp", name, *ctx.args]
+        forwarded = ["install", "--mcp", name, *option_args, *ctx.args]
 
     try:
         cli.main(args=forwarded, standalone_mode=False)

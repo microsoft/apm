@@ -59,7 +59,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
-from git.exc import GitCommandError
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
@@ -82,6 +81,7 @@ from ..install.errors import (
     PolicyViolationError,
     RequiredIntegrationError,
 )
+from ..install.locking import serialized_lifecycle
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
@@ -155,6 +155,8 @@ def _resolve_and_stage_revision_pin_updates(
     against the new SHAs after the user's consent decision while dry-run and
     decline paths leave the original manifest model untouched.
     """
+    from git.exc import GitCommandError
+
     only_set = set(only_packages) if only_packages is not None else None
     logger.progress("Checking upstream for revision-pin freshness...", symbol="running")
 
@@ -230,6 +232,9 @@ def _run_mcp_lsp_integration(
     diagnostics: Any,
     logger: InstallLogger,
     verbose: bool,
+    effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    effective_allow_resolved: bool = False,
+    force: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -310,6 +315,9 @@ def _run_mcp_lsp_integration(
         target_context=(mcp_apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
+        effective_allow_executables=effective_allow_executables,
+        effective_allow_resolved=effective_allow_resolved,
+        force=force,
     )
 
 
@@ -321,6 +329,7 @@ def _handle_service_only_update(
     dry_run: bool,
     logger: InstallLogger,
     verbose: bool,
+    force: bool,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -362,6 +371,7 @@ def _handle_service_only_update(
             diagnostics=None,
             logger=logger,
             verbose=verbose,
+            force=force,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
@@ -442,6 +452,7 @@ def _handle_service_only_update(
     ),
 )
 @click.pass_context
+@serialized_lifecycle
 def update(
     ctx: click.Context,
     packages: tuple[str, ...],
@@ -556,6 +567,35 @@ def _run_dep_update(
     force: bool = False,
     parallel_downloads: int = 4,
 ) -> None:
+    """Serialize update with every other mutation of the same workspace."""
+    from apm_cli.core.scope import InstallScope
+
+    effective_scope = scope or InstallScope.PROJECT
+    _run_dep_update_locked(
+        assume_yes=assume_yes,
+        dry_run=dry_run,
+        verbose=verbose,
+        project_root=project_root,
+        target=target,
+        scope=effective_scope,
+        packages=packages,
+        force=force,
+        parallel_downloads=parallel_downloads,
+    )
+
+
+def _run_dep_update_locked(
+    *,
+    assume_yes: bool,
+    dry_run: bool,
+    verbose: bool,
+    project_root: Path | None = None,
+    target: str | list[str] | None = None,
+    scope=None,
+    packages: tuple[str, ...] = (),
+    force: bool = False,
+    parallel_downloads: int = 4,
+) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
     When ``project_root`` is provided, the working directory is
@@ -609,6 +649,7 @@ def _run_dep_update(
         dry_run=dry_run,
         logger=logger,
         verbose=verbose,
+        force=force,
     ):
         return
 
@@ -616,9 +657,9 @@ def _run_dep_update(
     # pipeline must resolve against the new SHAs, but declined/dry-run paths
     # should not mutate the APMPackage instance parsed from the on-disk manifest.
     staged_apm_package = copy.deepcopy(apm_package)
-    all_declared_deps = (
-        staged_apm_package.get_apm_dependencies() + staged_apm_package.get_dev_apm_dependencies()
-    )
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    all_declared_deps = project_manifest_dependencies(staged_apm_package)
 
     # Map any positional [PACKAGES] to canonical dependency keys for the
     # engine's only_packages filter; None means "refresh everything".
@@ -797,6 +838,14 @@ def _run_dep_update(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
+    from apm_cli.install.summary import exit_unless_install_result_allows_success
+
+    exit_unless_install_result_allows_success(
+        logger=logger,
+        result=result,
+        allow_neutral_outcome=True,
+    )
+
     plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
@@ -834,6 +883,9 @@ def _run_dep_update(
                 diagnostics=getattr(result, "diagnostics", None),
                 logger=logger,
                 verbose=verbose,
+                effective_allow_executables=getattr(result, "exec_allow_map", None),
+                effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
+                force=force,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))
@@ -905,9 +957,8 @@ def _fire_update_scripts(
 
     with contextlib.suppress(Exception):
         from apm_cli.core.lifecycle_scripts import (
-            LifecycleEvent,
-            PackageInfo,
             build_runner_from_context,
+            event_for_dependencies,
         )
 
         project_root = None
@@ -921,15 +972,10 @@ def _fire_update_scripts(
             project_root=project_root,
         )
 
-        pkg_infos = []
-        for dep in apm_package.get_apm_dependencies():
-            pkg_infos.append(PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference))
-
-        scope_name = scope.value if hasattr(scope, "value") else str(scope)
-        event = LifecycleEvent.create(
-            event=event_name,
-            packages=pkg_infos,
-            scope=scope_name,
+        event = event_for_dependencies(
+            event_name,
+            apm_package.get_apm_dependencies(),
+            scope=scope.value if hasattr(scope, "value") else str(scope),
             working_directory=project_root,
         )
 

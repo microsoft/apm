@@ -17,7 +17,9 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 import requests
 import yaml
 
+from ..cache.paths import get_cache_root
 from ..cache.url_normalize import SCP_LIKE_RE
+from ..utils.git_env import get_git_executable
 from ..utils.github_host import (
     build_ado_api_url,
     is_azure_devops_hostname,
@@ -25,7 +27,7 @@ from ..utils.github_host import (
     is_visualstudio_legacy_hostname,
     parse_ado_repo_url,
 )
-from ..utils.path_security import PathTraversalError, ensure_path_within
+from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from . import _gitlab
 from .parser import PolicyValidationError, load_policy
@@ -158,9 +160,7 @@ def _verify_hash_pin(
             expected_hash=expected_hash,
         )
 
-    digest = hashlib.new(algo)
-    digest.update(raw_bytes)
-    actual_hex = digest.hexdigest().lower()
+    actual_hex = compute_policy_hash(raw_bytes, algo)
     if actual_hex == expected_hex:
         return None
 
@@ -177,8 +177,8 @@ def _verify_hash_pin(
     )
 
 
-# Cache location: apm_modules/.policy-cache/<hash>.yml + <hash>.meta.json
-POLICY_CACHE_DIR = ".policy-cache"
+# Cache location: user cache root/policy_v1/<project-hash>/<source-hash>.*
+POLICY_CACHE_DIR = "policy_v1"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
 CACHE_SCHEMA_VERSION = "6"  # Bump when cache format changes to auto-invalidate
@@ -296,7 +296,7 @@ def discover_policy_with_chain(
         if pin is not None:
             expected_hash = pin.normalized
 
-    local_override = bool(policy_override and Path(policy_override).is_file())
+    local_override = bool(policy_override and _expand_policy_path(policy_override).is_file())
     if cache_only and not local_override and not policy_cache_available(project_root):
         if expected_hash is not None:
             return _unverifiable_cache_pin(expected_hash, "")
@@ -729,6 +729,8 @@ def discover_policy(
 
     Resolution order:
     1. If policy_override is a local file path -> load from file
+       (an unambiguous local path that does not exist returns
+       ``outcome="absent"`` with an error instead of a repo lookup)
     2. If policy_override is an https:// URL -> fetch from URL
        (http:// is rejected for security)
     3. If policy_override is "org" -> auto-discover from project's git remote
@@ -746,9 +748,17 @@ def discover_policy(
     must always be treated fail-closed by callers.
     """
     if policy_override:
-        path = Path(policy_override)
+        path = _expand_policy_path(policy_override)
         if path.exists() and path.is_file():
             return _load_from_file(path, expected_hash=expected_hash)
+        if _is_unambiguous_local_policy_path(policy_override):
+            kind = "path is not a file" if path.exists() else "file not found"
+            return PolicyFetchResult(
+                error=f"Policy {kind}: {policy_override}",
+                source=f"file:{policy_override}",
+                outcome="absent",
+                not_found=True,
+            )
         if policy_override.startswith("http://"):
             return PolicyFetchResult(
                 error="Refusing plaintext http:// policy URL -- use https://",
@@ -785,6 +795,23 @@ def discover_policy(
         expected_hash=expected_hash,
         cache_only=cache_only,
     )
+
+
+def _expand_policy_path(ref: str) -> Path:
+    """Expand ``~`` in a policy ref; an unknown ``~user`` stays literal."""
+    try:
+        return Path(ref).expanduser()
+    except RuntimeError:
+        return Path(ref)
+
+
+def _is_unambiguous_local_policy_path(ref: str) -> bool:
+    """True when *ref* can only be a local path (``owner/name.yml`` stays a repo ref)."""
+    if ref.startswith(("https://", "http://")):
+        return False
+    if ref.startswith((".", "/", "~")) or "\\" in ref or Path(ref).is_absolute():
+        return True
+    return "/" not in ref and ref.lower().endswith((".yml", ".yaml"))
 
 
 def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFetchResult:
@@ -943,7 +970,7 @@ def _extract_org_host_port_from_git_remote(
     """Extract ``(org, host, port)`` from git remote origin."""
     try:
         result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
+            [get_git_executable(), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1548,10 +1575,9 @@ def _get_token_for_host(host: str) -> str | None:
     For other hosts the token manager + git credential helpers are used.
     """
     try:
-        from ..core.token_manager import GitHubTokenManager
+        from ..core.auth import AuthResolver
 
-        manager = GitHubTokenManager()
-        return manager.get_token_with_credential_fallback("modules", host)
+        return AuthResolver().resolve(host).token
     except Exception as exc:
         logger.debug("Token manager failed for %s: %s", host, exc)
         if _is_github_host(host):
@@ -1624,33 +1650,11 @@ def _unverifiable_cache_pin(
 
 
 def _get_cache_dir(project_root: Path) -> Path:
-    """Get the policy cache directory.
-
-    Path-security guard (#832): the resulting path is asserted to live
-    within ``project_root``.  This catches the edge case where
-    ``apm_modules`` itself is a symlink that points outside the
-    project root -- a configuration that, while unusual, would let
-    cache reads/writes escape the project tree.
-    """
-    # Resolve early so candidate inherits long-name form on Windows;
-    # without this, resolve() on a not-yet-existing candidate keeps
-    # 8.3 short names while the base resolves to long names (#886).
-    project_root = project_root.resolve()
-    base = project_root / "apm_modules"
-    candidate = base / POLICY_CACHE_DIR
-    # Resolve both ends and assert containment under ``project_root``,
-    # not under ``base`` -- otherwise a symlinked apm_modules pointing
-    # outside the project would resolve through the symlink on both
-    # sides and the check would silently pass.
-    try:
-        ensure_path_within(candidate, project_root)
-    except PathTraversalError:
-        raise PathTraversalError(  # noqa: B904
-            f"Policy cache path '{candidate}' resolves outside "
-            f"project root '{project_root}' -- refusing to read or "
-            "write the cache here."
-        )
-    return candidate
+    """Return the user-owned policy cache directory for one project."""
+    cache_root = get_cache_root()
+    project_identity = str(project_root.expanduser().resolve()).encode("utf-8")
+    project_key = hashlib.sha256(project_identity).hexdigest()[:16]
+    return ensure_path_within(cache_root / POLICY_CACHE_DIR / project_key, cache_root)
 
 
 def _cache_key(repo_ref: str) -> str:
@@ -1948,6 +1952,8 @@ def _read_cache_entry(
         cached_at = meta.get("cached_at", 0)
         age = int(time.time() - cached_at)
 
+        if age < 0:
+            return None
         if age > MAX_STALE_TTL:
             return None  # Past MAX_STALE_TTL, unusable
 

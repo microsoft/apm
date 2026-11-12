@@ -238,9 +238,7 @@ _BOUNDARY_GATE = re.compile(r"enforce_agent_plugin_deployment_boundary\(bundle_i
 _LOCAL_BUNDLE_IMPORT = re.compile(
     r"from \.\.install\.local_bundle_handler import install_local_bundle"
 )
-_EXECUTABLE_TRUST_IMPORT = re.compile(
-    r"from \.\.security\.executables import read_bundle_allow_executables"
-)
+_EXECUTABLE_TRUST_IMPORT = re.compile(r"_allow_execs_for_bundle = _effective_bundle_allow_map")
 
 
 def _check_format_owner(

@@ -10,6 +10,7 @@ from apm_cli.commands.deps.cli import (
     _deps_list_source_label,
     _format_primitive_counts,
 )
+from apm_cli.deps.lockfile import LockedDependency
 
 
 class TestFormatPrimitiveCounts:
@@ -127,11 +128,9 @@ class TestDepDisplayName:
 
     def test_display_name_with_version(self):
         """Display with explicit version."""
-        mock_dep = MagicMock()
-        mock_dep.get_unique_key.return_value = "owner/repo"
-        mock_dep.version = "1.0.0"
-        mock_dep.resolved_commit = None
-        mock_dep.resolved_ref = None
+        mock_dep = LockedDependency(
+            version="1.0.0", resolved_commit=None, resolved_ref=None, repo_url="owner/repo"
+        )
 
         result = _dep_display_name(mock_dep)
 
@@ -139,11 +138,12 @@ class TestDepDisplayName:
 
     def test_display_name_with_commit_short_hash(self):
         """Display with commit SHA (short 7-char hash)."""
-        mock_dep = MagicMock()
-        mock_dep.get_unique_key.return_value = "owner/repo"
-        mock_dep.version = None
-        mock_dep.resolved_commit = "abc123def456789"
-        mock_dep.resolved_ref = None
+        mock_dep = LockedDependency(
+            version=None,
+            resolved_commit="abc123def456789",
+            resolved_ref=None,
+            repo_url="owner/repo",
+        )
 
         result = _dep_display_name(mock_dep)
 
@@ -151,11 +151,9 @@ class TestDepDisplayName:
 
     def test_display_name_with_resolved_ref(self):
         """Display with resolved_ref when no version/commit."""
-        mock_dep = MagicMock()
-        mock_dep.get_unique_key.return_value = "owner/repo"
-        mock_dep.version = None
-        mock_dep.resolved_commit = None
-        mock_dep.resolved_ref = "main"
+        mock_dep = LockedDependency(
+            version=None, resolved_commit=None, resolved_ref="main", repo_url="owner/repo"
+        )
 
         result = _dep_display_name(mock_dep)
 
@@ -163,11 +161,9 @@ class TestDepDisplayName:
 
     def test_display_name_fallback_latest(self):
         """Display falls back to 'latest' when no info available."""
-        mock_dep = MagicMock()
-        mock_dep.get_unique_key.return_value = "owner/repo"
-        mock_dep.version = None
-        mock_dep.resolved_commit = None
-        mock_dep.resolved_ref = None
+        mock_dep = LockedDependency(
+            version=None, resolved_commit=None, resolved_ref=None, repo_url="owner/repo"
+        )
 
         result = _dep_display_name(mock_dep)
 
@@ -175,11 +171,12 @@ class TestDepDisplayName:
 
     def test_display_name_version_takes_precedence(self):
         """Version takes precedence over commit."""
-        mock_dep = MagicMock()
-        mock_dep.get_unique_key.return_value = "owner/repo"
-        mock_dep.version = "1.0.0"
-        mock_dep.resolved_commit = "abc123def456789"
-        mock_dep.resolved_ref = "main"
+        mock_dep = LockedDependency(
+            version="1.0.0",
+            resolved_commit="abc123def456789",
+            resolved_ref="main",
+            repo_url="owner/repo",
+        )
 
         result = _dep_display_name(mock_dep)
 
@@ -208,12 +205,9 @@ class TestAddTreeChildren:
 
         parent_repo_url = "https://github.com/owner/parent"
 
-        mock_child = MagicMock()
-        mock_child.get_unique_key.return_value = "owner/child"
-        mock_child.version = "1.0.0"
-        mock_child.resolved_commit = None
-        mock_child.resolved_ref = None
-        mock_child.repo_url = "https://github.com/owner/child"
+        mock_child = LockedDependency(
+            version="1.0.0", resolved_commit=None, resolved_ref=None, repo_url="owner/child"
+        )
 
         children_map = {parent_repo_url: [mock_child]}
 
@@ -231,19 +225,13 @@ class TestAddTreeChildren:
 
         parent_repo_url = "https://github.com/owner/parent"
 
-        mock_child1 = MagicMock()
-        mock_child1.get_unique_key.return_value = "owner/child1"
-        mock_child1.version = "1.0.0"
-        mock_child1.resolved_commit = None
-        mock_child1.resolved_ref = None
-        mock_child1.repo_url = "https://github.com/owner/child1"
+        mock_child1 = LockedDependency(
+            version="1.0.0", resolved_commit=None, resolved_ref=None, repo_url="owner/child1"
+        )
 
-        mock_child2 = MagicMock()
-        mock_child2.get_unique_key.return_value = "owner/child2"
-        mock_child2.version = "1.1.0"
-        mock_child2.resolved_commit = None
-        mock_child2.resolved_ref = None
-        mock_child2.repo_url = "https://github.com/owner/child2"
+        mock_child2 = LockedDependency(
+            version="1.1.0", resolved_commit=None, resolved_ref=None, repo_url="owner/child2"
+        )
 
         children_map = {parent_repo_url: [mock_child1, mock_child2]}
 
@@ -259,12 +247,9 @@ class TestAddTreeChildren:
         parent_branch.add.return_value = child_branch
         parent_repo_url = "https://github.com/owner/parent"
 
-        mock_child = MagicMock()
-        mock_child.get_unique_key.return_value = "owner/child"
-        mock_child.version = "1.0.0"
-        mock_child.resolved_commit = None
-        mock_child.resolved_ref = None
-        mock_child.repo_url = "https://github.com/owner/child"
+        mock_child = LockedDependency(
+            version="1.0.0", resolved_commit=None, resolved_ref=None, repo_url="owner/child"
+        )
 
         repeated_parent = MagicMock()
         repeated_parent.get_unique_key.return_value = parent_repo_url
@@ -352,21 +337,17 @@ class TestDepsIntegration:
     def test_dependency_display_with_fallback(self):
         """Integration of dep display with fallback logic."""
         # Create mock dependencies with different info levels
-        mock_dep_with_version = MagicMock()
-        mock_dep_with_version.get_unique_key.return_value = "owner/repo"
-        mock_dep_with_version.version = "1.0.0"
-        mock_dep_with_version.resolved_commit = None
-        mock_dep_with_version.resolved_ref = None
+        mock_dep_with_version = LockedDependency(
+            version="1.0.0", resolved_commit=None, resolved_ref=None, repo_url="owner/repo"
+        )
 
         result = _dep_display_name(mock_dep_with_version)
         assert "1.0.0" in result
 
         # Create mock with commit but no version
-        mock_dep_with_commit = MagicMock()
-        mock_dep_with_commit.get_unique_key.return_value = "owner/repo"
-        mock_dep_with_commit.version = None
-        mock_dep_with_commit.resolved_commit = "abc123def456"
-        mock_dep_with_commit.resolved_ref = None
+        mock_dep_with_commit = LockedDependency(
+            version=None, resolved_commit="abc123def456", resolved_ref=None, repo_url="owner/repo"
+        )
 
         result = _dep_display_name(mock_dep_with_commit)
         assert "abc123d" in result

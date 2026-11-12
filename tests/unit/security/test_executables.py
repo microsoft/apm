@@ -39,6 +39,7 @@ from apm_cli.security.executables import (
     filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
+    local_bundle_approval_key,
     more_severe_exec_status,
     parse_allow_executables,
     prompt_executable_approval,
@@ -204,6 +205,39 @@ class TestBuildApprovalKey:
         assert build_approval_key("ci-hooks@acme", "1.2.0") == "ci-hooks@acme#1.2.0"
 
 
+class TestLocalBundleApprovalKey:
+    def test_hash_includes_normally_excluded_directories(self, tmp_path: Path) -> None:
+        payload = tmp_path / "__pycache__" / "server.py"
+        payload.parent.mkdir()
+        payload.write_text("first", encoding="utf-8")
+        first = local_bundle_approval_key("demo", "", tmp_path)
+
+        payload.write_text("second", encoding="utf-8")
+
+        assert local_bundle_approval_key("demo", "", tmp_path) != first
+
+    def test_hash_rejects_symlinks(self, tmp_path: Path) -> None:
+        target = tmp_path / "target"
+        target.write_text("payload", encoding="utf-8")
+        link = tmp_path / "link"
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"file symlinks unavailable: {exc}")
+
+        with pytest.raises(ValueError, match="contains a symlink"):
+            local_bundle_approval_key("demo", "", tmp_path)
+
+    def test_locked_hash_uses_manifest_without_reading_payloads(self, tmp_path: Path) -> None:
+        lockfile = {"pack": {"bundle_files": {"extension.mjs": "a" * 64}}}
+
+        with patch.object(Path, "read_bytes") as read_bytes:
+            key = local_bundle_approval_key("demo", "1", tmp_path, lockfile)
+
+        read_bytes.assert_not_called()
+        assert key.startswith("demo#1@sha256:")
+
+
 # ---------------------------------------------------------------------------
 # scan_package_executables
 # ---------------------------------------------------------------------------
@@ -294,6 +328,21 @@ class TestScanPackageExecutables:
             assert decl.lsp_count == 2
             assert EXEC_TYPE_LSP in decl.exec_types
             assert decl.lsp_details == ["pyright", "typescript-language-server"]
+
+    def test_preparsed_manifest_avoids_a_second_yaml_read(self, tmp_path) -> None:
+        manifest_data = {
+            "dependencies": {"lsp": [{"name": "pyright", "command": "pyright-langserver"}]}
+        }
+        with patch("apm_cli.utils.yaml_io.load_yaml") as load_yaml:
+            decl = scan_package_executables(
+                tmp_path,
+                "lsp-pkg",
+                "1.0",
+                manifest_data=manifest_data,
+            )
+
+        load_yaml.assert_not_called()
+        assert decl.lsp_count == 1
 
     def test_transitive_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -651,8 +700,16 @@ class TestSaveUserExecutablesAtomic:
 class _FakeMcpDep:
     """Minimal stand-in for an MCP dependency exposing ``.name``."""
 
-    def __init__(self, name: str | None) -> None:
+    def __init__(
+        self,
+        name: str | None,
+        *,
+        resolved_by: str | None = None,
+        approval_keys: tuple[str, ...] = (),
+    ) -> None:
         self.name = name
+        self.resolved_by = resolved_by
+        self.approval_keys = approval_keys
 
 
 class _RecordingLogger:
@@ -707,29 +764,105 @@ class TestFilterMcpFailClosed:
 
 
 class TestFilterLspFailClosed:
-    def test_project_allowed_slug_passes(self) -> None:
+    def test_root_lsp_passes_as_project_authored_content(self) -> None:
         deps = [_FakeMcpDep("pyright")]
         logger = _RecordingLogger()
 
         result = filter_lsp_by_allow_executables(
             deps,
-            {"pyright": {"lsp": True}},
+            {},
             logger,
         )
 
         assert result == deps
         assert logger.warnings == []
 
-    def test_unapproved_lsp_is_filtered(self) -> None:
-        deps = [_FakeMcpDep("pyright")]
+    def test_unapproved_declaring_package_is_filtered(self) -> None:
+        deps = [
+            _FakeMcpDep(
+                "pyright",
+                resolved_by="evil/package",
+                approval_keys=("evil/package",),
+            )
+        ]
         logger = _RecordingLogger()
 
-        result = filter_lsp_by_allow_executables(deps, {}, logger)
+        result = filter_lsp_by_allow_executables(
+            deps,
+            {},
+            logger,
+        )
 
         assert result == []
         assert logger.warnings == [
-            "Filtered 1 LSP server(s) whose executables are not trusted yet."
+            "Filtered 1 LSP server from 'evil/package': declaring package is "
+            "not trusted yet. Run 'apm policy explain evil/package'; approve it "
+            "only if policy permits."
         ]
+        assert "LSP server 'pyright' from 'evil/package'" in logger.verbose[0]
+        assert "if policy permits" in logger.verbose[0]
+
+    def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
+        approved = _FakeMcpDep(
+            "shared-name",
+            resolved_by="trusted/package",
+            approval_keys=("trusted/package",),
+        )
+        impersonator = _FakeMcpDep(
+            "shared-name",
+            resolved_by="evil/package",
+            approval_keys=("evil/package",),
+        )
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(
+            [approved, impersonator],
+            {"trusted/package": {"lsp": True}},
+            logger,
+        )
+
+        assert result == [approved]
+
+    def test_unlocked_declarer_gets_lock_recovery_guidance(self) -> None:
+        dependency = _FakeMcpDep("pyright", resolved_by="ghe.example/owner/repo")
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables([dependency], {}, logger)
+
+        assert result == []
+        assert "regenerate apm.lock.yaml" in logger.verbose[0]
+
+    def test_multiple_unlocked_declarers_get_plural_recovery_guidance(self) -> None:
+        dependencies = [
+            _FakeMcpDep("pyright", resolved_by="ghe.example/owner/one"),
+            _FakeMcpDep("ruff", resolved_by="ghe.example/owner/two"),
+        ]
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(dependencies, {}, logger)
+
+        assert result == []
+        assert "approve each package" in logger.warnings[0]
+        assert "LSP server 'pyright'" in logger.verbose[0]
+        assert "LSP server 'ruff'" in logger.verbose[1]
+
+    def test_mixed_declarers_get_distinct_recovery_guidance(self) -> None:
+        dependencies = [
+            _FakeMcpDep(
+                "pyright",
+                resolved_by="owner/locked",
+                approval_keys=("owner/locked",),
+            ),
+            _FakeMcpDep("ruff", resolved_by="owner/unlocked"),
+        ]
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(dependencies, {}, logger)
+
+        assert result == []
+        warning = logger.warnings[0]
+        assert "policy explain owner/locked" in warning
+        assert "regenerate apm.lock.yaml" in warning
 
 
 @pytest.mark.parametrize(

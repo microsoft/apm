@@ -82,9 +82,15 @@ MUTATIONS: tuple[BundleMutation, ...] = (
         "src/apm_cli/commands/install.py",
         (
             "                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)\n"
+            "                from ..install.local_bundle_handler import (\n"
+            "                    effective_bundle_allow_map as _effective_bundle_allow_map,\n"
+            "                )\n"
             "                from ..install.local_bundle_handler import install_local_bundle as _install_lb"
         ),
         (
+            "                from ..install.local_bundle_handler import (\n"
+            "                    effective_bundle_allow_map as _effective_bundle_allow_map,\n"
+            "                )\n"
             "                from ..install.local_bundle_handler import install_local_bundle as _install_lb\n"
             "                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)"
         ),

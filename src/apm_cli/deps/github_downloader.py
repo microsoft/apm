@@ -21,7 +21,6 @@ from git.exc import GitCommandError
 
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
-    APMPackage,
     DependencyReference,
     GitReferenceType,
     PackageInfo,
@@ -29,22 +28,28 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
-from ..utils.atomic_io import atomic_write_text
+from ..models.dependency.host_virtual import dependency_repository_owner, repository_path_segments
 from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
+from ..utils.git_env import (
+    checkout_git_worktree,
+    get_git_executable,
+    git_no_hooks_args,
+    git_subprocess_error_text,
+    git_worktree_head,
+    redact_git_diagnostic,
+)
 from ..utils.git_sparse import (
     apply_sparse_cone,
-    repair_dangling_cone_symlinks,
+    materialize_tracked_symlinks,
     sparse_checkout_active,
     validate_materialized_symlinks,
 )
 from ..utils.github_host import (
     default_host,
     is_github_hostname,
-    sanitize_token_url_in_message,
 )
-from ..utils.yaml_io import yaml_to_str
 from .bare_cache import (
     bare_clone_with_fallback,
     clone_with_fallback,
@@ -62,6 +67,7 @@ from .transport_selection import (
     ProtocolPreference,
     TransportSelector,
 )
+from .virtual_file import materialize_virtual_file_package
 
 _log = logging.getLogger(__name__)
 
@@ -77,7 +83,7 @@ _PROTOCOL_FALLBACK_DOCS_URL = (
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
-        print(f"[DEBUG] {message}", file=sys.stderr)
+        print(f"[DEBUG] {redact_git_diagnostic(message)}", file=sys.stderr)
 
 
 def _close_repo(repo) -> None:
@@ -315,21 +321,23 @@ class GitHubPackageDownloader:
             )
 
         auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-        base_env = (
-            self.auth_resolver.git_env_for_context(
-                auth_ctx,
-                base_env=self.git_env,
-            )
-            if auth_ctx is not None
-            else self.git_env
+        remote_url = self._build_repo_url(
+            dep_ref.repo_url,
+            use_ssh=False,
+            dep_ref=dep_ref,
+            token="",
+            auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
         )
-        git_env = GitAuthEnvBuilder.subprocess_env_dict(base_env)
-        if dep_ref.is_insecure:
-            git_env = self.auth_resolver.build_noninteractive_git_env(
-                base_env=git_env,
-                preserve_config_isolation=True,
-                suppress_credential_helpers=True,
+        if auth_ctx is None:
+            auth_ctx = self.auth_resolver.resolve_for_remote(
+                dep_ref.host or default_host(),
+                remote_url,
+                dependency_repository_owner(dep_ref),
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
             )
+        base_env = self.auth_resolver.git_env_for_remote(auth_ctx, remote_url)
+        git_env = GitAuthEnvBuilder.subprocess_env_dict(base_env)
         return git_env
 
     def _persistent_cache_checkout(
@@ -354,7 +362,7 @@ class GitHubPackageDownloader:
             is True
             and not dep_ref.is_insecure
         ):
-            org = dep_ref.repo_url.split("/", 1)[0] if "/" in dep_ref.repo_url else None
+            org = dependency_repository_owner(dep_ref)
 
             def _checkout(token: str | None, env: dict[str, str]) -> Path:
                 attempt_env = GitAuthEnvBuilder.subprocess_env_dict(env)
@@ -371,7 +379,7 @@ class GitHubPackageDownloader:
                     sparse_paths=sparse_paths,
                 )
 
-            return self.auth_resolver.try_with_fallback(
+            checkout = self.auth_resolver.try_with_fallback(
                 dep_ref.host or default_host(),
                 _checkout,
                 org=org,
@@ -382,13 +390,23 @@ class GitHubPackageDownloader:
                 base_env=self.git_env,
             )
 
-        return cache.get_checkout(
-            repository_url,
-            ref,
-            locked_sha=locked_sha,
-            env=self._cache_git_env(dep_ref),
-            sparse_paths=sparse_paths,
-        )
+        else:
+            checkout = cache.get_checkout(
+                repository_url,
+                ref,
+                locked_sha=locked_sha,
+                env=self._cache_git_env(dep_ref),
+                sparse_paths=sparse_paths,
+            )
+        resolver = getattr(self, "_tiered_resolver", None)
+        if (
+            resolver is not None
+            and locked_sha
+            and dep_ref.reference
+            and resolver.remotely_resolved(dep_ref, locked_sha) is True
+        ):
+            cache.remember_resolved_ref(repository_url, dep_ref.reference, locked_sha)
+        return checkout
 
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
@@ -603,6 +621,7 @@ class GitHubPackageDownloader:
         *,
         stream: bool = False,
         retry_throttles: bool = True,
+        allow_netrc: bool = True,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
         return self._strategies.resilient_get(
@@ -612,43 +631,12 @@ class GitHubPackageDownloader:
             max_retries=max_retries,
             stream=stream,
             retry_throttles=retry_throttles,
+            allow_netrc=allow_netrc,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:
-        """Sanitize Git error messages to remove potentially sensitive authentication information.
-
-        Args:
-            error_message: Raw error message from Git operations
-
-        Returns:
-            str: Sanitized error message with sensitive data removed
-        """
-        import re
-
-        # Remove any tokens that might appear in URLs for github hosts (format: https://token@host)
-        # Sanitize for default host and common enterprise hosts via helper
-        sanitized = sanitize_token_url_in_message(error_message, host=default_host())
-
-        # Sanitize Azure DevOps URLs - both cloud (dev.azure.com) and any on-prem server
-        # Use a generic pattern to catch https://token@anyhost format for all hosts
-        # This catches: dev.azure.com, ado.company.com, tfs.internal.corp, etc.
-        sanitized = re.sub(r"https://[^@\s]+@([^\s/]+)", r"https://***@\1", sanitized)
-
-        # Remove any tokens that might appear as standalone values
-        sanitized = re.sub(
-            r"(ghp_|gho_|ghu_|ghs_|ghr_|glpat[_-])[a-zA-Z0-9_\-]+",
-            "***",
-            sanitized,
-        )
-
-        # Remove environment variable values that might contain tokens
-        sanitized = re.sub(
-            r"(GITHUB_TOKEN|GITHUB_APM_PAT|ADO_APM_PAT|GH_TOKEN|GITHUB_COPILOT_PAT|GITLAB_APM_PAT|GITLAB_TOKEN)=[^\s]+",
-            r"\1=***",
-            sanitized,
-        )
-
-        return sanitized
+        """Delegate Git diagnostic redaction to its canonical owner."""
+        return redact_git_diagnostic(error_message)
 
     def _build_repo_url(
         self,
@@ -837,7 +825,12 @@ class GitHubPackageDownloader:
         return self._refs.resolve_commit_sha_for_ref(dep_ref, ref)
 
     def download_raw_file(
-        self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Download a single file from repository (GitHub or Azure DevOps).
 
@@ -846,6 +839,10 @@ class GitHubPackageDownloader:
             file_path: Path to file within the repository (e.g., "prompts/code-review.prompt.md")
             ref: Git reference (branch, tag, or commit SHA). Defaults to "main"
             verbose_callback: Optional callable for verbose logging (receives str messages)
+            raw_only: Skip the Contents API fallback on the public-github
+                anonymous-first path and report a miss via ``RuntimeError``
+                when the raw CDN does not have the file (microsoft/apm#3283
+                virtual-package marker sweep).  Ignored everywhere else.
 
         Returns:
             bytes: File content
@@ -857,7 +854,7 @@ class GitHubPackageDownloader:
 
         # Check if this is Artifactory (Mode 1: explicit FQDN)
         if dep_ref.is_artifactory():
-            repo_parts = dep_ref.repo_url.split("/")
+            repo_parts = repository_path_segments(dep_ref.repo_url)
             return self._download_file_from_artifactory(
                 dep_ref.host,
                 dep_ref.artifactory_prefix,
@@ -870,7 +867,7 @@ class GitHubPackageDownloader:
         # Check if this should go through Artifactory proxy (Mode 2)
         art_proxy = self._parse_artifactory_base_url()
         if art_proxy and self._should_use_artifactory_proxy(dep_ref):
-            repo_parts = dep_ref.repo_url.split("/")
+            repo_parts = repository_path_segments(dep_ref.repo_url)
             return self._download_file_from_artifactory(
                 art_proxy[0],
                 art_proxy[1],
@@ -887,7 +884,7 @@ class GitHubPackageDownloader:
 
         # GitHub API
         return self._download_github_file(
-            dep_ref, file_path, ref, verbose_callback=verbose_callback
+            dep_ref, file_path, ref, verbose_callback=verbose_callback, raw_only=raw_only
         )
 
     def _download_ado_file(
@@ -918,6 +915,7 @@ class GitHubPackageDownloader:
         file_path: str,
         ref: str = "main",
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
@@ -937,6 +935,7 @@ class GitHubPackageDownloader:
             file_path,
             ref=ref,
             verbose_callback=verbose_callback,
+            raw_only=raw_only,
         )
 
     def validate_virtual_package_exists(
@@ -1048,92 +1047,35 @@ class GitHubPackageDownloader:
         # Download the file content. A confirmed API throttle is
         # indeterminate, not an accessibility failure, so select the one
         # sparse-Git fallback and use its observed commit for lock provenance.
+        api_throttle: GitHubThrottleError | None = None
         try:
             file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
         except GitHubThrottleError as throttle:
+            api_throttle = throttle
+        except RuntimeError as e:
+            raise RuntimeError(f"Failed to download virtual package: {e}") from e
+
+        # Git is a separate attempt: do not attach the prior API throttle as
+        # implicit context to its auth failures. Keep it for fallback diagnostics.
+        if api_throttle is not None:
             fetched = self._strategies.download_github_file_via_throttle_fallback(
                 dep_ref,
                 dep_ref.virtual_path,
                 ref,
-                throttle,
+                api_throttle,
             )
             file_content = fetched.content
             resolved_commit = fetched.resolved_commit
-        except RuntimeError as e:
-            raise RuntimeError(f"Failed to download virtual package: {e}") from e
 
         # Update progress - processing
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=90, total=100)
 
-        # Create target directory structure
-        target_path.mkdir(parents=True, exist_ok=True)
-
-        # Determine the subdirectory based on file extension
-        subdirs = {
-            ".prompt.md": "prompts",
-            ".instructions.md": "instructions",
-            ".agent.md": "agents",
-        }
-
-        subdir = None
-        filename = dep_ref.virtual_path.split("/")[-1]
-        for ext, dir_name in subdirs.items():
-            if dep_ref.virtual_path.endswith(ext):
-                subdir = dir_name
-                break
-
-        if not subdir:
-            raise ValueError(f"Unknown file extension for {dep_ref.virtual_path}")
-
-        # Create .apm structure
-        apm_dir = target_path / ".apm" / subdir
-        apm_dir.mkdir(parents=True, exist_ok=True)
-
-        # Write the file
-        file_path = apm_dir / filename
-        file_path.write_bytes(file_content)
-
-        # Generate minimal apm.yml
-        package_name = dep_ref.get_virtual_package_name()
-
-        # Try to extract description from file frontmatter
-        description = f"Virtual package containing {filename}"
-        try:
-            content_str = file_content.decode("utf-8")
-            # Simple frontmatter parsing (YAML between --- markers)
-            if content_str.startswith("---\n"):
-                end_idx = content_str.find("\n---\n", 4)
-                if end_idx > 0:
-                    frontmatter = content_str[4:end_idx]
-                    # Look for description field
-                    for line in frontmatter.split("\n"):
-                        if line.startswith("description:"):
-                            description = line.split(":", 1)[1].strip().strip("\"'")
-                            break
-        except Exception:
-            # If frontmatter parsing fails, use default description
-            pass
-
-        apm_yml_data = {
-            "name": package_name,
-            "version": "1.0.0",
-            "description": description,
-            "author": dep_ref.repo_url.split("/")[0],
-        }
-        apm_yml_content = yaml_to_str(apm_yml_data)
-
-        apm_yml_path = target_path / "apm.yml"
-        atomic_write_text(apm_yml_path, apm_yml_content)
-
-        # Create APMPackage object
-        package = APMPackage(
-            name=package_name,
-            version="1.0.0",
-            description=description,
-            author=dep_ref.repo_url.split("/")[0],
-            source=dep_ref.to_github_url(),
-            package_path=target_path,
+        package = materialize_virtual_file_package(
+            dep_ref,
+            target_path,
+            dep_ref.virtual_path.split("/")[-1],
+            file_content,
         )
 
         # Build the resolved reference. On non-GitHub hosts or SHA-resolve
@@ -1177,17 +1119,10 @@ class GitHubPackageDownloader:
             temp_clone_path.mkdir(parents=True, exist_ok=True)
 
             def _repair(repo_env: dict[str, str]) -> bool:
-                dangling = repair_dangling_cone_symlinks(
-                    "git",
-                    temp_clone_path,
-                    [subdir_path],
-                    env=repo_env,
+                # Lenient: download_subdirectory_package rejects what remains.
+                materialize_tracked_symlinks(
+                    "git", temp_clone_path, [subdir_path], env=repo_env, strict=False
                 )
-                if dangling is not None:
-                    _log.info(
-                        "Sparse checkout widened to repair dangling symlink '%s' (#2707).",
-                        dangling.relative_to(temp_clone_path),
-                    )
                 return True
 
             public_github_anonymous_first = (
@@ -1209,22 +1144,14 @@ class GitHubPackageDownloader:
                 setup_env = self.auth_resolver.build_public_github_anonymous_git_env(
                     base_env=self.git_env,
                 )
-                setup_cmds = [
-                    ["git", "init"],
-                    ["git", "remote", "add", "origin", anonymous_url],
-                ]
-                for cmd in setup_cmds:
-                    result = subprocess.run(
-                        cmd,
-                        cwd=str(temp_clone_path),
-                        env=setup_env,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        timeout=120,
-                    )
-                    if result.returncode != 0:
-                        return False
+                from ..utils.git_env import init_git_remote_worktree
+
+                setup_env = init_git_remote_worktree(
+                    temp_clone_path,
+                    anonymous_url,
+                    setup_env,
+                    run=subprocess.run,
+                )
                 apply_sparse_cone(
                     "git",
                     temp_clone_path,
@@ -1234,15 +1161,31 @@ class GitHubPackageDownloader:
                 )
 
                 def _fetch(token: str | None, git_env: dict[str, str]) -> None:
+                    from ..utils.git_env import git_network_env
+
+                    winning_url = anonymous_url
                     if token is not None:
                         authenticated_url = self._build_repo_url(
                             dep_ref.repo_url,
                             use_ssh=False,
                             dep_ref=dep_ref,
-                            token=token or "",
+                            token="",
                         )
+                        winning_url = authenticated_url
+                    git_env = git_network_env(
+                        winning_url,
+                        git_env,
+                        worktree=temp_clone_path,
+                    )
+                    if token is not None:
                         remote_result = subprocess.run(
-                            ["git", "remote", "set-url", "origin", authenticated_url],
+                            [
+                                get_git_executable(),
+                                "remote",
+                                "set-url",
+                                "origin",
+                                authenticated_url,
+                            ],
                             cwd=str(temp_clone_path),
                             env=git_env,
                             capture_output=True,
@@ -1258,7 +1201,7 @@ class GitHubPackageDownloader:
                                 stderr=remote_result.stderr,
                             )
                     fetch_result = subprocess.run(
-                        ["git", "fetch", "origin", ref or "HEAD", "--depth=1"],
+                        [get_git_executable(), "fetch", "origin", ref or "HEAD", "--depth=1"],
                         cwd=str(temp_clone_path),
                         env=git_env,
                         capture_output=True,
@@ -1274,7 +1217,7 @@ class GitHubPackageDownloader:
                             stderr=fetch_result.stderr,
                         )
 
-                org = dep_ref.repo_url.split("/", 1)[0]
+                org = dependency_repository_owner(dep_ref)
                 self.auth_resolver.try_with_fallback(
                     dep_ref.host or default_host(),
                     _fetch,
@@ -1286,7 +1229,7 @@ class GitHubPackageDownloader:
                     base_env=self.git_env,
                 )
                 checkout_result = subprocess.run(
-                    ["git", "checkout", "FETCH_HEAD"],
+                    [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
                     cwd=str(temp_clone_path),
                     env=setup_env,
                     capture_output=True,
@@ -1300,44 +1243,38 @@ class GitHubPackageDownloader:
 
             # Resolve per-dependency auth via AuthResolver.
             dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-            dep_token = dep_auth_ctx.token if dep_auth_ctx else self.github_token
             dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
-
-            # Use the per-dependency AuthContext env for every classified host.
-            if dep_auth_ctx is not None:
-                env = self.auth_resolver.git_env_for_context(
-                    dep_auth_ctx,
-                    base_env=self.git_env,
-                )
-            else:
-                env = {**os.environ, **(self.git_env or {})}
             auth_url = self._build_repo_url(
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token=dep_token,
+                token="",
                 auth_scheme=dep_auth_scheme,
             )
-
-            cmds = [
-                ["git", "init"],
-                ["git", "remote", "add", "origin", auth_url],
-            ]
-            for cmd in cmds:
-                result = subprocess.run(
-                    cmd,
-                    cwd=str(temp_clone_path),
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=120,
+            if dep_auth_ctx is not None:
+                env = self.auth_resolver.git_env_for_remote(
+                    dep_auth_ctx,
+                    auth_url,
                 )
-                if result.returncode != 0:
-                    _debug(
-                        f"Sparse-checkout step failed ({' '.join(cmd)}): {result.stderr.strip()}"
-                    )
-                    return False
+            else:
+                org = dependency_repository_owner(dep_ref)
+                generic_ctx = self.auth_resolver.resolve_for_remote(
+                    dep_ref.host or default_host(),
+                    auth_url,
+                    org,
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+                env = self.auth_resolver.git_env_for_remote(generic_ctx, auth_url)
+
+            from ..utils.git_env import init_git_remote_worktree
+
+            env = init_git_remote_worktree(
+                temp_clone_path,
+                auth_url,
+                env,
+                run=subprocess.run,
+            )
             apply_sparse_cone(
                 "git",
                 temp_clone_path,
@@ -1345,12 +1282,18 @@ class GitHubPackageDownloader:
                 env=env,
                 timeout=120,
             )
-            fetch_cmd = ["git", "fetch", "origin"]
+            fetch_cmd = [get_git_executable(), "fetch", "origin"]
             fetch_cmd.append(ref or "HEAD")
             fetch_cmd.append("--depth=1")
-            checkout_cmds = [fetch_cmd, ["git", "checkout", "FETCH_HEAD"]]
+            checkout_steps = [
+                ("fetch", fetch_cmd),
+                (
+                    "checkout",
+                    [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+                ),
+            ]
 
-            for cmd in checkout_cmds:
+            for step_name, cmd in checkout_steps:
                 result = subprocess.run(
                     cmd,
                     cwd=str(temp_clone_path),
@@ -1362,13 +1305,14 @@ class GitHubPackageDownloader:
                 )
                 if result.returncode != 0:
                     _debug(
-                        f"Sparse-checkout step failed ({' '.join(cmd)}): {result.stderr.strip()}"
+                        f"Sparse-checkout {step_name} failed: "
+                        f"{redact_git_diagnostic(result.stderr.strip())}"
                     )
                     return False
 
             return _repair(env)
         except Exception as e:
-            _debug(f"Sparse-checkout failed: {e}")
+            _debug(f"Sparse-checkout failed: {git_subprocess_error_text(e)}")
             return False
 
     def download_subdirectory_package(
@@ -1639,14 +1583,18 @@ class GitHubPackageDownloader:
                         raise RuntimeError(f"Failed to clone repository: {e}") from e
 
                     if is_commit_sha:
-                        repo_obj = None
                         try:
-                            repo_obj = Repo(temp_clone_path)
-                            repo_obj.git.checkout(ref)
+                            checkout_git_worktree(temp_clone_path, ref, env=self.git_env)
                         except Exception as e:
-                            raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
-                        finally:
-                            _close_repo(repo_obj)
+                            detail = self._sanitize_git_error(git_subprocess_error_text(e))
+                            raise RuntimeError(f"Failed to checkout commit {ref}: {detail}") from e
+                    materialize_tracked_symlinks(
+                        "git",
+                        temp_clone_path,
+                        [subdir_path],
+                        env=self._git_env_dict(),
+                        strict=False,
+                    )
 
                     # Disable progress reporter after clone
                     if progress_reporter:
@@ -1703,14 +1651,10 @@ class GitHubPackageDownloader:
             if _ws2_resolved_commit is not None:
                 resolved_commit = _ws2_resolved_commit
             else:
-                repo = None
                 try:
-                    repo = Repo(temp_clone_path)
-                    resolved_commit = repo.head.commit.hexsha
+                    resolved_commit = git_worktree_head(temp_clone_path, env=self.git_env)
                 except Exception:
                     resolved_commit = "unknown"
-                finally:
-                    _close_repo(repo)
 
             # Update progress - validating
             if progress_obj and progress_task_id is not None:
@@ -1828,7 +1772,7 @@ class GitHubPackageDownloader:
         package structure instead of cloning the full repository.
 
         Args:
-            repo_ref: Repository reference — either a DependencyReference object
+            repo_ref: Repository reference -- either a DependencyReference object
                 or a string (e.g., "user/repo#branch"). Passing the object
                 directly avoids a lossy parse round-trip for generic git hosts.
             target_path: Local path where package should be downloaded
@@ -1926,6 +1870,9 @@ class GitHubPackageDownloader:
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                 )
+                # A shard keeps unresolvable links as text; the clone path
+                # below then raises the strict diagnostic (#3457).
+                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
                 from ..utils.file_ops import robust_copy2, robust_copytree
 
                 for item in _cached.iterdir():
@@ -1978,9 +1925,8 @@ class GitHubPackageDownloader:
 
         # Store progress reporter so we can disable it after clone
         progress_reporter = None
-        package_display_name = (
-            dep_ref.repo_url.split("/")[-1] if "/" in dep_ref.repo_url else dep_ref.repo_url
-        )
+        repo_segments = repository_path_segments(dep_ref.repo_url)
+        package_display_name = repo_segments[-1] if repo_segments else dep_ref.repo_url
 
         try:
             # Clone the repository using fallback authentication methods
@@ -1992,14 +1938,14 @@ class GitHubPackageDownloader:
                     if progress_task_id and progress_obj
                     else None
                 )
-                repo = self._clone_with_fallback(
+                self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,
                     progress_reporter=progress_reporter,
                     dep_ref=dep_ref,
                     verbose_callback=verbose_callback,
                 )
-                repo.git.checkout(resolved_ref.resolved_commit)
+                checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
             else:
                 # For branches and tags, we can use shallow clone
                 progress_reporter = (
@@ -2007,7 +1953,7 @@ class GitHubPackageDownloader:
                     if progress_task_id and progress_obj
                     else None
                 )
-                repo = self._clone_with_fallback(
+                self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,
                     progress_reporter=progress_reporter,
@@ -2021,17 +1967,20 @@ class GitHubPackageDownloader:
             if progress_reporter:
                 progress_reporter.disabled = True
 
+            # Links become their Git-object content while .git exists (#3457).
+            materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
+
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"
             if git_dir.exists():
                 _rmtree(git_dir)
 
-        except GitCommandError as e:
+        except (GitCommandError, subprocess.CalledProcessError) as e:
             # Check if this might be a private repository access issue
             if "Authentication failed" in str(e) or "remote: Repository not found" in str(e):
                 error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
                 host = dep_ref.host or default_host()
-                org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url else None
+                org = dependency_repository_owner(dep_ref)
                 error_msg += self.auth_resolver.build_error_context(
                     host,
                     "clone",
@@ -2041,7 +1990,7 @@ class GitHubPackageDownloader:
                 )
                 raise RuntimeError(error_msg) from e
             else:
-                sanitized_error = self._sanitize_git_error(str(e))
+                sanitized_error = self._sanitize_git_error(git_subprocess_error_text(e))
                 raise RuntimeError(
                     f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
                 ) from e

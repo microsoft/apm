@@ -6,9 +6,13 @@ import contextlib
 import os
 import tempfile
 import threading
+import weakref
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.results import InstallDisposition, InstallResult
 
@@ -25,11 +29,17 @@ def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> Non
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(snapshot)
-        os.replace(temporary_name, manifest_path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(temporary_name)
         raise
+    try:
+        os.replace(temporary_name, manifest_path)
+    except OSError as exc:
+        raise OSError(
+            f"Could not restore {manifest_path}: {exc}. "
+            f"Prior manifest snapshot retained at {temporary_name} for recovery."
+        ) from exc
 
 
 def _maybe_rollback_manifest(
@@ -51,10 +61,9 @@ def _maybe_rollback_manifest(
         except Exception as exc:
             if logger is not None:
                 logger.warning(
-                    "Failed to remove apm.yml created by this install. "
-                    "Delete apm.yml manually before retrying."
+                    f"Failed to remove {manifest_path} created by this install: {exc}. "
+                    "Inspect and remove that new manifest before retrying."
                 )
-                logger.verbose_detail(f"Manifest rollback error: {exc}")
         return
     try:
         if snapshot is None:
@@ -66,8 +75,9 @@ def _maybe_rollback_manifest(
             logger.progress("apm.yml restored to its previous state.")
     except Exception as exc:
         if logger is not None:
-            logger.warning("Failed to restore apm.yml. Inspect apm.yml before retrying.")
-            logger.verbose_detail(f"Manifest rollback error: {exc}")
+            logger.warning(
+                f"Failed to restore apm.yml: {exc}. Inspect the recovery data before retrying."
+            )
 
 
 class InstallTransaction:
@@ -84,15 +94,27 @@ class InstallTransaction:
         apm_modules_dir: Path,
         validation: _ValidationOutcome | None,
         logger: InstallLogger,
+        acquire_lock: bool = True,
     ) -> None:
         """Capture the manifest and create one resolution staging session."""
         self.manifest_path = manifest_path
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation
         self._logger = logger
-        self._manifest_existed = manifest_path.exists()
-        self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
-        self._resolution = ResolutionStagingSession(apm_modules_dir)
+        self._workspace_lock = acquire_lifecycle_lock() if acquire_lock else None
+        # Finalize this acquisition, not the shared FileLock object's lifetime.
+        self._workspace_lock_finalizer = (
+            weakref.finalize(self, self._workspace_lock.release)
+            if self._workspace_lock is not None
+            else None
+        )
+        try:
+            self._manifest_existed = manifest_path.exists()
+            self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
+            self._resolution = ResolutionStagingSession(apm_modules_dir)
+        except BaseException:
+            self._release_workspace_lock()
+            raise
         self._lock = threading.RLock()
         self.committed = False
         self._completed = False
@@ -122,41 +144,39 @@ class InstallTransaction:
         with self._lock:
             if self._rolled_back:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
-            if not self.committed:
-                cleanup_issues = self._resolution.commit() or []
-                self.committed = True
-                self._completed = True
-                cleanup_issues.extend(self._resolution.remove_abandoned_roots())
-                self._report_resolution_cleanup_issues(cleanup_issues)
-            if (
-                self._validation is not None
-                and self._validation.has_failures
-                and result.disposition is InstallDisposition.SUCCESS
-            ):
-                result.disposition = InstallDisposition.PARTIAL_SUCCESS
-            result.committed = True
-            return result
+            try:
+                if not self.committed:
+                    cleanup_issues = self._resolution.commit() or []
+                    self.committed = True
+                    self._completed = True
+                    cleanup_issues.extend(self._resolution.remove_abandoned_roots())
+                    self._report_resolution_cleanup_issues(cleanup_issues)
+                if (
+                    self._validation is not None
+                    and self._validation.has_failures
+                    and result.disposition is InstallDisposition.SUCCESS
+                ):
+                    result.disposition = InstallDisposition.PARTIAL_SUCCESS
+                result.committed = True
+                return result
+            except BaseException:
+                self.rollback()
+                raise
+            finally:
+                if self.committed:
+                    self._release_workspace_lock()
 
     def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
         """Report cleanup paths that require safe manual recovery."""
         if not issues or self._logger is None:
             return
-        item_label = "item" if len(issues) == 1 else "items"
-        if self._logger.verbose is True:
-            recovery_action = (
-                "Stop other APM installs, then delete the paths listed below manually."
-            )
-        else:
-            recovery_action = (
-                "Stop other APM installs, then run again with --verbose "
-                "to see paths you can delete manually."
-            )
         self._logger.warning(
-            f"Could not safely remove {len(issues)} interrupted-install backup "
-            f"{item_label}. {recovery_action}"
+            "Install recovery or staging cleanup is incomplete. Close programs using the "
+            "affected paths, then inspect the retained data before retrying. "
+            "Do not delete backups needed to recover the prior installation."
         )
         for path, reason in issues:
-            self._logger.verbose_detail(f"Resolution backup kept at {path}: {reason}")
+            self._logger.warning(f"Resolution recovery path {path}: {reason}")
 
     def complete(self, result: InstallResult) -> InstallResult:
         """Finalize one result according to its canonical disposition."""
@@ -164,9 +184,12 @@ class InstallTransaction:
             with self._lock:
                 if self._rolled_back:
                     raise RuntimeError("Cannot complete an install transaction after rollback")
-                cleanup_issues = self._resolution.rollback() or []
-                self._report_resolution_cleanup_issues(cleanup_issues)
-                self._completed = True
+                try:
+                    cleanup_issues = self._resolution.rollback() or []
+                    self._report_resolution_cleanup_issues(cleanup_issues)
+                    self._completed = True
+                finally:
+                    self._release_workspace_lock()
             return result
         if result.disposition in {
             InstallDisposition.CANCELLED,
@@ -182,11 +205,16 @@ class InstallTransaction:
         with self._lock:
             if self.committed or self._rolled_back:
                 return
-            cleanup_issues = self._resolution.rollback() or []
-            self._report_resolution_cleanup_issues(cleanup_issues)
-            self._restore_manifest()
-            self._rolled_back = True
-            self._completed = True
+            try:
+                try:
+                    cleanup_issues = self._resolution.rollback() or []
+                    self._report_resolution_cleanup_issues(cleanup_issues)
+                finally:
+                    self._restore_manifest()
+                self._rolled_back = True
+                self._completed = True
+            finally:
+                self._release_workspace_lock()
 
     def fail(self, error: BaseException) -> InstallResult:
         """Rollback and return a structured failed install result."""
@@ -201,7 +229,7 @@ class InstallTransaction:
         """Enter this install attempt."""
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb) -> Literal[False]:
         """Rollback every uncommitted exit and preserve exception semantics."""
         if exc is not None or not self._completed:
             self.rollback()
@@ -216,6 +244,11 @@ class InstallTransaction:
             self._manifest_existed,
         )
 
+    def _release_workspace_lock(self) -> None:
+        """Release this transaction's nested lifecycle acquisition once."""
+        if self._workspace_lock_finalizer is not None:
+            self._workspace_lock_finalizer()
+
 
 def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
     """Return the context transaction's journal, creating a legacy adapter."""
@@ -225,5 +258,46 @@ def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
             apm_modules_dir=ctx.apm_modules_dir,
             validation=None,
             logger=ctx.logger,
+            acquire_lock=False,
         )
-    return ctx.transaction.resolution
+    return cast(ResolutionStagingSession, ctx.transaction.resolution)
+
+
+def transactional_pipeline(
+    run: Callable[..., InstallResult | None],
+) -> Callable[..., InstallResult]:
+    """Supply a compatibility transaction and rollback every exceptional exit."""
+
+    @wraps(run)
+    def wrapped(*args: Any, **kwargs: Any) -> InstallResult:
+        transaction = kwargs.get("transaction")
+        owns_transaction = transaction is None
+        if transaction is None:
+            from apm_cli.core.scope import InstallScope, get_manifest_path, get_modules_dir
+
+            scope = kwargs.get("scope") or InstallScope.PROJECT
+            try:
+                manifest_path = get_manifest_path(scope)
+                modules_dir = get_modules_dir(scope)
+            except (AttributeError, TypeError):
+                manifest_path = Path.cwd() / "apm.yml"
+                modules_dir = Path.cwd() / "apm_modules"
+            transaction = InstallTransaction(
+                manifest_path=manifest_path,
+                apm_modules_dir=modules_dir,
+                validation=None,
+                logger=kwargs.get("logger"),
+            )
+            kwargs["transaction"] = transaction
+        try:
+            result = run(*args, **kwargs)
+        except BaseException:
+            transaction.rollback()
+            raise
+        if result is None:
+            result = InstallResult()
+        if owns_transaction:
+            result = transaction.complete(result)
+        return result
+
+    return wrapped

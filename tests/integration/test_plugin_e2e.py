@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
@@ -74,6 +75,38 @@ def _existing_deployed_file_paths(project_root: Path, deployed_files: list[str])
         if candidate.exists():
             existing.append(candidate)
     return existing
+
+
+def _deployed_skill_contents(project_root: Path, dependency: dict) -> dict[Path, bytes]:
+    """Snapshot real skill files so retained deployment checks cannot pass vacuously."""
+    paths = _existing_deployed_file_paths(project_root, dependency["deployed_files"])
+    contents = {path: path.read_bytes() for path in paths if path.is_file()}
+    assert any(path.name == "SKILL.md" for path in contents), "Skill must be deployed"
+    return contents
+
+
+def _assert_plugin_removed_skill_retained(
+    project_root: Path,
+    plugin_key: str,
+    plugin_deployed_paths: list[Path],
+    skill_dependency: dict,
+    skill_contents: dict[Path, bytes],
+) -> None:
+    """Check filesystem cleanup and surviving lock ownership, not diagnostic wording."""
+    import yaml
+
+    assert plugin_deployed_paths, "Plugin must have deployed files before uninstall"
+    remaining = [path.as_posix() for path in plugin_deployed_paths if path.exists()]
+    assert not remaining, f"Plugin deployed files remained after uninstall: {remaining}"
+    lockfile = yaml.safe_load((project_root / "apm.lock.yaml").read_text())
+    dep_keys = {_locked_dependency_key(entry) for entry in lockfile["dependencies"]}
+    skill_key = _locked_dependency_key(skill_dependency)
+    assert plugin_key not in dep_keys, "Plugin ownership must be removed from the lockfile"
+    assert dep_keys == {skill_key}, f"Expected only the retained skill, got {dep_keys}"
+    assert _locked_dependency(lockfile, skill_key) == skill_dependency
+    for path, content in skill_contents.items():
+        assert path.is_file(), f"Retained skill file removed: {path}"
+        assert path.read_bytes() == content, f"Retained skill file changed: {path}"
 
 
 def _make_package_info(
@@ -416,12 +449,16 @@ class TestPluginHeroScenarios:
 
         parsed = yaml_lib.safe_load((plugin_dir / "apm.yml").read_text())
         assert parsed["type"] == "hybrid", f"Expected type 'hybrid', got '{parsed.get('type')}'"
+        revalidated = validate_apm_package(plugin_dir)
+        assert revalidated.is_valid, revalidated.errors
+        assert revalidated.package_type is PackageType.SKILL_BUNDLE
 
     @pytest.mark.requires_apm_binary
+    @pytest.mark.parametrize("plugin_subskill", [False, True], ids=["standalone", "plugin-skill"])
     def test_local_plugin_uninstall_after_sequential_skill_install_cleans_deployed_files(
-        self, apm_binary_path, tmp_path
-    ):
-        """Sequential CLI installs must retain plugin deployed_files for uninstall cleanup."""
+        self, apm_binary_path: Path, tmp_path: Path, plugin_subskill: bool
+    ) -> None:
+        """Removing a plugin cleans its files without removing a separately installed skill."""
         import yaml as yaml_lib
 
         if not FIXTURE_DIR.exists():
@@ -431,8 +468,11 @@ class TestPluginHeroScenarios:
         workspace.mkdir()
         plugin_dir = workspace / "plugin-src"
         shutil.copytree(FIXTURE_DIR, plugin_dir)
-        skill_dir = workspace / "skill-src"
-        _write_local_skill_package(skill_dir)
+        if plugin_subskill:
+            skill_dir = plugin_dir / "skills" / "test-skill"
+        else:
+            skill_dir = workspace / "skill-src"
+            _write_local_skill_package(skill_dir)
 
         project = workspace / "project"
         project.mkdir()
@@ -462,6 +502,8 @@ class TestPluginHeroScenarios:
 
         deployed_paths = _existing_deployed_file_paths(project, deployed_files)
         assert project / ".github" / "agents" / "test-agent.agent.md" in deployed_paths
+        skill_dep = _locked_dependency(lockfile, f"_local/{skill_dir.name}")
+        skill_contents = _deployed_skill_contents(project, skill_dep)
 
         uninstall = _run_apm_command(
             apm_binary_path, ["uninstall", str(plugin_dir)], project, timeout=60
@@ -469,9 +511,113 @@ class TestPluginHeroScenarios:
         assert uninstall.returncode == 0, (
             f"Uninstall failed:\n{uninstall.stdout}\n{uninstall.stderr}"
         )
-        combined = uninstall.stdout + uninstall.stderr
-        assert "Uninstall complete" in combined
-        assert all(not path.exists() for path in deployed_paths)
+        _assert_plugin_removed_skill_retained(
+            project, "_local/plugin-src", deployed_paths, skill_dep, skill_contents
+        )
+
+    @pytest.mark.requires_apm_binary
+    def test_copilot_dialect_plugin_lsp_survives_install_reinstall_and_audit(
+        self,
+        apm_binary_path: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A plugin's Copilot-dialect LSP config reaches canonical lock and runtime state."""
+        plugin_dir = tmp_path / "copilot-lsp-plugin"
+        plugin_dir.mkdir()
+        manifest_dir = plugin_dir / ".github" / "plugin"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "plugin.json").write_text(
+            json.dumps({"name": "copilot-lsp-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        (plugin_dir / ".lsp.json").write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "csharp": {
+                            "command": "dnx",
+                            "args": ["roslyn-language-server", "--stdio"],
+                            "cwd": "${PLUGIN_ROOT}",
+                            "fileExtensions": {".cs": "csharp"},
+                            "warmupTimeoutMs": 120000,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        normalized = validate_apm_package(plugin_dir)
+        assert normalized.is_valid, normalized.errors
+        normalization_output = capsys.readouterr()
+        warning_output = normalization_output.out + normalization_output.err
+        assert warning_output.count("uses unsupported 'cwd'") == 1
+        assert "consumer runtime chooses the working directory" in warning_output
+        assert "[!] LSP server 'csharp'" in warning_output
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: copilot-lsp-lifecycle\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            encoding="utf-8",
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text(
+            "# Test project\n",
+            encoding="utf-8",
+        )
+
+        initial_install = _run_apm_command(
+            str(apm_binary_path),
+            ["install", str(plugin_dir), "--target", "copilot", "--no-policy"],
+            project,
+        )
+        assert initial_install.returncode == 0, initial_install.stdout + initial_install.stderr
+        install_output = initial_install.stdout + initial_install.stderr
+        # Normalization already removed cwd; installing its APM projection
+        # must not emit the same warning a second time.
+        assert "uses unsupported 'cwd'" not in install_output
+
+        lock = LockFile.read(project / "apm.lock.yaml")
+        assert lock is not None
+        assert lock.lsp_servers == ["csharp"]
+        assert lock.lsp_configs["csharp"] == {
+            "args": ["roslyn-language-server", "--stdio"],
+            "command": "dnx",
+            "extensionToLanguage": {".cs": "csharp"},
+            "name": "csharp",
+            "startupTimeout": 120000,
+        }
+
+        runtime_path = project / ".github" / "lsp.json"
+        runtime_config = json.loads(runtime_path.read_text(encoding="utf-8"))
+        assert runtime_config["lspServers"]["csharp"] == {
+            "args": ["roslyn-language-server", "--stdio"],
+            "command": "dnx",
+            "fileExtensions": {".cs": "csharp"},
+            "warmupTimeoutMs": 120000,
+        }
+        initial_lock_bytes = (project / "apm.lock.yaml").read_bytes()
+        initial_runtime_bytes = runtime_path.read_bytes()
+
+        reinstall = _run_apm_command(
+            str(apm_binary_path),
+            ["install", "--target", "copilot", "--no-policy"],
+            project,
+        )
+        assert reinstall.returncode == 0, reinstall.stdout + reinstall.stderr
+        assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
+        assert runtime_path.read_bytes() == initial_runtime_bytes
+
+        audit = _run_apm_command(
+            str(apm_binary_path),
+            ["audit", "--ci", "--no-policy", "--format", "json"],
+            project,
+        )
+        assert audit.returncode == 0, audit.stdout + audit.stderr
+        assert json.loads(audit.stdout)["passed"] is True
+        assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
+        assert runtime_path.read_bytes() == initial_runtime_bytes
 
     @pytest.mark.requires_apm_binary
     def test_root_declared_skill_lifecycle_is_bounded(self, apm_binary_path, tmp_path):
@@ -890,8 +1036,10 @@ class TestPluginNetworkE2E:
 
     # ---- Test 6: lockfile preserved on sequential installs ---------------
 
-    def test_lockfile_preserved_on_sequential_install(self, apm_binary_path, temp_project):
-        """Installing packages one at a time must preserve previous lockfile entries."""
+    def test_lockfile_preserved_on_sequential_install(
+        self, apm_binary_path: Path, temp_project: Path
+    ) -> None:
+        """Sequential installs preserve ownership through scoped plugin removal."""
         skill_ref = self.SKILL_REF
 
         # Install plugin
@@ -929,6 +1077,8 @@ class TestPluginNetworkE2E:
         plugin_dep = _locked_dependency(lockfile, plugin_key)
         plugin_deployed_files = plugin_dep.get("deployed_files", [])
         plugin_deployed_paths = _existing_deployed_file_paths(temp_project, plugin_deployed_files)
+        skill_dep = _locked_dependency(lockfile, self.SKILL_PATH)
+        skill_contents = _deployed_skill_contents(temp_project, skill_dep)
 
         # deps tree should show both
         tree = subprocess.run(
@@ -938,6 +1088,7 @@ class TestPluginNetworkE2E:
             cwd=str(temp_project),
             timeout=60,
         )
+        assert tree.returncode == 0, f"Deps tree failed:\n{tree.stdout}\n{tree.stderr}"
         combined = tree.stdout + tree.stderr
         assert "mock-marketplace-plugin" in combined, "Plugin missing from deps tree"
         assert "test-skill" in combined, "Skill missing from deps tree"
@@ -951,13 +1102,9 @@ class TestPluginNetworkE2E:
             timeout=60,
         )
         assert r3.returncode == 0, f"Uninstall failed:\n{r3.stderr}"
-        combined = r3.stdout + r3.stderr
-        if plugin_deployed_paths:
-            assert "Cleaned up" in combined and "integrated" in combined.lower(), (
-                f"Uninstall should report integration cleanup:\n{combined}"
-            )
-        remaining = [path.as_posix() for path in plugin_deployed_paths if path.exists()]
-        assert not remaining, f"Plugin deployed files remained after uninstall: {remaining}"
+        _assert_plugin_removed_skill_retained(
+            temp_project, plugin_key, plugin_deployed_paths, skill_dep, skill_contents
+        )
 
     # ---- Test 7: compile includes plugin primitives ---------------------
 
@@ -1069,8 +1216,10 @@ class TestPluginNetworkE2E:
         assert plugin_entry is not None, (
             f"Plugin not found in lockfile. Deps: {lockfile['dependencies']}"
         )
-        assert plugin_entry.get("package_type") == "marketplace_plugin", (
-            f"Expected package_type 'marketplace_plugin', got: {plugin_entry.get('package_type')}"
+        # The normalized apm.yml/.apm package outranks its plugin publishing
+        # surface and retains the root skills/ bundle classification.
+        assert plugin_entry.get("package_type") == "skill_bundle", (
+            f"Expected package_type 'skill_bundle', got: {plugin_entry.get('package_type')}"
         )
 
     # ---- Test 11: idempotent reinstall ----------------------------------

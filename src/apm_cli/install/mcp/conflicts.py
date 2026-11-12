@@ -1,4 +1,4 @@
-"""MCP CLI flag-conflict matrix (E1-E15).
+"""MCP CLI flag-conflict matrix.
 
 Extracted from ``commands/install.py`` per the architecture-invariants
 LOC budget. ``validate_mcp_conflicts`` is the single chokepoint that
@@ -34,13 +34,12 @@ def validate_mcp_conflicts(
     headers: Mapping[str, str],
     mcp_version: str | None,
     command_argv: Sequence[str] | None,
-    global_: bool,
     only: str | None,
     update: bool,
     any_transport_flag: bool,
     registry_url: str | None = None,
 ) -> None:
-    """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit.
+    """Apply the conflict matrix. Raises ``click.UsageError`` on a conflict.
 
     ``any_transport_flag`` should be ``use_ssh or use_https or
     allow_protocol_fallback`` (pre-evaluated by the caller).
@@ -73,12 +72,6 @@ def validate_mcp_conflicts(
     # E1: positional packages mixed with --mcp.
     if pre_dash_packages:
         raise click.UsageError("cannot mix --mcp with positional packages")
-
-    # E2: --global not supported for MCP entries.
-    if global_:
-        raise click.UsageError(
-            "MCP servers are project-scoped; --global is not supported for MCP entries"
-        )
 
     # E3: --only apm conflicts with --mcp.
     if only == "apm":

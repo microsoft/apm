@@ -68,7 +68,7 @@ class TestInstallDryRunE2E:
     def test_install_dry_run_lists_apm_dependencies_without_changes(
         self, temp_project, apm_binary_path
     ):
-        """Dry-run prints the preview banner, lists the APM dep, and writes nothing."""
+        """An uncached remote dep gets an incomplete, read-only local preview."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
         result = _run_apm(apm_binary_path, ["install", "--dry-run"], temp_project)
@@ -78,7 +78,8 @@ class TestInstallDryRunE2E:
 
         out = result.stdout
         assert "Dry run mode" in out, f"Missing 'Dry run mode' banner:\n{out}"
-        assert "Dry run complete" in out, f"Missing 'Dry run complete' footer:\n{out}"
+        assert "Dry run incomplete" in out, f"Missing incomplete-preview footer:\n{out}"
+        assert "locally known APM dependency" in " ".join(out.split())
         assert "APM dependencies" in out, f"Missing APM dependencies header:\n{out}"
         assert "microsoft/apm-sample-package" in out, (
             f"Dep repo_url not mentioned in dry-run output:\n{out}"

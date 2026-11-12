@@ -8,7 +8,7 @@ Those rules defend decisions that have no entry in
 a semantic rule whose body was gutted still registers, still runs, still
 reports a clean run, and still ships.
 
-This file supplies the missing proof for that half.  For each of the 48
+This file supplies the missing proof for that half.  For each of the
 guard-less rules it pins one minimal, meaningful source mutation -- a surgical
 edit that kills a load-bearing sub-condition of the decision the rule owns --
 and asserts that exact rule reports a real `Violation`.  Coverage is a set
@@ -432,19 +432,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Runtime streaming stops enforcing a monotonic wall-clock deadline.",
         replace_all=True,
     ),
-    MutationCase(
-        rule_id="transport-platform-tls-trust-injection",
-        path="src/apm_cli/cli.py",
-        old="from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status",
-        new=(
-            "import truststore\n"
-            "from apm_cli.core.tls_trust import configure_process_tls_trust,"
-            " log_tls_trust_status\n"
-            "\n"
-            "truststore.inject_into_ssl()"
-        ),
-        intent="The root CLI injects TLS trust outside the two sanctioned modules.",
-    ),
 )
 
 CASE_IDS: tuple[str, ...] = tuple(case.rule_id for case in MUTATIONS)
@@ -509,6 +496,17 @@ def test_matrix_covers_every_guardless_rule_exactly_once() -> None:
 def test_matrix_case_order_is_deterministic() -> None:
     """Cases stay sorted by rule ID so parameterized IDs never reshuffle."""
     assert list(CASE_IDS) == sorted(CASE_IDS)
+
+
+def test_engine_command_cannot_gain_a_second_test_owner() -> None:
+    """A local engine selector must fail the same boundary as binary selectors."""
+    rule_id = "contracts-tests-executable-contract-authorities"
+    path = "tests/integration/test_cache_prune_outcome_lifecycle.py"
+    mutation = _source(path) + "\n\ndef apm_engine_command():\n    return ('alternate-engine',)\n"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutation})
+    assert not report.failures
+    assert {item.rule_id for item in report.violations} == {rule_id}
+    assert {item.path for item in report.violations} == {path}
 
 
 @pytest.mark.parametrize("case", MUTATIONS, ids=CASE_IDS)

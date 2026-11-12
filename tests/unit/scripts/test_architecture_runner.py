@@ -56,9 +56,10 @@ REAL_ROOT = Path(__file__).resolve().parents[3]
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.windows_compat
 def test_source_cache_reads_each_path_once_including_errors(tmp_path: Path) -> None:
     """A valid file, a missing file, and an undecodable file each read once."""
-    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "ok.py").write_bytes(b"x = 1\n")
     (tmp_path / "bad_utf8.py").write_bytes(b"x = 1\n\xff\xfe")
     cache = SourceCache(tmp_path, ("ok.py", "bad_utf8.py", "missing.py"))
 
@@ -373,6 +374,7 @@ class Container:
     assert provider.tree_index_builds == 1
 
 
+@pytest.mark.windows_compat
 def test_tree_index_build_has_one_production_owner() -> None:
     """Only FactsProvider may fold FileFacts into a compact TreeIndex."""
     linter_root = REAL_ROOT / "scripts/architecture_linter"
@@ -383,7 +385,7 @@ def test_tree_index_build_has_one_production_owner() -> None:
             if not isinstance(node, ast.Call):
                 continue
             if isinstance(node.func, ast.Name) and node.func.id == "build_tree_index":
-                callers.append(str(path.relative_to(REAL_ROOT)))
+                callers.append(path.relative_to(REAL_ROOT).as_posix())
 
     assert callers == [
         "scripts/architecture_linter/facts.py",
@@ -605,40 +607,62 @@ contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
+contracts-tooling-governance-evidence
 contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-native-lifecycle-evidence
+contracts-tooling-policy-content-hash
+contracts-tooling-policy-identity
+contracts-tooling-project-yaml-write-delegation
+contracts-tooling-python-artifact-membership
+contracts-tooling-source-replacements
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
+install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
+install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration
 install-deployment-gitlab-policy-adapter
 install-deployment-incomplete-chain-routing
+install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-lock-parent-placement
+install-deployment-skill-preflight
 install-deployment-locked-skill-subset-reconstruction
+install-deployment-lsp-lifecycle
+install-deployment-lsp-target-contract
 install-deployment-manifest-inheritance-includes
+install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
+install-deployment-lifecycle-serialization
 install-deployment-mcp-ownership-migration
+install-deployment-mcp-registry-resolution
+install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
+install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
 install-deployment-resolution-replacement
 install-deployment-resolver-queue-dedup
 install-deployment-skill-subset-tokens
+install-deployment-single-file-materialization
+install-deployment-skills-root-derivation
 install-deployment-source-plan
 install-deployment-target-file-contraction
 install-deployment-uninstall-reachability
@@ -647,35 +671,49 @@ install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-manifest
+marketplace-integrations-codex-native-lifecycle
 marketplace-integrations-copilot-ownership
 marketplace-integrations-generated-bundle-lf-writers
 marketplace-integrations-hash-visible-lf-writers
 marketplace-integrations-legacy-skill-membership
 marketplace-integrations-local-audit-resolution
+marketplace-integrations-locked-evidence
 marketplace-integrations-metadata-enrichment
 marketplace-integrations-native-registration
 marketplace-integrations-output-path
 marketplace-integrations-package-construction
+marketplace-integrations-package-format-precedence
 marketplace-integrations-package-projection
 marketplace-integrations-producer-admission
 marketplace-integrations-projection-boundary
 marketplace-integrations-raw-diagnostics
 marketplace-integrations-removed-plugin-lifecycle
+marketplace-integrations-source-admission
 marketplace-integrations-source-parsing
 marketplace-integrations-tag-pattern
 marketplace-integrations-version-precedence
+mutation_writes.claude_mcp_paths
 mutation_writes.copilot_cli_mcp_paths
 mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_declaration_scope
+mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
+mutation_writes.mcp_passthrough_denylist
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
+mutation_writes.opencode_enabled_intent
+mutation_writes.user_hook_home_reference
 mutation_writes.user_root_scope
+onboarding-metadata-only
+contracts-tooling-root-context-write-eligibility
+hooks-integrations-native-instruction-projection
 registry_delegation.agents_source_attribution
+registry_delegation.audit_target_selection
 registry_delegation.bootstrap_project_name
+registry_delegation.build_id_verification
 registry_delegation.command_machine_output
 registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes
@@ -693,21 +731,34 @@ registry_delegation.policy_ref_redaction
 registry_delegation.root_cli_output_mode
 registry_delegation.runtime_descriptors
 registry_delegation.target_vocabulary
+registry_delegation.user_invocable_resolution
+registry_delegation.version_rendering
+transport-platform-artifactory-full-commit-sha
+transport-platform-artifactory-netrc-isolation
+transport-platform-cache-cleanup-outcome
+transport-platform-clone-connect-retry
 transport-platform-git-cache-identity
+transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-throttle
+transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
+transport-platform-host-reference-coordinates
+transport-platform-ls-remote-tag-commits
+transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
+transport-platform-release-metadata-discovery
 transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
+transport-platform-unix-install-ownership
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """
-_EXPECTED_RULE_IDS = frozenset(_EXPECTED_RULE_ID_TEXT.split())
+_EXPECTED_RULE_IDS = frozenset(_EXPECTED_RULE_ID_TEXT.split()) | {"audit-primitive-discovery"}
 
 
 def test_registered_rule_inventory_matches_frozen_semantic_contract() -> None:

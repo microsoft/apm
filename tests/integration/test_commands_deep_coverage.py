@@ -36,8 +36,10 @@ def runner() -> CliRunner:
 
 
 @pytest.fixture
-def project_with_deps(tmp_path: Path) -> Path:
+def project_with_deps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a minimal but realistic APM project with dependencies."""
+    # The CLI resolves the project from the process cwd, not ``obj["cwd"]``.
+    monkeypatch.chdir(tmp_path)
     # Create apm.yml
     apm_yml = tmp_path / "apm.yml"
     apm_yml.write_text(
@@ -88,8 +90,10 @@ def project_with_deps(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def project_no_deps(tmp_path: Path) -> Path:
+def project_no_deps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a minimal APM project with no dependencies."""
+    # The CLI resolves the project from the process cwd, not ``obj["cwd"]``.
+    monkeypatch.chdir(tmp_path)
     apm_yml = tmp_path / "apm.yml"
     apm_yml.write_text(
         "name: test-project\n"

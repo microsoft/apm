@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 
@@ -494,10 +494,8 @@ class TestSkillSubsetConsistencyCheck:
         return manifest
 
     def _make_lock_mock(self, locked_deps):
-        """Create a lock mock: get_dependency(key) → locked_dep."""
-        lock = Mock()
-        lock.get_dependency = lambda key: locked_deps.get(key)
-        return lock
+        """Use the real lookup owner so fixtures follow the lockfile contract."""
+        return LockFile(dependencies=locked_deps)
 
     def _make_dep_ref(self, repo_url, skill_subset=None):
         ref = Mock()
@@ -506,24 +504,38 @@ class TestSkillSubsetConsistencyCheck:
         return ref
 
     def _make_locked_dep(self, package_type="skill_bundle", skill_subset=None):
-        dep = Mock()
-        dep.package_type = package_type
-        dep.skill_subset = skill_subset if skill_subset else []
-        return dep
+        return LockedDependency(
+            repo_url="owner/repo",
+            package_type=package_type,
+            skill_subset=skill_subset or [],
+        )
 
-    def test_consistent_passes(self):
+    def _package_with_skills(self, tmp_path: Path, *names: str) -> Path:
+        package = tmp_path / "pkg"
+        for name in names:
+            skill = package / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+        return package
+
+    def test_consistent_passes(self, tmp_path: Path):
         """Matching skill_subset → check passes."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha", "beta"])
+        dep_ref.get_install_path.return_value = self._package_with_skills(
+            tmp_path,
+            "alpha",
+            "beta",
+        )
         locked = self._make_locked_dep(skill_subset=["alpha", "beta"])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
 
-    def test_mismatch_fails(self):
+    def test_mismatch_fails(self, tmp_path: Path):
         """Different skill_subset → check fails."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -532,11 +544,11 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is False
         assert "mismatch" in result.message
 
-    def test_no_manifest_subset_vs_lock_subset_fails(self):
+    def test_no_manifest_subset_vs_lock_subset_fails(self, tmp_path: Path):
         """Manifest has no skills: but lockfile has skill_subset → fails."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -545,11 +557,11 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is False
 
-    def test_non_bundle_skipped(self):
-        """Non skill_bundle packages are skipped."""
+    def test_marketplace_plugin_subset_mismatch_fails(self, tmp_path: Path):
+        """Plugin package subsets are checked because CLI --skill supports them."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha"])
@@ -557,10 +569,10 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
-        assert result.passed is True
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        assert result.passed is False
 
-    def test_missing_from_lock_skipped(self):
+    def test_missing_from_lock_skipped(self, tmp_path: Path):
         """Deps not in lockfile are skipped (other checks catch this)."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -568,10 +580,10 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
 
-    def test_both_empty_passes(self):
+    def test_both_empty_passes(self, tmp_path: Path):
         """Both manifest and lockfile with no skill_subset → passes."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -580,7 +592,7 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
 
 

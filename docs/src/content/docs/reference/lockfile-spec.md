@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Normative reference:** this page documents the v0.2 working-draft lockfile format as emitted by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 5 (Lockfile)](/apm/specs/openapm-v01/) and published as JSON Schema at [`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json).
+> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.46 amendment selects [`lockfile-v0.1.46.schema.json`](/apm/specs/schemas/lockfile-v0.1.46.schema.json), adding manifest extensions without changing earlier schema bytes. See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 `apm.lock.yaml` is the pinned record of every resolved dependency and every
 file APM deployed into the workspace. It is the source of truth for
@@ -20,12 +20,15 @@ APM keeps using the recorded commits until you run `apm update`, `apm lock
 
 ## Purpose
 
-This is a **Working Draft**. The lock file format has two versions in use:
+This is a **Working Draft**. Ordinary projects use two lockfile versions:
 `"1"` (plain Git projects) and `"2"` (projects with at least one registry-sourced
 dependency or Git semver-resolved dependency). The bump is opportunistic; see
 [Version bumping](#version-bumping). Registry-sourced dependencies require the
 experimental registries feature (`apm experimental enable registries`) before
 install or replay.
+
+The explicit, unratified [root source replacement candidate](#root-source-replacement-evidence-candidate)
+uses version `"3"`. It does not change the version chosen for ordinary projects.
 
 The lockfile gives APM four things:
 
@@ -54,6 +57,40 @@ my-project/
 
 Always commit it. The lockfile is what makes a fresh clone install identically
 on any machine.
+
+### `apm_modules/` is derived
+
+`apm.yml` records dependency intent; `apm.lock.yaml` records the resolved graph
+and managed-file state. Keep both in version control. `apm_modules/` contains
+installed dependency content, which can be regenerated with `apm install`
+while the declared package sources remain available.
+
+Normally, keep `apm_modules/` gitignored. Project installs add this entry to
+`.gitignore` automatically when it is missing:
+
+```gitignore
+apm_modules/
+```
+
+:::caution[Keep installed content available while it is in use]
+Derived content is not necessarily disposable when `apm install` exits.
+Supported native integrations, including Copilot Agent Plugins, load plugins
+live from `apm_modules/`. Agents and tools can also follow deployed links to
+package resources there. Keep the directory available for as long as those
+consumers need it.
+:::
+
+For [CI workflows](../../integrations/ci-cd/), check out the committed manifest
+and lockfile, then run `apm install --frozen` to restore the locked dependency
+graph. Discard a disposable workspace only after all dependent operations,
+native agent sessions, and other consumers have finished.
+
+APM has no install flag for automatic post-install removal. For a separate
+cleanup step, [`apm deps clean`](../cli/deps/#apm-deps-clean) removes the project
+`apm_modules/` without deleting `apm.yml` or `apm.lock.yaml`; the same lifetime
+restriction applies. Reinstall before using consumers that need those resources
+again. See [What to commit](../../consumer/install-packages/#what-to-commit)
+for target-owned files.
 
 ## Top-level structure
 
@@ -115,10 +152,15 @@ lsp_configs:
     args: ["--stdio"]
     extensionToLanguage:
       ".py": python
+lsp_target_servers:
+  claude:
+    - pyright
+lsp_config_provenance:
+  pyright: "project:."
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
-  .github/skills/my-local-skill/SKILL.md: "a1b2c3..."
+  .github/skills/my-local-skill/SKILL.md: "sha256:a1b2c3..."
 deployments:
   - kind: project-relative
     target: copilot
@@ -133,18 +175,21 @@ deployments:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `lockfile_version` | string | yes | Schema version. `"1"` for plain Git projects; `"2"` when any dependency has `source: "registry"` or Git semver resolution fields (`constraint`, `resolved_tag`, `resolved_at`). |
+| `lockfile_version` | string | yes | `"1"` for plain Git projects; `"2"` for registry/Git semver evidence; candidate `"3"` when a root replacement table is present. |
 | _(Deprecated)_ `generated_at` | ISO 8601 string | no | Legacy write timestamp. New lockfiles omit it; when an existing lockfile carries it, APM refreshes it on substantive writes. Ignored by equivalence checks. |
-| `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
+| `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic except for a narrow compatibility path: exact APM 0.28 metadata, a locked `marketplace_plugin` type, and a matching content hash together authorize the receipt-less cached-plugin upgrade. It never overrides canonical `apm.yml` precedence or applies to freshly fetched dependencies. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
-| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. Reinstall uses this ownership record to remove only APM-managed entries when a target is dropped. Older lockfiles without this field adopt an existing self-defined native entry only when it exactly matches the stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. |
+| `mcp_omissions` | map | no | Install-time dependency MCP exclusions: each server maps to a `declaration` fingerprint and `reason` (`only-apm` or `untrusted-transitive`). The fingerprint binds canonical dependency identity, source pin, dependency depth and authored declaration before plugin-root expansion, using the same manifest snapshot as the expanded config. It does not use self-asserted inventory name or version. An admitted baseline supersedes old omission evidence, but remains subject to normal drift checks. Audit never treats this as native ownership or as an exemption for root or previously admitted MCP. Missing or stale evidence cannot establish deliberate omission; see [config-consistency](../baseline-checks/#config-consistency) for reconciliation. |
+| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. An empty map authorizes no cleanup. Older lockfiles lacking this field can recover ownership only for self-defined native entries matching their stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. A missing lockfile grants no ownership of existing native entries. |
 | `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used to identify the former owner in `config-consistency` diagnostics; it never exempts a lock-only entry. |
-| `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest as of the last install or update. |
-| `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
+| `lsp_servers` | list of strings | no | Names of all LSP servers in current APM-managed state, including package- and bundle-contributed servers. |
+| `lsp_configs` | map | no | `server_name -> resolved config dict` retained for owner-aware lifecycle reconciliation. It is not an `apm audit` drift baseline. |
+| `lsp_target_servers` | map of string lists | no | `target -> server names` for LSP entries APM successfully wrote. Reinstall and uninstall use this ownership record to remove stale executable entries without claiming legacy or user-owned content. |
+| `lsp_config_provenance` | map of strings | no | `server_name -> declaration owner` using `project:.`, `package:<identity>`, or `bundle:<identity>`. Reconciliation uses this field to preserve bundle and surviving-package entries while removing departed owners. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
-| `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
+| `local_deployed_file_hashes` | map | no | `path -> sha256:<hex>` for `local_deployed_files`. |
 | `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
 
 ## Canonical deployment rows
@@ -155,13 +200,30 @@ runtime entry -- with its full ownership history:
 | Field | Type | Notes |
 |---|---|---|
 | `kind` | string | Locator storage form: `project-relative`, `target-relative`, or `uri` (e.g. an MCP server entry). |
-| `target` | string | Deploy target name (`copilot`, `claude`, `mcp`, etc.). |
+| `target` | string | Deploy target name (`copilot`, `claude`, `mcp`, etc.), or `legacy` when the row was recorded without one. See [unattributed rows](#unattributed-rows). |
 | `value` | string | The path (relative to its `kind`) or URI value. |
 | `runtime` | string or null | Runtime scoping the row, when applicable (e.g. an MCP client name). |
 | `scope` | string | Install scope, typically `project`. |
 | `owners` | list of strings | Every dependency key that has ever claimed this locator, oldest to newest. |
 | `active_owner` | string | The current claimant. Always one of `owners`; a row where it is not is malformed. |
 | `content_hash` | string or null | `sha256:<hex>` digest of the deployed content, when known. |
+
+Fresh Claude/Codex MCP registry writes store a SHA-256 fingerprint of the
+normalized native entry actually written in the MCP URI row's existing
+`content_hash`. Cleanup verifies against this retained receipt without a
+registry lookup. Older registry rows with null hashes remain unverified and
+protected. This records no duplicate secret values and requires no new
+lockfile field or version. Full APM dependency lockfile rebuilds retain these
+receipts, including `apm install --only apm`.
+
+Partial self-defined conflicts in ordinary installs or bundle application
+preserve prior retirement/deferred-cleanup entries and claims and unrelated
+owners, without restoring ownership revoked by the current attempt. Registry
+writes preceding a self-defined install conflict retain their receipts and
+ownership even when install exits `1`. Bundle MCP declarations support only
+self-defined connections, not registry references. A registry conflict does
+not skip later registry groups or self-defined updates: successful writes
+and their stored baselines remain aligned before the command reports failure.
 
 `owners` and `active_owner` must each resolve to a member of the **valid
 owner universe** for that lockfile: every current key in `dependencies`,
@@ -174,28 +236,47 @@ and [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 `deployments` is the canonical source APM writes to going forward. The
 per-dependency `deployed_files`/`deployed_file_hashes` and the top-level
-`local_deployed_files`/`local_deployed_file_hashes`/`mcp_target_servers`
-fields remain on disk as derived, one-cycle-compatible legacy views of the
-same ledger -- older tooling that only reads the flat fields still sees a
-consistent projection. Author neither view by hand; both are written by
-`apm install`, `apm prune`, and related commands.
+`local_deployed_files`/`local_deployed_file_hashes`/`mcp_target_servers`/
+`lsp_target_servers` fields remain on disk as derived, one-cycle-compatible
+legacy views of the same ledger -- older tooling that only reads the flat
+fields still sees a consistent projection. Author neither view by hand; both
+are written by `apm install`, `apm prune`, and related commands.
+
+### Unattributed rows
+
+`legacy` marks rows recorded without a concrete target. Install preserves ambiguous historical rows, including untagged historical bundle output; neither a path nor a saved hash establishes cleanup authority. Cleanup requires explicit governance backed by provenance. Current project-local installs record concrete target ownership for later rename, deletion, and target-removal reconciliation. This does not broaden legacy dependency cleanup or change canonical safe-deletion checks.
 
 ## Per-entry fields
 
 Each item in `dependencies` describes one resolved package.
 
+Marketplace semver selections reuse the Git-semver fields: `constraint`,
+`resolved_tag`, and `version` record the requested selector, selected tag, and
+selected version. Here `version` comes from the publisher's tag pattern, not
+the package's display version. `resolved_at` records the resolution's UTC
+timestamp and is [advisory](../../specs/openapm-v01/#req-lk-008), never an audit
+or replay tie-breaker.
+Reinstalling the same marketplace selection preserves this timestamp; changed
+selection or catalog provenance records a new resolution time.
+`resolved_ref` agrees with `resolved_tag`, and
+`resolved_commit` pins the installed bytes. Audit requires this locked evidence
+for version selections; it neither guesses a tag pattern nor re-resolves the
+catalog. `discovered_via` + `marketplace_plugin_name` associate a declaration
+with one locked coordinate, not a durable catalog trust identity.
+
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
 | `materialization_repo_url` | string | no | Source-cased path that preserves repository display spelling when APM reconstructs the dependency, including for `apm_modules/` materialization and generated links. Omitted when it equals `repo_url`; it must normalize to the same identity and cannot redirect a lock entry. |
+| `alias` | string | no | Validated directory name directly below `apm_modules/`, preserved for replay, audit, and removal. Placement metadata only; it does not change repository identity, source coordinates, or the resolved revision. Missing means no alias override, never an alias inferred from `name`. |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
 | `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
 | `resolved_commit` | string | no | Exact 40-char commit SHA installed. The pin. |
-| `name` | string | no | Package name as declared in the dependency's own `apm.yml` at resolution time. For `package_type: claude_skill`, the name comes from `SKILL.md` frontmatter with the directory name as fallback. **SELF-ASSERTED** author-claim metadata -- NOT integrity-verified and MUST NOT be used for trust decisions or identity keying. Always cross-reference `repo_url` + `resolved_commit` (or `resolved_hash`) for provenance. Omitted when absent. |
-| `version` | string | no | Resolved package version. For registry entries: the exact version selected from the registry for reinstall; `resolved_hash` remains the integrity anchor. For git/local entries: the `version` field from the dependency's `apm.yml` at resolution time (display/inventory metadata only -- replay always uses `resolved_ref`/`resolved_commit`). For `package_type: claude_skill` (which has no `apm.yml`), the value is always `unknown`. For git-semver entries: the resolved semver version. **SELF-ASSERTED** for git/local entries; see `name` boundary note above. |
+| `name` | string | no | Package name as declared in the dependency's own `apm.yml` at resolution time. For `package_type: claude_skill`, the name comes from `SKILL.md` frontmatter with the directory name as fallback. **SELF-ASSERTED** author-claim metadata -- NOT integrity-verified and MUST NOT be used for trust decisions or identity keying. Cross-reference `repo_url` + `resolved_commit` (or `resolved_hash`) for ordinary provenance. [Replacement entries](#root-source-replacement-evidence-candidate) instead use `replacement.source` with the selected commit or content hash; `repo_url` retains original ownership. Omitted when absent. |
+| `version` | string | no | Resolved package version. For registry entries: the exact version selected from the registry for reinstall; `resolved_hash` remains the integrity anchor. For Git-semver selections, including marketplace object-form `version`, this is the selected semver recorded with `constraint` and `resolved_tag`. Otherwise Git/local entries carry the dependency's `apm.yml` version as display/inventory metadata, or `unknown` for `package_type: claude_skill` without `apm.yml`. Replay uses `resolved_ref`/`resolved_commit`, not inventory versions. Inventory metadata is **SELF-ASSERTED**; see `name` above. |
 | `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
@@ -203,14 +284,14 @@ Each item in `dependencies` describes one resolved package.
 | `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For dependencies that expose selectable skills: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
-| `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. A shared path has one canonical package owner; uninstall transfers ownership to a surviving provider. When the consumer manifest declares targets, reinstall preserves entries for other declared, gated, or dynamic targets and removes entries outside that target universe. On a target contraction, a normal install/prune run removes an obsolete target's file only when its recorded hash still matches; a user-edited file stays on disk and remains tracked for review. `apm lock` is non-destructive: if bytes remain on disk, the lockfile preserves their `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows until the next normal install can prove and perform cleanup. Without a declared target set, reinstall preserves prior other-target entries. |
-| `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
+| `deployed_files` | list of strings | no | Sorted project-relative paths APM wrote for this dependency; powers `prune` and `audit`'s file-presence check. Shared paths have one canonical owner; uninstall transfers ownership to a surviving provider. Reinstall preserves other declared, gated, or dynamic targets' entries. On explicit manifest contraction, install/prune removes dropped targets' files only if recorded hashes match; edited files remain tracked on disk. `apm lock` preserves files and their `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows until normal install can verify and perform cleanup. Without `targets:` or `target:` in the consumer's `apm.yml`, reinstall preserves inactive targets' deployed files, merge-hook configuration, and ownership sidecars, even with `--target`. A `--target` override does not declare dropped targets; only explicit manifest contraction permits pruning them. |
+| `deployed_file_hashes` | map | no | `path -> sha256:<hex>` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
 | `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
 | `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
-| `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
+| `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. GitCache-backed git-subpath checkouts pin `core.autocrlf=false` so LF-committed content is not rewritten as CRLF on checkout; this pin does not override `.gitattributes` or `core.eol`. Bytes that are committed as CRLF stay CRLF. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |
@@ -218,10 +299,11 @@ Each item in `dependencies` describes one resolved package.
 | `source_digest` | string | no | `sha256:<hex>` digest of the hosted `marketplace.json` bytes used for resolution. |
 | `is_insecure` | bool | no | `true` when the source URL was `http://`. |
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
-| `constraint` | string | git-source semver only | The original semver range from `apm.yml` (`^1.2.0`, `~1.4`). Present when `ref:` was a range; used by drift detection so a manifest range vs. a locked tag (`v1.5.3`) is not a false positive, and by lockfile replay to pin the resolved tag deterministically across installs. |
+| `constraint` | string | git-source semver only | The original semver selector from Git `ref:` or marketplace object-form `version` in `apm.yml` (`^1.2.0`, `~1.4`, `1.2.3`). Together with `resolved_tag` and selected `version`, distinguishes a resolved selection from package inventory metadata. Replay pins the selected tag and commit rather than re-resolving the selector. |
 | `resolved_tag` | string | git-source semver or SHA-pin updates | The concrete annotated git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint` or justified the latest full-SHA revision-pin update. |
 | `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution. Surfaces "how stale is this pin?" in `apm why`. |
 | `declared_license` | string | no | The license the package *manifest declares* (`license:` in `apm.yml`, or `license` in a `plugin.json`), recorded verbatim at resolve time and syntax-validated offline against the bundled SPDX id set. An author **claim**, not a conclusion from `LICENSE` text -- APM never reads the license file. Omitted when undeclared (absence means unknown; no sentinel is stored). Surfaced by `apm lock export`. |
+| `extensions` | map | no | Vendor keys matching `x-[a-z][a-z0-9-]*` from the dependency's own `apm.yml`, in declaration order. Values are recorded as declared and are not interpreted. Omitted when the dependency declares none. See [req-ext-003](../../specs/openapm-v01/#req-ext-003). |
 
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
@@ -273,20 +355,52 @@ The synthesized entry is **not** written back to YAML - the flat
 `local_deployed_*` fields remain the on-disk source of truth. Treat the self
 entry as an implementation detail; do not author it by hand.
 
+## Root source replacement evidence (candidate)
+
+Version `"3"` is an **unratified implementation candidate**. Its
+[proposed schema](/apm/specs/schemas/lockfile-source-replacements-v1.schema.json)
+is staged for review, not an adopted OpenAPM version. It requires a
+feature-capable development build and the explicit
+[replacement manifest selector](../manifest-schema/#313-replace-candidate).
+No first supported release has been assigned. Verified older readers v0.25.0,
+v0.32.0 and v0.33.0 reject this version; v0.24.1 may accept and rewrite it without
+honoring replacement semantics.
+
+The generated `replacements` list stores the complete normalized root table,
+including unused rules. A used dependency has a `replacement` record:
+`source` stores the selected `path`, or `git`/optional `path`/required `ref`;
+`requests` stores original incoming `parent`, `ref`, `skills`, `targets`, `dev`
+and `alias` evidence. Shared parents and direct-plus-transitive requests remain
+inspectable. Each selected source must agree with the root table.
+
+Top-level dependency coordinates and materialization ownership remain the
+original identity, even for a selected local source. Resolved commits/tags and
+content hashes describe the selected bytes. A local replacement has no invented
+Git pin. Parent references in this format use exact original lock keys rather
+than legacy repository-only strings.
+
+Frozen install compares the full table and verifies selected local content
+through the existing local-content preflight. It refuses missing baseline
+hashes and changed, added or removed source files before deployment.
+Audit replays selected sources, including native plugin cache bytes, without
+mutating the project. Uninstall repairs surviving request evidence and retains
+dormant rules; it refuses unverifiable replacement reachability before removal.
+Do not edit this evidence by hand.
+
 ## Version bumping
 
-The lock file uses two schema versions:
+Version selection follows the persisted content:
 
 | Version | Triggered by | Adds |
 |---|---|---|
 | `"1"` | Default for Git-only projects. | Baseline schema. |
 | `"2"` | Any dependency with `source: "registry"` or Git semver resolution fields. | `resolved_url`, `resolved_hash`, and registry `version`; `constraint`, `resolved_tag`, and `resolved_at` for Git semver pins. |
+| `"3"` (candidate) | Root `replacements` table, including an empty table. | Complete root rules, per-entry selected source and original incoming requests. |
 
-The bump is **opportunistic**: a project that never opts into a registry keeps
-`lockfile_version: "1"` forever, even on a newer client. The first registry
-dep added to the graph promotes the lockfile to `"2"`; if every registry dep is
-later removed, the next write demotes back to `"1"`. Both versions are valid
-on-disk formats; consumers MUST handle either.
+The bump is **content-driven**. Without replacement rules, registry dependencies
+or Git semver evidence select `"2"`; otherwise the writer uses `"1"`.
+Removing the `replace` block and running a normal install restores that ordinary
+selection. Keeping `replace: []` retains the candidate opt-in and version `"3"`.
 
 For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
 
@@ -319,7 +433,7 @@ shipped.
 | Command | Reads | Writes |
 |---|---|---|
 | `apm install` | existing lockfile (for `--frozen` and incremental reuse) | full rewrite on resolution change |
-| `apm install --frozen` | required | never writes; fails on a missing pin or MCP config/server-name drift |
+| `apm install --frozen` | required | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
 | `apm compile` | yes (resolution + integrity) | no |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
@@ -334,6 +448,16 @@ lockfile includes the field, APM retains it for compatibility and refreshes it
 only on a substantive write. To migrate a legacy lockfile manually, delete the
 `generated_at: ...` line from `apm.lock.yaml` once; APM will not add it back.
 
+Frozen replay checks immutable requirements from dependency manifests as they
+are loaded. A lock entry cannot silently replace a required tag or SHA with a
+different commit. Equivalent tag/SHA spellings are accepted after verification.
+Unchanged locked literal refs reuse the recorded commit without ref discovery,
+even if the upstream tag moved or disappeared. Short SHA pins are checked
+against the full recorded commit's prefix; matching ref text alone is not enough.
+New tag names may require a lookup. On a cold cache,
+APM may fetch a locked parent before discovering its conflicting requirement.
+Fix the manifest refs and regenerate the lockfile with a normal install.
+
 ## Drift and integrity
 
 The lockfile is what `apm audit` compares the workspace against. Each baseline
@@ -346,8 +470,8 @@ check maps to specific lockfile fields:
 | `ref-consistency` | `resolved_ref` per entry vs. `apm.yml` |
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
-| `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
-| `config-consistency` | `mcp_configs` and `mcp_config_provenance` |
+| `skill-subset-consistency` | `skill_subset` per entry, matched against `apm.yml` and the resolved package tree |
+| `config-consistency` | `mcp_configs`, `mcp_config_provenance` and exact `mcp_omissions` evidence |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
@@ -357,10 +481,13 @@ the two checks do not double-count.
 
 Orphan detection works in two directions:
 
-- **Orphan packages** - entries in `dependencies` that the manifest no longer
-  declares. `apm prune` removes them and their `deployed_files`.
+- **Orphan packages** - recognized roots under `apm_modules/` no longer needed
+  by the dependency graph, even when their lock entries are gone. `apm prune`
+  removes them while preserving bundles and roots containing needed children.
 - **Orphan files** - files under managed target directories that no lockfile
-  entry claims. `apm prune` removes them too.
+  entry claims. A ghost record alone does not authorize deleting these bytes.
+  Prune repairs ownership metadata; deletion still requires a pruned
+  dependency's trusted pre-transition claim and preserves surviving owners.
 
 `apm prune` is the only command that reconciles `deployments` rows. The valid
 owner universe and metadata-only repair boundary are defined in
@@ -371,7 +498,7 @@ documented under [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 `lockfile_version` is the schema version of the file format itself.
 
-- The current versions are `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies.
+- Ordinary projects use `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies. Version `"3"` is an unratified candidate written only when a root replacement table is present; see [Root source replacement evidence](#root-source-replacement-evidence-candidate).
 - APM additively extends entries within each version - new optional fields
   may appear without bumping the version. Older APM clients ignore unknown
   fields.
@@ -384,6 +511,15 @@ malformed container fields, and invalid deployment rows fail closed before APM
 constructs lock state. Pre-versioned legacy files migrate as v1 inputs. Fix or
 remove other invalid files explicitly; APM does not silently replace them with
 an empty lockfile.
+
+A lockfile left with unresolved git merge conflict markers (`<<<<<<<`,
+`>>>>>>>`, or `|||||||` at the start of a line) is reported as a merge conflict
+rather than a YAML scanner error. Commands that require the lockfile name the
+file and the cause, and direct you to resolve the conflict or restore a
+known-good lockfile before retrying your original command. APM does not
+discard, rewrite, or re-resolve the conflicted file. Preview and best-effort
+readers retain their existing exit behavior. A bare `=======` separator is
+not treated as a conflict marker. See [manual repair guidance](../../troubleshooting/install-failures/#merge-conflict-markers-in-the-lockfile).
 
 ## Example
 
@@ -407,8 +543,8 @@ dependencies:
       - .github/skills/code-review/SKILL.md
       - .github/skills/test-writing/SKILL.md
     deployed_file_hashes:
-      .github/skills/code-review/SKILL.md: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-      .github/skills/test-writing/SKILL.md: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+      .github/skills/code-review/SKILL.md: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      .github/skills/test-writing/SKILL.md: "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
 mcp_servers:
   - github
 mcp_configs:
@@ -419,7 +555,7 @@ mcp_configs:
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
-  .github/skills/my-local-skill/SKILL.md: "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
+  .github/skills/my-local-skill/SKILL.md: "sha256:fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
 ```
 
 ## See also

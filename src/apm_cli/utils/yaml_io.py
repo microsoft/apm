@@ -14,9 +14,6 @@ Public API::
     yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
-import os
-import secrets
-from contextlib import suppress
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -408,15 +405,29 @@ def load_yaml_roundtrip(path: str | Path) -> Any:
 
 
 def dump_yaml_roundtrip(data: Any, path: str | Path) -> None:
-    """Write ruamel round-trip YAML data with explicit UTF-8 encoding."""
+    """Write ruamel round-trip YAML data with explicit UTF-8 encoding.
+
+    Deterministic LF line endings (apm#2624): the project-file rewrite
+    paths that use this (install / uninstall / package-resolution
+    rewriting ``apm.yml``) previously wrote platform-native newlines, so
+    on Windows the file flip-flopped between CRLF and LF depending on
+    which command last touched it, churning git diffs. Windows files
+    already in the CRLF domain incur a one-time line-ending-only diff on
+    their next rewrite.
+    """
+    from .atomic_io import write_text_lf
+
+    write_text_lf(Path(path), yaml_roundtrip_to_str(data))
+
+
+def yaml_roundtrip_to_str(data: Any) -> str:
+    """Serialize comment-preserving YAML for callers using atomic writes."""
     stream = StringIO()
     try:
         _roundtrip_yaml().dump(data, stream)
     except Exception as exc:
         _raise_as_pyyaml_error(exc)
-    text = stream.getvalue()
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    return stream.getvalue()
 
 
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
@@ -437,6 +448,10 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     ``apm install`` / ``apm audit``.
     """
 
+    def detect(self, text: str) -> bool:
+        """Strip one leading UTF-8 BOM before detecting front matter."""
+        return super().detect(text.removeprefix("\ufeff"))
+
     def split(self, text: str) -> tuple[str, str]:
         """Strip one leading UTF-8 BOM before locating the front matter."""
         return super().split(text.removeprefix("\ufeff"))
@@ -456,6 +471,38 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
+def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
+    """Parse Markdown text through the bounded handler.
+
+    ``preserve_body`` retains body whitespace after consuming the delimiter's
+    first line break. Integrators use it when target conversion must not alter
+    the authored body.
+    """
+    import frontmatter
+
+    text = text.removeprefix("\ufeff")
+    if not _BOUNDED_FRONTMATTER_HANDLER.detect(text):
+        return frontmatter.Post(text)
+
+    try:
+        _BOUNDED_FRONTMATTER_HANDLER.split(text)
+        post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    except yaml.YAMLError:
+        raise
+    except (IndexError, ValueError) as exc:
+        raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
+    if preserve_body:
+        # The handler's delimiter regex consumes following whitespace too.
+        # Keep that authored whitespace, starting after the closing fence line.
+        normalized = text.removeprefix("\ufeff")
+        boundaries = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY.finditer(normalized)
+        next(boundaries)
+        closing = next(boundaries)
+        line_break = normalized.find("\n", closing.start())
+        post.content = normalized[line_break + 1 :] if line_break != -1 else ""
+    return post
+
+
 def load_frontmatter(fd: Any, encoding: str = "utf-8-sig") -> Any:
     """Parse Markdown front matter with the bounded YAML loader.
 
@@ -473,9 +520,17 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8-sig") -> Any:
     (written by PowerShell's ``Out-File``, ``>``, or Notepad) therefore cannot
     hide the ``---`` fence and silently drop its ``applyTo`` scope (apm#2683).
     """
-    import frontmatter
+    text = ""
+    if isinstance(fd, (str, Path)):
+        text = Path(fd).read_text(encoding=encoding)
+    elif hasattr(fd, "read"):
+        text = fd.read()
+        if isinstance(text, bytes):
+            text = text.decode(encoding)
+    else:
+        text = str(fd)
 
-    return frontmatter.load(fd, encoding=encoding, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    return loads_frontmatter(text)
 
 
 def dump_yaml(
@@ -526,30 +581,17 @@ def write_yaml_text_atomic(
 ) -> None:
     """Atomically replace a YAML file with already-rendered text.
 
-    The replacement is written to a sibling file first and then moved into
-    place with ``os.replace``. If the write or replace fails, the original
-    file remains untouched.
+    The canonical atomic writer creates the replacement beside the target
+    before moving it into place. If the write or replace fails, the original
+    file remains untouched. Its deterministic LF policy keeps the on-disk
+    bytes identical on every OS.
     """
+    from .atomic_io import atomic_write_text
+
     target = Path(path)
-    tmp_path: Path | None = None
-    try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        for _attempt in range(10):
-            candidate = target.with_name(f".{target.name}.{secrets.token_hex(8)}{tmp_suffix}")
-            try:
-                fd = os.open(candidate, flags, 0o600)
-            except FileExistsError:
-                continue
-            tmp_path = candidate
-            break
-        else:
-            raise FileExistsError(f"Could not create a unique temp file for {target}")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        os.replace(tmp_path, target)
-        tmp_path = None
-    except Exception:
-        if tmp_path is not None:
-            with suppress(OSError):
-                tmp_path.unlink()
-        raise
+    atomic_write_text(
+        target,
+        content,
+        temp_prefix=f".{target.name}.",
+        temp_suffix=tmp_suffix,
+    )

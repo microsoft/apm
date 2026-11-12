@@ -8,6 +8,7 @@ fixture pair under `integrity/`.
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from unittest.mock import MagicMock
 
 import jsonschema
 import pytest
@@ -39,27 +40,47 @@ BARE_HEX_LOCKFILE = ("integrity", "bare-hex-reader.frozen.yaml")
 
 @pytest.mark.req("req-lk-001")
 def test_lockfile_valid_v2_passes_schema():
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V2))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*V2))
 
 
 @pytest.mark.req("req-lk-002")
 def test_lockfile_declares_apiversion():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert "lockfile_version" in schema["required"]
     assert set(schema["properties"]["lockfile_version"]["enum"]) == {"1", "2"}
 
 
 @pytest.mark.req("req-lk-003")
 def test_lockfile_carries_dependencies_block():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert "dependencies" in schema["required"]
 
 
 @pytest.mark.req("req-lk-003")
-def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
-    from types import SimpleNamespace
+@pytest.mark.parametrize("scenario", ["success", "success-named"])
+@pytest.mark.parametrize(
+    "registered_url",
+    ["ssh://git@github.com/fixture/private-mkt.git", "git@github.com:fixture/private-mkt.git"],
+)
+def test_ssh_marketplace_install_records_repository_and_exact_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registered_url: str,
+    scenario: str,
+) -> None:
+    from tests.integration.test_github_marketplace_ssh_install import (
+        test_github_ssh_marketplace_installs_without_https,
+    )
 
+    test_github_ssh_marketplace_installs_without_https(
+        tmp_path, monkeypatch, registered_url, scenario
+    )
+
+
+@pytest.mark.req("req-lk-003")
+def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency import DependencyReference
     from apm_cli.policy.ci_checks import _check_ref_consistency
 
@@ -74,7 +95,12 @@ def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
             )
         }
     )
-    manifest = SimpleNamespace(get_all_apm_dependencies=lambda: [dependency])
+    manifest = APMPackage(
+        name="consumer",
+        version="1.0.0",
+        dependencies={"apm": [dependency]},
+    )
+    assert manifest.get_all_apm_dependencies() == [dependency]
 
     result = _check_ref_consistency(manifest, lock)
 
@@ -84,12 +110,38 @@ def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
 
 @pytest.mark.req("req-lk-004")
 def test_lockfile_v1_remains_parseable_under_v2_reader():
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*V1))
+
+
+@pytest.mark.req("req-lk-003")
+def test_frozen_manifest_pin_requires_the_exact_locked_commit():
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.plan import lockfile_satisfies_manifest
+    from apm_cli.models.dependency import DependencyReference
+
+    pin = "abcdef0123456789" * 2 + "abcdef01"
+    declared = DependencyReference.parse(f"fixture/frozen-pin#{pin}")
+    entry = LockedDependency(
+        repo_url=declared.repo_url, resolved_ref=pin, resolved_commit=pin.upper()
+    )
+    lock = LockFile(dependencies={declared.get_unique_key(): entry})
+    before = lock.to_yaml()
+    assert lockfile_satisfies_manifest(lock, [declared]) == (True, [])
+    assert lock.to_yaml() == before
+
+    entry.resolved_commit = "0123456789abcdef" * 2 + "01234567"
+    mismatched = lock.to_yaml()
+    satisfied, reasons = lockfile_satisfies_manifest(lock, [declared])
+    assert satisfied is False
+    assert len(reasons) == 1
+    assert "manifest commit" in reasons[0]
+    assert "lockfile resolved_commit" in reasons[0]
+    assert lock.to_yaml() == mismatched
 
 
 @pytest.mark.req("req-lk-005")
 def test_lockfile_dependency_carries_resolved_field():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry_props = schema["$defs"]["entry"]["properties"]
     for key in ("resolved_ref", "resolved_commit", "version"):
         assert key in entry_props, f"entry MUST permit `{key}`"
@@ -174,9 +226,138 @@ def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
     assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
 
+@pytest.mark.req("req-lk-006")
+@pytest.mark.parametrize("development", [False, True])
+def test_cold_dependency_evidence_cannot_defer_direct_mcp_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, development: bool
+) -> None:
+    """Pending dependency evidence never excuses changed root MCP declarations."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.errors import FrozenInstallError
+    from apm_cli.install.plan import lockfile_satisfies_manifest
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.models.apm_package import APMPackage
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+    from tests.utils.local_package import LocalPackageFactory
+
+    root_config = {
+        "name": "root-server",
+        "registry": False,
+        "transport": "stdio",
+        "command": "printf",
+        "args": ["current"],
+    }
+    fixture = LocalPackageFactory(tmp_path / "sources").create(
+        "consumer",
+        dependencies=("owner/plugin#main",),
+        mcp_dependencies=() if development else (root_config,),
+        dev_mcp_dependencies=(root_config,) if development else (),
+        targets=("cursor",),
+    )
+    monkeypatch.chdir(fixture.root)
+    package = APMPackage.from_apm_yml(fixture.manifest_path)
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="owner/plugin",
+            name="plugin",
+            package_type="apm_package",
+            resolved_ref="main",
+            resolved_commit="a" * 40,
+            depth=1,
+        )
+    )
+    assert lockfile_satisfies_manifest(lock, package.get_apm_dependencies()) == (True, [])
+    view = CurrentMcpConfigView.derive(
+        package,
+        lock,
+        fixture.root / "apm_modules",
+        trust_transitive_self_defined=False,
+        allow_pending=True,
+    )
+    lock.mcp_configs = {
+        "root-server": {**view.configs["root-server"], "args": ["previous"]},
+        "plugin-server": {**root_config, "name": "plugin-server"},
+    }
+    lock.mcp_servers = sorted(lock.mcp_configs)
+    lock.mcp_config_provenance = {"root-server": "user", "plugin-server": "plugin"}
+    lock.write(fixture.root / "apm.lock.yaml")
+    config = fixture.root / ".cursor/mcp.json"
+    config.parent.mkdir()
+    config.write_text('{"mcpServers":{"sentinel":{}}}\n', encoding="ascii")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    assert view.pending_packages == frozenset({"owner/plugin"})
+    assert view.pending_servers(lock) == frozenset({"plugin-server"})
+    with pytest.raises(FrozenInstallError, match="out of sync") as failure:
+        InstallService.enforce_frozen(InstallRequest(apm_package=package, frozen=True))
+
+    assert failure.value.reasons == [
+        "  - MCP server 'root-server' config differs from apm.lock.yaml"
+    ]
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
+
+
+@pytest.mark.req("req-lk-006")
+@pytest.mark.parametrize("scope_name", ["project", "user"])
+@pytest.mark.parametrize("selected_state", ["absent", "missing-pin"])
+def test_frozen_selected_store_rejects_source_decoy_without_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope_name: str, selected_state: str
+) -> None:
+    """The selected installation must satisfy frozen admission before any write."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.errors import FrozenInstallError
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.models.apm_package import APMPackage
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+    from tests.utils.local_package import LocalPackageFactory
+
+    source = LocalPackageFactory(tmp_path / "sources").create(
+        "consumer", dependencies=("owner/package",), targets=("claude",)
+    )
+    home, deploy = tmp_path / "home", tmp_path / "deploy"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("APM_HOME", str(home / ".apm"))
+    deploy.mkdir()
+    monkeypatch.chdir(deploy)
+    scope = InstallScope.USER if scope_name == "user" else InstallScope.PROJECT
+    selected = home / ".apm" if scope is InstallScope.USER else deploy
+    selected.mkdir(parents=True, exist_ok=True)
+    source_lock = LockFile()
+    source_lock.add_dependency(
+        LockedDependency(repo_url="owner/package", resolved_ref="main", resolved_commit="a" * 40)
+    )
+    source_lock.write(source.root / "apm.lock.yaml")
+    if selected_state == "missing-pin":
+        LockFile().write(selected / "apm.lock.yaml")
+    for path in (
+        selected / "apm_modules/unrelated/CLAUDE.md",
+        deploy / ".claude/settings.json",
+        home / ".cache/apm/sentinel",
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("preserve\n", encoding="ascii")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    diagnostic = "requires apm.lock.yaml" if selected_state == "absent" else "out of sync"
+    with pytest.raises(FrozenInstallError, match=diagnostic.replace(".", r"\.")):
+        InstallService.enforce_frozen(
+            InstallRequest(
+                apm_package=APMPackage.from_apm_yml(source.manifest_path), scope=scope, frozen=True
+            )
+        )
+
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
+
+
 @pytest.mark.req("req-lk-007")
 def test_lockfile_should_record_resolution_metadata():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     props = schema["properties"]
     for key in ("generated_at", "apm_version"):
         assert key in props
@@ -185,7 +366,7 @@ def test_lockfile_should_record_resolution_metadata():
 
 @pytest.mark.req("req-lk-008")
 def test_lockfile_supports_registry_source():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry = schema["$defs"]["entry"]["properties"]
     assert "registry_prefix" in entry and "host" in entry
 
@@ -209,7 +390,7 @@ def test_lockfile_records_registry_digest():
 def test_lockfile_round_trips_unknown_fields():
     doc = load_yaml_fixture(*RT)
     assert doc is not None
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert schema["additionalProperties"] is True
     assert "^x-[a-z][a-z0-9-]*$" in schema["patternProperties"]
 
@@ -220,7 +401,7 @@ def test_lockfile_round_trips_unknown_fields():
 @pytest.mark.req("req-lk-012")
 def test_lockfile_canonical_tree_sha256_field_present():
     """Canonical-tree hash MUST be `tree_sha256` (sec.5.6.4)."""
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry = schema["$defs"]["entry"]["properties"]
     assert "tree_sha256" in entry
     assert entry["tree_sha256"]["$ref"] == "#/$defs/hashEnvelope"
@@ -256,7 +437,7 @@ def test_lockfile_unknown_hash_algorithm_rejected():
         "local_deployed_file_hashes": {"a.md": "md5:c62747a2802841aa"},
     }
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("lockfile-v0.1.schema.json", bad)
+        validate_against("lockfile-v0.1.41.schema.json", bad)
 
 
 @pytest.mark.req("req-lk-015")
@@ -270,10 +451,55 @@ def test_lockfile_tree_sha256_canonicalisation_invariant():
 @pytest.mark.req("req-lk-016")
 def test_lockfile_reader_tolerates_bare_hex_hash():
     """v0.1 schema tolerates bare-hex; v0.2 will require envelope."""
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     pattern = schema["properties"]["local_deployed_file_hashes"]["additionalProperties"]["pattern"]
     assert "[0-9a-f]{64}" in pattern
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*BARE_HEX_LOCKFILE))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*BARE_HEX_LOCKFILE))
+
+
+@pytest.mark.req("req-lk-016")
+@pytest.mark.parametrize("hash_format", ["envelope", "bare64"])
+def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
+    tmp_path: Path, hash_format: str
+) -> None:
+    """Consume both existing digest encodings without rewriting the frozen lock."""
+    import os
+    import sys
+
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+    from tests.utils.local_package import LocalPackageFactory
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "reader", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    provider = factory.create("provider", targets=("agent-skills",))
+    source = factory.add_skill(
+        provider, "review", "---\nname: review\ndescription: fixture\n---\nunchanged\n"
+    )
+    consumer = factory.create("consumer", dependencies=("../provider",), targets=("agent-skills",))
+    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+    environment = isolated.subprocess_env()
+    installed = runner.run(("install", "--no-policy"), cwd=consumer.root, env=environment)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+
+    lockfile = consumer.root / "apm.lock.yaml"
+    locked = load_yaml(lockfile)
+    (dependency,) = locked["dependencies"]
+    digest = dependency["content_hash"]
+    assert digest.startswith("sha256:") and len(digest.removeprefix("sha256:")) == 64
+    if hash_format == "bare64":
+        dependency["content_hash"] = digest.removeprefix("sha256:")
+        dump_yaml(locked, lockfile)
+    original_lock = lockfile.read_bytes()
+    deployed = consumer.root / ".agents" / "skills" / "review" / "SKILL.md"
+    assert deployed.read_bytes() == source.read_bytes()
+
+    frozen = runner.run(("install", "--frozen", "--no-policy"), cwd=consumer.root, env=environment)
+
+    assert frozen.returncode == 0, frozen.stdout + frozen.stderr
+    assert lockfile.read_bytes() == original_lock
+    assert deployed.read_bytes() == source.read_bytes()
 
 
 @pytest.mark.req("req-lk-017")
@@ -307,7 +533,7 @@ def test_lockfile_deployed_file_hash_mismatch_fails_closed():
 
 @pytest.mark.req("req-lk-018")
 def test_lockfile_should_record_publish_timestamp():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert "generated_at" in schema["properties"]
     waive(
         "Publish-timestamp recording is a publisher-side SHOULD that "
@@ -318,12 +544,48 @@ def test_lockfile_should_record_publish_timestamp():
     )
 
 
+@pytest.mark.req("req-lk-008")
+@pytest.mark.parametrize("replay", [False, True])
+def test_marketplace_semver_records_resolution_timestamp(replay: bool) -> None:
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.phases.lockfile import LockfileBuilder
+    from apm_cli.marketplace.resolver import MarketplacePluginResolution
+
+    timestamp = "2026-10-20T19:26:55+00:00"
+    resolution = MarketplacePluginResolution(
+        canonical="owner/package#v1.2.3",
+        plugin=MagicMock(),
+        constraint="^1.0.0",
+        resolved_tag="v1.2.3",
+        resolved_version="1.2.3",
+        resolved_at=timestamp,
+    )
+    current = LockedDependency(
+        repo_url="owner/package", resolved_ref="v1.2.3", resolved_commit="a" * 40
+    )
+    previous = replace(current, constraint="^1.0.0", resolved_tag="v1.2.3", resolved_at=timestamp)
+    key = current.get_unique_key()
+    lock = LockFile(dependencies={key: current})
+    context = SimpleNamespace(
+        existing_lockfile=LockFile(dependencies={key: previous}) if replay else None,
+        marketplace_provenance=None if replay else {key: resolution.provenance("catalog", "tool")},
+    )
+    LockfileBuilder(context)._attach_marketplace_provenance(lock)
+    emitted = current.to_dict()
+    assert emitted["constraint"] == "^1.0.0"
+    assert emitted["resolved_tag"] == "v1.2.3"
+    assert emitted["resolved_at"] == timestamp
+
+
 @pytest.mark.req("req-lk-019")
 def test_lockfile_inventory_metadata_is_non_trust_anchor():
     # The optional `name`/`version` inventory fields MUST be permitted
     # on an entry and MUST validate when carried alongside the trust
     # anchors -- they are additive metadata, not identity.
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry_props = schema["$defs"]["entry"]["properties"]
     for key in ("name", "version"):
         assert key in entry_props, f"entry MUST permit `{key}`"
@@ -341,7 +603,7 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
             }
         ],
     }
-    validate_against("lockfile-v0.1.schema.json", doc)
+    validate_against("lockfile-v0.1.41.schema.json", doc)
 
     # The normative boundary: package-declared fields are self-asserted,
     # never trust anchors, and never identity/dedup keys. Registry version
@@ -355,14 +617,46 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
     )
 
 
+@pytest.mark.req("req-lk-019")
+@pytest.mark.parametrize(
+    ("selection", "inventory"),
+    [("^1.0.0", "1.2.3"), ("main", "main"), ("b" * 40, "b" * 40)],
+)
+def test_marketplace_inventory_cannot_substitute_for_locked_selection(
+    selection: str, inventory: str
+) -> None:
+    """Inventory metadata cannot make an unproved frozen selection valid."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.plan import lockfile_satisfies_manifest
+    from apm_cli.models.dependency import DependencyReference
+
+    declared = DependencyReference.parse_from_dict(
+        {"name": "tool", "marketplace": "catalog", "version": selection}
+    )
+    locked = LockedDependency(
+        repo_url="owner/package",
+        discovered_via="catalog",
+        marketplace_plugin_name="tool",
+        resolved_commit="a" * 40,
+        resolved_ref="other",
+        name="tool",
+        version=inventory,
+    )
+    lock = LockFile(dependencies={locked.get_unique_key(): locked})
+    satisfied, reasons = lockfile_satisfies_manifest(lock, [declared])
+    assert satisfied is False
+    assert len(reasons) == 1
+    assert "tool@catalog" in reasons[0]
+
+
 @pytest.mark.req("req-lk-022")
 def test_lockfile_materialization_spelling_is_non_identity_metadata():
     from apm_cli.deps.lockfile import LockedDependency
 
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry_props = schema["$defs"]["entry"]["properties"]
     assert entry_props["materialization_repo_url"]["type"] == "string"
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*V1))
 
     dependency = LockedDependency(
         repo_url="contoso/example",
@@ -385,6 +679,53 @@ def test_lockfile_materialization_spelling_is_non_identity_metadata():
         "an in-repository `virtual_path` and virtual-file leaf\nremain case-sensitive",
         "MUST fail closed without deleting any candidate path",
     )
+
+
+@pytest.mark.req("req-lk-022")
+@pytest.mark.parametrize("virtual_path", ["Nested/Rules", "Nested/Rules/Deep/Policy"])
+def test_claude_materialization_links_preserve_locked_source_and_virtual_case(
+    tmp_path: Path, virtual_path: str
+) -> None:
+    """Generated links use retained spelling, including case-sensitive virtual paths."""
+    from apm_cli.compilation.claude_formatter import ClaudeFormatter
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.primitives.models import PrimitiveCollection
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    source, output = tmp_path / "source", tmp_path / "output"
+    output.mkdir()
+    relative = f"Contoso/Standards/{virtual_path}"
+    memory = source / "apm_modules" / relative / "CLAUDE.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text("# Retained memory\n", encoding="ascii")
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="contoso/standards",
+            materialization_repo_url="Contoso/Standards",
+            host="github.com",
+            virtual_path=virtual_path,
+            is_virtual=True,
+            resolved_ref="main",
+            resolved_commit="b" * 40,
+        )
+    )
+    lock.write(source / "apm.lock.yaml")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    result = ClaudeFormatter(str(output), source_dir=str(source)).format_distributed(
+        PrimitiveCollection(), {}
+    )
+
+    assert result.success, result.errors
+    imports = [
+        line
+        for line in result.content_map[output / "CLAUDE.md"].splitlines()
+        if line.startswith("@")
+    ]
+    assert imports == [f"@../source/apm_modules/{relative}/CLAUDE.md"]
+    assert (output / imports[0][1:]).resolve() == memory.resolve()
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
 
 @pytest.mark.req("req-lk-022")
@@ -455,8 +796,10 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
     from types import SimpleNamespace
     from unittest.mock import MagicMock, patch
 
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.install.manifest_reconcile import union_preserving
     from apm_cli.install.phases import cleanup
+    from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     def target(name: str, root_dir: str | None = None):
@@ -514,14 +857,12 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
     )
     assert declared_indeterminate == [indeterminate_path]
 
-    prior_dependency = SimpleNamespace(
+    prior_dependency = LockedDependency(
+        repo_url="fixture/prior-identity",
         deployed_files=["shared.md", "old-only.md"],
-        deployed_file_hashes={},
     )
-    lockfile = SimpleNamespace(
-        dependencies={"prior-identity": prior_dependency},
-        get_dependency=lambda key: None,
-    )
+    lockfile = LockFile()
+    lockfile.add_dependency(prior_dependency)
     diagnostics = MagicMock()
     diagnostics.count_for_package.return_value = 0
     context = SimpleNamespace(
@@ -534,7 +875,7 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
         logger=MagicMock(),
         package_deployed_files={"active-identity": ["shared.md"]},
     )
-    removal = MagicMock(deleted=[], deleted_targets=[], skipped_user_edit=[])
+    removal = CleanupResult()
     with patch(
         "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
         return_value=removal,
@@ -546,6 +887,78 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
         "MUST remove a prior path attributable",
         "MUST preserve that path and its corresponding hash entry",
         "MUST preserve any path freshly\ndeployed by an active dependency",
+    )
+
+
+@pytest.mark.req("req-lk-020")
+def test_lockfile_keeps_shared_root_paths_another_declared_target_governs(tmp_path: Path) -> None:
+    """A shared-root path stays while another declared target governs it (#3179).
+
+    Its recorded target (codex) has left the manifest, and a ``--target
+    claude`` run does not process copilot. Copilot still governs the
+    ``.agents/skills`` partition, so the path is attributable to a declared
+    target and preserved. Once no declared target governs it, it is removed.
+    """
+    from apm_cli.core.deployment_state import (
+        DeploymentLedger,
+        DeploymentLocator,
+        DeploymentRecord,
+        LocatorKind,
+    )
+    from apm_cli.install.manifest_reconcile import (
+        declared_target_profiles,
+        reconcile_deployed_block,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+    from apm_cli.utils.content_hash import compute_file_hash
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    shared = ".agents/skills/shared/SKILL.md"
+    deployed = tmp_path / shared
+    deployed.parent.mkdir(parents=True)
+    deployed.write_text("shared", encoding="utf-8")
+    recorded = compute_file_hash(deployed)
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="codex",
+        value=shared,
+        runtime=None,
+        scope="project",
+    )
+    ledger = DeploymentLedger(
+        records={
+            locator.key: DeploymentRecord(
+                locator=locator, owners=(".",), active_owner=".", content_hash=recorded
+            )
+        }
+    )
+
+    def reconcile(manifest: str) -> list[str]:
+        (tmp_path / "apm.yml").write_text(manifest, encoding="utf-8")
+        active: list[TargetProfile] = [KNOWN_TARGETS["claude"]]
+        files, _hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="<local .apm/>",
+            current_files=[],
+            current_hashes={},
+            prior_files=[shared],
+            prior_hashes={shared: recorded},
+            active_targets=active,
+            declared_targets=declared_target_profiles(tmp_path),
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+        )
+        return files
+
+    assert reconcile("targets:\n  - claude\n  - copilot\n") == [shared]
+    assert deployed.exists()
+    assert reconcile("targets:\n  - claude\n") == []
+    assert not deployed.exists()
+
+    assert_spec_contains(
+        "(b) another declared target",
+        "shared deploy roots\nare partitioned by the filename patterns",
+        "MUST remove a prior path attributable to\nnone of those targets",
     )
 
 
@@ -625,6 +1038,53 @@ class TestFinalLockfileTargetContraction:
 
 
 @pytest.mark.req("req-lk-021")
+@pytest.mark.req("req-lk-020")
+def test_cli_target_without_manifest_targets_preserves_inactive_state(tmp_path: Path) -> None:
+    """An active CLI target does not authorize pruning undeclared inactive targets."""
+    import json
+
+    from apm_cli.install.manifest_reconcile import (
+        declared_target_profiles,
+        reconcile_dropped_merge_hook_targets,
+        union_preserving,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / "apm.yml").write_text("name: preserve-targets\nversion: 1.0.0\n", encoding="utf-8")
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": "owned"}]}
+    config = codex_dir / "hooks.json"
+    ownership = codex_dir / "apm-hooks.json"
+    config.write_text(json.dumps({"hooks": {"PreToolUse": [entry]}}), encoding="utf-8")
+    ownership.write_text(
+        json.dumps({"PreToolUse": [{**entry, "_apm_source": "req-lk-021-fixture"}]}),
+        encoding="utf-8",
+    )
+    prior_bytes = {path: path.read_bytes() for path in (config, ownership)}
+    active_targets = [KNOWN_TARGETS["claude"]]
+    declared = declared_target_profiles(tmp_path, active_targets=active_targets)
+    prior_path = ".codex/skills/demo/SKILL.md"
+    prior_hashes = {prior_path: "sha256:" + "a" * 64}
+
+    paths, hashes = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=[prior_path],
+        prior_hashes=prior_hashes,
+        targets=active_targets,
+        declared_targets=declared,
+    )
+    stats = reconcile_dropped_merge_hook_targets(tmp_path, active_targets, declared)
+
+    assert declared is None
+    assert paths == [prior_path]
+    assert hashes == prior_hashes
+    assert stats == {"files_removed": 0, "errors": 0}
+    assert {path: path.read_bytes() for path in prior_bytes} == prior_bytes
+
+
+@pytest.mark.req("req-lk-021")
 def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
     """req-lk-021 extends req-lk-020's preserve/remove decision to
     merge-based hook configuration: a dropped target's consumer-owned
@@ -697,6 +1157,174 @@ def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
     )
     assert not (codex_dir / "apm-hooks.json").exists(), (
         "ownership record left empty by the removal MUST also be removed"
+    )
+    assert claude_snapshot == (claude_dir / "settings.json").read_text(encoding="utf-8"), (
+        "a target still attributable to the declared set MUST be preserved untouched"
+    )
+    assert (claude_dir / "apm-hooks.json").exists(), "retained target's ownership record survives"
+
+    assert_spec_contains(
+        "MUST apply the same preserve-or-remove decision",
+        "MUST remove only the consumer-owned entries",
+        "It MUST preserve\nevery entry that does not carry the consumer's own ownership",
+        "the merge-based hook configuration document is already absent for a\n"
+        "target while its ownership record remains",
+        "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
+    )
+
+
+@pytest.mark.req("req-lk-006")
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_frozen_install_preserves_conflicted_lockfile_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newline: str
+) -> None:
+    """The existing frozen no-rewrite obligation also covers unreadable lockfiles."""
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    (tmp_path / "apm.yml").write_text(
+        "name: conformance\nversion: '1.0.0'\ntargets:\n  - claude\n", encoding="utf-8"
+    )
+    instructions = tmp_path / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "c.instructions.md").write_text("conformance\n", encoding="utf-8")
+    lockfile_path = tmp_path / "apm.lock.yaml"
+    original = (
+        ("lockfile_version: '1'\n<<<<<<< HEAD\n=======\n>>>>>>> feature\n")
+        .replace("\n", newline)
+        .encode("utf-8")
+    )
+    lockfile_path.write_bytes(original)
+    monkeypatch.chdir(tmp_path)
+
+    with patch("apm_cli.commands._helpers.check_for_updates", return_value=None):
+        result = CliRunner().invoke(cli, ["install", "--frozen"])
+
+    assert result.exit_code == 1, result.output
+    assert lockfile_path.read_bytes() == original
+    assert_spec_contains("the lockfile is never written\nor rewritten")
+
+
+class TestFrozenInstallNeverWritesLockfile:
+    """req-lk-006's first clause, at the write chokepoint.
+
+    req-lk-006 is one sentence carrying two obligations: a frozen mode "in
+    which the lockfile is never written or rewritten" AND a failure "on any
+    direct dependency for which the lockfile has no pin".  Only the second
+    had behavioural coverage -- ``lockfile_satisfies_manifest`` -- so a
+    frozen install deployed files and rewrote the lockfile to claim them,
+    which is how a committed lockfile that under-records survives CI
+    (issue #2379).  The existing req-lk-006 test asserts a fixture's
+    ``resolved_hash`` field, not frozen behaviour.
+    """
+
+    @pytest.mark.req("req-lk-006")
+    def test_frozen_install_withholds_the_write_and_fails_instead(self, tmp_path):
+        """A frozen install MUST leave apm.lock.yaml byte-identical, and MUST
+        NOT report success when the lockfile it withheld claims deployed
+        files the committed one does not."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, suppress_lockfile_writes
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.service import InstallService
+
+        def _lock(deployed):
+            lock = LockFile(lockfile_version="1", apm_version="0.0.0-test")
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="https://github.com/o/r",
+                    resolved_ref="main",
+                    resolved_commit="a" * 40,
+                    depth=1,
+                    deployed_files=list(deployed),
+                )
+            )
+            return lock
+
+        lockfile_path = tmp_path / "apm.lock.yaml"
+        (tmp_path / "apm.yml").write_text("name: t\nversion: 1.0.0\n")
+        _lock([".claude/skills/recorded/SKILL.md"]).write(lockfile_path)
+        committed_bytes = lockfile_path.read_bytes()
+
+        request = MagicMock()
+        request.apm_package.package_path = tmp_path / "apm.yml"
+
+        # What the install would deploy: the recorded skill plus one the
+        # committed lockfile never claims.
+        produced = _lock([".claude/skills/recorded/SKILL.md", ".claude/skills/unclaimed/SKILL.md"])
+        with suppress_lockfile_writes() as withheld:
+            produced.write(lockfile_path)
+
+        assert lockfile_path.read_bytes() == committed_bytes, "MUST never be rewritten"
+
+        with pytest.raises(FrozenInstallError) as exc:
+            InstallService._enforce_frozen_no_rewrite(request, withheld)
+        assert ".claude/skills/unclaimed/SKILL.md" in " ".join(exc.value.reasons)
+        assert lockfile_path.read_bytes() == committed_bytes
+
+        assert_spec_contains("the lockfile is never written\nor rewritten")
+
+
+@pytest.mark.req("req-lk-021")
+def test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe(tmp_path):
+    """req-lk-021's preserve/remove decision also covers Cursor's flat
+    native hook format, where ownership is attributed inline via
+    ``_apm_source`` on each entry rather than via a separate sidecar
+    file: a dropped Cursor target's consumer-owned entries are removed,
+    an entry without the consumer's own ownership attribution survives
+    even in the dropped target's own file, and a retained target (here
+    Claude's merge-based settings) is preserved untouched."""
+    import json
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    cursor_dir = tmp_path / ".cursor"
+    cursor_dir.mkdir(parents=True)
+    (cursor_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "hooks": {
+                    "preToolUse": [
+                        {
+                            "command": "owned",
+                            "_apm_source": "req-lk-021-fixture",
+                        },
+                        {"command": "user-authored"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}),
+        encoding="utf-8",
+    )
+    (claude_dir / "apm-hooks.json").write_text(
+        json.dumps({"PreToolUse": [{"matcher": "Bash", "_apm_source": "req-lk-021-fixture"}]}),
+        encoding="utf-8",
+    )
+    claude_snapshot = (claude_dir / "settings.json").read_text(encoding="utf-8")
+
+    stats = HookIntegrator().reconcile_dropped_targets(tmp_path, ["cursor"])
+
+    assert stats["errors"] == 0
+    cursor_native = json.loads((cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+    cursor_entries = cursor_native.get("hooks", {}).get("preToolUse", [])
+    assert not any(e.get("command") == "owned" for e in cursor_entries), (
+        "consumer-owned entry for the dropped Cursor target MUST be removed"
+    )
+    assert any(e.get("command") == "user-authored" for e in cursor_entries), (
+        "entry without consumer ownership attribution MUST be preserved"
+    )
+    assert not (cursor_dir / "apm-hooks.json").exists(), (
+        "Cursor has no ownership sidecar to begin with; reconciliation MUST NOT invent one"
     )
     assert claude_snapshot == (claude_dir / "settings.json").read_text(encoding="utf-8"), (
         "a target still attributable to the declared set MUST be preserved untouched"

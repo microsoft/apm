@@ -1,4 +1,4 @@
-"""Architecture guards for canonical frontmatter BOM decoding."""
+"""Architecture guards for canonical frontmatter detection and BOM decoding."""
 
 from __future__ import annotations
 
@@ -36,11 +36,14 @@ def test_frontmatter_bom_decoding_has_single_owner() -> None:
         owner for owner in registry.owners if owner.id == "frontmatter-bom-bounded-yaml"
     )
     rule = _RULES_BY_ID["contracts-tooling-frontmatter-yaml"]
+    report = run_selected_rules(root, ("contracts-tooling-frontmatter-yaml",))
 
+    assert report.violations == ()
+    assert report.failures == ()
     assert 'def load_frontmatter(fd: Any, encoding: str = "utf-8-sig")' in owner
     assert 'text.removeprefix("\\ufeff")' in owner
     assert (
-        "Frontmatter BOM decoding and bounded YAML parsing stay owned by utils/yaml_io.py"
+        "Frontmatter delimiter detection, BOM decoding, and bounded YAML parsing stay owned by utils/yaml_io.py"
         in rule.description
     )
     assert registry_owner.selectors == ("src/apm_cli/utils/yaml_io.py",)
@@ -80,6 +83,152 @@ def test_frontmatter_bom_guard_rejects_caller_owned_encoding(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
+
+    report = run_selected_rules(sandbox, ("contracts-tooling-frontmatter-yaml",))
+
+    assert report.exit_code != 0
+    assert _violated(report, "contracts-tooling-frontmatter-yaml")
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "local-detector",
+        "aliased-parser-bypass",
+        "identity-reread",
+        "identity-adoption-reread",
+        "decoded-security-bypass",
+        "decoded-force-bypass",
+        "surrogate-normalization-bypass",
+        "reconcile-before-preflight",
+        "native-reconcile-missing",
+        "no-target-reconcile-escapes",
+    ],
+)
+def test_frontmatter_authority_guard_rejects_split_owners(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    """The registered guard rejects local delimiter grammar and parser bypasses."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    if mutation == "local-detector":
+        owner = sandbox / "src/apm_cli/utils/yaml_io.py"
+        owner.write_text(
+            owner.read_text(encoding="utf-8").replace(
+                "_BOUNDED_FRONTMATTER_HANDLER.detect(text)",
+                'text.startswith("---")',
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "aliased-parser-bypass":
+        bypass = sandbox / "src/apm_cli/frontmatter_bypass.py"
+        bypass.write_text(
+            "from frontmatter import loads as parse\n\n"
+            "def read(text: str):\n"
+            "    return parse(text)\n",
+            encoding="utf-8",
+        )
+    elif mutation == "identity-reread":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "                    prepared=prepared_instructions[source_file],\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "identity-adoption-reread":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "                expected_content=new_content,\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "decoded-security-bypass":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "        if verdict.should_block:\n",
+                "        if False:\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "decoded-force-bypass":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "            force=force,\n",
+                "            force=False,\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "surrogate-normalization-bypass":
+        scanner = sandbox / "src/apm_cli/security/content_scanner.py"
+        scanner.write_text(
+            scanner.read_text(encoding="utf-8").replace(
+                "        content = _combine_surrogate_pairs(content)\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "reconcile-before-preflight":
+        services = sandbox / "src/apm_cli/install/services.py"
+        source = services.read_text(encoding="utf-8")
+        post_call = "\n    _reconcile_excluded_targets()\n"
+        assert source.count(post_call) == 1
+        services.write_text(
+            source.replace(post_call, "\n", 1).replace(
+                "    if integrators.instruction is not None:\n",
+                "    _reconcile_excluded_targets()\n    if integrators.instruction is not None:\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "native-reconcile-missing":
+        services = sandbox / "src/apm_cli/install/services.py"
+        services.write_text(
+            services.read_text(encoding="utf-8").replace(
+                "    if admits_native_plugin(package_info):\n"
+                "        _reconcile_excluded_targets()\n",
+                "    if admits_native_plugin(package_info):\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    else:
+        services = sandbox / "src/apm_cli/install/services.py"
+        services.write_text(
+            services.read_text(encoding="utf-8").replace(
+                "    if not targets:\n"
+                "        _reconcile_excluded_targets()\n"
+                "        return result\n",
+                "    _reconcile_excluded_targets()\n    if not targets:\n        return result\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
 
     report = run_selected_rules(sandbox, ("contracts-tooling-frontmatter-yaml",))
 

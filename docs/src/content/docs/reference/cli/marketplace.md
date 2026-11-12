@@ -64,7 +64,11 @@ Register a marketplace from a source reference. Accepted forms:
   `https://gitlab.com/acme/marketplace.git#v1.0.0`.
 - Hosted `marketplace.json` URL --
   `https://catalog.example.com/marketplace.json`.
-- SSH URL -- `git@host:org/repo.git` style.
+- SSH URL -- SCP-like `git@host:org/repo.git` or fully qualified
+  `ssh://git@host[:PORT]/org/repo.git`. Use the fully qualified form when the
+  server listens on a non-default SSH port; the port is optional otherwise.
+  SSH URLs cannot include passwords, queries, or fragments; use `--ref` to
+  select a branch, tag, or commit.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
   direct `marketplace.json` file.
@@ -96,6 +100,7 @@ apm marketplace add https://catalog.example.com/marketplace.json --name catalog
 
 # SSH
 apm marketplace add git@gitea.example.com:org/repo.git --name custom
+apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
 
 # Local filesystem (bare repo, working directory, or marketplace.json file)
 apm marketplace add /srv/marketplaces/agent-forge.git --name agent-forge
@@ -113,12 +118,20 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--verbose`, `-v` | Show detailed output. |
 
+For git-backed sources without a direct file path, APM looks for the catalog
+at `marketplace.json`, `.github/plugin/marketplace.json`, then
+`.claude-plugin/marketplace.json`, and registers the first one found without
+downloading it again.
+
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
 marketplace host is classified as GitHub, GitLab, or Azure DevOps.
-Other git hosts -- generic HTTPS, SSH, self-hosted -- are fetched via
-subprocess `git` through `GitCache`, and authentication falls through
-to the host's local git credential helper. Hosted `marketplace.json`
+Other git hosts are fetched via subprocess `git` through `GitCache`.
+Generic HTTPS can use a local Git credential helper; plain HTTP suppresses
+credentials, HTTPS-to-HTTP Git URL rewrites are rejected, and generic SSH is
+token-free and noninteractive. See the
+[authentication transport table](../../../getting-started/authentication/#generic-marketplace-git-transport)
+for the full policy. Hosted `marketplace.json`
 URLs are public HTTPS only: APM sends no auth headers. Use a
 git-backed marketplace for private catalogs. When packages are
 installed from a hosted JSON URL, the lockfile records the source URL
@@ -205,10 +218,21 @@ Fold a legacy `marketplace.yml` into the `marketplace:` block of
 ### `apm marketplace check`
 
 Validate the schema of the authoring config and verify that every package
-entry resolves to a reachable git ref. For an Azure DevOps `sourceBase`
-ending in `/_git`, package names are appended without a `.git` suffix.
-Services uses `ADO_APM_PAT`, then the Azure CLI bearer. Server hosts
-registered through `ADO_HOST` or `APM_ADO_HOSTS` use `ADO_APM_PAT` only.
+entry resolves to a reachable git ref. Bare `owner/repo` entries resolve
+against the configured default host. Private github.com and GHES repos use
+the standard GitHub auth chain during online validation. For an Azure
+DevOps `sourceBase` ending in `/_git`, package names are appended without
+a `.git` suffix. Services uses `ADO_APM_PAT`, then the Azure CLI bearer.
+Server hosts registered through `ADO_HOST` or `APM_ADO_HOSTS` use
+`ADO_APM_PAT` only.
+
+A `ref` that names a tag or branch must exist on the remote. A `ref` that
+is a full 40-character lowercase commit SHA passes when the remote serves
+that commit: a branch tip passes directly, any other commit is
+confirmed with a shallow fetch. Unreachable commits fail with
+`Commit '<sha>' not reachable on remote`. Abbreviated or uppercase SHAs
+are not commit pins and fail with a hint to use the full SHA. `--offline`
+cannot confirm a commit that is not a cached branch tip.
 
 | Flag | Description |
 |---|---|

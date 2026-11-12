@@ -6,12 +6,20 @@ orphan preview, dev_apm_deps, and the dry-run notice / success message.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.presentation.dry_run import render_and_exit as _render_and_exit
 from apm_cli.models.dependency.reference import DependencyReference
+
+
+def _raise(_lock: object) -> bool:
+    raise ValueError("malformed ledger")
 
 
 def render_and_exit(**kwargs) -> None:
@@ -31,6 +39,7 @@ def render_and_exit(**kwargs) -> None:
                 if (only_packages := kwargs.pop("only_packages", None)) is not None
                 else None
             ),
+            lsp_dependencies=tuple(kwargs.pop("lsp_deps", ())),
         )
     _render_and_exit(**kwargs)
 
@@ -57,14 +66,24 @@ def _make_apm_dep(
     return dep
 
 
-def _make_mcp_dep(name: str = "my-server") -> MagicMock:
-    dep = MagicMock()
-    dep.__str__ = lambda self: name
-    return dep
+@dataclass(frozen=True)
+class _DisplayDependency:
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
+
+
+def _make_mcp_dep(name: str = "my-server") -> _DisplayDependency:
+    return _DisplayDependency(name)
+
+
+def _make_lsp_dep(name: str = "pyright") -> _DisplayDependency:
+    return _DisplayDependency(name)
 
 
 # ---------------------------------------------------------------------------
-# APM and MCP dependency rendering
+# APM, MCP, and LSP dependency rendering
 # ---------------------------------------------------------------------------
 
 
@@ -83,6 +102,8 @@ class TestRenderApmDeps:
 
         assert plan.apm_dependency_count == 0
         assert plan.mcp_dependency_count == 1
+        assert plan.lsp_dependency_count == 0
+        assert plan.dependency_counts == (0, 1, 0)
 
     def test_plan_selects_only_requested_dependency_without_reparsing_it(self) -> None:
         """Preview selection retains the interpreted dependency object."""
@@ -94,6 +115,7 @@ class TestRenderApmDeps:
         package.get_apm_dependencies.return_value = [existing, requested]
         package.get_dev_apm_dependencies.return_value = []
         package.get_all_mcp_dependencies.return_value = []
+        package.get_lsp_dependencies.return_value = []
 
         plan = ProspectiveInstallPlan.from_apm_package(
             package,
@@ -105,6 +127,50 @@ class TestRenderApmDeps:
         assert plan.selected_apm_dependencies == (requested,)
         assert plan.selected_apm_dependencies[0].source == "registry"
         assert plan.selected_apm_dependencies[0].registry_name == "private"
+
+    def test_plan_retains_structured_versioned_path_for_selection_and_updates(self) -> None:
+        requested = DependencyReference.parse_from_dict(
+            {
+                "git": "https://github.com/acme/catalog",
+                "path": "plugins/tool-1.2.3",
+                "ref": "release",
+            }
+        )
+        package = MagicMock()
+        package.get_apm_dependencies.return_value = [requested]
+        package.get_dev_apm_dependencies.return_value = []
+        package.get_all_mcp_dependencies.return_value = []
+        package.get_lsp_dependencies.return_value = []
+
+        plan = ProspectiveInstallPlan.from_apm_package(
+            package,
+            should_install_apm=True,
+            should_install_mcp=False,
+            only_packages=["acme/catalog/plugins/tool-1.2.3#release"],
+            updated_packages=["acme/catalog/plugins/tool-1.2.3#release"],
+        )
+
+        assert plan.selected_apm_dependencies == (requested,)
+        assert plan.updated_apm_identities == {"acme/catalog/plugins/tool-1.2.3"}
+
+    def test_plan_excludes_apm_selection_when_only_mcp_is_requested(self) -> None:
+        """The prospective plan does not leak APM work into --only=mcp previews."""
+        dep = DependencyReference.parse("owner/repo#main")
+        package = MagicMock()
+        package.get_apm_dependencies.return_value = [dep]
+        package.get_dev_apm_dependencies.return_value = []
+        package.get_all_mcp_dependencies.return_value = []
+        package.get_lsp_dependencies.return_value = []
+
+        plan = ProspectiveInstallPlan.from_apm_package(
+            package,
+            should_install_apm=False,
+            should_install_mcp=True,
+            only_packages=None,
+        )
+
+        assert plan.selected_apm_dependencies == ()
+        assert plan.apm_dependency_count == 0
 
     def test_apm_deps_install_action_shown(self, tmp_path: Path) -> None:
         """APM deps rendered with 'install' when update=False (lines 42-45)."""
@@ -188,6 +254,52 @@ class TestRenderApmDeps:
         all_calls = " ".join(str(c) for c in logger.progress.call_args_list)
         assert "MCP dependencies" in all_calls
 
+    def test_lsp_only_deps_are_rendered_without_empty_message(self, tmp_path: Path) -> None:
+        """LSP-only manifests render servers and do not report an empty plan."""
+        logger = _make_logger()
+        dep = _make_lsp_dep("gopls")
+
+        with patch("apm_cli.deps.lockfile.LockFile.read", side_effect=Exception):
+            render_and_exit(
+                logger=logger,
+                should_install_apm=False,
+                apm_deps=[],
+                mcp_deps=[],
+                lsp_deps=[dep],
+                dev_apm_deps=[],
+                should_install_mcp=True,
+                update=False,
+                apm_dir=tmp_path,
+            )
+
+        all_calls = " ".join(str(c) for c in logger.progress.call_args_list)
+        assert "LSP servers to configure" in all_calls
+        assert "gopls" in all_calls
+        assert "No dependencies" not in all_calls
+
+    def test_filtered_lsp_only_deps_show_empty_message(self, tmp_path: Path) -> None:
+        """An APM-only dry run explains that its selected plan is empty."""
+        logger = _make_logger()
+
+        with patch("apm_cli.deps.lockfile.LockFile.read", side_effect=Exception):
+            render_and_exit(
+                logger=logger,
+                should_install_apm=True,
+                apm_deps=[],
+                mcp_deps=[],
+                lsp_deps=[_make_lsp_dep("gopls")],
+                dev_apm_deps=[],
+                should_install_mcp=False,
+                update=False,
+                apm_dir=tmp_path,
+            )
+
+        all_calls = " ".join(str(c) for c in logger.progress.call_args_list)
+        assert "LSP servers to configure" not in all_calls
+        assert "gopls" not in all_calls
+        assert "No APM dependencies selected by --only=apm" in all_calls
+        assert "Drop --only to preview MCP/LSP dependencies" in all_calls
+
     def test_no_deps_shows_empty_message(self, tmp_path: Path) -> None:
         """When all dep lists are empty the 'No dependencies found' message is shown (line 53)."""
         logger = _make_logger()
@@ -235,6 +347,27 @@ class TestRenderApmDeps:
 
 
 class TestOrphanPreview:
+    def test_incomplete_plan_never_claims_orphan_removals(self, tmp_path: Path) -> None:
+        logger = _make_logger()
+        plan = ProspectiveInstallPlan(
+            apm_dependencies=(),
+            dev_apm_dependencies=(),
+            selected_apm_dependencies=(),
+            mcp_dependencies=(),
+            should_install_apm=True,
+            should_install_mcp=False,
+            only_packages=None,
+            dependency_preview_errors=("unknown parent metadata",),
+        )
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
+            patch("apm_cli.drift.detect_orphans") as orphans,
+        ):
+            render_and_exit(logger=logger, plan=plan, update=False, apm_dir=tmp_path)
+        orphans.assert_not_called()
+        logger.dry_run_notice.assert_called_once()
+        assert "Dependency preview incomplete" in logger.dry_run_notice.call_args.args[0]
+
     def test_orphan_preview_header_shown(self, tmp_path: Path) -> None:
         """Orphan preview header is printed when orphans are found (lines 64-81)."""
         logger = _make_logger()
@@ -360,7 +493,7 @@ class TestOrphanPreview:
         ):
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
+                should_install_apm=True,
                 apm_deps=[],
                 mcp_deps=[],
                 dev_apm_deps=[dev_dep],
@@ -434,7 +567,7 @@ class TestDryRunNoticeAndSuccess:
         with patch("apm_cli.deps.lockfile.LockFile.read", side_effect=Exception):
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
+                should_install_apm=True,
                 apm_deps=[],
                 mcp_deps=[],
                 dev_apm_deps=[_make_apm_dep("owner/dev")],
@@ -462,6 +595,35 @@ class TestDryRunNoticeAndSuccess:
             )
 
         logger.dry_run_notice.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("predicate", "shown"),
+        [(lambda _lock: True, True), (lambda _lock: False, False), (_raise, False)],
+        ids=["cleanup-pending", "nothing-pending", "unreadable-ledger"],
+    )
+    def test_dry_run_notice_follows_local_cleanup_predicate(
+        self, tmp_path: Path, predicate: Callable[[object], bool], shown: bool
+    ) -> None:
+        """Pending local cleanup triggers the notice; a failing predicate never fails a preview."""
+        logger = _make_logger()
+
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
+            patch("apm_cli.drift.detect_orphans", return_value=[]),
+        ):
+            render_and_exit(
+                logger=logger,
+                should_install_apm=True,
+                apm_deps=[],
+                mcp_deps=[],
+                dev_apm_deps=[],
+                should_install_mcp=False,
+                update=False,
+                apm_dir=tmp_path,
+                local_cleanup_pending=predicate,
+            )
+
+        assert logger.dry_run_notice.called is shown
 
     def test_renderer_leaves_completion_summary_to_caller(self, tmp_path: Path) -> None:
         """The command lifecycle owns the one final dry-run summary."""
@@ -496,7 +658,7 @@ class TestDryRunNoticeAndSuccess:
         ):
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
+                should_install_apm=True,
                 apm_deps=[],
                 mcp_deps=[],
                 dev_apm_deps=[],

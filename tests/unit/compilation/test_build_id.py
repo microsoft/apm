@@ -9,8 +9,12 @@ import re
 
 import pytest  # noqa: F401
 
-from apm_cli.compilation.build_id import stabilize_build_id
-from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
+from apm_cli.compilation.build_id import (
+    has_build_id_line,
+    has_valid_build_id,
+    stabilize_build_id,
+)
+from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER, BUILD_ID_PLACEHOLDER
 
 _HASH_LINE_RE = re.compile(r"^<!-- Build ID: [a-f0-9]{12} -->$")
 
@@ -88,6 +92,20 @@ def test_empty_content_is_safe():
     assert stabilize_build_id("") == ""
 
 
+def test_has_valid_build_id_accepts_unchanged_generated_content():
+    content = stabilize_build_id(f"# A\n{BUILD_ID_PLACEHOLDER}\nbody\n")
+
+    assert has_valid_build_id(content)
+    assert not has_valid_build_id(content + "edited\n")
+
+
+def test_has_valid_build_id_rejects_missing_or_duplicate_ids():
+    valid = stabilize_build_id(f"# A\n{BUILD_ID_PLACEHOLDER}\nbody\n")
+
+    assert not has_valid_build_id("# A\nbody\n")
+    assert not has_valid_build_id(valid + valid.splitlines()[1] + "\n")
+
+
 def test_only_placeholder_line():
     content = f"{BUILD_ID_PLACEHOLDER}\n"
 
@@ -95,3 +113,13 @@ def test_only_placeholder_line():
 
     assert BUILD_ID_PLACEHOLDER not in result
     assert _HASH_LINE_RE.match(result.splitlines()[0])
+
+
+def test_has_build_id_line_distinguishes_presence_from_validity():
+    valid = stabilize_build_id(f"# A\n{BUILD_ID_PLACEHOLDER}\nbody\n")
+
+    assert has_build_id_line(valid)
+    assert has_build_id_line(valid + "edited\n")
+    assert not has_build_id_line("# A\nbody\n")
+    assert not has_build_id_line(f"{AGENTS_MD_GENERATED_MARKER}\n# Legacy content\n")
+    assert not has_build_id_line(valid + valid.splitlines()[1] + "\n")

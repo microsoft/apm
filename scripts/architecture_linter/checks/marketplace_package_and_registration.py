@@ -1,8 +1,8 @@
 """Package-construction, projection, skill-membership, and registration
 marketplace analyzers.
 
-Ports five of the twelve canonical owner decisions recorded in
-``.apm/architecture/owners/marketplace-plugins.json``.
+Ports marketplace-package decisions plus the local-bundle layout lowering
+guard recorded in ``.apm/architecture/owners/install-deployment.json``.
 """
 
 from __future__ import annotations
@@ -142,7 +142,7 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
     else:
         body = _def_body_text(validation_facts, "_validate_agent_plugin")
         for needle in (
-            "package = project_agent_plugin_package(plugin)",
+            "package = project_agent_plugin_package(plugin, create_config=create_config)",
             "result.package = package",
         ):
             if needle not in body:
@@ -169,6 +169,36 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
 
     # Directory normalization may not be re-invoked outside its owner and reuses.
     findings.extend(_scan_normalization_callers(provider, inv))
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_PROJECTION,
+            "src/apm_cli/install/drift.py",
+            (
+                "native_detection = route_agent_plugin_package(install_path)",
+                "agent_plugin_detection=native_detection,\n            read_only=True",
+                "with native_registration_scope(targets):",
+                'if result.get("native_plugin"):',
+                "from apm_cli.install.native_plugin_admission import verify_native_plugin_cache",
+                "verify_native_plugin_cache(\n                            lock_dep,",
+            ),
+            "Native replay must use canonical read-only projection, admission and integrity",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_PROJECTION,
+            "src/apm_cli/install/native_plugin_admission.py",
+            (
+                "_copy_tree_dereferencing_validated(source, replay_path, source)",
+                "verify_package_hash(candidate, expected_hash)",
+            ),
+            "Native cache verification must reuse canonical copying and package hashing",
+        )
+    )
     return tuple(findings)
 
 
@@ -262,6 +292,68 @@ def _check_legacy_skill_membership(provider: FactsProvider) -> tuple[Violation, 
             exempt=True,
         )
     )
+    return tuple(findings)
+
+
+_RID_BUNDLE_LAYOUT = "install-deployment-bundle-native-layout"
+
+
+_PLUGIN_LAYOUT = "src/apm_cli/bundle/plugin_layout.py"
+_LOCAL_BUNDLE_PATHS = "src/apm_cli/install/local_bundle_paths.py"
+_INSTALL_SERVICES = "src/apm_cli/install/services.py"
+_TARGET_NAME_COMPARISON = re.compile(r"\btarget\.name\s*(?:==|!=)|(?:==|!=)\s*target\.name\b")
+
+
+def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Local-bundle layout lowering must stay target-profile driven."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _PLUGIN_LAYOUT,
+            (
+                "class PluginDirSpec:",
+                "PLUGIN_LAYOUT: dict[str, PluginDirSpec]",
+                '"commands": PluginDirSpec(',
+                '("commands", "prompts")',
+                "plugin_command_prompt_name",
+            ),
+            "plugin_layout must own plugin-native directory and filename lowering data",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _LOCAL_BUNDLE_PATHS,
+            (
+                "def _lower_to_target(",
+                "PLUGIN_LAYOUT.get(head)",
+                "for primitive_kind in spec.primitive_kinds:",
+                "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+            ),
+            "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
+        )
+    )
+    for path in (_LOCAL_BUNDLE_PATHS, _INSTALL_SERVICES):
+        facts, failures = checked_facts(provider, path, _RID_BUNDLE_LAYOUT, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        for number, line in enumerate(facts.lines, start=1):
+            if _TARGET_NAME_COMPARISON.search(line):
+                findings.append(
+                    violation(
+                        _RID_BUNDLE_LAYOUT,
+                        path,
+                        "Local bundle lowering must not branch on target.name; use TargetProfile.primitives",
+                        line=number,
+                    )
+                )
     return tuple(findings)
 
 
@@ -366,6 +458,149 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+_RID_CODEX = "marketplace-integrations-codex-native-lifecycle"
+_CODEX_PREFIX = "src/apm_cli/codex_plugins/"
+
+
+def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep opaque native admission, public writes, and lifecycle ownership together."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    for name, owner in (
+        ("synchronize_codex_plugins", _CODEX_PREFIX + "registrar.py"),
+        ("plan_native_codex_plugin", _CODEX_PREFIX + "admission.py"),
+        ("compute_native_bundle_hash", "src/apm_cli/utils/content_hash.py"),
+        ("owns_codex_dependency", _CODEX_PREFIX + "registrar.py"),
+        ("verify_codex_source_identity", _CODEX_PREFIX + "registrar.py"),
+        ("is_codex_source_pin", _CODEX_PREFIX + "registrar.py"),
+    ):
+        count = _count_across(
+            provider,
+            inv,
+            _RID_CODEX,
+            _src_python(provider),
+            re.compile(rf"^def {name}\("),
+        )
+        if count != 1:
+            findings.append(violation(_RID_CODEX, owner, f"{name} must have exactly one owner"))
+    required = {
+        _CODEX_PREFIX + "client.py": (
+            '"expectedVersion": version',
+            'MINIMUM_CODEX_VERSION = "0.163.0"',
+        ),
+        _CODEX_PREFIX + "admission.py": (
+            "record_native_exec_status(",
+            "skill_subset_filter_tokens(skill_subset)",
+            "if any(not approvals.get(kind, False) for kind in types):",
+            "CodexNativeDeployment(",
+            "scratch_root is None",
+            "plugin.source_hash",
+            "compute_native_bundle_hash(root)",
+            "manifest.mcp_server_names",
+            'result["codex_source_identity"] = plugin.source_identity()',
+        ),
+        _CODEX_PREFIX + "registrar.py": (
+            "_preflight(",
+            "_write_records(ledger, records)",
+            "client.upgrade(rpc, marketplace)",
+            'actual_plugin != {"enabled": False}',
+            "prepare_snapshot(",
+            "compute_native_bundle_hash(",
+            "verify_codex_source_identity(modules_dir, records=records, **item.plugin.source_identity())",
+            "record.source_commit == source_commit",
+            "source_commit=item.plugin.source_commit",
+            "record = replace(record, source_commit=item.plugin.source_commit)",
+        ),
+        _CODEX_PREFIX + "snapshot.py": (
+            "plan.paths",
+            "compute_native_bundle_hash(",
+            "git_no_hooks_args()",
+        ),
+        "src/apm_cli/install/deployment_plan.py": (
+            "plan_native_codex_plugin(",
+            "native_plugin_root=",
+        ),
+        "src/apm_cli/install/services.py": (
+            "finalize_codex_native(",
+            "read_only=scratch_root is not None",
+        ),
+        "src/apm_cli/install/phases/codex_plugins.py": (
+            "candidates_from_lockfile(saved,",
+            "LockFile.read(get_lockfile_path(ctx.apm_dir))",
+            "synchronize_codex_plugins(",
+            "ctx.dry_run or ctx.lockfile_only",
+            "set(ctx.codex_native_plugins).issubset(retained)",
+            "ctx.package_deployed_files.get(key)",
+        ),
+        "src/apm_cli/install/sources.py": (
+            "is_codex_source_pin(cached_commit)",
+            "verify_marker(self.install_path, cached_commit)",
+            "is_codex_compatibility_manifest(install_path, detect_package_type(install_path)[1])",
+            "native_validation = validate_apm_package(install_path, source_path=install_path)",
+        ),
+        "src/apm_cli/integration/mcp_config_view.py": (
+            "is_codex_compatibility_manifest(package_dir, selected_manifest)",
+            "dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value",
+            "owns_codex_dependency(",
+            "ownership_cache=native_ownership_cache",
+        ),
+        "src/apm_cli/utils/content_hash.py": (
+            "_package_files(package_path, native=True)",
+            "path.stat().st_mode & stat.S_IXUSR",
+        ),
+        "src/apm_cli/deps/package_validator.py": (
+            'getattr(package, "codex_plugin", None) is not None',
+        ),
+        "src/apm_cli/install/drift.py": (
+            "is_codex_compatibility_manifest(install_path, selected_manifest)",
+            "if native_detection is not None or codex_native:",
+            "agent_plugin_detection=native_detection,\n            read_only=True",
+            "codex_records = verify_codex_source_identity(",
+            "records=codex_records",
+        ),
+        "src/apm_cli/commands/uninstall/cli.py": ("remove_codex_plugins(",),
+        "src/apm_cli/policy/ci_checks.py": (
+            "except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:",
+        ),
+    }
+    for path, fragments in required.items():
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_CODEX,
+                path,
+                fragments,
+                "Codex native lifecycle must retain canonical admission, ownership and public API gates",
+            )
+        )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_CODEX,
+            tuple(path for path in _src_python(provider) if path != _CODEX_PREFIX + "client.py"),
+            re.compile(
+                r"""["'](?:plugin/(?:read|uninstall)|marketplace/(?:upgrade|remove)|config/batchWrite)["']"""
+            ),
+            "Codex native protocol operations belong only to codex_plugins/client.py",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_CODEX,
+            _subdir_python(provider, _CODEX_PREFIX),
+            re.compile(r"plugins/cache|plugin_registry\.json|forceRefetch"),
+            "Codex lifecycle must not address private native state or perform global refetch",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
     Rule(
         id=_RID_CONSTRUCTION,
@@ -389,11 +624,25 @@ RULES: tuple[Rule, ...] = (
         check=_check_legacy_skill_membership,
     ),
     Rule(
+        id=_RID_BUNDLE_LAYOUT,
+        group=GROUP,
+        guard_ids=(_RID_BUNDLE_LAYOUT,),
+        description="Local bundle layout lowering stays owned by bundle/plugin_layout.py.",
+        check=_check_bundle_native_layout,
+    ),
+    Rule(
         id=_RID_NATIVE,
         group=GROUP,
         guard_ids=(_RID_NATIVE,),
         description="Native Agent Plugin registration admission stays free of client binary coupling.",
         check=_check_native_registration,
+    ),
+    Rule(
+        id=_RID_CODEX,
+        group=GROUP,
+        guard_ids=(_RID_CODEX,),
+        description="Codex native lifecycle consumes canonical admission and uses only owned public operations.",
+        check=_check_codex_lifecycle,
     ),
     Rule(
         id=_RID_COPILOT,

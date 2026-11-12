@@ -57,7 +57,7 @@ _BIN_DEPLOY_OWNER_DEF = re.compile(r"^def plugin_bin_deployable\(")
 _BIN_DEPLOY_ANY_DEF = re.compile(r"^def _?plugin_bin_deployable\(")
 
 
-_BIN_DEPLOY_SERVICES_IMPORT = "plugin_bin_deployable as _plugin_bin_deployable"
+_BIN_DEPLOY_SERVICES_IMPORT = "from .exec_gate import plugin_bin_deployable"
 
 
 _BIN_DEPLOY_SKILL_IMPORT = "from apm_cli.install.exec_gate import plugin_bin_deployable"
@@ -68,8 +68,10 @@ def check_plugin_bin_eligibility(provider: FactsProvider) -> tuple[Violation, ..
     rule_id = RULE_PLUGIN_BIN
     owner, owner_fail = _configured(provider, _EXEC_GATE_OWNER, rule_id)
     services, services_fail = _configured(provider, _INSTALL_SERVICES, rule_id)
+    plan_path = "src/apm_cli/install/deployment_plan.py"
+    plan, plan_fail = _configured(provider, plan_path, rule_id)
     integrator, integrator_fail = _configured(provider, _SKILL_INTEGRATOR, rule_id)
-    failures = [*owner_fail, *services_fail, *integrator_fail]
+    failures = [*owner_fail, *services_fail, *plan_fail, *integrator_fail]
     if failures:
         return tuple(failures)
 
@@ -100,6 +102,17 @@ def check_plugin_bin_eligibility(provider: FactsProvider) -> tuple[Violation, ..
                 _SKILL_INTEGRATOR,
                 "Skill integrator must import the exec_gate plugin_bin_deployable owner; "
                 f"missing: {_BIN_DEPLOY_SKILL_IMPORT}",
+            )
+        )
+    if not (
+        _has_re(plan, re.compile(r"^from \.exec_gate import .*\bplugin_bin_deployable\b"))
+        and _has_text(plan, "plugin_bin_deployable=plugin_bin_deployable(")
+    ):
+        findings.append(
+            _report(
+                rule_id,
+                plan_path,
+                "Prepared source plans must consume exec_gate.plugin_bin_deployable",
             )
         )
     # The legacy duplicate scan deliberately offered no exemption escape

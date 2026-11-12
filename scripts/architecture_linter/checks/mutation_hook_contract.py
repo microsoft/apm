@@ -1,10 +1,11 @@
 """Neutral-hook-contract and hook-command-vocabulary mutation analyzers.
 
-Ports three of the owner guards recorded in
+Ports the owner guards recorded in
 ``.apm/architecture/owners/hooks-integrations.json``:
 
 * ``hooks-integrations-copilot-cli-mcp-paths`` -- AC1 Copilot CLI MCP paths
   owner.
+* ``hooks-integrations-claude-mcp-paths`` -- Claude user MCP path owner.
 * ``hooks-integrations-neutral-hook-contract`` -- AC2/AC6/AC15c/AC4 hook
   grammar, per-target shape, validate-before-write ordering, drift
   projection (incl. ``check_hook_file_routing_owner`` and
@@ -44,6 +45,7 @@ from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import (
     EXEMPT_MARKER,
     checked_facts,
+    forbid_text,
     line_pattern_violations,
     violation,
 )
@@ -72,11 +74,18 @@ _HOOK_OWNERSHIP = "src/apm_cli/integration/hook_ownership.py"
 
 _HOOK_COMMAND_PATHS = "src/apm_cli/integration/hook_command_paths.py"
 
+_HOOK_SOURCE_SELECTION = "src/apm_cli/integration/hook_source_selection.py"
+
+_PLUGIN_HOOK_RESOURCES = "src/apm_cli/bundle/plugin_hooks.py"
+
 
 _AGENT_PLUGIN_LOADER = "src/apm_cli/agent_plugins/loader.py"
 
 
 _INSTALL_DRIFT = "src/apm_cli/install/drift.py"
+
+
+_DEPLOYABLE_SOURCE_PLAN = "src/apm_cli/install/deployable_source_plan.py"
 
 
 _HOOK_FILE_ROUTING_TARGETS: tuple[str, ...] = (_HOOK_INTEGRATOR, _KIRO_HOOK_INTEGRATOR)
@@ -329,6 +338,50 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
     return findings
 
 
+def _check_claude_mcp_paths(provider: FactsProvider) -> Iterable[Violation]:
+    """Claude user cleanup must check the adapter's path before normalization."""
+    rule_id = "mutation_writes.claude_mcp_paths"
+    owner = "src/apm_cli/adapters/client/claude.py"
+    facts_by_path, failures = _read_required(provider, rule_id, (owner, _MCP_INTEGRATOR))
+    if failures:
+        return failures
+    consumer = facts_by_path[_MCP_INTEGRATOR]
+    calls = [call for call in consumer.calls if call.scope == "remove_stale"]
+    raw = [
+        call.line
+        for call in calls
+        if call.qualname == "ClaudeClientAdapter.resolve_user_claude_unresolved_path"
+    ]
+    resolved = [
+        call.line
+        for call in calls
+        if call.qualname == "ClaudeClientAdapter.resolve_user_claude_json_path"
+    ]
+    guarded = len(raw) == len(resolved) == 1 and any(
+        call.qualname == "_reject_symlink_config" and raw[0] < call.line < resolved[0]
+        for call in calls
+    )
+    hardcoded = any(
+        literal.scope == "remove_stale"
+        and literal.value_repr in {repr(".claude.json"), repr("CLAUDE_CONFIG_DIR")}
+        for literal in consumer.literals
+    )
+    return (
+        *_require(
+            _has_fixed(facts_by_path[owner], "CLAUDE_CONFIG_DIR"),
+            rule_id,
+            owner,
+            "Claude adapter must own the CLAUDE_CONFIG_DIR MCP config root",
+        ),
+        *_require(
+            guarded and not hardcoded,
+            rule_id,
+            _MCP_INTEGRATOR,
+            "Claude user cleanup must check the adapter-selected path before normalization",
+        ),
+    )
+
+
 def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]:
     """Neutral hook source grammar, per-target shape, and drift projection.
 
@@ -340,7 +393,11 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
     keys route through ``hook_contract``, per-file routing is not gated by
     dependency targets, merge-hook config writes stay owned by
     ``HookIntegrator``, ownership markers route through ``hook_ownership``,
-    and shared drift projection routes through ``hook_ownership``.
+    shared drift projection routes through ``hook_ownership``, and Cursor
+    import preflight stays unconditional at every native-write call site
+    (#3129: a cached "already preflighted" flag on the plan object must
+    never gate the re-check, because a plan can be reused across projects
+    or after a Claude import file is added mid-install).
     """
     rule_id = "mutation_writes.neutral_hook_contract"
     return (
@@ -348,12 +405,16 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_rewrite_scope(provider, rule_id),
         *_nhc_claude_project_dir(provider, rule_id),
         *_nhc_event_map(provider, rule_id),
+        *_nhc_cursor_edge(provider, rule_id),
+        *_nhc_cursor_preflight_unconditional(provider, rule_id),
         *_nhc_contract_vocabulary(provider, rule_id),
         *_nhc_command_keys(provider, rule_id),
+        *_nhc_legacy_native_shapes(provider, rule_id),
         *_nhc_file_routing(provider, rule_id),
         *_nhc_config_writes(provider, rule_id),
         *_nhc_ownership_markers(provider, rule_id),
         *_nhc_drift_projection(provider, rule_id),
+        *_nhc_native_metadata_thaw(provider, rule_id),
     )
 
 
@@ -497,6 +558,176 @@ def _nhc_contract_vocabulary(provider: FactsProvider, rule_id: str) -> tuple[Vio
     )
 
 
+def _nhc_native_metadata_thaw(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Native renderers must thaw frozen hook metadata through ``hook_contract._thaw``.
+
+    The IR freezes nested metadata, so a shallow ``dict(...)`` copy or a raw
+    ``raw_entry`` passthrough leaves nested mappings frozen and breaks JSON
+    serialization (#3167).
+    """
+    renderer = "src/apm_cli/integration/hook_native_formats.py"
+    facts_by_path, failures = _read_required(provider, rule_id, (_HOOK_CONTRACT, renderer))
+    findings: list[Violation] = list(failures)
+    if not failures:
+        findings.extend(
+            _require(
+                _count_regex_lines(facts_by_path[_HOOK_CONTRACT], r"^def _thaw\(") == 1,
+                rule_id,
+                _HOOK_CONTRACT,
+                "_thaw must be defined exactly once by hook_contract",
+            )
+        )
+        for required in ("_thaw(handler.metadata)", "_thaw(binding.metadata)"):
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[renderer], required),
+                    rule_id,
+                    renderer,
+                    f"native hook renderers must call {required}",
+                )
+            )
+        findings.extend(
+            line_pattern_violations(
+                provider,
+                rule_id=rule_id,
+                paths=(renderer,),
+                pattern=r'dict\((?:handler|binding)\.metadata\)|append\(binding\.metadata\["raw_entry"\]\)',
+                message="native hook renderers must thaw frozen metadata with hook_contract._thaw",
+                exempt_marker=EXEMPT_MARKER,
+            )
+        )
+    return tuple(findings)
+
+
+def _nhc_cursor_edge(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Keep Cursor rendering and import preflight on the canonical native edge."""
+    renderer = "src/apm_cli/integration/hook_native_formats.py"
+    preflight = "src/apm_cli/integration/hook_cursor_preflight.py"
+    services = "src/apm_cli/install/services.py"
+    facts, failures = _read_required(
+        provider, rule_id, (renderer, preflight, _HOOK_INTEGRATOR, services)
+    )
+    findings: list[Violation] = list(failures)
+    if not failures:
+        for path, required in (
+            (_HOOK_INTEGRATOR, "entries = _to_cursor_hook_entries("),
+            (_HOOK_INTEGRATOR, "preflight_cursor_hooks("),
+            (preflight, "_to_cursor_hook_entries("),
+            (preflight, "validate_cursor_config(candidate)"),
+            (renderer, "_check_cursor_field_types(raw)"),
+            (renderer, "_check_cursor_field_types(entry)"),
+            (services, '"preflight_hooks_for_targets"'),
+            (services, "preflight_hooks("),
+        ):
+            findings.extend(
+                _require(
+                    _has_fixed(facts[path], required),
+                    rule_id,
+                    path,
+                    "Cursor hooks must use canonical rendering and import preflight before writes",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(renderer,)),
+            pattern=r"^(CURSOR_NATIVE_EVENTS\s*[:=]|def _to_cursor_hook_entries\()",
+            message="Cursor native hook contract must have one renderer owner",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
+def _nhc_cursor_preflight_unconditional(
+    provider: FactsProvider, rule_id: str
+) -> tuple[Violation, ...]:
+    """Cursor/Claude import preflight must never be gated by a cached flag.
+
+    Two independent sub-checks close the gap a purely lexical "preflight
+    call is present somewhere in the file" check (see ``_nhc_cursor_edge``)
+    cannot see:
+
+    * A token ban on ``cursor_preflight_done`` across the owner files, so a
+      plan-level cache field can never reintroduce the reused-plan bypass
+      fixed for #3129 under that name.
+    * A structural, per-call-site check that the native-write preflight
+      call at the per-target write boundary in ``_integrate_merged_hooks``
+      survives as a direct (unconditional) statement of its owning
+      ``if config.target_key in {...}:`` block -- not removed, and not
+      re-wrapped in a *second*, nested conditional (any cache predicate,
+      regardless of its name, would have to be such a nested ``if``). A
+      file-wide substring check cannot tell a removed/re-gated call at one
+      write boundary from an unrelated surviving call at another (for
+      example the separate upfront ``preflight_hooks_for_targets`` call),
+      because deleting or re-gating one occurrence still leaves the
+      ``preflight_cursor_hooks(`` substring present elsewhere in the file.
+    """
+    findings: list[Violation] = []
+    for path in (_HOOK_INTEGRATOR, _DEPLOYABLE_SOURCE_PLAN):
+        findings.extend(
+            forbid_text(
+                provider,
+                rule_id=rule_id,
+                path=path,
+                needles=("cursor_preflight_done",),
+                message=(
+                    "Cursor import preflight must stay unconditional; "
+                    "a cached cursor_preflight_done flag must never gate it"
+                ),
+            )
+        )
+    findings.extend(_nhc_cursor_preflight_call_site(provider, rule_id))
+    return tuple(findings)
+
+
+def _nhc_cursor_preflight_call_site(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Guard the exact per-write preflight call site structurally.
+
+    Looks up ``HookIntegrator._integrate_merged_hooks``, finds its direct
+    ``if config.target_key in {'cursor', 'claude'}:`` statement (the only
+    legitimate conditional around the call -- preflight only applies to
+    those two targets), and requires the ``preflight_cursor_hooks(...)``
+    call to be a direct statement of that ``if`` body. A removed call, or
+    one re-wrapped in any further nested conditional (a cache gate under
+    any name), fails this check even though the ``preflight_cursor_hooks(``
+    substring would still appear elsewhere in the file.
+    """
+    message = (
+        "HookIntegrator._integrate_merged_hooks must call "
+        "preflight_cursor_hooks(...) as a direct, unconditional statement "
+        "of its 'if config.target_key in {cursor, claude}' block -- not "
+        "removed and not re-wrapped in a further (cache) conditional"
+    )
+    index = provider.tree_index(_HOOK_INTEGRATOR)
+    if index is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    function = index.function("HookIntegrator._integrate_merged_hooks")
+    if function is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    target_key_if = next(
+        (
+            stmt
+            for stmt in function.body
+            if isinstance(stmt, ast.If)
+            and ast.unparse(stmt.test) == "config.target_key in {'cursor', 'claude'}"
+        ),
+        None,
+    )
+    if target_key_if is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    has_direct_call = any(
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Call)
+        and ast.unparse(stmt.value.func) == "preflight_cursor_hooks"
+        for stmt in target_key_if.body
+    )
+    if has_direct_call:
+        return ()
+    return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+
+
 def _nhc_command_keys(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
     """Neutral hook source grammar must route through ``hook_contract.py``."""
     owner_count = sum(
@@ -534,6 +765,22 @@ def _nhc_command_keys(provider: FactsProvider, rule_id: str) -> tuple[Violation,
             )
         )
     return tuple(findings)
+
+
+def _nhc_legacy_native_shapes(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Ownership matching must obtain legacy shapes from the native renderer."""
+    facts, failures = checked_facts(provider, _HOOK_INTEGRATOR, rule_id, require_python=True)
+    if failures:
+        return failures
+    return _require(
+        any(
+            call.scope == "_integrate_merged_hooks" and call.qualname == "_legacy_hook_entries"
+            for call in facts.calls
+        ),
+        rule_id,
+        _HOOK_INTEGRATOR,
+        "legacy hook shapes must route through _legacy_hook_entries",
+    )
 
 
 def _nhc_file_routing(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
@@ -628,40 +875,38 @@ def _nhc_ownership_markers(provider: FactsProvider, rule_id: str) -> tuple[Viola
 
 
 def _nhc_drift_projection(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
-    """Shared hook drift projection must route through ``hook_ownership.py``."""
+    """Shared hook drift comparisons must route through ``hook_ownership.py``."""
     facts_by_path, failures = _read_required(provider, rule_id, (_HOOK_OWNERSHIP, _INSTALL_DRIFT))
     findings: list[Violation] = list(failures)
-    if not failures:
-        findings.extend(
-            _require(
-                _count_regex_lines(
-                    facts_by_path[_HOOK_OWNERSHIP], r"^def project_apm_owned_hook_entries\("
+    scan_paths = _python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,))
+    for helper in ("project_apm_owned_hook_entries", "canonicalize_hook_sidecar"):
+        if not failures:
+            findings.extend(
+                _require(
+                    _count_regex_lines(facts_by_path[_HOOK_OWNERSHIP], rf"^def {helper}\(") == 1,
+                    rule_id,
+                    _HOOK_OWNERSHIP,
+                    f"{helper} must be defined exactly once",
                 )
-                == 1,
-                rule_id,
-                _HOOK_OWNERSHIP,
-                "project_apm_owned_hook_entries must be defined exactly once",
             )
-        )
+            findings.extend(
+                _require(
+                    _count_fixed_lines(facts_by_path[_INSTALL_DRIFT], f"{helper}(") == 2,
+                    rule_id,
+                    _INSTALL_DRIFT,
+                    f"install drift must call {helper} exactly twice",
+                )
+            )
         findings.extend(
-            _require(
-                _count_fixed_lines(facts_by_path[_INSTALL_DRIFT], "project_apm_owned_hook_entries(")
-                == 2,
-                rule_id,
-                _INSTALL_DRIFT,
-                "install drift must call project_apm_owned_hook_entries exactly twice",
+            _duplicate_scan(
+                provider,
+                rule_id=rule_id,
+                paths=scan_paths,
+                pattern=rf"^def {helper}\(",
+                message="shared hook drift comparisons must route through hook_ownership.py",
+                exempt=False,
             )
         )
-    findings.extend(
-        _duplicate_scan(
-            provider,
-            rule_id=rule_id,
-            paths=_python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,)),
-            pattern=r"^def project_apm_owned_hook_entries\(",
-            message="shared hook drift projection must route through hook_ownership.py",
-            exempt=False,
-        )
-    )
     return tuple(findings)
 
 
@@ -680,7 +925,9 @@ def _check_hook_command_vocabulary(provider: FactsProvider) -> Iterable[Violatio
     """
     rule_id = "mutation_writes.hook_command_vocabulary"
     facts_by_path, failures = _read_required(
-        provider, rule_id, (_HOOK_COMMAND_PATHS, _HOOK_INTEGRATOR)
+        provider,
+        rule_id,
+        (_HOOK_COMMAND_PATHS, _HOOK_INTEGRATOR, _HOOK_SOURCE_SELECTION, _PLUGIN_HOOK_RESOURCES),
     )
     if failures:
         return failures
@@ -711,10 +958,52 @@ def _check_hook_command_vocabulary(provider: FactsProvider) -> Iterable[Violatio
             "HookIntegrator must not hard-code the PLUGIN_ROOT literal",
         )
     )
+    for path in (_HOOK_INTEGRATOR, _PLUGIN_HOOK_RESOURCES):
+        facts = facts_by_path[path]
+        for required in ("iter_plugin_root_paths(", "resolve_plugin_root_hook_script("):
+            findings.extend(
+                _require(
+                    _has_fixed(facts, required),
+                    rule_id,
+                    path,
+                    f"Hook consumers must route through {required[:-1]}",
+                )
+            )
+    producer = facts_by_path[_PLUGIN_HOOK_RESOURCES]
+    for required in ("walk_hook_commands(", "iter_deployable_hook_bundle_files("):
+        findings.extend(
+            _require(
+                _has_fixed(producer, required),
+                rule_id,
+                _PLUGIN_HOOK_RESOURCES,
+                f"Hook packing must route through {required[:-1]}",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=[
+                path
+                for path in _python_paths(provider, under=_SRC)
+                if path != _HOOK_SOURCE_SELECTION
+            ],
+            pattern=r"^\s*def resolve_plugin_root_hook_script\(",
+            message="Plugin-root hook resource resolution belongs to hook_source_selection.py",
+            exempt=False,
+        )
+    )
     return findings
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="mutation_writes.claude_mcp_paths",
+        group=GROUP,
+        guard_ids=("hooks-integrations-claude-mcp-paths",),
+        description="Claude user MCP config paths must come from the Claude adapter.",
+        check=_check_claude_mcp_paths,
+    ),
     Rule(
         id="mutation_writes.copilot_cli_mcp_paths",
         group=GROUP,

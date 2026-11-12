@@ -104,6 +104,7 @@ def iter_deployable_hook_bundle_files(
     *,
     descriptor_files: set[Path] | None = None,
     exclude_json_files: bool = False,
+    include_package_metadata: bool = False,
 ) -> Iterator[Path]:
     """Yield source files that hook bundle materialization may copy."""
     descriptors = descriptor_files or set()
@@ -117,7 +118,8 @@ def iter_deployable_hook_bundle_files(
         if (
             source_file.is_symlink()
             or not source_file.is_file()
-            or source_file.name in {"package.json", MARKER_FILENAME}
+            or source_file.name == MARKER_FILENAME
+            or (source_file.name == "package.json" and not include_package_metadata)
             or _is_root_hook_descriptor(source_file, source_root, descriptors)
         ):
             continue

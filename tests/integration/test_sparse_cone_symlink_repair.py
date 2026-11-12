@@ -1,11 +1,11 @@
-"""Real-Git regression coverage for sparse-cone symlink repair."""
+"""Real-Git regression coverage for out-of-cone package links (#2707, #3457)."""
 
 from __future__ import annotations
 
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,11 +13,7 @@ from apm_cli.cache.git_cache import GitCache, _variant_key
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
-from apm_cli.utils.git_sparse import (
-    apply_sparse_cone,
-    repair_dangling_cone_symlinks,
-    validate_materialized_symlinks,
-)
+from apm_cli.utils.git_sparse import apply_sparse_cone, validate_materialized_symlinks
 from apm_cli.utils.path_security import PathTraversalError
 
 pytestmark = pytest.mark.component
@@ -60,9 +56,9 @@ def _checkout_sparse(tmp_path: Path, bare: Path, consumer: Path | None = None) -
     return consumer
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
-def test_legacy_downloader_repairs_real_out_of_cone_symlink(tmp_path: Path) -> None:
-    """The no-cache downloader path must widen and return a live package link."""
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
+def test_legacy_downloader_materializes_out_of_cone_symlink(tmp_path: Path) -> None:
+    """The no-cache downloader path installs the out-of-cone target's content."""
     bare = _commit_symlink_repo(tmp_path, "../../shared/reference.md")
     checkout = tmp_path / "legacy"
     downloader = object.__new__(GitHubPackageDownloader)
@@ -76,35 +72,19 @@ def test_legacy_downloader_repairs_real_out_of_cone_symlink(tmp_path: Path) -> N
 
     assert downloader._try_sparse_checkout(dep, checkout, "packages/tool", "main") is True
     installed_link = checkout / "packages" / "tool" / "reference.md"
-    assert installed_link.is_symlink()
-    assert installed_link.resolve().read_text(encoding="utf-8") == "shared content\n"
-    assert (checkout / "shared" / "reference.md").is_file()
+    assert not installed_link.is_symlink()
+    assert installed_link.read_text(encoding="utf-8") == "shared content\n"
+    # Resolved from Git objects: the sparse cone never widened.
+    assert not (checkout / "shared").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
-def test_repair_rejects_link_that_remains_broken(tmp_path: Path) -> None:
-    """Full-tree fallback must explain a link whose target is absent from Git."""
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
+def test_validation_rejects_link_that_is_broken(tmp_path: Path) -> None:
+    """A link whose target is absent from the commit is explained, not copied."""
     bare = _commit_symlink_repo(tmp_path, "../../missing/reference.md")
     consumer = _checkout_sparse(tmp_path, bare)
 
-    with pytest.raises(PathTraversalError, match="not a tracked file in the checked-out commit"):
-        repair_dangling_cone_symlinks(
-            "git",
-            consumer,
-            ["packages/tool"],
-            env=os.environ.copy(),
-        )
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
-def test_materialization_rejects_symlink_outside_checkout(tmp_path: Path) -> None:
-    """Remote package copies must remain within the pinned checkout."""
-    outside = tmp_path / "outside.txt"
-    outside.write_text("outside\n", encoding="utf-8")
-    bare = _commit_symlink_repo(tmp_path, str(outside))
-    consumer = _checkout_sparse(tmp_path, bare)
-
-    with pytest.raises(PathTraversalError, match="outside the allowed base directory"):
+    with pytest.raises(RuntimeError, match="is not a tracked file or directory"):
         validate_materialized_symlinks(
             "git",
             consumer,
@@ -113,9 +93,26 @@ def test_materialization_rejects_symlink_outside_checkout(tmp_path: Path) -> Non
         )
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
-def test_persistent_cache_hit_repairs_preexisting_dangling_shard(tmp_path: Path) -> None:
-    """A cache variant created before #2707 must be repaired when reused."""
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
+def test_materialization_rejects_symlink_outside_checkout(tmp_path: Path) -> None:
+    """Remote package copies must remain within the pinned checkout."""
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    bare = _commit_symlink_repo(tmp_path, str(outside))
+    consumer = _checkout_sparse(tmp_path, bare)
+
+    with pytest.raises(PathTraversalError, match="resolves outside the repository"):
+        validate_materialized_symlinks(
+            "git",
+            consumer,
+            ["packages/tool"],
+            env=os.environ.copy(),
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
+def test_persistent_cache_hit_heals_preexisting_dangling_shard(tmp_path: Path) -> None:
+    """A cache variant created before #3457 is rematerialized when reused."""
     bare = _commit_symlink_repo(tmp_path, "../../shared/reference.md")
     sha = subprocess.run(
         ["git", "--git-dir", str(bare), "rev-parse", "HEAD"],
@@ -148,13 +145,13 @@ def test_persistent_cache_hit_repairs_preexisting_dangling_shard(tmp_path: Path)
     )
 
     assert result == checkout
-    assert link.resolve().read_text(encoding="utf-8") == "shared content\n"
-    assert (checkout / "shared" / "reference.md").is_file()
+    assert not link.is_symlink()
+    assert link.read_text(encoding="utf-8") == "shared content\n"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
-def test_invalid_symlink_cleans_persistent_cache_staging(tmp_path: Path) -> None:
-    """Validation failure must not leave nested incomplete cache shards."""
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
+def test_invalid_symlink_lands_lenient_shard_for_consumer_rejection(tmp_path: Path) -> None:
+    """A shared shard keeps the escaping link as text; the consumer rejects it."""
     outside = tmp_path / "outside.txt"
     outside.write_text("outside\n", encoding="utf-8")
     bare = _commit_symlink_repo(tmp_path, str(outside))
@@ -167,20 +164,23 @@ def test_invalid_symlink_cleans_persistent_cache_staging(tmp_path: Path) -> None
     cache_root = tmp_path / "cache"
     cache = GitCache(cache_root)
 
-    with pytest.raises(PathTraversalError, match="outside the allowed base directory"):
-        cache.get_checkout(
-            bare.as_uri(),
-            "main",
-            locked_sha=sha,
-            env=os.environ.copy(),
-            sparse_paths=["packages/tool"],
-        )
+    checkout = cache.get_checkout(
+        bare.as_uri(),
+        "main",
+        locked_sha=sha,
+        env=os.environ.copy(),
+        sparse_paths=["packages/tool"],
+    )
 
     checkout_root = cache_root / "git" / "checkouts_v1"
     assert list(checkout_root.rglob("*.inc.*")) == []
+    link = checkout / "packages" / "tool" / "reference.md"
+    assert link.read_text(encoding="utf-8") == str(outside)
+    with pytest.raises(PathTraversalError, match="resolves outside the repository"):
+        validate_materialized_symlinks("git", checkout, ["packages/tool"], env=os.environ.copy())
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
 def test_downloader_rejects_real_symlink_into_git_metadata(tmp_path: Path) -> None:
     """The user-facing downloader must reject generated Git metadata targets."""
     bare = _commit_symlink_repo(tmp_path, "../../.git/config")
@@ -203,13 +203,13 @@ def test_downloader_rejects_real_symlink_into_git_metadata(tmp_path: Path) -> No
     )
     target = tmp_path / "installed"
 
-    with pytest.raises(PathTraversalError, match="not a tracked file in the checked-out commit"):
+    with pytest.raises(RuntimeError, match="is not a tracked file or directory"):
         downloader.download_subdirectory_package(dep, target)
 
     assert not target.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Git materializes plain files by default on Windows")
+@pytest.mark.skipif(os.name == "nt", reason="The fixture commits links through OS symlinks")
 def test_downloader_treats_colon_prefixed_package_path_literally(tmp_path: Path) -> None:
     """Git pathspec magic must not hide an external package symlink."""
     outside = tmp_path / "outside.txt"
@@ -239,5 +239,47 @@ def test_downloader_treats_colon_prefixed_package_path_literally(tmp_path: Path)
         virtual_path=package_path,
     )
 
-    with pytest.raises(PathTraversalError, match="outside the allowed base directory"):
+    with pytest.raises(PathTraversalError, match="resolves outside the repository"):
         downloader.download_subdirectory_package(dep, tmp_path / "installed")
+
+
+def test_full_clone_fallback_materializes_out_of_cone_links(tmp_path: Path) -> None:
+    """When sparse checkout fails, the full-clone fallback still installs link content."""
+    from apm_cli.utils.git_env import clone_git_worktree
+    from tests.utils.git_link_fixture import (
+        EXPECTED_PKG,
+        bare_clone,
+        build_link_origin,
+        neutral_git_env,
+        tree_bytes,
+    )
+
+    origin, sha = build_link_origin(tmp_path)
+    bare = bare_clone(origin, tmp_path / "origin.git")
+    env = neutral_git_env()
+    downloader = object.__new__(GitHubPackageDownloader)
+    downloader.install_logger = None
+    downloader.shared_clone_cache = None
+    downloader.persistent_git_cache = None
+    downloader.git_env = env
+    downloader._git_env_dict = lambda: env
+    downloader._try_sparse_checkout = MagicMock(return_value=False)
+    downloader._clone_with_fallback = lambda _url, target, **_kwargs: clone_git_worktree(
+        str(bare), target, env=env
+    )
+    dep = DependencyReference(
+        repo_url="owner/repo", reference=sha, is_virtual=True, virtual_path="pkg"
+    )
+    target = tmp_path / "installed"
+
+    # The fixture is a link fixture, not a complete APM package; this test
+    # asserts the materialized copy, not primitive validation.
+    with (
+        patch("apm_cli.deps.github_downloader.validate_apm_package"),
+        patch("apm_cli.deps._shared._validate_and_load_package"),
+        patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+    ):
+        downloader.download_subdirectory_package(dep, target)
+
+    downloader._try_sparse_checkout.assert_called_once()
+    assert tree_bytes(target) == EXPECTED_PKG
