@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
-from .git_env import git_line_ending_pin_args
+from .git_env import git_line_ending_pin_args, run_git_text
 from .path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -510,10 +510,9 @@ def sparse_checkout_active(
 ) -> bool:
     """Return whether Git still considers *repo_dir* a sparse checkout."""
     head = [git_exe, *(extra_git_args or [])]
-    result = subprocess.run(
+    result = run_git_text(
         [*head, "-C", str(repo_dir), "config", "--bool", "core.sparseCheckout"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=False,
@@ -552,18 +551,16 @@ def apply_sparse_cone(
     if not paths:
         return
     head = [git_exe, *(extra_git_args or [])]
-    subprocess.run(
+    run_git_text(
         [*head, "-C", str(repo_dir), "sparse-checkout", "init", "--cone"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=True,
     )
-    subprocess.run(
+    run_git_text(
         [*head, "-C", str(repo_dir), "sparse-checkout", "set", *paths],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=True,

@@ -44,9 +44,9 @@ Rules:
   and processing / classification labels. Never assign. Never
   request reviewers. Do not call `gh pr comment` yourself.
   Do not write `status/accepted`, `status/needs-design`, or
-  `status/needs-triage`. Write `status/deferred` only when this
-  PR is not labelled `status/accepted` and has no same-repo
-  linked issue labelled `status/accepted`.
+  `status/needs-triage` or `status/deferred`. A defer
+  recommendation belongs only in the advisory comment; a human
+  decides whether to apply `status/deferred`.
 - `json` defaults to `off` when omitted or unknown. Omitted `json`
   is not a missing-field stop.
 - `json: off` -> no machine JSON receipt.
@@ -97,14 +97,14 @@ classification labels from the contract. Never write
 `status/accepted`, `status/needs-design`, or
 `status/needs-triage`.
 
-Auto-defer: if this PR is not labelled `status/accepted` and
-has no same-repo linked issue labelled `status/accepted`, add
-`status/deferred` (`write: on` only).
-Do not overwrite `status/accepted` already on the PR. Linked
-means `Fixes` / `Closes` / `#N` in the body or commits, or
-GitHub `closingIssuesReferences`, same repository. Any one
-accepted linked issue or `status/accepted` on the PR blocks
-auto-defer.
+When neither this PR nor a same-repo linked issue is labelled
+`status/accepted`, recommend `needs-issue` and explain that a
+human must review and accept scope before implementation. If
+deferral is appropriate, recommend it in the advisory comment;
+never write `status/deferred`. Linked means `Fixes` / `Closes` /
+`#N` in the body or commits, or GitHub `closingIssuesReferences`,
+same repository. An accepted linked issue or `status/accepted` on
+the PR blocks the `needs-issue` recommendation.
 
 CODEOWNERS `reviewRequests` is runtime authority. Note owners in
 the comment. Never add or remove review requests.
@@ -131,11 +131,11 @@ conversation, no-op (do not post a duplicate).
    `auto-handle`.
 4. Neither this PR nor a linked same-repo issue is
    `status/accepted` -> recommend `needs-issue`,
-   add `status/deferred` when `write: on`, and thank the author.
-   Invite them to open an issue for maintainer review and
-   acceptance first, per CONTRIBUTING.md ("Start with an issue,
-   not an implementation."). Link
-   https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md
+   thank the author, and invite them to open an issue for
+   maintainer review and acceptance first, per CONTRIBUTING.md
+   ("Start with an issue, not an implementation."). Link
+   https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md.
+   Do not add `status/deferred`; any deferral is a human decision.
 5. `ready-for-review` when this PR or a linked same-repo issue is
    `status/accepted`. It is not merge approval and is not a
    request to run `autopilot-pr-review-scheduler`.
@@ -157,6 +157,5 @@ conversation, no-op (do not post a duplicate).
 - Do not run `autopilot-pr-review-worker` or `autopilot-pr-merge-worker`.
 - Do not contradict CODEOWNERS.
 - Do not treat labels or this comment as `status/accepted`.
-- Do not write `status/deferred` when a linked issue is
-  `status/accepted` or the PR already has `status/accepted`.
+- Never write `status/deferred` or any other human-decision label.
 - ASCII only.

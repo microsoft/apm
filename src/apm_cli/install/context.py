@@ -249,6 +249,11 @@ class InstallContext:
     cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)
 
     # ------------------------------------------------------------------
+    # Failed-install residue report (#3525)
+    # ------------------------------------------------------------------
+    install_finished: bool = False  # finalize returned a non-FAILED result
+
+    # ------------------------------------------------------------------
     # TUI controller (PR #1116, workstream B): one Live region for the
     # whole pipeline.  Phases call ``ctx.tui.start_phase(...)`` /
     # ``ctx.tui.task_started(...)`` / ``ctx.tui.task_completed(...)``;
