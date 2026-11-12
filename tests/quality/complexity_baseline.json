@@ -59,10 +59,20 @@
         "PLR0915"
       ]
     },
+    "src/apm_cli/bundle/local_bundle.py": {
+      "detect_local_bundle": [
+        "PLR0911"
+      ]
+    },
     "src/apm_cli/bundle/packer.py": {
       "pack_bundle": [
         "C901",
         "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/bundle/plugin_exporter.py": {
+      "export_plugin_bundle": [
         "PLR0915"
       ]
     },
@@ -124,7 +134,8 @@
     },
     "src/apm_cli/commands/deps/cli.py": {
       "_resolve_scope_deps": [
-        "C901"
+        "C901",
+        "PLR0915"
       ]
     },
     "src/apm_cli/commands/find.py": {
@@ -137,6 +148,9 @@
         "C901",
         "PLR0912",
         "PLR0915"
+      ],
+      "init": [
+        "PLR0913"
       ]
     },
     "src/apm_cli/commands/install.py": {
@@ -165,6 +179,11 @@
     "src/apm_cli/commands/lifecycle.py": {
       "_validate_script_file": [
         "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/marketplace/__init__.py": {
+      "add": [
+        "PLR0915"
       ]
     },
     "src/apm_cli/commands/outdated.py": {
@@ -540,12 +559,25 @@
         "PLR0911"
       ]
     },
+    "src/apm_cli/policy/_gitlab.py": {
+      "_fetch_gitlab_ancestry": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/policy/_remote.py": {
+      "_parse_remote_url": [
+        "PLR0911"
+      ]
+    },
     "src/apm_cli/policy/ci_checks.py": {
       "run_baseline_checks": [
         "PLR0911"
       ]
     },
     "src/apm_cli/policy/discovery.py": {
+      "_extract_extends_host": [
+        "PLR0911"
+      ],
       "_fetch_from_ado_repo": [
         "PLR0911"
       ],
@@ -553,9 +585,6 @@
         "PLR0911"
       ],
       "_fetch_github_contents": [
-        "PLR0911"
-      ],
-      "_parse_remote_url": [
         "PLR0911"
       ]
     },
