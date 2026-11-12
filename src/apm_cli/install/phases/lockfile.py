@@ -148,6 +148,8 @@ class LockfileBuilder:
             self._attach_content_hashes(lockfile)
             # Attach declared-license provenance captured at acquire time (U6)
             self._attach_declared_licenses(lockfile)
+            # Attach verbatim licence copies carried at materialization (#3556)
+            self._attach_carried_licenses(lockfile)
             # Attach marketplace provenance if available
             self._attach_marketplace_provenance(lockfile)
             # Selectively merge entries from the existing lockfile:
@@ -422,6 +424,12 @@ class LockfileBuilder:
         for dep_key, declared in self.ctx.package_declared_licenses.items():
             if dep_key in lockfile.dependencies and declared:
                 lockfile.dependencies[dep_key].declared_license = declared
+
+    def _attach_carried_licenses(self, lockfile: LockFile) -> None:
+        """Attach the licence copies carried into each materialized package (#3556)."""
+        for dep_key, carried in self.ctx.package_carried_licenses.items():
+            if dep_key in lockfile.dependencies:
+                lockfile.dependencies[dep_key].carried_licenses = tuple(carried)
 
     def _attach_marketplace_provenance(self, lockfile: LockFile) -> None:
         # Canonical manifest entries do not rediscover their marketplace on
