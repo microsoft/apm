@@ -144,7 +144,7 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
     - acme/lib: bare branch 'main' tracks a moving tip
 ```
 
-Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; a first segment containing a dot is a host). Wildcards via shell-style globs, e.g. `contoso/*`.
+Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; a first segment that contains a dot and does not start with one is a host). Wildcards via shell-style globs, e.g. `contoso/*`.
 
 ## mcp
 

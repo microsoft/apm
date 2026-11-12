@@ -104,14 +104,15 @@ dependencies:
     - "github.com/example-org/**"    # only example-org on github.com
 ```
 
-- A first segment containing a dot is a host; dotted GitLab groups need
-  their host (`gitlab.com/my.group/**`).
-- Hosts match exactly (case and port ignored); no lookalike or subdomain
+- A first segment containing a dot (and not starting with one) is a host;
+  dotted GitLab groups need their host (`gitlab.com/my.group/**`), and
+  `./` or `../` local-path patterns stay hostless.
+- Hosts match exactly (case and port ignored, also in `GITHUB_HOST`); no lookalike or subdomain
   matches, no wildcards in the host segment.
 - Shorthand, HTTPS and SSH forms of a package give the same result.
 - Hostless patterns (`contoso/**`) keep matching every host.
-- Enforced at install and by `apm audit` (manifest deps plus lockfile
-  transitives).
+- Enforced at install and by `apm audit` (direct deps incl. dev deps and
+  `replace` sources, plus lockfile transitives).
 
 ## Registry source governance (experimental)
 

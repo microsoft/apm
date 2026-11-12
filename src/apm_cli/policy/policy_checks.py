@@ -1240,8 +1240,9 @@ def run_dependency_policy_checks(
         manifest deps) every dep in ``deps_to_install`` is evaluated.
     source_deps:
         Optional dependency set for the allow/deny source checks. Defaults
-        to ``deps_to_install``. The audit wrapper passes manifest deps plus
-        locked transitive deps so every installed source is gated.
+        to ``deps_to_install``. The audit wrapper passes effective direct deps
+        (production, dev, and ``replace``-selected sources) plus locked
+        transitive deps so every installed source is gated.
 
     Returns
     -------
@@ -1346,9 +1347,17 @@ def run_dependency_policy_checks(
     return result
 
 
-def _audit_source_dependencies(apm_deps, lock: LockFile | None) -> list:
-    """Return manifest deps plus locked transitive deps for source checks."""
-    deps = list(apm_deps)
+def _audit_source_dependencies(manifest, lock: LockFile | None) -> list:
+    """Return effective direct deps plus locked transitive deps for source checks.
+
+    Direct production and dev declarations are projected through the
+    manifest's ``replace`` rules, so the selected source (not the original)
+    is gated, as install does.  Raises ``ValueError`` when the replacement
+    table cannot be bound.
+    """
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    deps = project_manifest_dependencies(manifest)
     if lock is None:
         return deps
     seen = {dep.get_unique_key() for dep in deps}
@@ -1410,6 +1419,18 @@ def run_policy_checks(
     # because the wrapper has the on-disk manifest.  The install pipeline
     # will pass effective_target directly (W2-target-aware).
 
+    try:
+        source_deps = _audit_source_dependencies(manifest, lock)
+    except ValueError as exc:
+        result.checks.append(
+            CheckResult(
+                name="dependency-sources",
+                passed=False,
+                message=f"Cannot resolve dependency sources from apm.yml: {exc}",
+            )
+        )
+        return result
+
     # -- Delegate dependency + MCP checks to shared seam ---------------
     dep_result = run_dependency_policy_checks(
         apm_deps,
@@ -1420,7 +1441,7 @@ def run_policy_checks(
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
         registries=getattr(manifest, "registries", None),
-        source_deps=_audit_source_dependencies(apm_deps, lock),
+        source_deps=source_deps,
     )
     result.checks.extend(dep_result.checks)
 

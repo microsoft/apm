@@ -131,6 +131,13 @@ class TestExplicitHostDependencies:
     def test_host_qualified_patterns_never_match_local_dependencies(self) -> None:
         assert not _allowed("./packages/x", allow=("github.com/**",))
 
+    def test_default_host_port_is_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example:8443")
+        assert DependencyReference.parse("team/repo").policy_host == "ghes.corp.example"
+        assert _allowed("team/repo", allow=("ghes.corp.example/**",))
+        assert not _allowed("team/repo", deny=("ghes.corp.example/**",))
+        assert not _allowed("team/repo", allow=("github.com/**",))
+
 
 class TestReferenceFormsAreEquivalent:
     @pytest.mark.parametrize(
@@ -196,10 +203,21 @@ class TestHostRecognitionRule:
             ("gitlab.com/my.group/**", ("gitlab.com", "my.group/**")),
             ("my.group/**", ("my.group", "**")),
             ("github.com", (None, "github.com")),
+            ("./packages/**", (None, "./packages/**")),
+            ("../shared/**", (None, "../shared/**")),
+            (".hidden.example/**", (None, ".hidden.example/**")),
         ],
     )
     def test_first_segment_with_a_dot_is_the_host(self, pattern, expected) -> None:
         assert split_policy_pattern_host(pattern) == expected
+
+    @pytest.mark.parametrize(
+        ("raw", "pattern"),
+        [("./packages/x", "./packages/**"), ("../shared/lib", "../shared/**")],
+    )
+    def test_relative_local_path_patterns_stay_hostless(self, raw: str, pattern: str) -> None:
+        assert _allowed(raw, allow=(pattern,))
+        assert not _allowed(raw, deny=(pattern,))
 
     def test_dotted_gitlab_group_requires_host_qualification(self) -> None:
         assert _allowed("gitlab.com/my.group/repo", allow=("gitlab.com/my.group/**",))
@@ -276,6 +294,56 @@ class TestTransitiveDependencies:
         denylist = next(c for c in result.checks if c.name == "dependency-denylist")
         assert not denylist.passed
         assert denylist.details[0].startswith("ghes.corp.example/example-org/lib:")
+
+
+class TestAuditDirectSources:
+    def _audit_allowlist(self, root: Path, manifest: str):
+        (root / "apm.yml").write_text(textwrap.dedent(manifest), encoding="utf-8")
+        policy = ApmPolicy(dependencies=DependencyPolicy(allow=ENTERPRISE_ALLOW))
+        result = run_policy_checks(root, policy, fail_fast=False)
+        return next(c for c in result.checks if c.name == "dependency-allowlist")
+
+    def test_audit_gates_replacement_source_host(self, tmp_path: Path) -> None:
+        allowlist = self._audit_allowlist(
+            tmp_path,
+            """\
+            $schema: "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+            name: demo
+            version: 1.0.0
+            dependencies:
+              apm:
+                - example-org/app
+            replace:
+              - for:
+                  git: https://github.com/example-org/app
+                with:
+                  git: https://ghes.unapproved.example/example-org/app
+                  ref: patched
+            """,
+        )
+        assert not allowlist.passed
+        assert allowlist.details == [
+            "ghes.unapproved.example/example-org/app: not in allowed sources"
+        ]
+
+    def test_audit_gates_direct_dev_dependency_host(self, tmp_path: Path) -> None:
+        allowlist = self._audit_allowlist(
+            tmp_path,
+            """\
+            name: demo
+            version: 1.0.0
+            dependencies:
+              apm:
+                - example-org/app
+            devDependencies:
+              apm:
+                - ghes.unapproved.example/example-org/tool
+            """,
+        )
+        assert not allowlist.passed
+        assert allowlist.details == [
+            "ghes.unapproved.example/example-org/tool: not in allowed sources"
+        ]
 
 
 def test_direct_and_denylist_details_name_the_effective_host() -> None:

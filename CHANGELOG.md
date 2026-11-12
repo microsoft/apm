@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Dependency policy `allow`/`deny` patterns can name a host, e.g. `github.com/example-org/**` or `ghes.corp.example/**`. Every direct and transitive dependency is matched exactly against its written host, or the default host (`GITHUB_HOST`, else `github.com`), at install and in `apm audit`, which now also checks transitive entries in `apm.lock.yaml`; violations name the host. Hostless patterns still match any host. A pattern whose first segment contains a dot is now read as a host, so write dotted GitLab groups as `gitlab.com/my.group/**`. (#3606)
+- Dependency policy `allow`/`deny` patterns can name a host, e.g. `github.com/example-org/**` or `ghes.corp.example/**`. Every direct and transitive dependency is matched exactly against its written host, or the default host (`GITHUB_HOST`, else `github.com`), at install and in `apm audit`, which now also checks dev dependencies, `replace`-selected sources and transitive entries in `apm.lock.yaml`; violations name the host. Hostless patterns still match any host. A pattern whose first segment contains a dot (and does not start with one) is now read as a host, so write dotted GitLab groups as `gitlab.com/my.group/**`; `./` and `../` local-path patterns are unchanged. (#3606)
 
 ### Changed
 

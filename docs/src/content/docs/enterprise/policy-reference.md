@@ -415,13 +415,13 @@ With this policy, `example-org/repo` is allowed only while the default host is `
 
 | Rule | Behavior |
 |------|----------|
-| Host recognition | The first segment is a host if and only if it contains a dot. Write dotted GitLab groups with their host: `gitlab.com/my.group/**`. |
-| Exact host | Hosts compare exactly, ignoring case and port. `ghes.corp.example` does not match `ghes.corp.example.evil.test` or `x.ghes.corp.example`. Wildcards are not expanded in the host segment. |
+| Host recognition | The first segment is a host if and only if it contains a dot and does not start with one. Write dotted GitLab groups with their host: `gitlab.com/my.group/**`. Relative local-path patterns such as `./packages/**` stay hostless. |
+| Exact host | Hosts compare exactly, ignoring case and port (including a port in `GITHUB_HOST`). `ghes.corp.example` does not match `ghes.corp.example.evil.test` or `x.ghes.corp.example`. Wildcards are not expanded in the host segment. |
 | Reference forms | `owner/repo`, `github.com/owner/repo`, `https://...` and `git@...:` forms of the same package give the same result. |
 | Hostless patterns | Unchanged: `contoso/**` still matches `contoso/*` repositories on **any** host. Use a host-qualified pattern to restrict the host. |
 | Local paths | Never match host-qualified patterns. |
 
-Install checks every resolved dependency; `apm audit` checks manifest dependencies plus the transitive entries in `apm.lock.yaml`. Violation details show the host, e.g. `ghes.other.example/example-org/repo: not in allowed sources`.
+Install checks every resolved dependency; `apm audit` checks direct dependencies (including `devDependencies` and the source selected by `replace`) plus the transitive entries in `apm.lock.yaml`. Violation details show the host, e.g. `ghes.other.example/example-org/repo: not in allowed sources`.
 
 Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. A `null` allow list permits everything not denied; an empty allow list permits nothing.
 

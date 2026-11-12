@@ -1803,14 +1803,17 @@ section's pattern grammar. It MUST NOT add character-class, brace, or
 escape expansion.
 
 (g) A `dependencies.allow` or `dependencies.deny` pattern whose first
-U+002F-separated segment contains U+002E is host-qualified. That
+U+002F-separated segment contains U+002E and does not begin with
+U+002E is host-qualified; a pattern beginning with `./` or `../` is
+therefore a hostless local-path pattern. That
 segment, with any `:port` suffix removed, names a host; the remaining
 segments are the path pattern matched under clauses (a) through (f).
 A host-qualified pattern matches a dependency only when the
 dependency's effective host equals the named host after mapping only
 U+0041 through U+005A to U+0061 through U+007A. The effective host is
 the host written in the dependency reference or, when none is written,
-the implementation's configured default host. Ports are ignored, the
+the implementation's configured default host, with any `:port` suffix
+removed. Ports are ignored on both sides, the
 host segment is compared literally with no wildcard expansion, and no
 other host (including a subdomain or a longer name sharing a prefix)
 matches. Local-path dependencies have no host and never match a
