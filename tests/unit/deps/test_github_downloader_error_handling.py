@@ -28,6 +28,17 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked clones carry no Git objects; real-git tests cover link materialization."""
+    with (
+        patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
 # ---------------------------------------------------------------------------
@@ -1249,9 +1260,7 @@ class TestDownloadPackage:
             patch("apm_cli.deps.github_downloader.checkout_git_worktree") as checkout,
         ):
             downloader.download_package(dep, tmp_path / "pkg")
-        checkout.assert_called_once_with(
-            tmp_path / "pkg", sha, env=downloader.git_env, package=str(dep)
-        )
+        checkout.assert_called_once_with(tmp_path / "pkg", sha, env=downloader.git_env)
 
     def test_virtual_artifactory_subdir_routes_to_artifactory(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
