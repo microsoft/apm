@@ -144,7 +144,7 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
     - acme/lib: bare branch 'main' tracks a moving tip
 ```
 
-Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
+Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; a first segment containing a dot is a host). Wildcards via shell-style globs, e.g. `contoso/*`.
 
 ## mcp
 
@@ -332,7 +332,7 @@ For every `allow:` field, the three states are distinct:
 
 `allow`, `deny`, and exact `require` patterns match on each dependency's canonical identity casing, not the pattern's literal case. GitHub owner/repository identities, and registry-backed identities (already canonicalized that way), compare case-insensitively -- `Contoso/Repo` and `contoso/repo` are the same package. Non-GitHub git hosts, ADO, local paths, marketplace identities, virtual in-repository subpaths (the path segment after `owner/repo`), Git refs/version strings (after `#`), MCP server names, and registry *names* stay case-sensitive.
 
-Dependency patterns use host-blind package names, so write `owner/repo` rather than `github.com/owner/repo`. Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
+A hostless pattern such as `owner/repo` matches that package on any host; a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. See [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns). Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
 
 For example, a mixed-case `deny` written as `**/Secure-Baseline` does not fire against the canonical lowercase repository name; write the owner/repository prefix first. A mixed-case owner-prefix deny that older releases failed to match can correctly surface new violations after upgrade.
 

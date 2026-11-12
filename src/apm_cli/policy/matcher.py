@@ -7,7 +7,10 @@ from collections.abc import Callable, Iterable
 from functools import lru_cache
 from typing import Protocol
 
-from ..models.dependency.identity import normalize_package_policy_identity
+from ..models.dependency.identity import (
+    normalize_package_policy_identity,
+    split_policy_pattern_host,
+)
 from .schema import DependencyPolicy, McpPolicy
 
 
@@ -17,6 +20,11 @@ class _DependencyPolicySubject(Protocol):
     @property
     def case_insensitive_identity_prefix_segments(self) -> int:
         """Return the repository-prefix length with presentation-only casing."""
+        ...
+
+    @property
+    def policy_host(self) -> str | None:
+        """Return the effective host for host-qualified patterns, or ``None``."""
         ...
 
     def get_canonical_dependency_string(self) -> str:
@@ -145,20 +153,36 @@ def _first_matching_dependency_pattern(
     dependency: _DependencyPolicySubject,
     patterns: tuple[str, ...] | None,
 ) -> str | None:
-    """Return the first pattern matching one dependency's identity semantics."""
+    """Return the first pattern matching one dependency's identity semantics.
+
+    A host-qualified pattern applies only when its host equals the
+    dependency's effective host; its remaining path is matched like a hostless
+    pattern. Hostless patterns match the dependency on any host.
+    """
     prefix_segments = dependency.case_insensitive_identity_prefix_segments
     canonical_ref = normalize_package_policy_identity(
         dependency.get_canonical_dependency_string(),
         case_insensitive_prefix_segments=prefix_segments,
     )
+    dependency_host = dependency.policy_host
     for pattern in patterns or ():
+        pattern_host, path_pattern = split_policy_pattern_host(pattern)
+        if pattern_host is not None and pattern_host != dependency_host:
+            continue
         normalized_pattern = normalize_package_policy_identity(
-            pattern,
+            path_pattern,
             case_insensitive_prefix_segments=prefix_segments,
         )
         if matches_pattern(canonical_ref, normalized_pattern):
             return pattern
     return None
+
+
+def dependency_policy_subject(dependency: _DependencyPolicySubject) -> str:
+    """Return the host-qualified identity that dependency diagnostics display."""
+    canonical_ref = dependency.get_canonical_dependency_string()
+    host = dependency.policy_host
+    return f"{host}/{canonical_ref}" if host else canonical_ref
 
 
 def check_dependency_allowed(

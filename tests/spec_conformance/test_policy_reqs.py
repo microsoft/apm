@@ -356,6 +356,45 @@ def test_policy_provides_default_deny_list_shape():
 
 
 @pytest.mark.req("req-pl-018")
+def test_policy_host_qualified_patterns_match_effective_host(monkeypatch):
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.policy_checks import (
+        _check_dependency_allowlist,
+        _check_dependency_denylist,
+    )
+    from apm_cli.policy.schema import DependencyPolicy
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    allow = DependencyPolicy(allow=("ghes.corp.example/**", "github.com/example-org/**"))
+
+    def allowed(raw: str) -> bool:
+        return _check_dependency_allowlist([DependencyReference.parse(raw)], allow).passed
+
+    for raw in (
+        "example-org/repo",
+        "https://github.com/example-org/repo.git",
+        "git@github.com:example-org/repo.git",
+        "GHES.corp.example:8443/team/repo",
+    ):
+        assert allowed(raw), raw
+    for raw in (
+        "github.com/other-org/repo",
+        "ghes.corp.example.evil.test/team/repo",
+        "evil.ghes.corp.example/team/repo",
+        "./packages/local",
+    ):
+        assert not allowed(raw), raw
+
+    hostless = DependencyPolicy(deny=("example-org/**",))
+    assert not _check_dependency_denylist(
+        [DependencyReference.parse("gitlab.com/example-org/repo")], hostless
+    ).passed
+
+    monkeypatch.setenv("GITHUB_HOST", "ghes.other.example")
+    assert not allowed("example-org/repo")
+
+
+@pytest.mark.req("req-pl-018")
 def test_policy_identity_casing_matches_dependency_source_semantics():
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency import DependencyReference

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Dependency policy `allow`/`deny` patterns can name a host, e.g. `github.com/example-org/**` or `ghes.corp.example/**`. Every direct and transitive dependency is matched exactly against its written host, or the default host (`GITHUB_HOST`, else `github.com`), at install and in `apm audit`, which now also checks transitive entries in `apm.lock.yaml`; violations name the host. Hostless patterns still match any host. A pattern whose first segment contains a dot is now read as a host, so write dotted GitLab groups as `gitlab.com/my.group/**`. (#PR_NUMBER)
+
 ### Changed
 
 - Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)

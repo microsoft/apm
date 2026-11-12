@@ -896,8 +896,9 @@ including alias, skill and target selections and every incoming request,
 while using the selected source for transport, authentication, ref
 resolution, cache acquisition, content scanning, integrity and policy
 evaluation. Replacement MUST NOT grant executable consent or bypass
-existing security checks. Existing host-blind policy matching remains
-host-blind, but evaluates the selected package, not the original package.
+existing security checks. Policy matching, including the effective host
+under [req-pl-018](#req-pl-018) clause (g), evaluates the selected package,
+not the original package.
 Original ref constraints are provenance, not constraints on the fully
 substituted source; immutable obligations introduced by the selected
 source's own dependencies still apply.
@@ -1707,7 +1708,7 @@ The `dependencies` policy block governs APM dependency declarations.
 
 | Field                  | Semantic                                                                                  |
 |------------------------|-------------------------------------------------------------------------------------------|
-| `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
+| `allow`                | List of patterns matched against the canonical dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded; a host-qualified pattern also requires the effective host per [req-pl-018](#req-pl-018) clause (g). Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
 | `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
 | `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
@@ -1735,9 +1736,11 @@ range (containing an upper bound); (d) a dependency with
 **[req-pl-018]** A conforming **governance** implementation MUST apply
 the following dependency-policy identity rules:
 
-(a) The match subject is the canonical, host-blind dependency package
-path: its repository coordinate plus any virtual in-repository path,
-with any `#` reference suffix excluded. A registry name is never part
+(a) The match subject is the canonical dependency package path, which
+omits the host: its repository coordinate plus any virtual
+in-repository path, with any `#` reference suffix excluded. A
+host-qualified pattern additionally constrains the host under clause
+(g); a hostless pattern matches the path on every host. A registry name is never part
 of this match subject and is compared literally wherever it appears in
 policy operands. This
 statement governs glob matching for `dependencies.allow` and
@@ -1798,6 +1801,23 @@ pattern-bearing policy field named in
 [Section 6.5](#65-allow-list--deny-list-tri-state-semantics) under that
 section's pattern grammar. It MUST NOT add character-class, brace, or
 escape expansion.
+
+(g) A `dependencies.allow` or `dependencies.deny` pattern whose first
+U+002F-separated segment contains U+002E is host-qualified. That
+segment, with any `:port` suffix removed, names a host; the remaining
+segments are the path pattern matched under clauses (a) through (f).
+A host-qualified pattern matches a dependency only when the
+dependency's effective host equals the named host after mapping only
+U+0041 through U+005A to U+0061 through U+007A. The effective host is
+the host written in the dependency reference or, when none is written,
+the implementation's configured default host. Ports are ignored, the
+host segment is compared literally with no wildcard expansion, and no
+other host (including a subdomain or a longer name sharing a prefix)
+matches. Local-path dependencies have no host and never match a
+host-qualified pattern. Shorthand, HTTPS and SSH references to the
+same repository MUST yield the same result. This clause applies to
+direct and transitive dependencies wherever `dependencies.allow` and
+`dependencies.deny` are evaluated.
 
 #### 6.3.2 `mcp`
 
@@ -3827,10 +3847,11 @@ they intend to deny. The same normalization widens `dependencies.allow`
 matching on a case-insensitive source, so an upgrade can admit a
 case-variant spelling that previously missed. Clause (d) of
 [req-pl-018](#req-pl-018) leaves segments at and after recursive-glob
-ambiguity byte-exact, including on a case-insensitive source. The
-match subject is host-blind, so one policy entry governs the same
-repository path on every reachable host; governance authors relying
-on host separation need an independent host-level control.
+ambiguity byte-exact, including on a case-insensitive source. A
+hostless pattern governs the same repository path on every reachable
+host; clause (g) of [req-pl-018](#req-pl-018) lets governance authors
+bind a pattern to one exact host, including the default host used for
+references written without one.
 
 ### 10.9 Archive path-traversal (zip-slip / symlink escape)
 

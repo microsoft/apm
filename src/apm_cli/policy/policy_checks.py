@@ -89,7 +89,7 @@ def _check_dependency_allowlist(
     policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 1: every dependency matches policy allow list."""
-    from .matcher import check_dependency_allowed
+    from .matcher import check_dependency_allowed, dependency_policy_subject
 
     if policy.allow is None:
         return CheckResult(
@@ -100,7 +100,7 @@ def _check_dependency_allowlist(
 
     violations: list[str] = []
     for dep in deps:
-        ref = dep.get_canonical_dependency_string()
+        ref = dependency_policy_subject(dep)
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "not in allowed" in reason:
             violations.append(f"{ref}: {reason}")
@@ -124,7 +124,7 @@ def _check_dependency_denylist(
     policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 2: no dependency matches policy deny list."""
-    from .matcher import check_dependency_allowed
+    from .matcher import check_dependency_allowed, dependency_policy_subject
 
     if not policy.effective_deny:
         return CheckResult(
@@ -135,7 +135,7 @@ def _check_dependency_denylist(
 
     violations: list[str] = []
     for dep in deps:
-        ref = dep.get_canonical_dependency_string()
+        ref = dependency_policy_subject(dep)
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
             violations.append(f"{ref}: {reason}")
@@ -1191,6 +1191,7 @@ def run_dependency_policy_checks(
     manifest_includes=_INCLUDES_NOT_PROVIDED,
     registries: dict[str, str] | None = None,
     direct_dep_keys: set[str] | None = None,
+    source_deps=None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1237,6 +1238,10 @@ def run_dependency_policy_checks(
         package's own manifest. When ``None`` (legacy dep-only seam
         and the audit wrapper that already iterates direct-only
         manifest deps) every dep in ``deps_to_install`` is evaluated.
+    source_deps:
+        Optional dependency set for the allow/deny source checks. Defaults
+        to ``deps_to_install``. The audit wrapper passes manifest deps plus
+        locked transitive deps so every installed source is gated.
 
     Returns
     -------
@@ -1258,6 +1263,7 @@ def run_dependency_policy_checks(
     """
     result = CIAuditResult()
     deps_list = list(deps_to_install)
+    source_list = deps_list if source_deps is None else list(source_deps)
     mcp_list = list(mcp_deps) if mcp_deps is not None else []
 
     def _run(check: CheckResult) -> bool:
@@ -1266,9 +1272,9 @@ def run_dependency_policy_checks(
         return fail_fast and not check.passed
 
     # -- Dependency checks (1-6) -----------------------------------
-    if _run(_check_dependency_allowlist(deps_list, policy.dependencies)):
+    if _run(_check_dependency_allowlist(source_list, policy.dependencies)):
         return result
-    if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
+    if _run(_check_dependency_denylist(source_list, policy.dependencies)):
         return result
     dep_names = None
     if policy.dependencies.effective_require or (
@@ -1340,6 +1346,20 @@ def run_dependency_policy_checks(
     return result
 
 
+def _audit_source_dependencies(apm_deps, lock: LockFile | None) -> list:
+    """Return manifest deps plus locked transitive deps for source checks."""
+    deps = list(apm_deps)
+    if lock is None:
+        return deps
+    seen = {dep.get_unique_key() for dep in deps}
+    for locked in lock.get_package_dependencies():
+        if locked.depth <= 1 or locked.get_unique_key() in seen:
+            continue
+        seen.add(locked.get_unique_key())
+        deps.append(locked.to_dependency_ref())
+    return deps
+
+
 def run_policy_checks(
     project_root: Path,
     policy: ApmPolicy,
@@ -1400,6 +1420,7 @@ def run_policy_checks(
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
         registries=getattr(manifest, "registries", None),
+        source_deps=_audit_source_dependencies(apm_deps, lock),
     )
     result.checks.extend(dep_result.checks)
 

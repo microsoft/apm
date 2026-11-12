@@ -181,6 +181,36 @@ def normalize_package_policy_identity(
     return f"{normalized_name}{separator}{reference}"
 
 
+def normalize_policy_host(host: str) -> str:
+    """Return the host name compared by host-qualified dependency-policy patterns.
+
+    Host names are case-insensitive. Ports are transport details, so the
+    shorthand, HTTPS and SSH spellings of one host share a policy identity.
+    """
+    return host.strip().translate(_ASCII_LOWER_TRANSLATION)
+
+
+@lru_cache(maxsize=512)
+def split_policy_pattern_host(pattern: str) -> tuple[str | None, str]:
+    """Split a dependency-policy pattern into ``(host, path_pattern)``.
+
+    The first ``/``-separated segment is a host if and only if it contains a
+    dot, mirroring host-qualified dependency shorthand. Owner names on the
+    default host never contain a dot, so a dotted GitLab group must be written
+    with its host (``gitlab.com/my.group/**``). A hostless pattern returns
+    ``None`` as its host. The host segment is matched literally: wildcards are
+    not expanded there, and an optional ``:port`` suffix is ignored.
+    """
+    head, separator, rest = pattern.partition("/")
+    if not separator or "." not in head:
+        return None, pattern
+    try:
+        host, _port = _split_shorthand_host_port(head)
+    except ValueError:
+        host = head
+    return normalize_policy_host(host), rest
+
+
 def build_dependency_unique_key(
     repo_url: str,
     *,

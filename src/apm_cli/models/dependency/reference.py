@@ -50,6 +50,7 @@ from .identity import (
     case_insensitive_identity_prefix_segments,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
+    normalize_policy_host,
 )
 from .materialization import build_materialization_path
 from .object_fields import (
@@ -181,6 +182,17 @@ class DependencyReference(ProviderCoordinateMixin):
             is_local=self.is_local,
             is_marketplace=self.is_marketplace,
         )
+
+    @property
+    def policy_host(self) -> str | None:
+        """Return the effective host compared by host-qualified policy patterns.
+
+        A reference without an explicit host resolves to the configured default
+        host (``GITHUB_HOST`` or ``github.com``). Local paths have no host.
+        """
+        if self.is_local:
+            return None
+        return normalize_policy_host(self.host or default_host())
 
     @property
     def ref_kind(self) -> str | None:
