@@ -1,0 +1,8 @@
+# Inherit the repository ruff contract; relax only the test-fixture rules
+# the root config already relaxes for tests/**.
+extend = "../../pyproject.toml"
+# Keep the cache out of the package dir (it would change the package hash).
+cache-dir = "../../.ruff_cache"
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "S110", "S112", "S603", "S607", "PLR0913"]
