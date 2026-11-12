@@ -29,6 +29,7 @@ from apm_cli.utils.git_env import (
     git_network_env,
     reset_git_cache,
 )
+from apm_cli.utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 
 pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
@@ -318,3 +319,57 @@ def test_bare_materialization_pins_line_endings_without_extra_spawns(
     assert clone_config == ["core.autocrlf=false", "core.eol=lf"]
     config_keys = {argv[argv.index("config") + 1] for argv in calls if "config" in argv}
     assert not config_keys & {"core.autocrlf", "core.eol"}
+
+
+@pytest.mark.parametrize("source", ["host-default", "global", "env-count"])
+def test_link_target_outside_sparse_cone_ignores_host_eol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    origin: tuple[Path, str],
+    source: str,
+) -> None:
+    """A link to a ``text=auto`` file the cone left out resolves to LF bytes.
+
+    The Git-object link resolver (#3457) reads such targets with
+    ``cat-file --filters``. Callers like the downloader pass no ``-c`` pins,
+    so the resolver must apply the line-ending pins itself.
+    """
+    src, _sha = origin
+    env = _neutral_env()
+    ident = ("-c", "user.name=APM Test", "-c", "user.email=test@example.com")
+    target = b"# Shared\n\nLF line.\n"
+    _write(src, "shared/doc.md", target)
+    link_blob = (
+        subprocess.run(
+            [get_git_executable(), "hash-object", "-w", "--stdin"],
+            input=b"../shared/doc.md",
+            cwd=src,
+            env=env,
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode("ascii")
+        .strip()
+    )
+    _git("add", "shared/doc.md", cwd=src, env=env)
+    _git(
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"120000,{link_blob},pkg/doc-link.md",
+        cwd=src,
+        env=env,
+    )
+    _git(*ident, "commit", "-qm", "link outside the cone", cwd=src, env=env)
+    sha = _git("rev-parse", "HEAD", cwd=src, env=env)
+    _host_eol_crlf(tmp_path, monkeypatch, source)
+
+    work = tmp_path / "work"
+    _git("clone", "-q", "--no-checkout", str(src), str(work), cwd=tmp_path, env=dict(os.environ))
+    apply_sparse_cone(get_git_executable(), work, ["pkg"], env=dict(os.environ))
+    checkout_git_worktree(work, sha, env=dict(os.environ))
+    assert not (work / "shared" / "doc.md").exists()
+
+    materialize_tracked_symlinks(get_git_executable(), work, ["pkg"], env=dict(os.environ))
+
+    assert (work / "pkg" / "doc-link.md").read_bytes() == target
