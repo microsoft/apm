@@ -468,6 +468,7 @@ With `PROXY_REGISTRY_ONLY=1`, APM will:
 1. Validate the existing `apm.lock.yaml` at startup and exit with an error if any entry is locked to a direct VCS source (no `registry_prefix`)
 2. Skip the download cache for entries that have no `registry_prefix` (forcing a fresh proxy download)
 3. Raise an error for any package reference that does not route through the configured proxy
+4. Skip ref and version enumeration against the upstream host: semver ranges and `apm view <pkg> versions` fail, so pin exact tags. See [Version enumeration and semver ranges](../../enterprise/registry-proxy/#version-enumeration-and-semver-ranges)
 
 ### Deprecated Artifactory env vars
 
@@ -519,6 +520,8 @@ APM tries unauthenticated access first for public repos to conserve rate limits 
 ```bash
 export GITHUB_TOKEN=ghp_any_valid_token
 ```
+
+For subdirectory packages in public github.com repositories (for example nested Claude plugins), APM checks package markers through `raw.githubusercontent.com`, which does not count against the REST API limit. It calls the Contents API only when no marker is found that way, for example in a private repository.
 
 ### SSO-protected organizations
 

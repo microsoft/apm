@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.35.0"
+version = "0.35.1"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -62,6 +62,9 @@ build = [
 [project.scripts]
 apm = "apm_cli.entrypoint:main"
 
+[tool.setuptools]
+license-files = ["LICENSE", "LICENSE-DOCS", "LICENSING.md", "NOTICE"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["apm_cli*"]
@@ -71,6 +74,12 @@ include = ["apm_cli*"]
 # Delivery no longer depends on this (ensure_child_tls_bootstrap generates the
 # .pth inline), but packaging it keeps the source tree and wheel in sync.
 "apm_cli.core._child_tls" = ["*.pth"]
+
+[tool.uv]
+# filelock >=4.2.1 (the first release with the GHSA-v4x8-3wr5-3wq8 family of
+# fixes) requires Python >=3.11. Keep Python 3.10 on the 3.x line already
+# shipped (3.29.0) rather than resolving to the vulnerable 4.1.x releases.
+constraint-dependencies = ["filelock==3.29.0; python_version < '3.11'"]
 
 [tool.ruff]
 line-length = 100

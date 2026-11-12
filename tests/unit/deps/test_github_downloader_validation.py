@@ -819,7 +819,7 @@ class TestSubdirectoryProbeOrder:
         dep_ref = _make_subdir_dep(vpath="collections/writing", ref="main")
 
         # Whitelist only `<vpath>/apm.yml`; everything else 404s.
-        def fake_download(_dr, path, _ref):
+        def fake_download(_dr, path, _ref, **kwargs):
             if path == "collections/writing/apm.yml":
                 return b"name: writing\nversion: 1.0.0\n"
             raise RuntimeError("404")

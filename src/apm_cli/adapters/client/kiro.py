@@ -208,12 +208,15 @@ class KiroClientAdapter(CopilotClientAdapter):
             )
             return True
 
+        # Fallback key for the error message when the registry lookup raises.
         config_key = self._determine_config_key(server_url, server_name)
 
         try:
             server_info = self._fetch_server_info(server_url, server_info_cache)
             if server_info is None:
                 return False
+
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             self._last_env_placeholder_keys = set()
             self._last_legacy_angle_vars = set()

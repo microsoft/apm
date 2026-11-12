@@ -1194,8 +1194,16 @@ class DownloadDelegate:
         file_path: str,
         ref: str,
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
-        """Fetch one github.com file anonymously, resolving auth only on 4xx."""
+        """Fetch one github.com file anonymously, resolving auth only on 4xx.
+
+        With ``raw_only=True`` the Contents API fallback is skipped: the
+        helper reports a miss (``RuntimeError``) when the raw CDN does not
+        have the file under any candidate ref.  This is the request-budget
+        seam used by virtual-package validation (microsoft/apm#3283) so a
+        CDN-only marker sweep never spends the shared anonymous REST quota.
+        """
         host = dep_ref.host or default_host()
         owner_repo = repository_owner_and_repo(dep_ref.repo_url)
         if owner_repo is None:
@@ -1211,6 +1219,15 @@ class DownloadDelegate:
                 if verbose_callback:
                     verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                 return content
+
+        if raw_only:
+            # Raw-CDN-only callers (virtual-package marker sweep) must not
+            # escalate a miss to the Contents API: that is the exact
+            # per-marker anonymous-quota waste this seam exists to avoid.
+            raise RuntimeError(
+                f"File {file_path} not found via raw CDN at ref {ref}"
+                f" (refs tried: {', '.join(refs)})"
+            )
 
         def _contents_request(
             token: str | None,
@@ -1325,6 +1342,7 @@ class DownloadDelegate:
         file_path: str,
         ref: str = "main",
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Download a file from GitHub repository.
 
@@ -1338,6 +1356,11 @@ class DownloadDelegate:
             file_path: Path to file within the repository
             ref: Git reference (branch, tag, or commit SHA)
             verbose_callback: Optional callable for verbose logging
+            raw_only: Skip the Contents API fallback and report a miss via
+                ``RuntimeError`` when the raw CDN does not have the file.
+                Only honored on the public-github anonymous-first path (the
+                sole caller is virtual-package validation, microsoft/apm#3283);
+                all other paths keep their existing behavior.
 
         Returns:
             bytes: File content
@@ -1357,6 +1380,7 @@ class DownloadDelegate:
                 file_path,
                 ref,
                 verbose_callback,
+                raw_only=raw_only,
             )
 
         # Parse owner/repo from repo_url

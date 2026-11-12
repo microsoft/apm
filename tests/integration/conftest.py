@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import platform as _platform
+import re
 import shutil
 import subprocess
 import sys
@@ -290,8 +291,8 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
 
 
 @cache
-def _has_runtime_version(name: str, version: str) -> bool:
-    """Qualify an optional marker version without starting a runtime session."""
+def _has_runtime_version(name: str, minimum: str) -> bool:
+    """Require a stable release at or above a marker minimum without starting a session."""
     executable = shutil.which(name)
     if executable is None:
         return False
@@ -301,7 +302,12 @@ def _has_runtime_version(name: str, version: str) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return result.returncode == 0 and result.stdout.strip().split()[-1:] == [version]
+    words = result.stdout.split()
+    if result.returncode or not words:
+        return False
+    found = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", words[-1])
+    floor = tuple(int(part) for part in minimum.split("."))
+    return found is not None and tuple(int(part) for part in found.groups()) >= floor
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -319,12 +325,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             if (
                 marker
                 and marker_name.startswith("requires_runtime_")
-                and marker.kwargs.get("version")
+                and marker.kwargs.get("min_version")
             ):
                 runtime = marker_name.removeprefix("requires_runtime_")
-                version = marker.kwargs["version"]
-                if not _has_runtime_version(runtime, version):
-                    item.add_marker(pytest.mark.skip(reason=f"{runtime} {version} required"))
+                minimum = marker.kwargs["min_version"]
+                if not _has_runtime_version(runtime, minimum):
+                    item.add_marker(
+                        pytest.mark.skip(reason=f"{runtime} {minimum} or later required")
+                    )
 
 
 @pytest.fixture(scope="session")
