@@ -127,7 +127,7 @@ Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
-### Claude Code profiles
+### Claude Code and Codex profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
 removes a package's files and lockfile rows only under the selected

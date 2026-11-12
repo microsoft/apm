@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` and `apm update` now write untyped flat command hooks as Codex `"type": "command"` handlers in `.codex/hooks.json`, as Codex's hook schema requires, including alongside Codex-shaped hook files. Reinstalling replaces older APM-owned untyped entries; explicit types, already-nested source handlers, manual hooks and other targets are unchanged. -- by @Parth-Vasave (#3385)
 - `apm install -g` and `apm update -g` for Cursor now deploy package instructions as `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context, instead of skipping them; `apm uninstall -g` removes only package-owned rules. As at project scope, an existing rule with the same name as a package rule is replaced on install. -- by @yahavi (#2506)
 - `apm install --update` and other same-process re-downloads of a Claude marketplace plugin (no `apm.yml` of its own) now stamp the re-materialized tree with the short commit SHA, as the first download does, so the `content_hash` recorded in `apm.lock.yaml` matches the installed files and a later fresh install passes the integrity check. If a lockfile already recorded an unstamped hash, run `apm install --update` once to re-record it. -- by @McNultyyy (#2627)
+- `apm compile --global` and `apm install -g` honor an absolute `CODEX_HOME` for Codex `AGENTS.md`, agents and hooks; unset or blank keeps `~/.codex`, a relative value fails before writing, skills stay in `~/.agents/skills/`, and switching `CODEX_HOME` keeps files deployed to other Codex homes. -- by @xubenqiang (#3491, #3653)
 
 ### Security
 
@@ -131,7 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt authoring, `copilot` target and packaged `apm-usage` docs now state that `.github/prompts/` files load only in VS Code Local harness sessions, not the Copilot harness or Copilot CLI, and show the skill alternative with `disable-model-invocation: true`; prompt deployment is unchanged. (#3550)
 - The devcontainer README no longer advertises the `ghcr.io/microsoft/apm/apm-cli` feature, which is not published to GHCR, and points to the supported ways to use APM in a dev container. (#3526)
 - The lockfile spec now shows `deployed_file_hashes` and `local_deployed_file_hashes` values in the `sha256:<hex>` form APM writes instead of bare hex. (#3519)
-- `apm compile --global` writes Codex instructions to `$CODEX_HOME/AGENTS.md` when `CODEX_HOME` is set, and `apm install -g` places Codex agents and hooks in the same directory as its MCP config; unset or blank keeps `~/.codex`, a relative value fails before writing, and skills stay in `~/.agents/skills/`; switching `CODEX_HOME` keeps files deployed to other Codex homes. -- by @xubenqiang (#3491, #3653)
 
 ## [0.35.0] - 2026-10-22
 
