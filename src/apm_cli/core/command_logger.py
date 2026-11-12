@@ -124,6 +124,7 @@ class CommandLogger:
         split exists so future quiet-mode policy can drop ``progress``
         without dropping advisory context.
         """
+        # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
         if soft_wrap:
             _rich_info(message, symbol=symbol, soft_wrap=True)
             return

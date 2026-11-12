@@ -28,19 +28,25 @@ whether anyone reviews entries. Pick the one that matches the trust you need.
 
 ## When a server is not found
 
-APM never switches registries on its own. A miss names the registry that was
-searched and shows how to continue:
+APM never switches registries on its own. When `apm install --mcp NAME` finds
+no match, the error names the registry that was searched and shows how to
+continue:
 
 ```text
 [x] Server(s) not found in registry https://api.mcp.github.com: NAME
 [i] Search this registry: apm mcp search "NAME"
 [i] Use another registry (replace <URL>): apm install --mcp "NAME" --registry <URL>
 [i] Or save it for every lookup: apm config set mcp-registry-url <URL>
+[i] Choosing an MCP registry: https://microsoft.github.io/apm/consumer/choosing-an-mcp-registry/
 ```
 
 The most common cause is a typo, so search the same registry first. If the
 server lives in another registry you trust, choose it explicitly. The example
-keeps any `--mcp-version`, `--target`, and `--global` you passed.
+keeps any `--mcp-version`, `--target`, and `--global` you passed. After a
+`--registry` miss, the search line says to set `MCP_REGISTRY_URL` first, since
+`apm mcp search` has no `--registry` flag. After an `MCP_REGISTRY_URL` miss,
+the last line points at that variable instead of `apm config`. Misses for `dependencies.mcp` entries in
+`apm.yml` show a shorter `apm mcp search` hint.
 
 ## Select a registry
 
@@ -56,7 +62,8 @@ export MCP_REGISTRY_URL=<URL>
 ```
 
 Precedence is `--registry`, then `MCP_REGISTRY_URL`, then
-`apm config set mcp-registry-url`, then the default. See
+`apm config set mcp-registry-url`, then the default. A per-dependency
+`registry:` URL in `apm.yml` overrides the chain for that entry. See
 [resolution order](../../reference/cli/config/#resolution-order) for the
 `http://` rules and [Install MCP servers](../install-mcp-servers/) for the
 rest of the MCP install flow.
