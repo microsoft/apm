@@ -199,13 +199,13 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json
   - .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:66c0ad67cba154b0863e71a6f6d05cbf1ec1d24777747f335186ee948966e6a8
+    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:5279f0c9a691e1f73f4118977cbb3da2822b705cd5d60d5808a583702a0b4b7a
     .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:c40c6fd4b99933d80ba66aa2de43cbada2a3f20a055c86a0b06d16d784905e10
     .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json: sha256:5b9504214e95f9d9a9723dc12310a6c6f4f95d72654efc7aba94b1e1cd40231f
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:505346e9bd7adbea8c360df737ef9c7360a83d8f2bfea6058c8eb4f72422e8a5
   source: local
   local_path: ../autopilot-issue-triage-worker
-  content_hash: sha256:2923e9b48e8aa32548e2ebd86217ee8b91b3309a8929325a850f386d5105cffd
+  content_hash: sha256:a8dcaeadc6e17af86b5a151be429d0c73d3bce0aafb0423b45bf299bd578a48b
   declaring_parent: ./packages/autopilot/autopilot-issue-triage-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-triage-worker
   declared_license: MIT
@@ -674,7 +674,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:66c0ad67cba154b0863e71a6f6d05cbf1ec1d24777747f335186ee948966e6a8
+  content_hash: sha256:5279f0c9a691e1f73f4118977cbb3da2822b705cd5d60d5808a583702a0b4b7a
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-worker/apm.yml

@@ -285,7 +285,7 @@ human decision states, bot processing, legacy read aliases, and safe
 rollout. Do not duplicate or expand its allowlist. Contributors need
 not supply a five-axis taxonomy. Propose only useful type/area/pillar
 classification; null or an empty list is valid when uncertain. At most
-six classification labels, with at most one type and one primary pillar.
+six classification labels, with at most one type and one pillar.
 The payload key `classification.theme` is kept for schema_version 2
 compatibility; its value is the one proposed `pillar/*` label or null.
 
