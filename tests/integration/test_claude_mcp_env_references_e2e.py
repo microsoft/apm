@@ -321,5 +321,6 @@ def test_reinstall_preserves_values_it_cannot_prove_it_wrote(
     assert path.read_bytes() == before
     assert "Preserved that connection" in _flat(output)
     assert "Fields args[1], args[3], env.PREFIXED, env.TOKEN hold values" in _flat(output)
+    assert "args[1]: ${E2E_TOKEN}" in _flat(output)
     assert "rotate those credentials" in _flat(output)
     _assert_no_value([output], SECRET, OTHER_SECRET)

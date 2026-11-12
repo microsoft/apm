@@ -489,7 +489,7 @@ def _report_native_conflict(
         logger.error(
             f"MCP server '{name}' conflicts with the existing {runtime} "
             f"connection in {client.get_config_path()}. Preserved that connection. "
-            f"{guidance} --force does not take ownership of user connections."
+            f"{guidance}\n    --force does not take ownership of user connections."
         )
         return
     logger.error(

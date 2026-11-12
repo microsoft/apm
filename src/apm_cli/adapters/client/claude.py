@@ -72,6 +72,10 @@ def _expanded_leaves(old: object, new: object) -> Iterator[tuple[str, str]]:
 
 def _expand_like_install_time(text: str, environ: Mapping[str, str]) -> str:
     """Expand bare ``${VAR}`` references the way pre-#3252 installs did."""
+    # An empty value counts as unset on purpose: a compound string such as
+    # ``--token=${FOO}`` with FOO="" then fails to match and the entry is kept
+    # as a conflict, which is the safe outcome. _legacy_equivalent handles a
+    # whole-string reference that an older release wrote as "".
     return _ENV_VAR_RE.sub(lambda m: environ.get(m.group(1)) or m.group(0), text)
 
 
@@ -124,7 +128,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     target_name: str = "claude"
     mcp_servers_key: str = "mcpServers"
 
-    _runtime_config_label: ClassVar[str] = ".mcp.json"
+    _runtime_config_label: ClassVar[str] = "the project .mcp.json"
     _runtime_launch_command: ClassVar[str] = "claude"
 
     # Own post-install aggregation buckets: the parent's mutable ClassVars
@@ -257,13 +261,17 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     # Post-install diagnostics (names only, never values)
     # ------------------------------------------------------------------ #
 
-    def _begin_env_tracking(self, server_url, server_name):
-        """Snapshot the current native entry for the security-upgrade notice."""
+    def _begin_env_tracking(self, server_url, server_name, server_info=None) -> object:
+        """Snapshot the current native entry (``dict | None``) for the upgrade notice.
+
+        Claude's snapshot shape differs from Copilot's, so this pairs with the
+        :meth:`_record_env_diagnostics` override below.
+        """
         self._last_env_placeholder_keys = set()
         self._last_legacy_angle_vars = set()
         if not self._supports_runtime_env_substitution:
             return None
-        key = self._determine_config_key(server_url, server_name)
+        key = self._determine_config_key(server_url, server_name, server_info)
         previous = (self.get_current_config().get(self.mcp_servers_key) or {}).get(key)
         return previous if isinstance(previous, dict) else None
 
@@ -320,22 +328,32 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         """Explain a preserved entry that holds values where apm.yml has references."""
         if self._is_user_scope():
             return None
-        key = self._determine_config_key(name, None)
-        native = (self.get_current_config().get(self.mcp_servers_key) or {}).get(key)
-        fields = sorted(path for path, _text in _expanded_leaves(native, expected))
-        if not fields:
+        servers = self.get_current_config().get(self.mcp_servers_key) or {}
+        # Self-defined servers keep their declared name as the key (#3493);
+        # registry servers use the historical short key.
+        native = servers.get(name, servers.get(self._determine_config_key(name, None)))
+        expanded = sorted(_expanded_leaves(native, expected))
+        if not expanded:
             return None
+        fields = [path for path, _text in expanded]
         where = (
             f"Field {fields[0]} holds a value"
             if len(fields) == 1
             else f"Fields {', '.join(fields)} hold values"
         )
+        # Names only: show which reference belongs where, never a value or default.
+        mapping = "; ".join(
+            f"{path}: "
+            + ", ".join(
+                dict.fromkeys("${" + m.group(1) + "}" for m in _CLAUDE_REFERENCE_RE.finditer(text))
+            )
+            for path, text in expanded
+        )
         return (
             f"{where} where apm.yml declares environment references, and APM cannot "
-            "confirm it wrote them. Put the ${VAR} references declared in apm.yml "
-            "back in those places yourself, then retry. If .mcp.json was committed, "
-            "rotate those credentials: editing the file does not erase them in Git "
-            "history."
+            "confirm it wrote them. Put the references declared in apm.yml back "
+            f"yourself ({mapping}), then retry. If .mcp.json was committed, rotate "
+            "those credentials: editing the file does not erase them in Git history."
         )
 
     @classmethod
@@ -581,7 +599,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
 
             config_key = self._determine_config_key(server_url, server_name, server_info)
 
-            previously_baked = self._begin_env_tracking(server_url, server_name)
+            previously_baked = self._begin_env_tracking(server_url, server_name, server_info)
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             from apm_cli.install.mcp.ownership import mcp_native_hash
 

@@ -204,7 +204,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            previously_baked = self._begin_env_tracking(server_url, server_name)
+            previously_baked = self._begin_env_tracking(server_url, server_name, server_info)
 
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -221,11 +221,13 @@ class CopilotClientAdapter(MCPClientAdapter):
             print(f"Error configuring MCP server: {e}")
             return False
 
-    def _begin_env_tracking(self, server_url, server_name):
+    def _begin_env_tracking(self, server_url, server_name, server_info=None) -> object:
         """Reset per-server env tracking and snapshot baked on-disk values.
 
-        Must run BEFORE the new config is formatted and written. Returns the
-        snapshot that :meth:`_record_env_diagnostics` consumes.
+        Must run BEFORE the new config is formatted and written. The returned
+        snapshot is opaque and adapter-owned: only this class's
+        :meth:`_record_env_diagnostics` consumes it, so a subclass that changes
+        its shape must override both methods together.
         """
         # Reset per-server tracking before formatting (so the per-server
         # summary line and aggregated diagnostics reflect this server only).
@@ -240,8 +242,12 @@ class CopilotClientAdapter(MCPClientAdapter):
             return set(), False
         return self._collect_previously_baked_keys(server_url, server_name)
 
-    def _record_env_diagnostics(self, config_key, server_config, previously_baked):
-        """Aggregate this server's env diagnostics for the post-install summary."""
+    def _record_env_diagnostics(self, config_key, server_config, previously_baked: object):
+        """Aggregate this server's env diagnostics for the post-install summary.
+
+        *previously_baked* is the ``(env_keys, headers_were_baked)`` snapshot
+        from :meth:`_begin_env_tracking`.
+        """
         previously_baked_keys, previously_baked_headers = previously_baked
         if self._supports_runtime_env_substitution:
             if self._last_legacy_angle_vars:

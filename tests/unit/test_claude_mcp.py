@@ -356,7 +356,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
 
         self.assertNotIn("baked-sentinel", text)
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
-        self.assertIn("previously stored as plaintext in .mcp.json", joined)
+        self.assertIn("previously stored as plaintext in the project .mcp.json", joined)
         self.assertIn("Claude Code will resolve 1 environment variable", joined)
         self.assertIn("before running 'claude'", joined)
         self.assertIn("JIRA_TOKEN", joined)
@@ -565,12 +565,52 @@ class TestClaudeLegacyEntries(unittest.TestCase):
         guidance = self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED)
 
         self.assertIn("Fields args[0], env.TOKEN hold values", guidance)
+        self.assertIn("(args[0]: ${OLD_TOKEN}; env.TOKEN: ${OLD_TOKEN})", guidance)
         self.assertIn("rotate those credentials", guidance)
         self.assertNotIn("someone-elses-value", guidance)
+        self.assertNotIn("--token=", guidance)
+
+    def test_conflict_guidance_finds_slash_named_self_defined_entry(self):
+        # Self-defined servers keep their declared name as the native key (#3493).
+        native = self._native("someone-elses-value")
+        self.adapter.update_config({"com.example/legacy": native})
+        guidance = self.adapter.native_conflict_guidance("com.example/legacy", _LEGACY_EXPECTED)
+
+        self.assertIn("Fields args[0], env.TOKEN hold values", guidance)
+        self.assertNotIn("someone-elses-value", guidance)
+
+    def test_upgrade_snapshot_uses_declared_self_defined_key(self):
+        native = self._native("old-sentinel")
+        self.adapter.update_config({"com.example/legacy": native})
+        snapshot = self.adapter._begin_env_tracking(
+            "com.example/legacy", None, {"name": "com.example/legacy", "is_self_defined": True}
+        )
+
+        self.assertEqual(snapshot, native)
 
     def test_conflict_guidance_is_silent_without_expanded_fields(self):
         self.adapter.update_config({"legacy": dict(_LEGACY_EXPECTED, command="other")})
         self.assertIsNone(self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED))
+
+
+class TestClaudeDiagnosticBucketIsolation(unittest.TestCase):
+    """Claude must own every mutable aggregation bucket Copilot declares."""
+
+    def test_every_mutable_copilot_classvar_is_redeclared(self):
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        buckets = {
+            name
+            for name, value in vars(CopilotClientAdapter).items()
+            if isinstance(value, (dict, set, list)) and not name.startswith("__")
+        }
+        self.assertTrue(buckets)
+        for name in sorted(buckets):
+            with self.subTest(bucket=name):
+                self.assertIn(name, vars(ClaudeClientAdapter))
+                self.assertIsNot(
+                    getattr(ClaudeClientAdapter, name), getattr(CopilotClientAdapter, name)
+                )
 
 
 class TestClaudeClientAdapterUser(unittest.TestCase):

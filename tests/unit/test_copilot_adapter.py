@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
@@ -540,6 +541,13 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
             return cls(**kwargs)
+
+    def test_claude_project_scope_keeps_placeholders(self):
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = self._adapter(ClaudeClientAdapter, project_root=Path(tmp))
+            self.assertTrue(adapter._supports_runtime_env_substitution)
 
     def test_claude_user_scope_still_resolves_to_literal(self):
         """Only Claude's project ``.mcp.json`` keeps placeholders (#3252);
