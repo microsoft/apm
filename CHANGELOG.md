@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Autopilot workers no longer write human-owned deferral labels, fail closed when active personas are missing, and PR-description guidance pins Mermaid validation while keeping diagrams conditional. (#3419)
 ### Added
 
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
@@ -37,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Autopilot: PR triage no longer applies the human-owned `status/deferred` label (it only recommends deferral); issue-triage and PR-review workers stop and name any required persona agent missing from `.github/agents/`; the PR-review panelist schema drops an unsupported rubric path; and `pr-description-skill` pins `@mermaid-js/mermaid-cli@12.0.0` and requires diagrams only for non-trivial structure or control flow. (#3419)
 - `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
 - Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
 - Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release; a pre-release is selected only when the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1, and builds differing only in metadata resolve to the highest version string. Credit to @xubenqiang for the approach in #3469. (#3601)
