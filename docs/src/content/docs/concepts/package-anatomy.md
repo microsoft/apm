@@ -150,7 +150,8 @@ The shape mirrors `package.json` on purpose: `name`, `version`,
 `dependencies`, `devDependencies`, `scripts`. The verbs match too:
 `apm install` deploys, `apm update` refreshes dependencies, and
 `apm install --frozen` is the lockfile-only CI install (mirrors
-`npm ci`). The CLI binary itself updates via `apm self-update`.
+`npm ci`). CLI upgrades use your package manager (`brew upgrade apm` for
+Homebrew), or `apm self-update` for standalone installs.
 :::
 
 ## Anatomy of `apm.lock.yaml`
@@ -161,7 +162,6 @@ by `apm install`; commit it.
 
 ```yaml
 lockfile_version: '1'
-generated_at: '2026-04-21T21:45:34.516938+00:00'
 apm_version: 0.22.0
 
 dependencies:
@@ -199,39 +199,24 @@ local_deployed_file_hashes:
 
 Top-level fields:
 
-| Field                          | Notes                                          |
-|--------------------------------|------------------------------------------------|
-| `lockfile_version`             | Schema version of the lockfile.                |
-| `generated_at`                 | ISO timestamp of last write.                   |
-| `apm_version`                  | CLI version that generated the file.           |
-| `dependencies`                 | List of `LockedDependency` entries.            |
-| `mcp_servers`                  | Resolved MCP server identifiers.               |
-| `mcp_configs`                  | Per-harness MCP configuration blobs.           |
-| `local_deployed_files`         | Files this package wrote to deployed dirs.     |
-| `local_deployed_file_hashes`   | SHA-256 of each local-deployed file.           |
+| Field                          | Notes                                                     |
+|--------------------------------|-----------------------------------------------------------|
+| `lockfile_version`             | Schema version of the lockfile.                           |
+| `apm_version`                  | CLI version that generated the file.                      |
+| `dependencies`                 | List of `LockedDependency` entries.                       |
+| `mcp_servers`                  | Resolved MCP server identifiers.                          |
+| `mcp_configs`                  | Per-harness MCP configuration blobs.                      |
+| `local_deployed_files`         | Files this package wrote to deployed dirs.                |
+| `local_deployed_file_hashes`   | SHA-256 of each local-deployed file.                      |
+| _(Deprecated)_ `generated_at`  | Write timestamp. Remove from lockfile to avoid conflicts. |
 
-Per-dependency fields:
-
-| Field                  | Notes                                          |
-|------------------------|------------------------------------------------|
-| `repo_url`             | Canonical clone URL.                           |
-| `host`, `port`         | For non-github.com or non-standard ports.      |
-| `registry_prefix`      | Artifactory-style prefix.                      |
-| `resolved_commit`      | Full SHA. The thing that makes installs reproducible. |
-| `resolved_ref`         | Original tag/branch the SHA was resolved from. |
-| `version`              | SemVer, if the dep is versioned.               |
-| `virtual_path`         | Subpath for single-primitive imports.          |
-| `is_virtual`           | True for primitive-form deps.                  |
-| `depth`                | 1 = direct dependency; >1 = transitive.        |
-| `package_type`         | `apm_package`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`, `skill_bundle`. |
-| `deployed_files`       | Files this dep wrote to your tree.             |
-| `deployed_file_hashes` | SHA-256 of each deployed file.                 |
-| `source`, `local_path` | Set for `local_path:` deps.                    |
-| `content_hash`         | SHA-256 of the package file tree.              |
-| `is_dev`               | True for `devDependencies` entries.            |
-
-See the [lockfile specification](../../reference/lockfile-spec/#per-entry-fields)
-for package-type-specific `name` and `version` semantics.
+Each dependency stores canonical identity and resolution data. For
+case-insensitive providers, `repo_url` is the canonical comparison value while
+the optional `materialization_repo_url` retains the repository display spelling
+used under `apm_modules/` and in generated links. The
+[lockfile specification](../../reference/lockfile-spec/#per-entry-fields) is the
+single field reference, including package-type-specific `name` and `version`
+semantics.
 
 `apm audit` rehashes everything in `deployed_file_hashes` and
 `local_deployed_file_hashes` to detect hand-edits before they ship.

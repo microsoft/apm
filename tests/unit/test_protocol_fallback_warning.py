@@ -8,14 +8,15 @@ same port is reused across schemes, which is incorrect for servers that
 serve SSH and HTTPS on different ports (e.g. Bitbucket Datacenter: SSH
 7999, HTTPS 7990). The warning names the offending dependency
 (``{host}/{repo}``), names the planned initial + fallback schemes,
-lists two remediations (pin the URL scheme, or drop
-``--allow-protocol-fallback`` to fail fast), and links to the docs.
+explains how to disable fallback across CLI flags, environment, and saved
+config to fail fast, and links to the docs.
 """
 
 import os
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
+from urllib.parse import urlsplit
 
 import pytest  # noqa: F401
 from git.exc import GitCommandError
@@ -84,8 +85,8 @@ class TestProtocolFallbackPortWarning:
 
     def test_warning_fires_on_ssh_url_with_port_when_fallback_allowed(self):
         """ssh:// URL with port + allow_fallback => plan has SSH and HTTPS =>
-        exactly one warning naming the offender, both schemes, both
-        remediations, and the docs URL."""
+        exactly one warning naming the offender, both schemes, the
+        fallback-disable remediation, and the docs URL."""
         dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
         assert dep.port == 7999
 
@@ -104,15 +105,18 @@ class TestProtocolFallbackPortWarning:
             f"{{host}}/{{repo}}:' form: {msg!r}"
         )
         assert "SSH" in msg and "HTTPS" in msg, f"warning must name both planned schemes: {msg!r}"
-        assert "Pin the URL scheme" in msg, (
-            f"warning must offer the 'pin the URL scheme' remediation: {msg!r}"
+        assert "Disable protocol fallback" in msg, (
+            f"warning must offer the fallback-disable remediation: {msg!r}"
         )
-        assert "--allow-protocol-fallback" in msg, (
-            f"warning must offer the 'drop --allow-protocol-fallback' escape "
-            f"hatch as an alternative: {msg!r}"
+        assert "CLI flags, environment, and saved config" in msg, (
+            f"warning must cover every fallback configuration source: {msg!r}"
         )
-        assert "See: https://microsoft.github.io/apm/" in msg, (
-            f"warning must link to the public docs via the 'See: ' prefix: {msg!r}"
+        docs = urlsplit(msg.rsplit("See: ", 1)[1])
+        assert (docs.scheme, docs.hostname, docs.path, docs.fragment) == (
+            "https",
+            "microsoft.github.io",
+            "/apm/consumer/manage-dependencies/",
+            "transport-selection",
         )
 
     def test_warning_fires_on_https_url_with_port_when_fallback_allowed(self):
@@ -383,6 +387,7 @@ class TestConcurrentFallbackWarning:
         import shutil
         import threading
 
+        original_environment = dict(os.environ)
         dl = _make_downloader()
         dl._allow_fallback = True
 
@@ -403,48 +408,49 @@ class TestConcurrentFallbackWarning:
         errors_lock = threading.Lock()
 
         def _worker():
-            with (
-                patch.dict(os.environ, {}, clear=True),
-                patch(
-                    "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                    return_value=None,
-                ),
-                patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
-                patch(
-                    "apm_cli.deps.github_downloader._rich_warning",
-                    side_effect=_capture,
-                ),
-            ):
-                MockRepo.clone_from.side_effect = _fake_clone
-                try:
-                    barrier.wait(timeout=10)
-                except threading.BrokenBarrierError as exc:
-                    with errors_lock:
-                        worker_errors.append(exc)
-                    return
-                target = Path(tempfile.mkdtemp())
-                try:
-                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
-                except (RuntimeError, GitCommandError):
-                    pass
-                finally:
-                    shutil.rmtree(target, ignore_errors=True)
+            try:
+                barrier.wait(timeout=10)
+            except threading.BrokenBarrierError as exc:
+                with errors_lock:
+                    worker_errors.append(exc)
+                return
+            target = Path(tempfile.mkdtemp())
+            try:
+                dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+            except (RuntimeError, GitCommandError):
+                pass
+            finally:
+                shutil.rmtree(target, ignore_errors=True)
 
-        threads = [threading.Thread(target=_worker) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+            patch(
+                "apm_cli.deps.github_downloader._rich_warning",
+                side_effect=_capture,
+            ),
+        ):
+            MockRepo.clone_from.side_effect = _fake_clone
+            threads = [threading.Thread(target=_worker) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
 
-        assert not worker_errors, (
-            f"Worker(s) failed to reach the barrier within the timeout "
-            f"(barrier broken or slow start): {worker_errors}"
-        )
-        for t in threads:
-            assert not t.is_alive(), (
-                f"Thread {t.name!r} is still alive after join(timeout=10); "
-                "the worker may have hung inside _clone_with_fallback"
+            assert not worker_errors, (
+                f"Worker(s) failed to reach the barrier within the timeout "
+                f"(barrier broken or slow start): {worker_errors}"
             )
+            for t in threads:
+                assert not t.is_alive(), (
+                    f"Thread {t.name!r} is still alive after join(timeout=10); "
+                    "the worker may have hung inside _clone_with_fallback"
+                )
+        assert dict(os.environ) == original_environment
 
         port_warnings = [msg for msg, sym in captured if "Custom port" in msg]
         assert len(port_warnings) == 1, (

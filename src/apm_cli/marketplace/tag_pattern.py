@@ -19,12 +19,14 @@ import re
 
 __all__ = [
     "DEFAULT_TAG_PATTERNS",
+    "TagPatternError",
     "build_tag_regex",
     "infer_tag_pattern",
     "infer_tag_pattern_from_refs",
     "is_version_tag_ref",
     "parse_tag_version",
     "render_tag",
+    "validate_tag_pattern",
 ]
 
 # Common tag layouts tried when no explicit ``tag_pattern`` is configured.
@@ -44,6 +46,37 @@ _PLAIN_SEMVER_RE = re.compile(
 # Placeholders we recognise.
 _PLACEHOLDER_VERSION = "{version}"
 _PLACEHOLDER_NAME = "{name}"
+_SUPPORTED_PLACEHOLDERS = frozenset({_PLACEHOLDER_NAME, _PLACEHOLDER_VERSION})
+_PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}")
+
+
+class TagPatternError(ValueError):
+    """Raised when a marketplace tag pattern cannot select semver tags."""
+
+
+def validate_tag_pattern(pattern: object, *, context: str = "tag_pattern") -> str:
+    """Return a normalized, consumer-safe marketplace tag pattern.
+
+    A semver-selection pattern must contain exactly one ``{version}``
+    placeholder. ``{name}`` is optional. Other brace placeholders are rejected
+    because the pattern engine treats no other tokens as substitutions.
+    """
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise TagPatternError(f"'{context}' must be a non-empty string, got {pattern!r}")
+    normalized = pattern.strip()
+    placeholders = _PLACEHOLDER_RE.findall(normalized)
+    unsupported = sorted(set(placeholders) - _SUPPORTED_PLACEHOLDERS)
+    if unsupported:
+        raise TagPatternError(
+            f"'{context}' contains unsupported placeholder(s): {', '.join(unsupported)}"
+        )
+    version_count = normalized.count(_PLACEHOLDER_VERSION)
+    if version_count != 1:
+        raise TagPatternError(
+            f"'{context}' must contain exactly one {_PLACEHOLDER_VERSION} placeholder, "
+            f"got {normalized!r}"
+        )
+    return normalized
 
 
 def render_tag(pattern: str, *, name: str, version: str) -> str:

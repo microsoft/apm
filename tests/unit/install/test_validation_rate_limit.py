@@ -14,54 +14,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.install import validation
-
-
-class TestRateLimitHelpers:
-    def test_is_rate_limit_failure_detects_marker(self):
-        exc = RuntimeError("GitHub API rate limit hit for github.com (403)")
-        assert validation._is_rate_limit_failure(exc) is True
-
-    def test_is_rate_limit_failure_detects_via_cause_chain(self):
-        original = RuntimeError("GitHub API rate limit hit for github.com (429)")
-        wrapped = RuntimeError("authenticated retry also failed")
-        wrapped.__cause__ = original
-        assert validation._is_rate_limit_failure(wrapped) is True
-
-    def test_is_rate_limit_failure_false_for_generic_errors(self):
-        assert validation._is_rate_limit_failure(RuntimeError("API returned 404")) is False
-        assert validation._is_rate_limit_failure(ValueError("nope")) is False
-
-    def test_is_rate_limit_failure_bounded_chain_walk(self):
-        exc = RuntimeError("oops")
-        exc.__cause__ = exc
-        assert validation._is_rate_limit_failure(exc) is False
-
-    def test_raise_if_rate_limited_primary_exhaustion(self):
-        resp = MagicMock(status_code=403, headers={"X-RateLimit-Remaining": "0"})
-        with pytest.raises(RuntimeError, match=r"GitHub API rate limit"):
-            validation._raise_if_rate_limited(resp, "github.com")
-
-    def test_raise_if_rate_limited_secondary_retry_after(self):
-        resp = MagicMock(status_code=403, headers={"Retry-After": "60"})
-        with pytest.raises(RuntimeError, match=r"GitHub API rate limit"):
-            validation._raise_if_rate_limited(resp, "github.com")
-
-    def test_raise_if_rate_limited_http_429(self):
-        resp = MagicMock(status_code=429, headers={})
-        with pytest.raises(RuntimeError, match=r"GitHub API rate limit"):
-            validation._raise_if_rate_limited(resp, "github.com")
-
-    def test_raise_if_rate_limited_ignores_plain_403(self):
-        # SSO / permission 403 carries no rate-limit signal -> no raise.
-        resp = MagicMock(status_code=403, headers={"X-RateLimit-Remaining": "4900"})
-        validation._raise_if_rate_limited(resp, "github.com")
-
-    def test_raise_if_rate_limited_ignores_404(self):
-        resp = MagicMock(status_code=404, headers={"Retry-After": "60"})
-        validation._raise_if_rate_limited(resp, "github.com")
+from apm_cli.models.apm_package import DependencyReference
 
 
 class TestValidateRateLimitClassification:
@@ -129,3 +84,27 @@ class TestValidateRateLimitClassification:
             )
 
         assert result is False
+
+    def test_virtual_typed_throttle_allows_the_download_stage(self) -> None:
+        """Virtual preflight must not turn an indeterminate throttle into False."""
+        resolver = self._setup_resolver()
+        dep_ref = DependencyReference(
+            repo_url="octocat/hello-world",
+            host="github.com",
+            reference="main",
+            virtual_path="instructions/example.instructions.md",
+            is_virtual=True,
+        )
+        throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+        with patch(
+            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
+            side_effect=throttle,
+        ):
+            result = validation._validate_package_exists(
+                dep_ref.to_canonical(),
+                auth_resolver=resolver,
+                dep_ref=dep_ref,
+            )
+
+        assert result is True

@@ -7,6 +7,7 @@ Tests cover:
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -18,6 +19,7 @@ from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
+from apm_cli.utils.git_env import get_git_executable
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -269,7 +271,7 @@ class TestCloneWithFallbackEnv:
             assert cfg_path == "/dev/null"
 
     def test_github_host_no_token_allows_credential_helpers(self):
-        """For GitHub hosts WITHOUT a token, env is relaxed so credential helpers work."""
+        """GitHub anonymous-first blocks credential helpers before the request."""
         dl = _make_downloader(github_token=None)
         dep = _dep("https://github.com/owner/repo.git")
 
@@ -277,9 +279,10 @@ class TestCloneWithFallbackEnv:
         assert len(calls) >= 1
 
         env_used = calls[0][1].get("env", calls[0].kwargs.get("env"))
-        assert "GIT_ASKPASS" not in env_used
-        assert "GIT_CONFIG_GLOBAL" not in env_used
-        assert "GIT_CONFIG_NOSYSTEM" not in env_used
+        assert env_used.get("GIT_ASKPASS") == "echo"
+        assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert env_used.get("GIT_CONFIG_KEY_0") == "credential.helper"
+        assert env_used.get("GIT_CONFIG_VALUE_0") == ""
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
     def test_generic_host_explicit_https_strict_no_ssh_fallback(self):
@@ -314,13 +317,13 @@ class TestCloneWithFallbackEnv:
         )
 
     def test_github_host_with_token_tries_method1_first(self):
-        """GitHub with a token → Method 1 (auth HTTPS) is tried first."""
+        """GitHub with a token still tries anonymous HTTPS first."""
         dl = _make_downloader(github_token="ghp_TESTTOKEN")
         dep = _dep("https://github.com/owner/repo.git")
 
         calls = self._run_clone(dl, dep, succeed_on=1)
         first_url = calls[0][0][0]
-        assert "ghp_TESTTOKEN" in first_url
+        assert "ghp_TESTTOKEN" not in first_url
         assert _url_host(first_url) == "github.com"
 
     def test_insecure_http_dep_is_strict_by_default(self):
@@ -405,17 +408,23 @@ class TestCloneWithFallbackEnv:
             assert "GIT_CONFIG_GLOBAL" not in envs[1]
             assert "GIT_CONFIG_NOSYSTEM" not in envs[1]
 
-    def test_gitlab_host_with_token_tries_oauth_https_first(self):
-        """GitLab with a PAT → Method 1 uses oauth2 HTTPS (not x-access-token)."""
+    def test_gitlab_host_with_token_uses_header_https_first(self):
+        """GitLab PAT authentication stays out of the clone URL."""
         dl = _make_downloader(gitlab_token="glpat_GITLABCLONE")
         dep = _dep("https://gitlab.com/acme/rules.git")
 
         calls = self._run_clone(dl, dep, succeed_on=1)
         first_url = calls[0][0][0]
-        assert "x-access-token" not in first_url.lower()
-        assert "oauth2" in first_url
-        assert "glpat_GITLABCLONE" in first_url
-        assert _url_host(first_url) == "gitlab.com"
+        parsed_url = urlparse(first_url)
+        assert parsed_url.username is None
+        assert parsed_url.password is None
+        assert parsed_url.hostname == "gitlab.com"
+        first_env = calls[0][1]["env"]
+        assert any(
+            value.startswith("Authorization: Basic ")
+            for key, value in first_env.items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
 
     def test_generic_host_error_message_mentions_credential_helpers(self):
         """When all methods fail for a generic host, the error suggests credential helpers."""
@@ -459,14 +468,10 @@ class TestCloneWithFallbackEnv:
         assert "ConnectTimeout" in relaxed["GIT_SSH_COMMAND"]
 
     def test_allow_fallback_env_is_per_attempt_not_per_dep(self):
-        """In a mixed allow_fallback plan, only token-bearing attempts get the
-        locked-down env; SSH and plain-HTTPS attempts get the relaxed env so
-        user credential helpers (gh auth, Keychain, ssh-agent) keep working.
+        """A non-auth HTTPS failure stays anonymous before SSH fallback.
 
-        Regression for the Wave 2 panel finding: previously the env was decided
-        once per dependency from `has_token`, so SSH attempts in a token-having
-        dep ran with `GIT_ASKPASS=echo` and `GIT_CONFIG_GLOBAL=/dev/null`,
-        breaking encrypted-key prompts and credential helpers.
+        The arbitrary ``GitCommandError("failed")`` is not an authentication
+        signal, so the configured PAT must not be resolved or presented.
         """
         dl = _make_downloader(github_token="ghp_TESTTOKEN")
         dl._allow_fallback = True
@@ -497,9 +502,7 @@ class TestCloneWithFallbackEnv:
                 shutil.rmtree(target, ignore_errors=True)
             calls = MockRepo.clone_from.call_args_list
 
-        # Map URL -> env used. Token-bearing attempts must get locked-down env;
-        # SSH attempts and plain-HTTPS must get the relaxed env. Plain-HTTPS
-        # must NOT embed the token in the URL.
+        # Plain HTTPS is credential-fenced; SSH retains its existing relaxed env.
         assert len(calls) >= 2, f"expected mixed chain, got {len(calls)} attempts"
         seen_auth_https = False
         seen_plain_https = False
@@ -519,17 +522,14 @@ class TestCloneWithFallbackEnv:
                     f"token URL must run with locked-down env; got env={env_used}"
                 )
             else:
-                # Plain HTTPS attempt: must NOT embed the token, and must run
-                # with relaxed env so credential helpers (gh auth, Keychain)
-                # can supply credentials.
+                # Public GitHub HTTPS is anonymous and credential-fenced.
                 seen_plain_https = True
                 assert url.startswith("https://"), url
-                assert "GIT_ASKPASS" not in env_used, (
-                    f"plain HTTPS must run with relaxed env; got env={env_used}"
+                assert env_used.get("GIT_ASKPASS") == "echo", (
+                    f"plain HTTPS must run with a helper fence; got env={env_used}"
                 )
-        assert seen_auth_https and seen_ssh and seen_plain_https, (
-            "expected at least one of each attempt kind in the mixed chain"
-        )
+        assert not seen_auth_https
+        assert seen_ssh and seen_plain_https
 
 
 # ===========================================================================
@@ -981,12 +981,26 @@ class TestValidatePackageExistsEnv:
     )
     @patch("subprocess.run")
     @patch.dict(os.environ, {}, clear=True)
-    def test_generic_host_validation_allows_credential_helpers(self, mock_run, _mock_cred):
-        """git ls-remote for a generic host should NOT have GIT_ASKPASS=echo."""
+    def test_generic_host_validation_snapshots_credential_helpers(
+        self,
+        mock_run,
+        _mock_cred,
+    ):
+        """Generic HTTPS keeps helpers in an immutable Git config snapshot."""
         from apm_cli.commands.install import _validate_package_exists
 
         mock_run.return_value = Mock(returncode=0)
-        _validate_package_exists("git.example.com/acme/rules")
+        config_result = subprocess.CompletedProcess(
+            ["git", "config"],
+            0,
+            stdout=b"global\0credential.helper\nfixture-helper\0",
+            stderr=b"",
+        )
+        with patch(
+            "apm_cli.utils.git_env._git_config_run",
+            return_value=config_result,
+        ):
+            _validate_package_exists("git.example.com/acme/rules")
 
         # Verify subprocess.run was called
         assert mock_run.called
@@ -997,10 +1011,16 @@ class TestValidatePackageExistsEnv:
         assert env_used.get("GIT_ASKPASS") != "echo", (
             "Generic host validation should not set GIT_ASKPASS=echo"
         )
-        # GIT_CONFIG_NOSYSTEM must NOT be '1' (allows system git config)
-        assert env_used.get("GIT_CONFIG_NOSYSTEM") != "1", (
-            "Generic host validation should not set GIT_CONFIG_NOSYSTEM=1"
-        )
+        assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert env_used.get("GIT_CONFIG_GLOBAL") == os.devnull
+        entries = {
+            (
+                env_used.get(f"GIT_CONFIG_KEY_{index}", ""),
+                env_used.get(f"GIT_CONFIG_VALUE_{index}", ""),
+            )
+            for index in range(int(env_used.get("GIT_CONFIG_COUNT", "0")))
+        }
+        assert ("credential.helper", "fixture-helper") in entries
         # GIT_TERMINAL_PROMPT should still be '0' (no interactive prompts)
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
@@ -1024,9 +1044,15 @@ class TestValidatePackageExistsEnv:
         assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
         cmd = mock_run.call_args[0][0]
         url_arg = cmd[-1]
-        assert "oauth2" in url_arg
-        assert "glpat_lsremote_test" in url_arg
-        assert "x-access-token" not in url_arg.lower()
+        parsed_url = urlparse(url_arg)
+        assert parsed_url.username is None
+        assert parsed_url.password is None
+        assert parsed_url.hostname == "gitlab.com"
+        assert any(
+            value.startswith("Authorization: Basic ")
+            for key, value in env_used.items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
 
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
@@ -1048,9 +1074,15 @@ class TestValidatePackageExistsEnv:
         assert env_used.get("GIT_ASKPASS") == "echo"
         assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
         assert "GIT_CONFIG_GLOBAL" in env_used
-        assert env_used.get("GIT_CONFIG_COUNT") == "1"
-        assert env_used.get("GIT_CONFIG_KEY_0") == "credential.helper"
-        assert env_used.get("GIT_CONFIG_VALUE_0") == ""
+        entries = [
+            (
+                env_used.get(f"GIT_CONFIG_KEY_{index}", ""),
+                env_used.get(f"GIT_CONFIG_VALUE_{index}", ""),
+            )
+            for index in range(int(env_used.get("GIT_CONFIG_COUNT", "0")))
+        ]
+        assert [value for key, value in entries if key.lower() == "credential.helper"] == [""]
+        assert [value for key, value in entries if key.lower().endswith(".extraheader")] == [""]
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
     @patch(
@@ -1059,6 +1091,7 @@ class TestValidatePackageExistsEnv:
     )
     @patch("subprocess.run")
     @patch.dict(os.environ, {}, clear=True)
+    @pytest.mark.windows_compat
     def test_gitlab_virtual_subdirectory_uses_git_ls_remote(self, mock_run, _mock_cred):
         """Dict git+path subdirectory on GitLab validates the repo root via git ls-remote."""
         from apm_cli.commands.install import _validate_package_exists
@@ -1078,7 +1111,8 @@ class TestValidatePackageExistsEnv:
         assert ok is True
         assert mock_run.called
         cmd = mock_run.call_args[0][0]
-        assert cmd[:3] == ["git", "ls-remote", "--heads"]
+        assert cmd[0] == get_git_executable()
+        assert cmd[1:3] == ["ls-remote", "--heads"]
 
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
@@ -1134,8 +1168,17 @@ class TestGitLabDirectShorthandProbing:
         assert r.is_virtual_subdirectory()
         assert mock_run.call_count == 1
         url_arg = mock_run.call_args[0][0][-1]
-        assert "epm-ease/apm-registry" in url_arg
-        assert "oauth2" in url_arg
+        parsed_url = urlparse(url_arg)
+        assert parsed_url.hostname == "git.epam.com"
+        assert parsed_url.path.rstrip("/") == "/epm-ease/apm-registry.git"
+        assert parsed_url.username is None
+        assert parsed_url.password is None
+        env_used = mock_run.call_args.kwargs["env"]
+        assert any(
+            value.startswith("Authorization: Basic ")
+            for key, value in env_used.items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
 
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
@@ -1239,10 +1282,11 @@ class TestIsGitHubClassification:
 
 
 class TestSparseCheckoutTokenResolution:
-    """Verify _try_sparse_checkout uses resolve_for_dep() for per-dep tokens."""
+    """Verify sparse checkout follows public GitHub anonymous-first auth."""
 
-    def test_sparse_checkout_uses_per_org_token(self, tmp_path):
-        """Sparse checkout should use per-org token, not the global instance token."""
+    @pytest.mark.windows_compat
+    def test_sparse_checkout_starts_anonymous_before_per_org_token(self, tmp_path):
+        """Sparse checkout does not present either configured token initially."""
         org_token = "ghp_ORG_SPECIFIC"
         global_token = "ghp_GLOBAL"
 
@@ -1267,7 +1311,11 @@ class TestSparseCheckoutTokenResolution:
             captured_urls = []
 
             def capture_run(cmd, **kwargs):
-                if len(cmd) >= 5 and cmd[:3] == ["git", "remote", "add"]:
+                if (
+                    len(cmd) >= 5
+                    and cmd[0] == get_git_executable()
+                    and cmd[1:4] == ["remote", "add", "origin"]
+                ):
                     captured_urls.append(cmd[4])  # The URL argument (after 'origin')
                     # Fail after capturing to keep the test fast
                     return MagicMock(returncode=1, stderr="test abort")
@@ -1278,8 +1326,5 @@ class TestSparseCheckoutTokenResolution:
                 dl._try_sparse_checkout(dep, tmp_path / "sparse", "subdir", ref="main")
 
             assert len(captured_urls) == 1, f"Expected 1 URL capture, got {captured_urls}"
-            # The per-org token should be in the URL, not the global one
-            assert org_token in captured_urls[0], (
-                f"Expected org-specific token in sparse checkout URL, got: {captured_urls[0]}"
-            )
+            assert org_token not in captured_urls[0]
             assert global_token not in captured_urls[0]

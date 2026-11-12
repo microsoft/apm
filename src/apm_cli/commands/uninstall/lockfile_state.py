@@ -11,6 +11,7 @@ def reconcile_uninstall_deployment_state(
     deploy_root: Path,
     all_deployed_files: set[str],
     surviving_deployed_files: dict[str, set[str]],
+    fully_refreshed_dependency_keys: set[str] | None = None,
 ) -> bool:
     """Reconcile survivor ownership and hashes without persisting."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -24,6 +25,13 @@ def reconcile_uninstall_deployment_state(
     from apm_cli.install.phases.lockfile import compute_deployed_hashes
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    replacement_changed = False
+    if lockfile.replacements is not None:
+        surviving_keys = set(lockfile.dependencies)
+        for dependency in lockfile.get_package_dependencies():
+            if dependency.replacement is not None:
+                replacement_changed |= dependency.replacement.retain_parents(surviving_keys)
 
     previous_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
     records_by_value = {}
@@ -58,13 +66,26 @@ def reconcile_uninstall_deployment_state(
         DeploymentIntent(
             active_targets=frozenset(),
             declared_targets=None,
-            desired_owners=frozenset({".", *lockfile.dependencies}),
+            desired_owners=DeploymentLedgerCodec.valid_owner_keys(lockfile),
             authoritative_targets=False,
         ),
     )
+    changed = reconciled.changed or replacement_changed
     if reconciled.changed:
         DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
-    return reconciled.changed
+    for dep_key in sorted(fully_refreshed_dependency_keys or set()):
+        if dep_key not in lockfile.dependencies:
+            continue
+        deployed_files = sorted(surviving_deployed_files.get(dep_key, set()))
+        hashes = compute_deployed_hashes(deployed_files, deploy_root)
+        DeploymentLedgerCodec.replace_legacy_owner(
+            lockfile,
+            dep_key,
+            deployed_files,
+            hashes,
+        )
+        changed = True
+    return changed
 
 
 def lockfile_has_persisted_state(lockfile) -> bool:
@@ -75,4 +96,5 @@ def lockfile_has_persisted_state(lockfile) -> bool:
         or lockfile.lsp_servers
         or lockfile.local_deployed_files
         or lockfile.deployment_ledger.records
+        or lockfile.replacements is not None
     )

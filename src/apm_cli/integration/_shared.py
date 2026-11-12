@@ -37,35 +37,56 @@ def deduplicate_deps(deps: list) -> list:
     return result
 
 
-def resolve_locked_apm_yml_paths(
+def resolve_locked_apm_yml_sources(
     apm_modules_dir: Path,
     lock_path: Path | None,
-) -> tuple[list[Path] | None, builtins.set]:
-    """Resolve apm.yml paths from the lockfile.
+) -> tuple[list[tuple[Path, object]] | None, builtins.set]:
+    """Resolve package manifest paths and dependency records from the lockfile.
 
-    Returns ``(locked_paths_or_None, direct_paths_set)``.
-    When *locked_paths* is ``None`` the caller should fall back to rglob.
+    Returns ``(locked_sources_or_None, direct_paths_set)``. Each source pairs an
+    ``apm.yml`` path with its locked dependency so consumers can retain exact
+    identity and provenance. When *locked_sources* is ``None`` the caller should
+    fall back to rglob.
     """
-    locked_paths: builtins.set | None = None
+    locked_sources: dict[Path, object] | None = None
     direct_paths: builtins.set = builtins.set()
 
     if lock_path and lock_path.exists():
         lockfile = LockFile.read(lock_path)
         if lockfile is not None:
-            locked_paths = builtins.set()
+            locked_sources = {}
             for dep in lockfile.get_package_dependencies():
                 if dep.repo_url:
-                    yml = (
-                        apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml"
-                        if dep.virtual_path
-                        else apm_modules_dir / dep.repo_url / "apm.yml"
-                    )
-                    locked_paths.add(yml.resolve())
+                    package_root = dep.to_dependency_ref().get_install_path(apm_modules_dir)
+                    yml = package_root / "apm.yml"
+                    if yml.is_symlink():
+                        raise ValueError(f"Locked package manifest must not be a symlink: {yml}")
+                    resolved_yml = yml.resolve()
+                    try:
+                        resolved_yml.relative_to(package_root.resolve())
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Locked package manifest escapes its package root: {yml}"
+                        ) from exc
+                    locked_sources[resolved_yml] = dep
                     if dep.depth == 1:
-                        direct_paths.add(yml.resolve())
+                        direct_paths.add(resolved_yml)
 
-    if locked_paths is not None:
-        resolved = [path for path in sorted(locked_paths) if path.exists()]
+    if locked_sources is not None:
+        resolved = [
+            (path, locked_sources[path]) for path in sorted(locked_sources) if path.exists()
+        ]
         return resolved, direct_paths
 
     return None, direct_paths
+
+
+def resolve_locked_apm_yml_paths(
+    apm_modules_dir: Path,
+    lock_path: Path | None,
+) -> tuple[list[Path] | None, builtins.set]:
+    """Resolve manifest paths while preserving the legacy path-only API."""
+    sources, direct_paths = resolve_locked_apm_yml_sources(apm_modules_dir, lock_path)
+    if sources is None:
+        return None, direct_paths
+    return [path for path, _dependency in sources], direct_paths

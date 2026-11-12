@@ -136,7 +136,9 @@ class TestGitHubVersionFetch(unittest.TestCase):
     @patch("requests.get")
     def test_fetch_network_error(self, mock_get):
         """Test handling of network errors."""
-        mock_get.side_effect = Exception("Network error")
+        import requests
+
+        mock_get.side_effect = requests.ConnectionError("Network error")
 
         result = get_latest_version_from_github()
         self.assertIsNone(result)
@@ -330,7 +332,9 @@ class TestGitHubVersionFetchAuth(unittest.TestCase):
     @patch("requests.get")
     def test_token_value_not_in_exception_text(self, mock_get, mock_token):
         """Token value must not appear in any raised exception or return value."""
-        mock_get.side_effect = Exception("connection refused")
+        import requests
+
+        mock_get.side_effect = requests.ConnectionError("connection refused")
 
         import io
         import logging
@@ -590,6 +594,15 @@ class TestAirGappedEnvVars(unittest.TestCase):
     def test_invalid_version_env_var_returns_none(self, mock_get):
         """An invalid VERSION value returns None without calling the API."""
         result = get_latest_version_from_github()
+        mock_get.assert_not_called()
+        self.assertIsNone(result)
+
+    @patch("requests.get")
+    @patch.dict("os.environ", {"VERSION": "vv1.2.3"}, clear=False)
+    def test_multiple_v_prefixes_are_rejected(self, mock_get):
+        """VERSION normalization must add or remove exactly one v prefix."""
+        result = get_latest_version_from_github()
+
         mock_get.assert_not_called()
         self.assertIsNone(result)
 

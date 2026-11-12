@@ -54,6 +54,9 @@ apm policy status [OPTIONS]
 | `--json` | Emit JSON. Alias of `-o json`. |
 | `--check` | Exit `1` when no usable policy is resolved (any `outcome` other than `found`). Default exit is always `0`. |
 
+Direct policy URLs should not embed credentials. Cache metadata and command
+output omit URL userinfo, query strings, and fragments.
+
 #### Output fields
 
 The table and JSON renderers expose the same fields:

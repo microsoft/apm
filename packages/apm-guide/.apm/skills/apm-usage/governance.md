@@ -10,6 +10,10 @@ CHANGELOG when using policy features.
 - **Repo-level:** `apm-policy.yml` in the repository root
 - **Local override:** `--policy ./path/to/apm-policy.yml`
 
+Do not embed credentials in direct policy URLs. APM omits URL userinfo, query
+strings, and fragments from policy cache metadata and diagnostics; prefer
+repository references with the normal host authentication chain.
+
 ## User config trust boundary
 
 `~/.apm/config.json` is user-scoped state, not org policy. Keep durable config
@@ -128,6 +132,13 @@ security:
 | `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle with cached policy but no embedded `apm.lock.yaml` fails closed; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs never fetch policy from the network. Logical OR on inheritance. |
 | `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
 
+Canonical deployment ownership is an always-on integrity boundary, not a
+policy option. Every `deployments` owner and `active_owner` must resolve to a
+current dependency, the workspace owner `.`, or `local-bundle`. A stale owner
+fails both bare `apm audit` and `apm audit --ci` with
+`deployment-ledger-owners`, even though ordinary drift remains advisory in
+bare audit. Run `apm prune`, then rerun `apm audit`.
+
 ## External scanner governance (experimental)
 
 Gate the behaviour of third-party SARIF scanners run by `apm audit
@@ -164,10 +175,10 @@ Notes:
 ## Executable trust governance
 
 Issue #1873 unifies executable-primitive trust (hooks, `bin/` executables,
-self-defined MCP servers, canvas extensions) onto one noun, `executables`,
-across three layers. The org policy is the **ceiling on deny**: it can deny and
-require fleet-wide and recommend a vetted set, but personal or project consent
-can never widen past an org deny.
+self-defined MCP servers, LSP servers, canvas extensions) onto one noun,
+`executables`, across three layers. The org policy is the **ceiling on deny**:
+it can deny and require fleet-wide and recommend a vetted set, but personal or
+project consent can never widen past an org deny.
 
 ```yaml
 # .github/apm-policy.yml
@@ -218,12 +229,17 @@ package PRESENCE, not materialized files. A separate audit signal,
 `required-executable-untrusted`, hard-fails CI when a required package's
 executables are untrusted (denied or gated).
 
-There is no `enforce` mandate runtime, no cryptographic signing, and no
-content-hash binding in this release: an org `executables.enforce` rung is
-accepted but fail-safe degrades to `recommend` (allowed, still overridable by a
-deny). Inspect the deciding layer for one package with `apm policy explain
-<pkg>`, and surface fleet-wide layer conflicts (packages allowed locally but
-denied by org policy) with `apm doctor`.
+There is no `enforce` mandate runtime or package signing in this release: an org
+`executables.enforce` rung is accepted but fail-safe degrades to `recommend`
+(allowed, still overridable by a deny). Local bundle LSP, MCP, and canvas
+approvals use a narrower content-bound key: when one is skipped, APM prints an
+exact `executables.allow` entry containing that bundle's SHA-256 digest. A
+different bundle that claims the same package name cannot inherit the grant. Inspect the
+deciding layer for one package with `apm policy explain <pkg>`, and surface
+fleet-wide layer conflicts (packages allowed locally but denied by org policy)
+with `apm doctor`. The same doctor row reports a malformed project
+executable-trust configuration under either `executables` or the deprecated
+`allowExecutables` key and names the configuration to fix.
 
 ## Plugin bin/ deployment governance (deprecated alias)
 
@@ -256,6 +272,18 @@ Deployed executables are placed on Claude Code's `PATH` and invoked
 without further confirmation, so use this field to opt out in
 environments where plugin executables are not trusted by default.
 
+### CLI consent flag
+
+In addition to policy-level controls, the `--trust-bin` / `--no-trust-bin`
+flags on `apm install` give per-invocation consent:
+
+- `--trust-bin` -- explicitly consent to bin/ deployment (suppresses the
+  trust-posture warning).
+- `--no-trust-bin` -- explicitly deny bin/ deployment for this invocation,
+  even if the project policy allows it.
+- Default (neither flag) -- deploy bin/ but emit a prominent warning
+  advising the user to pass `--trust-bin` for explicit consent.
+
 ## Canvas extension trust (experimental)
 
 Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
@@ -264,8 +292,10 @@ Because a canvas from a dependency is arbitrary executable code, APM blocks
 dependency-provided canvases when the project opts in to the executable gate:
 the project must add an `executables:` block to `apm.yml` and run
 `apm approve <pkg>` to deploy it. A first-party canvas in the root package being
-installed deploys once the flag is on; dependency canvases always require
-explicit approval.
+installed deploys once the flag is on. With `--global`, dependency-provided
+canvases always require explicit approval. Local bundle canvases use the exact
+`name#version@sha256:<digest>` key printed by `apm install`, so changed bundle
+bytes require renewed consent.
 
 By default `apm approve` records the grant in the project `apm.yml`
 `executables.allow` block (committed, shared with the team); `apm approve --user`
@@ -284,12 +314,12 @@ global canvas.
 
 The trust gate is enforced on every install path -- normal install and offline
 bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
-an executable canvas past trust. Canvas trust is unified with the `executables`
-default-deny gate (hooks, bin, mcp, canvas); approve once and all four
-executable types are governed consistently. The org `executables:` policy block
-governs canvas trust alongside the other types (`deny_all`, `deny`, `require`,
-`recommend`); a canvas-only policy knob is not part of this experimental
-release.
+an executable canvas past trust. Once an `executables:` block enables the
+default-deny gate, canvas trust is unified with hook, bin, MCP, and LSP
+execution; approve once and all five executable types are governed consistently.
+The org `executables:` policy block governs canvas trust alongside
+the other types (`deny_all`, `deny`, `require`, `recommend`); a canvas-only
+policy knob is not part of this experimental release.
 
 ## Local content governance
 
@@ -341,16 +371,28 @@ Chain limit: 5 levels max. Cycles are detected and rejected.
 
 Deny is evaluated first. Empty allow list permits all (except denied).
 
+Identity casing compares GitHub and registry owner/repository prefixes case-insensitively and keeps other identity boundaries case-sensitive. See [Identity casing](https://microsoft.github.io/apm/reference/policy-schema/#identity-casing) for recursive-glob behavior, upgrade risk, and workaround removal.
+
 ## Baseline checks (always run with --ci)
 
 These checks run without a policy file:
 
 - `lockfile-exists` -- apm.lock.yaml present
 - `ref-consistency` -- dependency refs match lockfile
+- `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
+- `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
+- `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
+
+Marketplace object declarations must match one locked coordinate through
+recorded marketplace/plugin provenance. Missing or ambiguous evidence fails.
+Version ranges require the locked selected version and tag; literal refs and
+full commit pins must agree with their locked evidence. Other locked coordinates
+remain subject to orphan detection. Audit does not refresh the catalog or
+modify the manifest, lockfile, or deployment.
 
 ## Policy checks (with --policy)
 
@@ -371,6 +413,13 @@ apm audit --ci --policy ./apm-policy.yml    # local policy file
 apm audit --ci --policy https://...         # remote policy URL
 ```
 
+An explicit `--policy` path, URL, or `owner/repo` that cannot be loaded
+(missing file, unreachable, malformed, garbage, not found) exits 1 with
+`[x] Policy '<source>' could not be loaded: <cause>`, regardless of
+`policy.fetch_failure_default`. Auto-discovery and `--policy org` keep the
+warn-by-default behaviour. CI JSON/SARIF report `policy.enforced` so a
+wrapper can tell whether policy checks actually ran.
+
 ## Install-time enforcement
 
 **Note:** Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the shipping design.
@@ -386,10 +435,15 @@ may use. This section covers how that contract is enforced at `apm install` time
 ### 2. Discovery and applicability
 
 APM auto-discovers org policy from the project's git remote by checking
-`.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub API-compatible
-hosts. Azure DevOps hosts use `_apm` only, because ADO rejects dot-prefixed
-repository names. Repositories with no detectable git remote (unpacked bundles,
-temp dirs) emit an explicit "could not determine org" line and skip discovery.
+`.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
+API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
+`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab uses
+`<top-level-group>/apm-policy/apm-policy.yml`, derived from the first remote
+path segment; nested subgroup scopes are not searched. Configure a self-managed host with
+`GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
+another project name. Repositories with no detectable git remote (unpacked
+bundles, temp dirs) emit an explicit "could not determine org" line and skip
+discovery.
 
 The `--policy <override>` flag is **audit-only today**  --  it works on
 `apm audit --ci` but is not yet wired through `apm install`.
@@ -529,7 +583,8 @@ equivalent to `APM_POLICY_DISABLE`.
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default
+Resolved effective policy is cached under the platform user cache at
+`apm/policy_v1/<project-key>/`. Default
 TTL comes from the policy's `cache.ttl` (`3600` seconds). Beyond TTL, APM serves
 the stale cache on refresh failure with a loud warning, up to a hard ceiling
 of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch. Writes are
@@ -633,8 +688,8 @@ as `[x]` errors and exit `1`.
 
 Checklist to publish a policy:
 
-1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `_apm`
-   project/repo on Azure DevOps).
+1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
+   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the top-level GitLab group).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

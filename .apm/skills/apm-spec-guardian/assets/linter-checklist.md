@@ -103,8 +103,11 @@ python3 - <<'PY'
 import re, sys
 src = open('SPEC').read()
 anchors = set(re.findall(r'<a id="([^"]+)"', src))
-anchors |= {re.sub(r'[^a-z0-9]+', '-', h.lower()).strip('-')
-            for h in re.findall(r'^#+\s+(.+)$', src, re.M)}
+def github_slug(heading):
+    heading = re.sub(r'[`*~]', '', heading.lower())
+    heading = re.sub(r'[^\w\- ]', '', heading)
+    return heading.replace(' ', '-')
+anchors |= {github_slug(h) for h in re.findall(r'^#+\s+(.+)$', src, re.M)}
 missing = [a for a in re.findall(r'\]\(#([^)]+)\)', src)
            if a not in anchors]
 print('OK' if not missing else missing[:20])
@@ -176,8 +179,8 @@ git diff --stat origin/main...HEAD | grep -E '\.py(\s|$)' || echo NONE
 ```
 
 MUST print `NONE`. If a `.py` file was modified, the PR is outside
-this skill's scope (it should also be triggering `apm-review-panel`);
-surface "Non-spec files modified -- consider running apm-review-panel
+this skill's scope (it should also be triggering `autopilot-pr-review-worker`);
+surface "Non-spec files modified -- consider running autopilot-pr-review-worker
 in parallel" as a linter note.
 
 ---

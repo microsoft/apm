@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import os
+import queue
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
+from tests.utils.git_credential_shim import GitCredentialShimFactory
 from tests.utils.local_git_repository import (
     GitCommit,
     LocalGitRepository,
@@ -16,6 +19,92 @@ from tests.utils.local_git_repository import (
 )
 
 _GIT_TIMEOUT_SECONDS = 10.0
+
+
+def test_git_credential_shim_streams_persistent_cat_file_output(tmp_path: Path) -> None:
+    """The shim must not buffer GitPython's persistent cat-file process."""
+    environment = _git_environment(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _run_git("init", str(repository), environment=environment)
+    readme = repository / "README.md"
+    readme.write_text("fixture\n", encoding="utf-8")
+    _run_git("-C", str(repository), "add", "README.md", environment=environment)
+    _run_git("-C", str(repository), "commit", "-m", "fixture", environment=environment)
+    real_git = Path(shutil.which("git") or "git").resolve()
+    shim = GitCredentialShimFactory(tmp_path / "shim").create(
+        base_env=environment,
+        real_git=real_git,
+        remote_map={},
+    )
+
+    process = subprocess.Popen(
+        ("git", "cat-file", "--batch-check"),
+        cwd=repository,
+        env=shim.environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    output: queue.Queue[str] = queue.Queue()
+    reader = threading.Thread(target=lambda: output.put(process.stdout.readline()), daemon=True)
+    try:
+        assert process.stdin is not None
+        process.stdin.write("HEAD\n")
+        process.stdin.flush()
+        reader.start()
+        reader.join(timeout=_GIT_TIMEOUT_SECONDS)
+        assert not reader.is_alive(), "cat-file output was buffered until process exit"
+        object_id, object_type, object_size = output.get_nowait().split()
+        assert len(object_id) == 40
+        assert object_type == "commit"
+        assert int(object_size) > 0
+    finally:
+        process.terminate()
+        process.wait(timeout=_GIT_TIMEOUT_SECONDS)
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("X-Trace: Bearer fixture-token", True),
+        ("X-Trace-Id: safe-value", False),
+    ],
+)
+def test_git_credential_shim_detects_credential_shaped_header_values(
+    tmp_path: Path,
+    header: str,
+    expected: bool,
+) -> None:
+    """The generated shim mirrors production credential-value detection."""
+    environment = _git_environment(tmp_path)
+    environment.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": header,
+        }
+    )
+    real_git = Path(shutil.which("git") or "git").resolve()
+    shim = GitCredentialShimFactory(tmp_path / "shim").create(
+        base_env=environment,
+        real_git=real_git,
+        remote_map={},
+    )
+
+    subprocess.run(
+        ("git", "--version"),
+        env=shim.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=_GIT_TIMEOUT_SECONDS,
+    )
+
+    events = [event for event in shim.events() if event["event"] == "git"]
+    assert len(events) == 1
+    assert events[0]["auth_config_present"] is expected
 
 
 def _git_environment(tmp_path: Path) -> dict[str, str]:
@@ -212,6 +301,437 @@ def test_relative_root_resolves_once_at_the_intended_location(
         environment=environment,
     )
     assert remote_main.stdout.split()[0] == commit.sha
+
+
+@pytest.mark.parametrize("remote_suffix", ("", ".git"))
+def test_install_url_rewrite_is_isolated_and_resolves_bare_and_git_forms(
+    tmp_path: Path,
+    remote_suffix: str,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    commit = factory.commit(repository, message="seed")
+    remote_base = "https://github.example.invalid/acme/package"
+
+    remote_forms = factory.install_url_rewrite(
+        repository,
+        f"{remote_base}{remote_suffix}",
+    )
+    assert factory.install_url_rewrite(repository, remote_base) == remote_forms
+
+    assert remote_forms == (remote_base, f"{remote_base}.git")
+    key = f"url.{repository.file_url}/.insteadOf"
+    configured = _run_git(
+        "config",
+        "--file",
+        environment["GIT_CONFIG_GLOBAL"],
+        "--get-all",
+        key,
+        environment=environment,
+    )
+    assert configured.stdout.splitlines() == list(remote_forms)
+    assert not (home / ".gitconfig").exists()
+
+    for remote_form in remote_forms:
+        resolved = _run_git(
+            "ls-remote",
+            remote_form,
+            "refs/heads/main",
+            environment=environment,
+        )
+        assert resolved.stdout.split()[0] == commit.sha
+
+    adjacent = factory.create("package.git-fork")
+    (adjacent.worktree / "apm.yml").write_text(
+        "name: adjacent\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory.commit(adjacent, message="seed adjacent")
+    adjacent_remote = _run_git(
+        "ls-remote",
+        f"{remote_base}.git-fork.git",
+        "refs/heads/main",
+        environment=environment,
+        check=False,
+    )
+    assert adjacent_remote.returncode != 0
+
+
+@pytest.mark.parametrize("remote_suffix", ("", ".git"))
+def test_url_rewrite_subprocess_env_returns_fresh_full_env_for_both_forms(
+    tmp_path: Path,
+    remote_suffix: str,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    commit = factory.commit(repository, message="seed")
+    remote_base = "https://github.example.invalid/acme/package"
+
+    child_env = factory.url_rewrite_subprocess_env(
+        repository,
+        f"{remote_base}{remote_suffix}",
+    )
+
+    key = f"url.{repository.file_url}/.insteadOf"
+    assert child_env["GIT_CONFIG_COUNT"] == "2"
+    assert child_env["GIT_CONFIG_KEY_0"] == key
+    assert child_env["GIT_CONFIG_KEY_1"] == key
+    assert child_env["GIT_CONFIG_VALUE_0"] == remote_base
+    assert child_env["GIT_CONFIG_VALUE_1"] == f"{remote_base}.git"
+    # Full child env, not a caller-merged overlay: every fixture env entry
+    # (e.g. the isolated GIT_CONFIG_GLOBAL) survives untouched alongside it.
+    for name, value in environment.items():
+        assert child_env[name] == value
+
+    for remote_form in (remote_base, f"{remote_base}.git"):
+        resolved = _run_git(
+            "ls-remote",
+            remote_form,
+            "refs/heads/main",
+            environment=child_env,
+        )
+        assert resolved.stdout.split()[0] == commit.sha
+
+
+def test_url_rewrite_subprocess_env_does_not_mutate_input_or_factory_state(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    original_environment = dict(environment)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory.commit(repository, message="seed")
+    remote_base = "https://github.example.invalid/acme/package"
+
+    first_env = factory.url_rewrite_subprocess_env(repository, remote_base)
+    second_env = factory.url_rewrite_subprocess_env(repository, remote_base)
+
+    # The mapping the caller constructed (and handed to the constructor)
+    # must be untouched -- both by construction and by repeated calls.
+    assert environment == original_environment
+    assert "GIT_CONFIG_COUNT" not in environment
+    # Each call returns a fresh, independent dict: equal contents, distinct
+    # identity, and mutating one must never leak into the other or into a
+    # subsequent call.
+    assert first_env == second_env
+    assert first_env is not second_env
+    first_env["GIT_CONFIG_VALUE_0"] = "tampered"
+    third_env = factory.url_rewrite_subprocess_env(repository, remote_base)
+    assert third_env == second_env
+
+
+def test_url_rewrite_subprocess_env_validates_ownership_and_remote_url_before_returning(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory.commit(repository, message="seed")
+
+    for remote_url in (
+        "",
+        " https://github.example.invalid/acme/package",
+        "file:///tmp/package.git",
+        "https://token@github.example.invalid/acme/package.git",
+        "https://github.example.invalid/acme/package?ref=main",
+        "https://github.example.invalid/acme/package#main",
+        "https://github.example.invalid/acme/../package",
+        "https://github.example.invalid/acme/package/",
+    ):
+        with pytest.raises(ValueError):
+            factory.url_rewrite_subprocess_env(repository, remote_url)
+    assert "GIT_CONFIG_COUNT" not in environment
+
+    forged = LocalGitRepository(
+        origin=repository.origin,
+        worktree=repository.worktree,
+    )
+    with pytest.raises(ValueError, match="not owned"):
+        factory.url_rewrite_subprocess_env(
+            forged,
+            "https://github.example.invalid/acme/package",
+        )
+    assert "GIT_CONFIG_COUNT" not in environment
+
+
+def test_url_rewrite_subprocess_env_contains_collisions_to_owned_repository(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory.commit(repository, message="seed")
+    adjacent = factory.create("package.git-fork")
+    (adjacent.worktree / "apm.yml").write_text(
+        "name: adjacent\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory.commit(adjacent, message="seed adjacent")
+    remote_base = "https://github.example.invalid/acme/package"
+
+    child_env = factory.url_rewrite_subprocess_env(repository, remote_base)
+
+    # Git's prefix-matching insteadOf rewrite must not let a request for an
+    # unrelated, adjacently-named remote resolve through this repository's
+    # rewrite base -- the trailing "/" containment must carry over from
+    # install_url_rewrite.
+    adjacent_remote = _run_git(
+        "ls-remote",
+        f"{remote_base}.git-fork.git",
+        "refs/heads/main",
+        environment=child_env,
+        check=False,
+    )
+    assert adjacent_remote.returncode != 0
+
+
+def test_url_rewrite_subprocess_env_rejects_preexisting_process_git_config(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    remote_base = "https://github.example.invalid/acme/package"
+
+    polluted_by_count = dict(environment)
+    polluted_by_count["GIT_CONFIG_COUNT"] = "1"
+    polluted_by_count["GIT_CONFIG_KEY_0"] = "credential.helper"
+    polluted_by_count["GIT_CONFIG_VALUE_0"] = ""
+    factory_with_count = LocalGitRepositoryFactory(
+        tmp_path / "repositories-count",
+        env=polluted_by_count,
+    )
+    repository_with_count = factory_with_count.create("package")
+    (repository_with_count.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory_with_count.commit(repository_with_count, message="seed")
+    with pytest.raises(ValueError, match="GIT_CONFIG_COUNT"):
+        factory_with_count.url_rewrite_subprocess_env(repository_with_count, remote_base)
+
+    malformed_slot = dict(environment)
+    malformed_slot["GIT_CONFIG_KEY_0"] = "credential.helper"
+    factory_with_slot = LocalGitRepositoryFactory(
+        tmp_path / "repositories-slot",
+        env=malformed_slot,
+    )
+    repository_with_slot = factory_with_slot.create("package")
+    (repository_with_slot.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory_with_slot.commit(repository_with_slot, message="seed")
+    with pytest.raises(ValueError, match="GIT_CONFIG_KEY_0"):
+        factory_with_slot.url_rewrite_subprocess_env(repository_with_slot, remote_base)
+
+
+def test_url_rewrite_subprocess_env_rejects_preexisting_process_git_config_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    # Windows environment variable names are case-insensitive: a fixture
+    # carrying "git_config_count" or "Git_Config_Key_0" occupies the exact
+    # same slot there as the canonical uppercase name, so the fail-closed
+    # guard must normalize case before comparing -- otherwise a
+    # differently-cased pre-existing entry would slip past detection and
+    # end up silently clobbered (or duplicated with undefined precedence)
+    # alongside the ones this method writes.
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    remote_base = "https://github.example.invalid/acme/package"
+
+    polluted_by_lower_count = dict(environment)
+    polluted_by_lower_count["git_config_count"] = "1"
+    polluted_by_lower_count["Git_Config_Key_0"] = "credential.helper"
+    polluted_by_lower_count["Git_Config_Value_0"] = ""
+    factory_with_lower_count = LocalGitRepositoryFactory(
+        tmp_path / "repositories-lower-count",
+        env=polluted_by_lower_count,
+    )
+    repository_with_lower_count = factory_with_lower_count.create("package")
+    (repository_with_lower_count.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory_with_lower_count.commit(repository_with_lower_count, message="seed")
+    snapshot_before = dict(factory_with_lower_count._env)
+    with pytest.raises(ValueError, match="git_config_count"):
+        factory_with_lower_count.url_rewrite_subprocess_env(
+            repository_with_lower_count, remote_base
+        )
+    assert factory_with_lower_count._env == snapshot_before
+
+    mixed_case_slot = dict(environment)
+    mixed_case_slot["gIt_ConFiG_key_0"] = "credential.helper"
+    factory_with_mixed_slot = LocalGitRepositoryFactory(
+        tmp_path / "repositories-mixed-slot",
+        env=mixed_case_slot,
+    )
+    repository_with_mixed_slot = factory_with_mixed_slot.create("package")
+    (repository_with_mixed_slot.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory_with_mixed_slot.commit(repository_with_mixed_slot, message="seed")
+    snapshot_before_slot = dict(factory_with_mixed_slot._env)
+    with pytest.raises(ValueError, match="gIt_ConFiG_key_0"):
+        factory_with_mixed_slot.url_rewrite_subprocess_env(repository_with_mixed_slot, remote_base)
+    assert factory_with_mixed_slot._env == snapshot_before_slot
+
+
+def test_install_url_rewrite_rejects_unsafe_inputs_before_config_mutation(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    global_config = Path(environment["GIT_CONFIG_GLOBAL"])
+    original_global = global_config.read_bytes()
+
+    for remote_url in (
+        "",
+        " https://github.example.invalid/acme/package",
+        "file:///tmp/package.git",
+        "https://token@github.example.invalid/acme/package.git",
+        "https://github.example.invalid/acme/package?ref=main",
+        "https://github.example.invalid/acme/package#main",
+        "https://github.example.invalid/acme/../package",
+        "https://github.example.invalid/acme/package/",
+    ):
+        with pytest.raises(ValueError):
+            factory.install_url_rewrite(repository, remote_url)
+    assert global_config.read_bytes() == original_global
+    assert not (home / ".gitconfig").exists()
+
+    forged = LocalGitRepository(
+        origin=repository.origin,
+        worktree=repository.worktree,
+    )
+    with pytest.raises(ValueError, match="not owned"):
+        factory.install_url_rewrite(
+            forged,
+            "https://github.example.invalid/acme/package",
+        )
+    assert global_config.read_bytes() == original_global
+    assert not (home / ".gitconfig").exists()
+
+    outside_config = tmp_path / "outside.gitconfig"
+    outside_config.write_bytes(b"[safe]\n\tvalue = unchanged\n")
+    global_config.unlink()
+    global_config.symlink_to(outside_config)
+    with pytest.raises(ValueError, match="symlinked fixture Git config"):
+        factory.install_url_rewrite(
+            repository,
+            "https://github.example.invalid/acme/package",
+        )
+    assert outside_config.read_bytes() == b"[safe]\n\tvalue = unchanged\n"
+    assert not (home / ".gitconfig").exists()
+
+
+def test_install_url_rewrite_requires_bounded_fixture_git_config(tmp_path: Path) -> None:
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    home = scenario / "home"
+    home.mkdir()
+    environment = _git_environment(tmp_path)
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    outside_config = Path(environment["GIT_CONFIG_GLOBAL"])
+    original_config = outside_config.read_bytes()
+    factory = LocalGitRepositoryFactory(
+        scenario / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+
+    with pytest.raises(ValueError, match="outside the allowed base"):
+        factory.install_url_rewrite(
+            repository,
+            "https://github.example.invalid/acme/package",
+        )
+    assert outside_config.read_bytes() == original_config
+
+    isolated_environment = _git_environment(scenario)
+    isolated_environment.pop("GIT_CONFIG_NOSYSTEM")
+    unguarded_factory = LocalGitRepositoryFactory(
+        scenario / "unguarded-repositories",
+        env=isolated_environment,
+    )
+    unguarded_repository = unguarded_factory.create("package")
+    with pytest.raises(ValueError, match="GIT_CONFIG_NOSYSTEM=1"):
+        unguarded_factory.install_url_rewrite(
+            unguarded_repository,
+            "https://github.example.invalid/acme/package",
+        )
 
 
 def test_same_source_sequence_produces_deterministic_commit(

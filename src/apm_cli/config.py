@@ -10,6 +10,7 @@ import os
 # ---------------------------------------------------------------------------
 _ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
+_ENV_GITHUB_AUTH_FIRST = "APM_GITHUB_AUTH_FIRST"
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -42,10 +43,14 @@ def ensure_config_exists():
             os.chmod(CONFIG_FILE, 0o600)
 
 
-def get_config():
+def get_config(*, create: bool = True):
     """Get the current configuration.
 
     Results are cached for the lifetime of the process.
+
+    Args:
+        create: When false, missing user config returns defaults without
+            creating ``~/.apm/config.json``.
 
     Returns:
         dict: Current configuration.
@@ -53,10 +58,38 @@ def get_config():
     global _config_cache
     if _config_cache is not None:
         return _config_cache
-    ensure_config_exists()
+    if create:
+        ensure_config_exists()
+    elif not os.path.exists(CONFIG_FILE):
+        return {}
     with open(CONFIG_FILE, encoding="utf-8") as f:
         _config_cache = json.load(f)
     return _config_cache
+
+
+def get_config_if_exists() -> dict:
+    """Read the existing configuration without creating a user config file."""
+    global _config_cache
+    if _config_cache is not None:
+        return _config_cache
+    if not os.path.isfile(CONFIG_FILE):
+        return {}
+    with open(CONFIG_FILE, encoding="utf-8") as f:
+        _config_cache = json.load(f)
+    return _config_cache
+
+
+def _resolve_create_config(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
+    """Resolve legacy bootstrap and newer create_config keywords."""
+    if create_config is not None:
+        return create_config
+    if bootstrap is not None:
+        return bootstrap
+    return True
 
 
 def _invalidate_config_cache():
@@ -174,15 +207,18 @@ def unset_temp_dir() -> None:
     _unset_config_key("temp_dir")
 
 
-def get_install_target() -> str | list[str] | None:
+def get_install_target(*, create_config: bool = True) -> str | list[str] | None:
     """Get the configured default target used by ``apm install``.
+
+    Args:
+        create_config: When false, do not create a missing user config file.
 
     Returns:
         Parsed target value from config, or ``None`` when unset/invalid.
     """
     from apm_cli.core.target_detection import parse_target_field
 
-    value = get_config().get(_INSTALL_TARGET_KEY)
+    value = get_config(create=create_config).get(_INSTALL_TARGET_KEY)
     try:
         return parse_target_field(value)
     except ValueError:
@@ -299,13 +335,23 @@ def unset_self_update_install_dir() -> None:
 # ---------------------------------------------------------------------------
 
 
-def get_allow_protocol_fallback() -> bool:
+def get_allow_protocol_fallback(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
     """Get the allow-protocol-fallback setting.
+
+    Args:
+        bootstrap: Legacy name for whether to create a missing user config file.
+        create_config: When false, do not create a missing user config file.
 
     Returns:
         bool: Whether cross-protocol fallback is enabled (default: False).
     """
-    return get_config().get("allow_protocol_fallback", False)
+    return get_config(
+        create=_resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    ).get("allow_protocol_fallback", False)
 
 
 def set_allow_protocol_fallback(enabled: bool) -> None:
@@ -317,13 +363,23 @@ def set_allow_protocol_fallback(enabled: bool) -> None:
     update_config({"allow_protocol_fallback": enabled})
 
 
-def get_prefer_ssh() -> bool:
+def get_prefer_ssh(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
     """Get the prefer-ssh transport preference setting.
+
+    Args:
+        bootstrap: Legacy name for whether to create a missing user config file.
+        create_config: When false, do not create a missing user config file.
 
     Returns:
         bool: Whether SSH is preferred for shorthand dependencies (default: False).
     """
-    return get_config().get("prefer_ssh", False)
+    return get_config(
+        create=_resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    ).get("prefer_ssh", False)
 
 
 def set_prefer_ssh(enabled: bool) -> None:
@@ -356,8 +412,11 @@ def unset_prefer_ssh() -> None:
     _unset_config_key("prefer_ssh")
 
 
-def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
-    """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value.
+def _parse_tristate_bool_env(raw: str | None) -> bool | None:
+    """Parse a tri-state boolean environment variable value.
+
+    Shared by every ``APM_*`` boolean env var (``APM_ALLOW_PROTOCOL_FALLBACK``,
+    ``APM_GITHUB_AUTH_FIRST``, ...) so the accepted spellings stay in one place.
 
     Args:
         raw: Raw environment variable value, or ``None`` when unset.
@@ -379,7 +438,16 @@ def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
     return None
 
 
-def get_apm_allow_protocol_fallback() -> bool:
+def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
+    """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value."""
+    return _parse_tristate_bool_env(raw)
+
+
+def get_apm_allow_protocol_fallback(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
     """Return the effective allow-protocol-fallback flag.
 
     Resolution order:
@@ -395,10 +463,91 @@ def get_apm_allow_protocol_fallback() -> bool:
     env_value = _parse_allow_protocol_fallback_env(os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK))
     if env_value is not None:
         return env_value
-    return get_allow_protocol_fallback()
+    should_create = _resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    return get_allow_protocol_fallback(create_config=should_create)
 
 
-def get_apm_protocol_pref() -> str | None:
+# ---------------------------------------------------------------------------
+# GitHub anonymous-first opt-out (issue #2545)
+# ---------------------------------------------------------------------------
+
+
+def get_github_auth_first(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
+    """Get the github-auth-first setting.
+
+    Args:
+        bootstrap: Legacy name for whether to create a missing user config file.
+        create_config: When false, do not create a missing user config file.
+
+    Returns:
+        bool: Whether exact-host github.com HTTPS attempts skip the
+        anonymous-first attempt and go straight to credentialed/environment-
+        inheriting behavior (default: False).
+    """
+    return get_config(
+        create=_resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    ).get("github_auth_first", False)
+
+
+def set_github_auth_first(enabled: bool) -> None:
+    """Set the github-auth-first setting.
+
+    Args:
+        enabled: Whether to skip the anonymous-first HTTPS attempt for
+            exact-host github.com dependencies.
+    """
+    update_config({"github_auth_first": enabled})
+
+
+def unset_github_auth_first() -> None:
+    """Remove the ``github_auth_first`` key from the config file.
+
+    No-op if the key is not present. After this call
+    :func:`get_apm_github_auth_first` will fall through to
+    ``APM_GITHUB_AUTH_FIRST`` env var and then the built-in default (``False``).
+    """
+    _unset_config_key("github_auth_first")
+
+
+def _parse_github_auth_first_env(raw: str | None) -> bool | None:
+    """Parse ``APM_GITHUB_AUTH_FIRST`` as a tri-state value."""
+    return _parse_tristate_bool_env(raw)
+
+
+def get_apm_github_auth_first(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
+    """Return the effective github-auth-first flag.
+
+    Resolution order:
+      1. ``APM_GITHUB_AUTH_FIRST`` environment variable
+         (``"1"``/``"true"``/``"yes"``/``"on"`` => True;
+          ``"0"``/``"false"``/``"no"``/``"off"`` => False)
+      2. ``github_auth_first`` value from ``~/.apm/config.json``
+      3. ``False`` (default: anonymous-first for exact-host github.com)
+
+    Returns:
+        ``True`` when github.com HTTPS attempts should skip the anonymous
+        attempt, otherwise ``False``.
+    """
+    env_value = _parse_github_auth_first_env(os.environ.get(_ENV_GITHUB_AUTH_FIRST))
+    if env_value is not None:
+        return env_value
+    should_create = _resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    return get_github_auth_first(create_config=should_create)
+
+
+def get_apm_protocol_pref(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> str | None:
     """Return the effective protocol preference string.
 
     Resolution order:
@@ -414,7 +563,8 @@ def get_apm_protocol_pref() -> str | None:
     env_val = os.environ.get(_ENV_GIT_PROTOCOL, "").strip().lower()
     if env_val in ("ssh", "https", "http"):
         return env_val
-    if get_prefer_ssh():
+    should_create = _resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    if get_prefer_ssh(create_config=should_create):
         return "ssh"
     return None
 
@@ -463,9 +613,15 @@ def unset_copilot_cowork_skills_dir() -> None:
     _unset_config_key("copilot_cowork_skills_dir")
 
 
-def _get_registries_section() -> dict:
+def _get_registries_section(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> dict:
     """Return the ``registries`` section from config.json as a dict."""
-    regs = get_config().get("registries", {})
+    regs = get_config(
+        create=_resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    ).get("registries", {})
     return regs if isinstance(regs, dict) else {}
 
 
@@ -525,10 +681,15 @@ def unset_registry(name: str) -> None:
         update_config({"registries": regs})
 
 
-def get_config_json_default_registry() -> str | None:
+def get_config_json_default_registry(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> str | None:
     """Return the registry name marked ``default: true`` in config.json."""
     found: str | None = None
-    for name, body in _get_registries_section().items():
+    should_create = _resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    for name, body in _get_registries_section(create_config=should_create).items():
         if not isinstance(name, str) or not name.strip():
             continue
         if not isinstance(body, dict):
@@ -761,9 +922,12 @@ def _validate_mcp_registry_url(url: str) -> str:
             f"({len(normalized)} > {_MCP_REGISTRY_URL_MAX_LENGTH} characters)"
         )
     parsed = urlparse(normalized)
+    from apm_cli.install.mcp.registry import _redact_url_credentials
+
+    safe_url = _redact_url_credentials(normalized)
     if not parsed.scheme:
         raise ValueError(
-            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"mcp-registry-url: Invalid URL '{safe_url}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"
         )
     scheme = parsed.scheme.lower()
@@ -774,21 +938,36 @@ def _validate_mcp_registry_url(url: str) -> str:
             f"WebSocket URLs (ws/wss) and file:// paths are rejected for security."
         )
     if parsed.username is not None:
-        raise ValueError(
-            "mcp-registry-url: URL must not contain credentials; "
-            "use the MCP_REGISTRY_URL environment variable or a credential helper instead."
-        )
+        raise ValueError("mcp-registry-url: embedded credentials are not supported")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("mcp-registry-url: URL has an invalid port") from exc
     if not parsed.hostname:
         raise ValueError(
-            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"mcp-registry-url: Invalid URL '{safe_url}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"
+        )
+    if parsed.query or parsed.fragment:
+        raise ValueError(
+            "mcp-registry-url: base URL must not contain a query or fragment; "
+            "query strings and fragments are not supported"
         )
     return normalized
 
 
-def get_mcp_registry_url() -> str | None:
-    """Return the user-configured MCP registry URL, or None if not set."""
-    return get_config().get(_MCP_REGISTRY_URL_KEY)
+def get_mcp_registry_url(*, create_config: bool = False) -> str | None:
+    """Return the user-configured MCP registry URL, or None if not set.
+
+    Reads avoid materialising ``~/.apm/config.json`` by default: registry
+    resolution runs on every MCP client construction, including preview-only
+    paths, and a lookup that answers "not set" must not leave state behind to
+    say so. Passing ``create_config=True`` preserves the legacy bootstrapping
+    behavior for callers that intentionally materialise user config.
+    """
+    if _config_cache is None and not create_config and not os.path.exists(CONFIG_FILE):
+        return None
+    return get_config(create=create_config).get(_MCP_REGISTRY_URL_KEY)
 
 
 def set_mcp_registry_url(url: str) -> None:

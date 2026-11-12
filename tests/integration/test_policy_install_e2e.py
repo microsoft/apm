@@ -41,8 +41,12 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+# Load this owner before decorators patch discovery, or its import-time binding
+# can capture the discovery mock permanently and leak policy state across tests.
+from apm_cli.policy import install_preflight as install_preflight_module
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+from tests.utils.materialized_downloader import stub_materialized_downloader
 
 # ---------------------------------------------------------------------------
 # Paths to real fixtures from W1
@@ -59,7 +63,7 @@ FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "policy"
 # install_preflight.py does a top-level ``from .discovery import
 # discover_policy_with_chain`` -> must also patch where it's used.
 _PATCH_DISCOVER_GATE = "apm_cli.policy.discovery.discover_policy_with_chain"
-_PATCH_DISCOVER_PREFLIGHT = "apm_cli.policy.install_preflight.discover_policy_with_chain"
+_PATCH_DISCOVER_PREFLIGHT = f"{install_preflight_module.__name__}.discover_policy_with_chain"
 
 # Version-check noise suppressor
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
@@ -245,7 +249,11 @@ class TestI1BlockDeniedDirectDep:
         _write_apm_yml(project_dir / "apm.yml", deps=["test-blocked/forbidden-package"])
 
         policy = _load_fixture_policy("apm-policy-deny.yml")
-        fetch = _make_fetch_result("found", policy=policy)
+        fetch = _make_fetch_result(
+            "found",
+            policy=policy,
+            source="org:gitlab.com/test-org/apm-policy",
+        )
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
 
@@ -634,6 +642,43 @@ class TestI10DryRunDenied:
         # No filesystem mutation
         assert not (project_dir / "apm.lock.yaml").exists(), "Dry-run should NOT create lockfile"
         assert not (project_dir / "apm_modules").exists(), "Dry-run should NOT create apm_modules/"
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_VALIDATE_PKG, return_value=True)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_positional_dry_run_excludes_unrequested_denied_manifest_dependency(
+        self,
+        mock_gate,
+        mock_preflight,
+        _mock_validate,
+        _mock_updates,
+        project,
+    ):
+        """Policy checks receive only the dependency selected for preview."""
+        project_dir, runner = project
+        manifest_path = project_dir / "apm.yml"
+        _write_apm_yml(
+            manifest_path,
+            deps=["test-blocked/evil-pkg"],
+        )
+        requested = project_dir / "requested-package"
+        requested.mkdir()
+        _write_apm_yml(requested / "apm.yml", name="requested-package")
+        manifest_before = manifest_path.read_bytes()
+        fetch = _make_fetch_result(
+            "found",
+            policy=_load_fixture_policy("apm-policy-deny.yml"),
+        )
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        result = _invoke_install(runner, ["./requested-package", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert "would be blocked" not in result.output.lower()
+        assert "test-blocked" not in result.output
+        assert manifest_path.read_bytes() == manifest_before
 
 
 # =====================================================================
@@ -1094,13 +1139,19 @@ class TestI20WarnModeAllViolations:
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
 
+        modules = project_dir / "apm_modules"
+        for name in ("evil-pkg-1", "evil-pkg-2", "evil-pkg-3"):
+            package_root = modules / "test-blocked" / name
+            package_root.mkdir(parents=True)
+            _write_apm_yml(package_root / "apm.yml", name=name)
+        stub_materialized_downloader(mock_dl, modules)
+
         result = _invoke_install(runner)
 
         out = result.output
         # Should NOT block (warn mode)
         assert "blocked by org policy" not in out.lower(), f"Warn-mode should NOT block:\n{out}"
-        # Install should proceed (exit 0 or exit due to mock errors,
-        # but NOT due to policy)
+        assert result.exit_code == 0, out
         # The 3 deps should all be attempted (not short-circuited
         # after the first policy check failure)
         for dep_name in ["evil-pkg-1", "evil-pkg-2", "evil-pkg-3"]:

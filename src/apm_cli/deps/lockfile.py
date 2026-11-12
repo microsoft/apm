@@ -5,9 +5,15 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import re
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +23,18 @@ from ..core.deployment_state import DeploymentLedger
 from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
 from ..models.dependency.identity import normalize_package_repo_url
+from ..models.dependency.object_fields import parse_alias_override
 from ..models.dependency.reference import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
+)
+from ..models.dependency.replacement import (
+    LocalReplacementSource,
+    ReplacementBinding,
+    ReplacementConfigError,
+    build_replacement_index,
+    parse_replace_block,
+    project_effective_reference,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,7 +42,98 @@ logger = logging.getLogger(__name__)
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
-SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3"})
+_REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
+
+
+def lockfile_parent_identity(
+    dependency: DependencyReference | LockedDependency,
+    replacements: Sequence[object] | None,
+) -> str:
+    """Encode exact original parent keys for v3, retaining legacy repo-url parents."""
+    return dependency.get_unique_key() if replacements is not None else dependency.repo_url
+
+
+def _copy_extension_map(value: object) -> dict[str, Any]:
+    """Copy a vendor-extension mapping, or return {} for empty/invalid input.
+
+    Non-mapping values (corrupt lockfiles) become an empty map so readers do
+    not raise. String-coerced keys keep declaration order.
+    """
+    if not isinstance(value, dict) or not value:
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
+class _ExistingLockfileUnset:
+    """Sentinel for callers that have not already read the destination."""
+
+
+_EXISTING_LOCKFILE_UNSET = _ExistingLockfileUnset()
+
+# req-lk-006 requires a frozen-install mode "in which the lockfile is never
+# written or rewritten".  An install reaches ``LockFile.write`` from eight
+# call sites (dependency lockfile build, local bundles, target-contraction
+# reconciliation, local-content persist, MCP and LSP integration, ...), so
+# the suppression lives at the one chokepoint they all funnel through
+# instead of as a flag threaded to each -- a new write site then inherits
+# the guarantee rather than needing to remember it.
+#
+# Suppressed writes are *recorded*, not merely dropped: the caller compares
+# them against the committed lockfile to decide whether the frozen install
+# can honestly report success (see ``InstallService``).
+#
+# A ContextVar rather than a module global so the mode cannot leak across
+# concurrent installs in one process (tests, programmatic callers).
+_suppressed_writes: ContextVar[list[str] | None] = ContextVar(
+    "apm_suppressed_lockfile_writes", default=None
+)
+
+
+@contextmanager
+def suppress_lockfile_writes() -> Iterator[list[str]]:
+    """Record and discard every :meth:`LockFile.write` in this context.
+
+    Yields the list of serialised lockfiles that *would* have been written,
+    in call order.  Serialised rather than held by reference so that later
+    mutation of the same in-memory :class:`LockFile` cannot rewrite
+    history: each entry is exactly the content that ``write`` withheld.
+    """
+    attempts: list[str] = []
+    token = _suppressed_writes.set(attempts)
+    try:
+        yield attempts
+    finally:
+        _suppressed_writes.reset(token)
+
+
+def installed_apm_version() -> str:
+    """Return the running APM distribution version for lockfile metadata."""
+    try:
+        from importlib.metadata import version
+
+        return version("apm-cli")
+    except Exception:
+        return "unknown"
+
+
+def resolve_reproducible_timestamp(
+    explicit: str | None,
+    lockfile_generated_at: str | None,
+) -> str:
+    """Resolve stable metadata time from explicit, environment, or legacy input."""
+    if explicit:
+        return explicit
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if source_date_epoch:
+        try:
+            return datetime.fromtimestamp(
+                int(source_date_epoch),
+                tz=UTC,
+            ).isoformat()
+        except (ValueError, OverflowError, OSError):
+            pass
+    return lockfile_generated_at or _REPRODUCIBLE_EPOCH
 
 
 class LockfileFormatError(ValueError):
@@ -38,6 +144,59 @@ class UnsupportedLockfileVersionError(LockfileFormatError):
     """Raised when a lockfile declares a version this client cannot read."""
 
 
+class LockfileConflictError(LockfileFormatError):
+    """Raised when a lockfile still contains git merge conflict markers."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(
+            f"{path} contains unresolved git merge conflict markers.\n"
+            "Resolve the conflict in that file or restore a known-good lockfile, "
+            "then retry your original command."
+        )
+
+
+class LockfileSymlinkError(OSError):
+    """Raised instead of replacing a symlinked lockfile with a regular file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        try:
+            self.target = os.readlink(path)
+        except OSError:
+            self.target = "<unreadable>"
+        super().__init__(
+            f"{path} is a symbolic link to {self.target}. APM does not write "
+            "lockfiles through symbolic links, so the link and its target were "
+            "left unchanged.\nReplace the link with a regular file (for example, "
+            "copy the target over it), then retry your original command."
+        )
+
+
+# Git writes each marker at the start of a line, followed by a space and a label
+# (or nothing, for a bare ``=======`` separator). A separator alone is not
+# evidence of a conflict, so only the labelled markers are matched here.
+_CONFLICT_MARKER_RE = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: |$)", re.MULTILINE)
+
+
+def has_conflict_markers(text: str) -> bool:
+    """Return True when *text* contains a git merge conflict marker at line start."""
+    return _CONFLICT_MARKER_RE.search(text) is not None
+
+
+def require_supported_lockfile_version(data: object) -> str:
+    """Return a supported declared version or fail closed."""
+    if not isinstance(data, dict):
+        raise LockfileFormatError("Lockfile root must be a mapping")
+    version = data.get("lockfile_version", "1")
+    if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
+        supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
+        raise UnsupportedLockfileVersionError(
+            f"Unsupported lockfile version {version!r}; supported versions: {supported}"
+        )
+    return version
+
+
 def _validate_lockfile_container(data: object) -> dict[str, Any]:
     """Validate version and top-level container shapes before construction."""
     if not isinstance(data, dict):
@@ -45,12 +204,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
     data = dict(data)
     # Pre-versioned lockfiles are a supported legacy v1 migration input.
     # Explicit unknown/newer versions still fail closed below.
-    version = data.get("lockfile_version", "1")
-    if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
-        supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
-        raise UnsupportedLockfileVersionError(
-            f"Unsupported lockfile version {version!r}; supported versions: {supported}"
-        )
+    require_supported_lockfile_version(data)
     list_fields = (
         "dependencies",
         "deployments",
@@ -62,7 +216,10 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "mcp_configs",
         "mcp_target_servers",
         "mcp_config_provenance",
+        "mcp_omissions",
         "lsp_configs",
+        "lsp_target_servers",
+        "lsp_config_provenance",
         "local_deployed_file_hashes",
     )
     for field_name in list_fields:
@@ -78,10 +235,30 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
     for index, dependency in enumerate(data.get("dependencies", [])):
         if not isinstance(dependency, dict):
             raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
-    for target, servers in (data.get("mcp_target_servers") or {}).items():
-        if not isinstance(target, str) or not isinstance(servers, list):
+    if any(not isinstance(name, str) or not name for name in (data.get("mcp_omissions") or {})):
+        raise LockfileFormatError(
+            "MCP omission evidence has invalid server names; selection is unknown. "
+            "Restore a known-good lockfile and repeat the intended install selection"
+        )
+    for field_name in ("mcp_target_servers", "lsp_target_servers"):
+        for target, servers in (data.get(field_name) or {}).items():
+            if not isinstance(target, str) or not target or not isinstance(servers, list):
+                raise LockfileFormatError(
+                    f"Lockfile {field_name} values must be string-to-list mappings"
+                )
+            if not all(isinstance(server, str) and bool(server) for server in servers):
+                raise LockfileFormatError(f"Lockfile {field_name} entries must be strings")
+    for server, provenance in (data.get("mcp_config_provenance") or {}).items():
+        if not isinstance(server, str) or not (
+            (isinstance(provenance, str) and bool(provenance))
+            or (
+                isinstance(provenance, list)
+                and bool(provenance)
+                and all(isinstance(owner, str) and bool(owner) for owner in provenance)
+            )
+        ):
             raise LockfileFormatError(
-                "Lockfile mcp_target_servers values must be string-to-list mappings"
+                "Lockfile mcp_config_provenance values must be strings or string lists"
             )
     if "deployments" in data:
         from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -91,6 +268,21 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         except ValueError as exc:
             raise LockfileFormatError(str(exc)) from exc
     return data
+
+
+def _normalized_mcp_provenance(
+    provenance: dict[str, str | list[str]],
+) -> dict[str, str | list[str]]:
+    """Return deterministic MCP provenance with list-valued owners sorted."""
+    return {
+        server: sorted(owners) if isinstance(owners, list) else owners
+        for server, owners in sorted(provenance.items())
+    }
+
+
+def _json_identity(value: Any) -> str:
+    """Serialize *value* so JSON type changes (``1`` vs ``true``) compare unequal."""
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def _normalize_lockfile_host_type(raw: Any) -> str | None:
@@ -133,6 +325,7 @@ class LockedDependency:
     """A resolved dependency with exact commit/version information."""
 
     repo_url: str
+    materialization_repo_url: str | None = None
     host: str | None = None
     host_type: str | None = None
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
@@ -201,6 +394,12 @@ class LockedDependency:
     # See to_dict/from_dict and the supply-chain boundary note in the lockfile
     # spec. Omitted from the serialized entry when absent.
     name: str | None = None
+    alias: str | None = None
+    # req-ext-003: vendor extension keys (x-*) from the dependency manifest,
+    # in declaration order. Omitted from YAML when empty so lockfiles that
+    # declare no extensions stay byte-identical. Values are not interpreted.
+    extensions: dict[str, Any] = field(default_factory=dict)
+    replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -208,12 +407,38 @@ class LockedDependency:
     _unknown_fields: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Normalize case-insensitive package identity when loading or creating locks."""
-        self.repo_url = normalize_package_repo_url(
+        """Separate canonical lock identity from materialization spelling."""
+        try:
+            self.alias = parse_alias_override(self.alias)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid lockfile dependency alias {self.alias!r}. Restore a known-good "
+                "apm.lock.yaml from version control or correct this entry's alias "
+                "to its intended placement. "
+                "Do not delete content at a rejected alias destination."
+            ) from exc
+        original_repo_url = self.repo_url
+        canonical_repo_url = normalize_package_repo_url(
             self.repo_url,
             host=self.host,
             source=self.source,
             registry_prefix=self.registry_prefix,
+        )
+        materialization_repo_url = self.materialization_repo_url or original_repo_url
+        materialization_identity = normalize_package_repo_url(
+            materialization_repo_url,
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.registry_prefix,
+        )
+        if materialization_identity != canonical_repo_url:
+            raise ValueError(
+                f"materialization_repo_url {materialization_repo_url!r} does not "
+                f"identify the same package as repo_url {self.repo_url!r}"
+            )
+        self.repo_url = canonical_repo_url
+        self.materialization_repo_url = (
+            materialization_repo_url if materialization_repo_url != canonical_repo_url else None
         )
 
     def get_unique_key(self) -> str:
@@ -249,6 +474,10 @@ class LockedDependency:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""
         result: dict[str, Any] = {"repo_url": self.repo_url}
+        if self.materialization_repo_url:
+            result["materialization_repo_url"] = self.materialization_repo_url
+        if self.alias is not None:
+            result["alias"] = self.alias
         if self.name is not None:
             result["name"] = self.name
         if self.host:
@@ -319,8 +548,12 @@ class LockedDependency:
             result["resolved_at"] = self.resolved_at
         if self.declared_license:
             result["declared_license"] = self.declared_license
+        if self.extensions:
+            result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
+        if self.replacement is not None:
+            result["replacement"] = self.replacement.to_dict()
         # Replay forward-compat unknown fields LAST so they never shadow a
         # known field that this build understands.
         for k, v in self._unknown_fields.items():
@@ -364,6 +597,8 @@ class LockedDependency:
         # the explicit legacy key handled above; do NOT consider it unknown.
         _known_keys = {
             "repo_url",
+            "materialization_repo_url",
+            "alias",
             "host",
             "host_type",
             "port",
@@ -398,15 +633,23 @@ class LockedDependency:
             "resolved_tag",
             "resolved_at",
             "declared_license",
+            "extensions",
             "exec_status",
             "name",
+            "replacement",
             # legacy migration key handled above
             "deployed_skills",
         }
-        unknown_fields = {k: v for k, v in data.items() if k not in _known_keys}
+        unknown_fields = {
+            k: v
+            for k, v in data.items()
+            if k not in _known_keys and not DependencyReference.is_transient_provider_field(k)
+        }
 
-        return cls(
+        locked = cls(
             repo_url=data["repo_url"],
+            materialization_repo_url=data.get("materialization_repo_url"),
+            alias=data.get("alias"),
             host=data.get("host"),
             host_type=host_type,
             port=port,
@@ -443,8 +686,21 @@ class LockedDependency:
             declared_license=data.get("declared_license"),
             exec_status=exec_status,
             name=data.get("name"),
+            extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
+        if "replacement" in data:
+            try:
+                locked.replacement = ReplacementBinding.from_dict(
+                    data["replacement"], locked.to_dependency_ref()
+                )
+            except ReplacementConfigError as exc:
+                raise LockfileFormatError(f"Invalid replacement evidence: {exc}") from exc
+            if locked.to_dependency_ref().is_local and (
+                locked.resolved_ref or locked.resolved_commit
+            ):
+                raise LockfileFormatError("Local replacement must not carry a Git ref or commit")
+        return locked
 
     @classmethod
     def from_dependency_ref(
@@ -459,6 +715,7 @@ class LockedDependency:
         git_semver_resolution=None,
         package_name: str | None = None,
         package_version: str | None = None,
+        extensions: dict[str, Any] | None = None,
     ) -> LockedDependency:
         """Create from a DependencyReference with resolution info.
 
@@ -502,6 +759,28 @@ class LockedDependency:
                 "exclusive: a dependency is either registry-sourced or a "
                 "git-source semver resolution, not both."
             )
+        binding = dep_ref.replacement
+        if binding is not None:
+            if registry_resolution is not None or registry_config is not None:
+                raise ValueError("Replacement sources cannot use a registry resolution")
+            locked = cls.from_dependency_ref(
+                dep_ref=binding.original,
+                resolved_commit=resolved_commit,
+                depth=depth,
+                resolved_by=resolved_by,
+                is_dev=is_dev,
+                git_semver_resolution=git_semver_resolution,
+                package_name=package_name,
+                package_version=package_version,
+                extensions=extensions,
+            )
+            locked.replacement = ReplacementBinding.from_dict(binding.to_dict(), binding.original)
+            locked.resolved_ref = (
+                git_semver_resolution.resolved_tag
+                if git_semver_resolution is not None
+                else dep_ref.reference
+            )
+            return locked
         if registry_config is not None:
             host = registry_config.host
             registry_prefix = registry_config.prefix
@@ -532,6 +811,7 @@ class LockedDependency:
         else:
             resolved_ref_val = dep_ref.reference
 
+        dep_ref.validate_provider_coordinates()
         if registry_resolution is not None:
             version_value = registry_resolution.version
         elif git_semver_resolution is not None:
@@ -541,8 +821,20 @@ class LockedDependency:
         else:
             version_value = None
 
+        canonical_repo_url = normalize_package_repo_url(
+            dep_ref.repo_url,
+            host=dep_ref.host,
+            source="local" if dep_ref.is_local else dep_ref.source,
+            registry_prefix=dep_ref.artifactory_prefix,
+            is_local=dep_ref.is_local,
+            is_marketplace=dep_ref.is_marketplace,
+        )
         return cls(
-            repo_url=dep_ref.repo_url,
+            repo_url=canonical_repo_url,
+            alias=dep_ref.alias,
+            materialization_repo_url=(
+                dep_ref.repo_url if dep_ref.repo_url != canonical_repo_url else None
+            ),
             host=host,
             host_type=dep_ref.host_type,
             port=dep_ref.port,
@@ -583,10 +875,15 @@ class LockedDependency:
                 git_semver_resolution.resolved_at if git_semver_resolution is not None else None
             ),
             name=package_name,
+            extensions=_copy_extension_map(extensions),
         )
 
-    def to_dependency_ref(self) -> DependencyReference:
+    def to_dependency_ref(self, *, effective: bool = True) -> DependencyReference:
         """Reconstruct a DependencyReference from this locked dependency.
+
+        Replacement rows return the selected source by default, including
+        its host for transport and provider checks. ``effective=False``
+        returns the original ownership coordinates instead.
 
         Registry-sourced deps come back with ``source="registry"`` so the
         install pipeline routes them to the registry resolver. The exact
@@ -599,8 +896,9 @@ class LockedDependency:
         # range (e.g. ``^1.2.0`` -> ``1.5.3``).
         is_registry = self.source == "registry"
         ref = self.version if (is_registry and self.version) else self.resolved_ref
-        return DependencyReference(
-            repo_url=self.repo_url,
+        dep = DependencyReference(
+            repo_url=self.materialization_repo_url or self.repo_url,
+            alias=self.alias,
             host=self.host,
             host_type=self.host_type,
             port=self.port,
@@ -617,6 +915,36 @@ class LockedDependency:
             source=self.source,
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
+        ).with_derived_provider_coordinates()
+        if not effective or self.replacement is None:
+            return dep
+        selected = project_effective_reference(self.replacement.original, self.replacement.rule)
+        selected.replacement = self.replacement
+        if not selected.is_local:
+            selected.reference = self.resolved_ref or selected.reference
+        return selected
+
+    def matches_replacement(self, dep: DependencyReference) -> bool:
+        """Whether this pin belongs to the same root-selected source contract."""
+        binding = dep.replacement
+        if binding is None or self.replacement is None:
+            return binding is self.replacement
+        return binding.rule == self.replacement.rule
+
+    @property
+    def parent_keys(self) -> tuple[str | None, ...]:
+        """Return recorded incoming parents, including the root marker."""
+        if self.replacement is None:
+            return (self.resolved_by,)
+        return tuple(dict.fromkeys(request.parent for request in self.replacement.requests))
+
+    @property
+    def is_local_source(self) -> bool:
+        """Whether verification/replay uses local bytes, independent of ownership."""
+        return (
+            isinstance(self.replacement.rule.source, LocalReplacementSource)
+            if self.replacement is not None
+            else self.source == "local"
         )
 
 
@@ -625,7 +953,7 @@ class LockFile:
     """APM lock file for reproducible dependency resolution."""
 
     lockfile_version: str = "1"
-    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    generated_at: str | None = None
     apm_version: str | None = None
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
@@ -637,9 +965,12 @@ class LockFile:
     # ``resolved_by is None`` convention). Kept OUT of ``mcp_configs`` values so
     # it never pollutes config comparisons. Consistency diagnostics use this as
     # ownership context only; provenance never exempts a lock-only server.
-    mcp_config_provenance: dict[str, str] = field(default_factory=dict)
+    mcp_config_provenance: dict[str, str | list[str]] = field(default_factory=dict)
+    mcp_omissions: dict[str, Any] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
+    lsp_target_servers: dict[str, list[str]] = field(default_factory=dict)
+    lsp_config_provenance: dict[str, str] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
     deployment_ledger: DeploymentLedger = field(
@@ -647,6 +978,13 @@ class LockFile:
     )
     _deployments_present: bool = field(default=False, repr=False, compare=False)
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
+    _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
+
+    # Root replacement rules (issue #3180).  Stores the full normalized rule
+    # table including dormant rules so frozen validation can compare declared
+    # intent without reading unused sources.  ``None`` means no replacement
+    # state; ``[]`` means explicitly empty (cleared rules).
+    replacements: list[dict] | None = field(default=None, repr=False)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -667,9 +1005,46 @@ class LockFile:
         ):
             self.lockfile_version = "2"
 
-    def get_dependency(self, key: str) -> LockedDependency | None:
-        """Get a dependency by its unique key."""
+    def get_dependency(
+        self,
+        key: str,
+        *,
+        marketplace_index: dict[tuple[str, str], LockedDependency | None] | None = None,
+    ) -> LockedDependency | None:
+        """Look up a key, using a fresh provenance snapshot for marketplace keys.
+
+        Batch consumers can supply one snapshot to keep lookup linear overall.
+        No index is cached on this mutable lockfile.
+        """
+        if key.startswith("_marketplace/"):
+            parts = key.split("/", 2)
+            if len(parts) == 3:
+                index = self.marketplace_index() if marketplace_index is None else marketplace_index
+                return index.get((parts[1], parts[2]))
         return self.dependencies.get(key)
+
+    def marketplace_index(self) -> dict[tuple[str, str], LockedDependency | None]:
+        """Index recorded discovery labels, with None for ambiguous associations.
+
+        These labels associate declarations with locked coordinates; they are
+        not a catalog trust identity and never authorize a catalog refresh.
+        """
+        index: dict[tuple[str, str], LockedDependency | None] = {}
+        for dep in self.dependencies.values():
+            if dep.discovered_via and dep.marketplace_plugin_name:
+                pair = (dep.discovered_via, dep.marketplace_plugin_name)
+                index[pair] = None if pair in index else dep
+        return index
+
+    def get_dependency_by_marketplace(
+        self, marketplace_name: str, plugin_name: str
+    ) -> LockedDependency | None:
+        """Find a locked dependency by its marketplace provenance.
+
+        Fails closed (returns None) if no matching dependency is found or if
+        multiple rows share the same marketplace provenance.
+        """
+        return self.marketplace_index().get((marketplace_name, plugin_name))
 
     def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
         """Rename one locally deployed path and carry its content hash."""
@@ -679,7 +1054,7 @@ class LockFile:
 
     def has_dependency(self, key: str) -> bool:
         """Check if a dependency exists."""
-        return key in self.dependencies
+        return self.get_dependency(key) is not None
 
     def get_all_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies sorted by depth then repo_url."""
@@ -688,6 +1063,22 @@ class LockFile:
     def get_package_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
+
+    def project_self_entry(self) -> LockedDependency:
+        """Build the virtual self-entry for the project's own local content.
+
+        The entry is an in-memory normalization of ``local_deployed_files``;
+        it is never serialized as a dependency row.
+        """
+        return LockedDependency(
+            repo_url="<self>",
+            source="local",
+            local_path=_SELF_KEY,
+            is_dev=True,
+            depth=0,
+            deployed_files=list(self.local_deployed_files),
+            deployed_file_hashes=dict(self.local_deployed_file_hashes),
+        )
 
     def _needs_v2(self) -> bool:
         """Whether the resolved graph requires lockfile schema v2.
@@ -706,20 +1097,71 @@ class LockFile:
                 return True
         return False
 
+    def _needs_v3(self) -> bool:
+        """Whether replacement state requires lockfile schema v3 (issue #3180).
+
+        The version bump is content-driven: only when replacement rules exist
+        (including an explicitly empty list) does the lockfile require v3.
+        Verified v0.25.0, v0.32.0 and v0.33.0 readers reject this version;
+        v0.24.1 does not provide that fail-closed guarantee.
+        """
+        return self.replacements is not None or any(
+            dep.replacement is not None for dep in self.dependencies.values()
+        )
+
+    def _validate_replacement_evidence(self) -> None:
+        """Keep per-entry source evidence bound to the complete root rule table."""
+        try:
+            index = build_replacement_index(parse_replace_block(self.replacements or []))
+            for dep in self.dependencies.values():
+                rule = index.lookup(dep.to_dependency_ref(effective=False))
+                evidence = dep.replacement
+                if (rule is None) != (evidence is None) or (
+                    evidence is not None and evidence.rule != rule
+                ):
+                    raise ReplacementConfigError(
+                        f"Replacement evidence for {dep.get_unique_key()} disagrees with root replacements"
+                    )
+                if self.replacements is not None:
+                    if any(
+                        parent is not None and parent not in self.dependencies
+                        for parent in dep.parent_keys
+                    ):
+                        raise ReplacementConfigError(
+                            f"Replacement graph parent for {dep.get_unique_key()} is absent from the lockfile"
+                        )
+        except ReplacementConfigError as exc:
+            raise LockfileFormatError(str(exc)) from exc
+
+    def _required_lockfile_version(self) -> str:
+        """Return the minimum schema version required by current lock state."""
+        if self._needs_v3():
+            return "3"
+        return "2" if self._needs_v2() else "1"
+
+    def sync_lockfile_version(self) -> None:
+        """Re-derive ``lockfile_version`` from current content.
+
+        Callers that mutate content directly (instead of through
+        ``add_dependency``) use this to keep the in-memory version equal to
+        what ``to_yaml`` would emit before comparing locks (issue #3433).
+        """
+        self.lockfile_version = self._required_lockfile_version()
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
+        self._validate_replacement_evidence()
+
         if not self.deployment_ledger.records:
             self.deployment_ledger = DeploymentLedgerCodec.from_lockfile(self)
         DeploymentLedgerCodec.apply_to_lockfile(self.deployment_ledger, self)
-        # Opportunistic v1<->v2 derivation (design §6.1, invariant §2.1.4):
+        # Content-driven v1<->v2 derivation:
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
-        # that mutate ``self.dependencies`` directly or remove the last
-        # registry / git-semver dep need the field re-derived here so the
-        # on-disk version is correct in both directions.
-        self.lockfile_version = "2" if self._needs_v2() else "1"
+        # that mutate content directly need the field re-derived here.
+        self.sync_lockfile_version()
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
@@ -729,8 +1171,9 @@ class LockFile:
         try:
             data: dict[str, Any] = {
                 "lockfile_version": emit_version,
-                "generated_at": self.generated_at,
             }
+            if self.generated_at is not None:
+                data["generated_at"] = self.generated_at
             if self.apm_version:
                 data["apm_version"] = self.apm_version
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
@@ -739,23 +1182,36 @@ class LockFile:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
-            if self.mcp_target_servers:
+            if self.mcp_omissions:
+                data["mcp_omissions"] = dict(sorted(self.mcp_omissions.items()))
+            if self.mcp_target_servers or self._mcp_target_servers_present:
                 data["mcp_target_servers"] = {
                     target: sorted(servers)
                     for target, servers in sorted(self.mcp_target_servers.items())
                 }
             if self.mcp_config_provenance:
-                data["mcp_config_provenance"] = dict(sorted(self.mcp_config_provenance.items()))
+                data["mcp_config_provenance"] = _normalized_mcp_provenance(
+                    self.mcp_config_provenance
+                )
             if self.lsp_servers:
                 data["lsp_servers"] = sorted(self.lsp_servers)
             if self.lsp_configs:
                 data["lsp_configs"] = dict(sorted(self.lsp_configs.items()))
+            if self.lsp_target_servers:
+                data["lsp_target_servers"] = {
+                    target: sorted(servers)
+                    for target, servers in sorted(self.lsp_target_servers.items())
+                }
+            if self.lsp_config_provenance:
+                data["lsp_config_provenance"] = dict(sorted(self.lsp_config_provenance.items()))
             if self.local_deployed_files:
                 data["local_deployed_files"] = sorted(self.local_deployed_files)
             if self.local_deployed_file_hashes:
                 data["local_deployed_file_hashes"] = dict(
                     sorted(self.local_deployed_file_hashes.items())
                 )
+            if self.replacements is not None:
+                data["replacements"] = self.replacements
             from ..utils.yaml_io import yaml_to_str
 
             return yaml_to_str(data)
@@ -777,15 +1233,21 @@ class LockFile:
         except (yaml.YAMLError, ValueError) as exc:
             raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
+        return cls._from_validated_data(data)
+
+    @classmethod
+    def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
+        """Construct a lockfile from an already validated YAML mapping."""
         lock = cls(
             lockfile_version=data.get("lockfile_version", "1"),
-            generated_at=data.get("generated_at", ""),
+            generated_at=data.get("generated_at"),
             apm_version=data.get("apm_version"),
         )
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
+        lock.mcp_omissions = dict(data.get("mcp_omissions") or {})
         lock.mcp_target_servers = {
             target: list(servers)
             for target, servers in (data.get("mcp_target_servers") or {}).items()
@@ -794,21 +1256,30 @@ class LockFile:
         lock.mcp_config_provenance = dict(data.get("mcp_config_provenance") or {})
         lock.lsp_servers = list(data.get("lsp_servers", []))
         lock.lsp_configs = dict(data.get("lsp_configs") or {})
+        lock.lsp_target_servers = {
+            target: list(servers)
+            for target, servers in (data.get("lsp_target_servers") or {}).items()
+        }
+        lock._lsp_target_servers_present = "lsp_target_servers" in data
+        lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        # Root replacement rules (issue #3180).  ``None`` = no replacement
+        # section in lockfile; ``[]`` = explicitly cleared replacement state.
+        raw_replacements = data.get("replacements")
+        if "replacements" in data:
+            if isinstance(raw_replacements, list):
+                lock.replacements = raw_replacements
+            else:
+                raise LockfileFormatError("'replacements' must be a list")
+        if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
+            raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
+        lock._validate_replacement_evidence()
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
         if lock.local_deployed_files:
-            lock.dependencies[_SELF_KEY] = LockedDependency(
-                repo_url="<self>",
-                source="local",
-                local_path=".",
-                is_dev=True,
-                depth=0,
-                deployed_files=list(lock.local_deployed_files),
-                deployed_file_hashes=dict(lock.local_deployed_file_hashes),
-            )
+            lock.dependencies[_SELF_KEY] = lock.project_self_entry()
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
         if "deployments" in data:
@@ -821,19 +1292,83 @@ class LockFile:
             lock.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lock)
         return lock
 
-    def write(self, path: Path) -> None:
-        """Write lock file to disk."""
-        from ..utils.atomic_io import atomic_write_text
+    def write(
+        self,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
+    ) -> None:
+        """Write lock file to disk, preserving legacy timestamp behavior.
 
-        atomic_write_text(path, self.to_yaml())
+        Inside :func:`suppress_lockfile_writes` (``apm install --frozen``,
+        req-lk-006) the serialised content is recorded for the caller and
+        the file on disk is left byte-for-byte untouched.
+
+        New lockfiles omit ``generated_at``.  When the on-disk lockfile already
+        carries the field, keep it stable for semantic no-ops and refresh it for
+        substantive writes. This behavior should be changed to remove the legacy
+        timestamp in a future APM version, but for now it preserves backward
+        compatibility with older APM builds that expect the field. This method
+        may mutate ``self.generated_at`` to preserve or refresh that metadata.
+        Callers that already loaded the destination can pass ``existing_lockfile``
+        to avoid parsing the same bytes again.
+        """
+        suppressed = _suppressed_writes.get()
+        if suppressed is not None:
+            suppressed.append(self.to_yaml())
+            return
+        if path.is_symlink():
+            raise LockfileSymlinkError(path)
+        from ..utils.atomic_io import atomic_write_text, umask_file_mode
+        from ..utils.staging_guard import assert_no_staging_paths
+        from ..utils.yaml_io import load_yaml_str
+
+        existing: LockFile | None
+        legacy_timestamp_present = False
+        if isinstance(existing_lockfile, _ExistingLockfileUnset) and path.exists():
+            existing_text = path.read_text(encoding="utf-8")
+            try:
+                existing_data = load_yaml_str(existing_text)
+            except (yaml.YAMLError, ValueError):
+                existing_data = None
+            existing = None
+            if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
+                legacy_timestamp_present = True
+                try:
+                    existing = type(self)._from_validated_data(
+                        _validate_lockfile_container(existing_data)
+                    )
+                except UnsupportedLockfileVersionError:
+                    raise
+                except LockfileFormatError:
+                    existing = None
+        elif isinstance(existing_lockfile, _ExistingLockfileUnset):
+            existing = None
+        else:
+            existing = existing_lockfile
+        if existing is not None and existing.generated_at is not None:
+            if self.is_semantically_equivalent(existing):
+                self.generated_at = existing.generated_at
+            else:
+                self.generated_at = datetime.now(UTC).isoformat()
+        elif legacy_timestamp_present:
+            self.generated_at = datetime.now(UTC).isoformat()
+        else:
+            self.generated_at = None
+        serialized = self.to_yaml()
+        assert_no_staging_paths(serialized, path.name)
+        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
-        """Read lock file from disk. Returns None if not exists or corrupt."""
-        if not path.exists():
+        """Read lock file from disk. Returns None when the file does not exist."""
+        if not path.exists() and not path.is_symlink():
             return None
         try:
-            return cls.from_yaml(path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            if has_conflict_markers(text):
+                raise LockfileConflictError(path)
+            return cls.from_yaml(text)
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
@@ -862,15 +1397,7 @@ class LockFile:
         """
         from .installed_package import InstalledPackage
 
-        # Get APM version
-        try:
-            from importlib.metadata import version
-
-            apm_version = version("apm-cli")
-        except Exception:
-            apm_version = "unknown"
-
-        lock = cls(apm_version=apm_version)
+        lock = cls(apm_version=installed_apm_version())
 
         for entry in installed_packages:
             registry_resolution = None
@@ -903,6 +1430,7 @@ class LockFile:
                 git_semver_resolution=git_semver_resolution,
                 package_name=getattr(entry, "package_name", None),
                 package_version=getattr(entry, "package_version", None),
+                extensions=getattr(entry, "extensions", None),
             )
             lock.add_dependency(locked_dep)
 
@@ -939,9 +1467,14 @@ class LockFile:
                 paths.append(rel_path)
         return paths
 
-    def save(self, path: Path) -> None:
+    def save(
+        self,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
+    ) -> None:
         """Save lock file to disk (alias for write)."""
-        self.write(path)
+        self.write(path, existing_lockfile=existing_lockfile)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP/LSP servers, and configs.
@@ -949,7 +1482,10 @@ class LockFile:
         Ignores ``generated_at`` and ``apm_version`` so that a no-change
         install does not dirty the lockfile.
         """
-        if self.lockfile_version != other.lockfile_version:
+        if (
+            self.lockfile_version != other.lockfile_version
+            or self.replacements != other.replacements
+        ):
             return False
         self_dependency_keys = set(self.dependencies).difference({_SELF_KEY})
         other_dependency_keys = set(other.dependencies).difference({_SELF_KEY})
@@ -962,25 +1498,37 @@ class LockFile:
                 return False
         if sorted(self.mcp_servers) != sorted(other.mcp_servers):
             return False
-        if self.mcp_configs != other.mcp_configs:
+        # Python equality treats ``1`` and ``True`` as equal, which would keep a
+        # stale drift baseline after a type-only change such as OpenCode's
+        # ``enabled``.
+        if _json_identity(self.mcp_configs) != _json_identity(other.mcp_configs) or _json_identity(
+            self.mcp_omissions
+        ) != _json_identity(other.mcp_omissions):
             return False
-        if self.mcp_target_servers != other.mcp_target_servers or dict(
-            self.deployment_ledger.records
-        ) != dict(other.deployment_ledger.records):
+        if (
+            self.mcp_target_servers != other.mcp_target_servers
+            or (bool(self.mcp_target_servers) or self._mcp_target_servers_present)
+            != (bool(other.mcp_target_servers) or other._mcp_target_servers_present)
+            or dict(self.deployment_ledger.records) != dict(other.deployment_ledger.records)
+        ):
             return False
-        if self.mcp_config_provenance != other.mcp_config_provenance:
+        if _normalized_mcp_provenance(self.mcp_config_provenance) != _normalized_mcp_provenance(
+            other.mcp_config_provenance
+        ):
             return False
         if sorted(self.lsp_servers) != sorted(other.lsp_servers):
             return False
         if self.lsp_configs != other.lsp_configs:
             return False
-        if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
+        if self.lsp_target_servers != other.lsp_target_servers:
+            return False
+        if self.lsp_config_provenance != other.lsp_config_provenance:
             return False
         # Issue #887: include hash dict in equivalence so post-install
         # hash updates persist even when the file list is unchanged.
-        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):  # noqa: SIM103
-            return False
-        return True
+        return sorted(self.local_deployed_files) == sorted(other.local_deployed_files) and dict(
+            self.local_deployed_file_hashes
+        ) == dict(other.local_deployed_file_hashes)
 
     @classmethod
     def installed_paths_for_project(cls, project_root: Path) -> list[str]:
@@ -997,12 +1545,7 @@ class LockFile:
                        ordered by depth then repo_url (no duplicates).
         """
         try:
-            lockfile_path = get_lockfile_path(project_root)
-            if not lockfile_path.exists():
-                # Fallback to legacy lockfile for pre-migration reads
-                legacy_path = project_root / LEGACY_LOCKFILE_NAME
-                if legacy_path.exists():
-                    lockfile_path = legacy_path
+            lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
             lockfile = cls.read(lockfile_path)
             if not lockfile:
                 return []
@@ -1022,6 +1565,23 @@ def get_lockfile_path(project_root: Path) -> Path:
     return project_root / LOCKFILE_NAME
 
 
+def resolve_lockfile_path_for_read(project_root: Path, *, read_only: bool) -> Path:
+    """Resolve the lockfile path, preserving legacy files for read-only callers."""
+    if read_only:
+        new_path = get_lockfile_path(project_root)
+        legacy_path = project_root / LEGACY_LOCKFILE_NAME
+        if (
+            not new_path.exists()
+            and not new_path.is_symlink()
+            and (legacy_path.exists() or legacy_path.is_symlink())
+        ):
+            return legacy_path
+        return new_path
+
+    migrate_lockfile_if_needed(project_root)
+    return get_lockfile_path(project_root)
+
+
 def migrate_lockfile_if_needed(project_root: Path) -> bool:
     """Migrate legacy apm.lock to apm.lock.yaml if needed.
 
@@ -1037,7 +1597,9 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
     """
     new_path = get_lockfile_path(project_root)
     legacy_path = project_root / LEGACY_LOCKFILE_NAME
-    if not new_path.exists() and legacy_path.exists():
+    # A dangling symlink reports exists() == False; renaming onto it would
+    # replace the link, so leave it for the writer to refuse.
+    if not new_path.exists() and not new_path.is_symlink() and legacy_path.exists():
         try:
             legacy_path.rename(new_path)
         except OSError:

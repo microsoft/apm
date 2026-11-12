@@ -204,6 +204,11 @@ function Test-RuntimeSetup {
 # --- HERO SCENARIO 1: 30-Second Zero-Config ---
 
 function Test-HeroZeroConfig {
+    if ($env:APM_RUN_INFERENCE_TESTS -ne "1") {
+        Write-Info "Skipping HERO SCENARIO 1 (inference tests decoupled; set APM_RUN_INFERENCE_TESTS=1 to enable)"
+        return $true
+    }
+
     Write-TestHeader "HERO SCENARIO 1: 30-Second Zero-Config (README lines 35-44)"
 
     # Create temporary directory for this test
@@ -341,20 +346,24 @@ function Test-HeroGuardrailing {
         }
 
         # Step 5: apm run design-review (from installed package)
-        Write-Host "Running: $script:BINARY_PATH run design-review (with 10s timeout)"
-        Write-Host "--- Command Output Start ---"
-        $exitCode = Invoke-WithTimeout -Seconds 10 -Command $script:BINARY_PATH -Arguments @("run", "design-review")
-        Write-Host "--- Command Output End ---"
-        Write-Host "Exit code: $exitCode"
+        if ($env:APM_RUN_INFERENCE_TESTS -eq "1") {
+            Write-Host "Running: $script:BINARY_PATH run design-review (with 10s timeout)"
+            Write-Host "--- Command Output Start ---"
+            $exitCode = Invoke-WithTimeout -Seconds 10 -Command $script:BINARY_PATH -Arguments @("run", "design-review")
+            Write-Host "--- Command Output End ---"
+            Write-Host "Exit code: $exitCode"
 
-        if ($exitCode -eq 124) {
-            # Timeout is expected and OK - prompt started executing
-            Write-Success "design-review prompt executed with compiled guardrails"
-        } elseif ($exitCode -eq 0) {
-            Write-Success "design-review completed successfully"
+            if ($exitCode -eq 124) {
+                # Timeout is expected and OK - prompt started executing
+                Write-Success "design-review prompt executed with compiled guardrails"
+            } elseif ($exitCode -eq 0) {
+                Write-Success "design-review completed successfully"
+            } else {
+                Write-ErrorText "apm run design-review failed immediately"
+                return $false
+            }
         } else {
-            Write-ErrorText "apm run design-review failed immediately"
-            return $false
+            Write-Info "Skipping apm run design-review (inference tests decoupled; set APM_RUN_INFERENCE_TESTS=1 to enable)"
         }
 
         Write-Success "HERO SCENARIO 2: 2-minute guardrailing PASSED"
@@ -387,11 +396,20 @@ function Main {
     Write-Host "Binary found: $script:BINARY_PATH"
 
     $testsPassed = 0
-    $testsTotal = 5  # Prerequisites, basic commands, runtime setup, 2 hero scenarios
+    $testsTotal = 4  # Prerequisites, basic commands, runtime setup, guardrailing
     $dependencyTestsRun = $false
+    $inferenceTestsRun = $false
+
+    if ($env:APM_RUN_INFERENCE_TESTS -eq "1") {
+        $testsTotal++
+        $inferenceTestsRun = $true
+        Write-Info "Inference tests enabled (APM_RUN_INFERENCE_TESTS=1)"
+    } else {
+        Write-Info "Inference tests decoupled; skipping apm run tests"
+    }
 
     # Add dependency tests to total if available and GITHUB token is present
-    if ($script:DEPENDENCY_TESTS_AVAILABLE -and ($env:GITHUB_CLI_PAT -or $env:GITHUB_TOKEN)) {
+    if ($script:DEPENDENCY_TESTS_AVAILABLE -and ($env:GITHUB_APM_PAT -or $env:GITHUB_TOKEN)) {
         $testsTotal++
         $dependencyTestsRun = $true
         Write-Info "Dependency integration tests will be included"
@@ -426,11 +444,15 @@ function Main {
             Write-ErrorText "Runtime setup test failed"
         }
 
-        # HERO SCENARIO 1: 30-second zero-config
-        if (Test-HeroZeroConfig) {
-            $testsPassed++
+        # HERO SCENARIO 1: 30-second zero-config (only with inference enabled)
+        if ($inferenceTestsRun) {
+            if (Test-HeroZeroConfig) {
+                $testsPassed++
+            } else {
+                Write-ErrorText "Hero scenario 1 (30-sec zero-config) failed"
+            }
         } else {
-            Write-ErrorText "Hero scenario 1 (30-sec zero-config) failed"
+            Test-HeroZeroConfig | Out-Null
         }
 
         # HERO SCENARIO 2: 2-minute guardrailing
@@ -467,23 +489,27 @@ function Main {
         Write-Host ""
         Write-Host "Binary is ready for production release"
         Write-Host "End-user experience validated successfully"
-        Write-Host "Both README hero scenarios work perfectly"
+        Write-Host "Release-gated README flows passed"
         Write-Host ""
         Write-Host "Validated user journeys:"
         Write-Host "  1. Prerequisites (GITHUB_TOKEN)"
         Write-Host "  2. Binary accessibility"
         Write-Host "  3. Runtime setup (copilot)"
         Write-Host ""
-        Write-Host "  HERO SCENARIO 1: 30-Second Zero-Config"
-        Write-Host "    - Run virtual package directly"
-        Write-Host "    - Auto-install on first run"
-        Write-Host "    - Use cached package on second run"
-        Write-Host ""
+        if ($inferenceTestsRun) {
+            Write-Host "  HERO SCENARIO 1: 30-Second Zero-Config"
+            Write-Host "    - Run virtual package directly"
+            Write-Host "    - Auto-install on first run"
+            Write-Host "    - Use cached package on second run"
+            Write-Host ""
+        }
         Write-Host "  HERO SCENARIO 2: 2-Minute Guardrailing"
         Write-Host "    - Project initialization"
         Write-Host "    - Install APM packages"
         Write-Host "    - Compile to AGENTS.md guardrails"
-        Write-Host "    - Run prompts with guardrails"
+        if ($inferenceTestsRun) {
+            Write-Host "    - Run prompts with guardrails"
+        }
         if ($dependencyTestsRun) {
             Write-Host ""
             Write-Host "  BONUS: Real dependency integration"

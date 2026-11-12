@@ -81,7 +81,7 @@ class DependencyTree:
         default_factory=lambda: defaultdict(list)
     )
     _nodes_by_unique_key: dict[str, DependencyNode] = field(default_factory=dict)
-    _repo_url_index: set[str] = field(default_factory=set)
+    _repo_lookup_index: set[str] = field(default_factory=set)
     max_depth: int = 0
     resolution_errors: list[str] = field(default_factory=list)
 
@@ -90,14 +90,14 @@ class DependencyTree:
         node_id = node.get_id()
         unique_key = node.dependency_ref.get_unique_key()
         is_new = node_id not in self.nodes
+        if not is_new:
+            return
         self.nodes[node_id] = node
-        if is_new:
-            self._nodes_by_unique_key.setdefault(unique_key, node)
-            self._nodes_by_depth[node.depth].append(node)
-        else:
-            self._nodes_by_unique_key[unique_key] = node
+        self._nodes_by_unique_key.setdefault(unique_key, node)
+        self._nodes_by_depth[node.depth].append(node)
         if node.dependency_ref.repo_url:
-            self._repo_url_index.add(node.dependency_ref.repo_url)
+            self._repo_lookup_index.add(node.dependency_ref.repo_url)
+            self._repo_lookup_index.add(node.dependency_ref.canonical_repo_url)
         self.max_depth = max(self.max_depth, node.depth)
 
     def get_node(self, unique_key: str) -> DependencyNode | None:
@@ -115,8 +115,8 @@ class DependencyTree:
         return list(self._nodes_by_depth.get(depth, []))
 
     def has_dependency(self, repo_url: str) -> bool:
-        """Check if a dependency exists in the tree (O(1) via index)."""
-        return repo_url in self._repo_url_index
+        """Check source or canonical GitHub repository spelling in O(1)."""
+        return repo_url in self._repo_lookup_index
 
 
 @dataclass

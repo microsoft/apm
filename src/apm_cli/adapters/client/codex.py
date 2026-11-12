@@ -1,22 +1,57 @@
 """OpenAI Codex CLI implementation of MCP client adapter."""
 
+import json
 import logging
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
+from tomlkit.items import InlineTable, Item, String, Table
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
+from ...utils.net import is_loopback_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
-from .base import MCPClientAdapter
+from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
 
 _log = logging.getLogger(__name__)
+
+# Codex documents ``http_headers`` as a map of header names to STATIC values,
+# so a ``${VAR}`` written there reaches the server as that literal text. An
+# environment-sourced header has two dedicated fields instead:
+# ``env_http_headers`` maps a header name to the variable holding its whole
+# value, and ``bearer_token_env_var`` names the variable holding an
+# Authorization bearer token. Codex resolves both at server start, which is
+# what the declared ``${VAR}`` asks for -- this adapter does not support
+# runtime substitution itself, so the placeholder survives
+# ``_resolve_variable_placeholders`` untouched.
+# See https://learn.chatgpt.com/docs/extend/mcp?surface=cli
+_CODEX_BEARER_HEADER = "authorization"
+_CODEX_REGISTRY_ID_COMMENT = "# apm-registry-id: "
+_JSON_DECODER = json.JSONDecoder()
+# Reuse the canonical placeholder syntax so the two spellings APM accepts
+# (``${VAR}`` and ``${env:VAR}``) cannot drift apart here. The auth scheme is
+# case-insensitive per RFC 7235; Codex always writes it as ``Bearer``.
+_CODEX_BEARER_VALUE_RE = re.compile(rf"(?i:Bearer) +{_ENV_VAR_RE.pattern}")
+# Any reference still standing in a resolved value, deliberately wider than the
+# canonical parser: a spelling it does not model, such as the shell default in
+# ``${VAR:-}``, is no more static than a ``${VAR}`` Codex could resolve, and
+# writing it to ``http_headers`` sends the braces to the server. Widening the
+# report here, rather than the parser, keeps every other adapter's placeholder
+# semantics untouched. ``${input:...}`` is excluded: input variables are
+# collected elsewhere and carry their own warning.
+_CODEX_UNSUPPORTED_REFERENCE_RE = re.compile(r"\$\{(?!input:)")
+
+
+def _ascii_names(names: list[str]) -> str:
+    """Join manifest-authored names for console output, escaping non-ASCII."""
+    return ", ".join(ascii(name)[1:-1] for name in names)
 
 
 class CodexClientAdapter(MCPClientAdapter):
@@ -41,14 +76,16 @@ class CodexClientAdapter(MCPClientAdapter):
 
         Args:
             registry_url (str, optional): URL of the MCP registry.
-                If not provided, uses the MCP_REGISTRY_URL environment variable
-                or falls back to the default GitHub registry.
+                If not provided, resolves the MCP_REGISTRY_URL env var,
+                then ``apm config set mcp-registry-url``, then the public
+                default (see ``registry.client.resolve_mcp_registry_url``).
             project_root: Project root used to resolve project-local Codex
                 config paths.
             user_scope: Whether the adapter should resolve user-scope Codex
                 config paths instead of project-local paths.
         """
         super().__init__(project_root=project_root, user_scope=user_scope)
+        self._rendering_baseline = False
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
@@ -75,13 +112,177 @@ class CodexClientAdapter(MCPClientAdapter):
         """
         return str(self._get_codex_dir() / "config.toml")
 
+    @staticmethod
+    def _registry_id_item(server_config: object) -> Item | None:
+        """Locate a comment that survives standard, dotted and inline TOML layouts.
+
+        Inline values cannot contain comments, so annotate the whole inline
+        entry. Other layouts expose command/url scalar trivia even when their
+        parent tables are implicit or split across out-of-order fragments.
+        """
+        if isinstance(server_config, InlineTable):
+            return server_config
+        if isinstance(server_config, dict):
+            for key in ("command", "url"):
+                value = server_config.get(key)
+                if isinstance(value, String):
+                    return value
+        return None
+
+    @classmethod
+    def get_registry_id(cls, server_config: dict) -> str | None:
+        """Read APM identity metadata without exposing it as a Codex setting.
+
+        Keep reading legacy native IDs for conflict detection; their presence
+        alone is not ownership evidence and never authorizes a migration.
+        """
+        legacy_id = server_config.get("id")
+        if isinstance(legacy_id, str) and legacy_id:
+            return legacy_id
+        item = cls._registry_id_item(server_config)
+        if item is None:
+            return None
+        comment = item.trivia.comment
+        if not comment.startswith(_CODEX_REGISTRY_ID_COMMENT):
+            return None
+        try:
+            registry_id, _ = _JSON_DECODER.raw_decode(comment[len(_CODEX_REGISTRY_ID_COMMENT) :])
+        except ValueError:
+            return None
+        return registry_id if isinstance(registry_id, str) and registry_id else None
+
+    @classmethod
+    def _annotate_registry_id(cls, server_config: dict, registry_id: str) -> None:
+        """Keep UUID matching metadata in an escaped, round-trip TOML comment."""
+        item = cls._registry_id_item(server_config)
+        if item is None:
+            raise ValueError("Codex MCP server must have a string command or url")
+        original_comment = item.trivia.comment
+        suffix = f" {original_comment}" if original_comment else ""
+        item.comment(_CODEX_REGISTRY_ID_COMMENT[2:] + json.dumps(registry_id) + suffix)
+
+    @staticmethod
+    def _expand_inline_table(entry: InlineTable) -> Table:
+        """Expand an inline container without discarding its values or comments.
+
+        Nested inline comments are invalid TOML, and deleting a middle key can
+        leave stray separators in tomlkit. Expand only containers being written
+        or owned entries being repaired; keep unrelated child items intact.
+        """
+        table = tomlkit.table(is_super_table=False)
+        for key, value in entry.items():
+            table.add(key, value)
+        if entry.trivia.comment:
+            table.comment(entry.trivia.comment)
+        return table
+
+    def _write_config(self, config: dict) -> None:
+        """Validate serialized TOML before atomically replacing the native file."""
+        serialized = tomlkit.dumps(config)
+        tomlkit.parse(serialized)
+        config_path = Path(self.get_config_path())
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(config_path, serialized, new_file_mode=0o600)
+        _log.debug("Codex config written to %s", config_path)
+
+    def migrate_legacy_managed_servers(self, managed_names: set[str]) -> set[str]:
+        """Remove unsupported IDs only from entries with recorded APM ownership."""
+        if not managed_names:
+            return set()
+        config = self.get_current_config()
+        if config is None:
+            return set()
+        servers = config.get("mcp_servers", {})
+        migrated: set[str] = set()
+        for name in sorted(managed_names):
+            config_key = self._determine_config_key(name, None)
+            entry = servers.get(config_key)
+            if not isinstance(entry, dict) or "id" not in entry:
+                continue
+            registry_id = entry["id"]
+            if not isinstance(registry_id, str):
+                continue
+            if isinstance(servers, InlineTable):
+                servers = self._expand_inline_table(servers)
+                config["mcp_servers"] = servers
+            if isinstance(entry, InlineTable):
+                entry = self._expand_inline_table(entry)
+                servers[config_key] = entry
+            if registry_id:
+                self._annotate_registry_id(entry, registry_id)
+            del entry["id"]
+            migrated.add(name)
+        if migrated:
+            self._write_config(config)
+        return migrated
+
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """Accept the historical empty-ID spelling without accepting foreign identity."""
+        if not isinstance(native, dict) or self.get_registry_id(native):
+            return False
+        comparable = dict(native)
+        if comparable.get("id") == "":
+            comparable.pop("id")
+        return comparable == expected
+
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
+    ) -> bool:
+        """Recognize a stdio entry written before ``${VAR}`` values moved to ``env_vars``.
+
+        When the lockfile recorded a fingerprint of the earlier write, it is the
+        proof: a mismatch means the entry changed after APM wrote it. Without
+        one, the older formatter stored either the resolved value or the literal
+        reference, so anything else is a manual edit and stays a conflict.
+        """
+        names = expected.get("env_vars")
+        if self.user_scope or recorded_write is False:
+            return False
+        native_env = native.get("env") if isinstance(native, dict) else None
+        if not names or not isinstance(native_env, dict) or "env_vars" in native:
+            return False
+        legacy_env = dict(expected.get("env") or {})
+        for name in names:
+            value = native_env.get(name)
+            if not isinstance(value, str):
+                return False
+            if recorded_write is None:
+                if value not in (f"${{{name}}}", os.getenv(name)):
+                    return False
+                _log.debug("Codex entry for %s verified without a recorded fingerprint", name)
+            legacy_env[name] = value
+        legacy = {key: value for key, value in expected.items() if key != "env_vars"}
+        legacy["env"] = legacy_env
+        return self.matches_managed_server_config(native, legacy)
+
+    def render_server_config(self, server_info: dict, **kwargs) -> dict:
+        """Render a baseline without repeating the install-time write warnings."""
+        self._rendering_baseline = True
+        try:
+            return super().render_server_config(server_info, **kwargs)
+        finally:
+            self._rendering_baseline = False
+
+    def expanded_env_names(self, native: object, requested: dict) -> list[str]:
+        """Names the requested entry forwards that the native entry stores as ``env`` values."""
+        native_env = native.get("env") if isinstance(native, dict) else None
+        if not isinstance(native_env, dict):
+            return []
+        names = []
+        for name in requested.get("env_vars") or []:
+            value = native_env.get(name)
+            # A stored reference such as ``${VAR}`` never held a secret.
+            if value is None or (isinstance(value, str) and _ENV_VAR_RE.fullmatch(value)):
+                continue
+            names.append(name)
+        return names
+
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
 
         Args:
             config_updates (dict): Configuration updates to apply.
         """
-        config_path = Path(self.get_config_path())
         current_config = self.get_current_config()
         if current_config is None:
             return False
@@ -89,15 +290,13 @@ class CodexClientAdapter(MCPClientAdapter):
         # Ensure mcp_servers section exists
         if "mcp_servers" not in current_config:
             current_config["mcp_servers"] = {}
+        elif isinstance(current_config["mcp_servers"], InlineTable):
+            current_config["mcp_servers"] = self._expand_inline_table(current_config["mcp_servers"])
 
         # Apply updates to mcp_servers section
         current_config["mcp_servers"].update(config_updates)
 
-        # Ensure directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        atomic_write_text(config_path, tomlkit.dumps(current_config), new_file_mode=0o600)
-        _log.debug("Codex config written to %s", config_path)
+        self._write_config(current_config)
         return True
 
     def get_current_config(self):
@@ -163,7 +362,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -172,9 +371,19 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_config is None:
                 return False
 
+            # Registry identity is APM metadata, not a supported native field.
+            registry_id = server_info.get("id")
+            if isinstance(registry_id, str) and registry_id:
+                server_config = tomlkit.item(server_config)
+                self._annotate_registry_id(server_config, registry_id)
+
             # Update configuration using the chosen key
+            from apm_cli.install.mcp.ownership import mcp_native_hash
+
+            fingerprint = mcp_native_hash(self.managed_server_config(server_config))
             if not self.update_config({config_key: server_config}):
                 return False
+            self.written_mcp_hashes[server_url] = fingerprint
 
             _rich_success(
                 f"Configured MCP server '{config_key}' for Codex CLI",
@@ -200,12 +409,11 @@ class CodexClientAdapter(MCPClientAdapter):
         if runtime_vars is None:
             runtime_vars = {}
 
-        # Default configuration structure with registry ID for conflict detection
+        # Only fields accepted by Codex belong in the native server mapping.
         config = {
             "command": "unknown",
             "args": [],
             "env": {},
-            "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
         }
 
         # Self-defined stdio deps carry raw command/args. Route ``env`` and
@@ -213,15 +421,33 @@ class CodexClientAdapter(MCPClientAdapter):
         # syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``) are resolved at
         # install time before being written to ~/.codex/config.toml.
         # See issue #1266.
+        #
+        # A value authored as exactly ``${VAR}`` under the key ``VAR`` is the
+        # one case that must NOT be resolved and stored: Codex reads those from
+        # the launching environment through ``env_vars`` at server start, so the
+        # secret never lands in config.toml. See issue #3393.
         raw = server_info.get("_raw_stdio")
         if raw:
-            config["command"] = raw["command"]
+            forwarded_env: list[str] = []
             resolved_env_for_args: dict = {}
+            written_env: dict = {}
             if raw.get("env"):
-                resolved_env_for_args = self._resolve_environment_variables(
-                    raw["env"], env_overrides=env_overrides
+                if self.user_scope:
+                    literal_env = raw["env"]
+                else:
+                    literal_env, forwarded_env = self._split_forwarded_stdio_env(raw["env"])
+                    self._warn_unforwardable_env(literal_env, server_info.get("name", ""))
+                written_env = self._resolve_environment_variables(
+                    literal_env, env_overrides=env_overrides
                 )
-                config["env"] = resolved_env_for_args
+                # Args keep resolving against every declared name; a forwarded
+                # value is read from the environment when it is available, and
+                # never prompts for a value that only the runtime needs.
+                resolved_env_for_args = dict(written_env)
+                for name in forwarded_env:
+                    value = (env_overrides or {}).get(name) or os.getenv(name)
+                    if value:
+                        resolved_env_for_args[name] = value
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
 
             def _process_stdio_arg(arg):
@@ -231,15 +457,26 @@ class CodexClientAdapter(MCPClientAdapter):
                     )
                 return self.normalize_project_arg(arg)
 
-            config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
-            self._merge_extra(config, server_info)
-            return config
+            # Keep the key order the user-scope output has always had; tomlkit
+            # still renders scalars and arrays before the [env] sub-table.
+            stdio_config: dict = {
+                "command": raw["command"],
+                "args": [_process_stdio_arg(arg) for arg in raw.get("args") or []],
+                "env": written_env,
+            }
+            if raw.get("cwd") is not None:
+                stdio_config["cwd"] = raw["cwd"]
+            if forwarded_env:
+                stdio_config["env_vars"] = forwarded_env
+            self._merge_extra(stdio_config, server_info)
+            return stdio_config
 
         # Remote MCP handling.
         # Precedence on Codex when a server publishes BOTH a remote and a stdio
         # package: prefer the stdio package (falls through to the packages branch
         # below). The remote-only branch here handles the streamable-http path
-        # and rejects SSE / non-https / empty-url remotes with explicit warnings.
+        # and rejects SSE / non-https (except loopback http) / empty-url remotes
+        # with explicit warnings.
         remotes = server_info.get("remotes", [])
         packages = server_info.get("packages", [])
         if remotes and not packages:
@@ -263,30 +500,71 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            scheme = urlparse(remote_url).scheme.lower()
-            if scheme != "https":
+            try:
+                parsed_remote = urlparse(remote_url)
+                scheme = parsed_remote.scheme.lower()
+                insecure_loopback = scheme == "http" and is_loopback_host(parsed_remote.hostname)
+            except ValueError:
+                scheme = ""
+                insecure_loopback = False
+            # Codex CLI itself accepts plain-http loopback URLs (its docs use
+            # http://localhost examples), and local dev servers rarely carry
+            # certs -- so loopback http is allowed. Any other non-https host is
+            # still rejected to avoid cleartext bearer tokens in transit.
+            if scheme != "https" and not insecure_loopback:
                 _rich_warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
-                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    f"must use https:// (got {scheme or 'no scheme'}). "
+                    "Plain http is allowed for loopback addresses only.",
                     symbol="warning",
                 )
                 return None
 
-            remote_config = {
-                "url": remote_url,
-                "id": server_info.get("id", ""),
-            }
+            remote_config = {"url": remote_url}
             http_headers: dict[str, str] = {}
+            env_http_headers: dict[str, str] = {}
+            bearer_token_env_var = ""
+            unsupported_headers: list[str] = []
             for header in remote.get("headers", []):
                 h_name = header.get("name", "")
                 h_value = header.get("value", "")
-                if h_name and h_value:
-                    http_headers[h_name] = self._resolve_variable_placeholders(
-                        h_value, env_overrides or {}, runtime_vars or {}
-                    )
+                if not (h_name and h_value):
+                    continue
+                resolved = self._resolve_variable_placeholders(
+                    h_value, env_overrides or {}, runtime_vars or {}
+                )
+                bearer = _CODEX_BEARER_VALUE_RE.fullmatch(resolved)
+                if bearer and h_name.lower() == _CODEX_BEARER_HEADER:
+                    bearer_token_env_var = bearer.group(1)
+                    continue
+                env_header = _ENV_VAR_RE.fullmatch(resolved)
+                if env_header:
+                    env_http_headers[h_name] = env_header.group(1)
+                    continue
+                if _CODEX_UNSUPPORTED_REFERENCE_RE.search(resolved):
+                    unsupported_headers.append(h_name)
+                    continue
+                http_headers[h_name] = resolved
+            if unsupported_headers:
+                safe_headers = ", ".join(ascii(name)[1:-1] for name in unsupported_headers)
+                safe_server = ascii(server_name)[1:-1]
+                _rich_warning(
+                    f"Skipping header(s) {safe_headers} of MCP server "
+                    f"'{safe_server}' for Codex CLI: Codex reads a header from the "
+                    "environment only when the value is exactly ${VAR} or, for "
+                    "Authorization, `Bearer ${VAR}`. Literal text around the "
+                    "reference, or a shell-style default such as ${VAR:-}, has no "
+                    "Codex equivalent; export the whole header value as one variable.",
+                    symbol="warning",
+                )
+            # Scalars precede the sub-tables tomlkit renders for the dict values.
+            if bearer_token_env_var:
+                remote_config["bearer_token_env_var"] = bearer_token_env_var
             if http_headers:
                 remote_config["http_headers"] = http_headers
                 self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            if env_http_headers:
+                remote_config["env_http_headers"] = env_http_headers
             self._merge_extra(remote_config, server_info)
             return remote_config
 
@@ -354,12 +632,25 @@ class CodexClientAdapter(MCPClientAdapter):
                         config["env"] = resolved_env
                 elif registry_name == "docker":
                     config["command"] = "docker"
+                    runtime_args = self._ensure_docker_run_args(processed_runtime_args)
 
                     # For Docker packages in Codex TOML format:
                     # - Ensure all environment variables from resolved_env are represented as -e flags in args
                     # - Put actual environment variable values in separate [env] section
-                    config["args"] = self._ensure_docker_env_flags(
-                        processed_runtime_args + processed_package_args, resolved_env
+                    # _ensure_docker_env_flags inserts -e flags immediately
+                    # before the trailing operand on the assumption that it is
+                    # the image, so it must run while the image IS trailing.
+                    # Package arguments are the container's own argv and are
+                    # appended afterwards, keeping them behind the image per
+                    # `docker run [OPTIONS] IMAGE [ARG...]`; folding them in
+                    # first pushed the env flags past the image into the
+                    # container argv, where docker never applies them.
+                    config["args"] = (
+                        self._ensure_docker_env_flags(
+                            self._ensure_docker_image_arg(runtime_args, package_name),
+                            resolved_env,
+                        )
+                        + processed_package_args
                     )
 
                     # Environment variables go in separate env section for Codex TOML format
@@ -412,16 +703,20 @@ class CodexClientAdapter(MCPClientAdapter):
                         )
                         processed.append(processed_value)
                 elif arg_type == "named":
-                    # For named arguments, the flag name is in the "value" field
-                    flag_name = arg.get("value", "")
+                    name = arg.get("name", "")
+                    value = arg.get("value", arg.get("default", ""))
+                    if isinstance(name, str) and name.startswith("-"):
+                        flag_name = name
+                        additional_value = value
+                    else:
+                        flag_name = value
+                        additional_value = name
                     if flag_name:
                         processed.append(flag_name)
-                        # Some named arguments might have additional values (rare)
-                        additional_value = arg.get("name", "")
                         if (
                             additional_value
                             and additional_value != flag_name
-                            and not additional_value.startswith("-")
+                            and not str(additional_value).startswith("-")
                         ):
                             processed_value = self._resolve_variable_placeholders(
                                 str(additional_value), resolved_env, runtime_vars
@@ -444,6 +739,50 @@ class CodexClientAdapter(MCPClientAdapter):
                 processed.append(processed_value)
 
         return processed
+
+    def _warn_unforwardable_env(self, literal_env: dict, server_name: str) -> None:
+        """Name the env keys whose references Codex cannot forward; never print values."""
+        if self._rendering_baseline:
+            return
+        keys = [
+            name
+            for name, value in literal_env.items()
+            if isinstance(value, str) and _ENV_PLACEHOLDER_RE.search(value)
+        ]
+        if not keys:
+            return
+        _rich_warning(
+            f"Codex cannot forward env {_ascii_names(keys)} for server "
+            f"'{_ascii_names([server_name])}' by "
+            "reference, so APM resolved them at install time and wrote the values to "
+            ".codex/config.toml. Declare each as KEY: ${KEY} to forward it instead.",
+            symbol="warning",
+        )
+
+    @staticmethod
+    def _split_forwarded_stdio_env(raw_env: dict) -> tuple[dict, list[str]]:
+        """Split a self-defined stdio env block into literals and forwarded names.
+
+        Codex reads a stdio server's variables from the environment that launches
+        it when they are named in ``env_vars``, so a value written as exactly
+        ``${VAR}`` under the key ``VAR`` does not have to be resolved and stored
+        in config.toml. Everything else keeps the existing install-time
+        resolution and is written to ``[mcp_servers.<name>.env]``.
+
+        Returns:
+            tuple: ``(literal_env, forwarded_env)`` -- the entries to resolve and
+                the variable names to forward.
+        """
+        literal_env: dict = {}
+        forwarded_env: list[str] = []
+        for name, raw_value in raw_env.items():
+            if isinstance(raw_value, str):
+                reference = _ENV_VAR_RE.fullmatch(raw_value)
+                if reference and reference.group(1) == name:
+                    forwarded_env.append(name)
+                    continue
+            literal_env[name] = raw_value
+        return literal_env, forwarded_env
 
     def _process_environment_variables(self, env_vars, env_overrides=None):
         """Process environment variable definitions and resolve actual values.

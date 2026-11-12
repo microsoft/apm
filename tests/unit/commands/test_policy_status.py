@@ -5,20 +5,23 @@ from __future__ import annotations
 import json
 import textwrap
 import unicodedata
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.policy import (
+    _build_report,
     _count_rules,
     _format_age,
+    _resolve_chain_refs,
 )
 from apm_cli.commands.policy import (
     policy as policy_group,
 )
-from apm_cli.policy.discovery import PolicyFetchResult
+from apm_cli.policy.discovery import PolicyFetchResult, _CacheEntry
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
@@ -273,6 +276,49 @@ class TestStatusJsonOutput:
             result = runner.invoke(policy_group, ["status", "-o", "json"])
         assert result.exit_code == 0, result.output
         json.loads(result.output)  # must parse
+
+
+class TestStatusCredentialRedaction:
+    def test_legacy_cache_refs_and_source_are_redacted(self, tmp_path: Path) -> None:
+        raw_leaf = "https://alice:s3cr3t@policy.example.com/apm-policy.yml?sig=private-signature"
+        raw_parent = "https://bob:parent-secret@policy.example.com/base.yml"
+        policy = _rich_policy()
+        result = PolicyFetchResult(
+            policy=policy,
+            source=f"url:{raw_leaf}",
+            outcome="found",
+        )
+        legacy_entry = _CacheEntry(
+            policy=policy,
+            source=f"url:{raw_leaf}",
+            age_seconds=10,
+            stale=False,
+            chain_refs=[raw_parent, raw_leaf],
+        )
+
+        with patch(
+            "apm_cli.commands.policy._read_cache_entry",
+            return_value=legacy_entry,
+        ):
+            chain = _resolve_chain_refs(result, tmp_path)
+        report = _build_report(result, chain, _count_rules(policy))
+
+        source = urlparse(report["source"].removeprefix("url:"))
+        assert source.username is None
+        assert source.password is None
+        assert source.query == ""
+        assert source.hostname == "policy.example.com"
+        assert source.path == "/apm-policy.yml"
+
+        assert len(report["extends_chain"]) == 1
+        parent = urlparse(report["extends_chain"][0])
+        assert parent.username is None
+        assert parent.password is None
+        assert parent.query == ""
+        assert parent.hostname == "policy.example.com"
+        assert parent.path == "/base.yml"
+        assert "s3cr3t" not in json.dumps(report)
+        assert "parent-secret" not in json.dumps(report)
 
 
 class TestStatusNoCache:

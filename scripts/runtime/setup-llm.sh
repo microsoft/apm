@@ -41,9 +41,22 @@ setup_llm() {
         exit 1
     fi
     
-    # Create virtual environment for LLM
-    log_info "Creating Python virtual environment for LLM..."
-    python3 -m venv "$llm_venv"
+    # Create virtual environment for LLM. Bootstrap pip as a separate step:
+    # `python3 -m venv` hides ensurepip's output, so a failure would only
+    # report "exit status 1" without the reason. A re-run over an existing venv
+    # must not let APM's truststore .pth bootstrap inject into ensurepip's
+    # bundled pip, whose vendored truststore rejects an already-injected ssl.
+    local python3_bin
+    python3_bin="$(command -v python3)"
+    log_info "Creating Python virtual environment for LLM (using $python3_bin)..."
+    if ! python3 -m venv --without-pip "$llm_venv"; then
+        log_error "Could not create the LLM virtual environment at $llm_venv."
+        exit 1
+    fi
+    if ! APM_DISABLE_TRUSTSTORE=1 "$llm_venv/bin/python" -m ensurepip --upgrade --default-pip; then
+        log_error "Could not bootstrap pip into $llm_venv (python3: $python3_bin)."
+        exit 1
+    fi
     
     # Install LLM in virtual environment
     log_info "Installing LLM library..."

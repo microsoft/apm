@@ -91,6 +91,21 @@ class DeploymentLedger:
 
 
 @dataclass(frozen=True)
+class CompletedReintegration:
+    """Completed skill projection, never whole-package or other-primitive authority.
+
+    Construct only from positive skill discovery and complete materialization.
+    Skill values are the adapter's successful source-backed members, not a
+    destination scan. Empty or older evidence does not establish a skill domain.
+    """
+
+    owner: str
+    targets: frozenset[str]
+    current_values: frozenset[str]
+    skill_values: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class DeploymentIntent:
     """Target and package universe governing one reconciliation."""
 
@@ -99,6 +114,11 @@ class DeploymentIntent:
     desired_owners: frozenset[str] | None
     authoritative_targets: bool
     dry_run: bool = False
+    generic_governed_values: frozenset[str] | None = None
+    unprocessed_claims: frozenset[str] = frozenset()
+    """Values a declared target this run did not process still governs."""
+    completed_reintegration: CompletedReintegration | None = None
+    verified_absent_values: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -242,9 +262,17 @@ class DeploymentReconciler:
         removed: list[DeploymentLocator] = []
         retained: list[DeploymentLocator] = []
         handoffs: list[tuple[str, str, str]] = []
+        successful_by_value = self._successful_by_value(successful)
+        failed_values = {locator.value for locator in failed_by_key.values()}
+        obsolete_absent = self._obsolete_absent_values(
+            previous, intent, successful_by_value, failed_values
+        )
+        superseded_success_keys: set[str] = set()
 
         for key, prior in previous.records.items():
             proofs = successful.get(key)
+            if proofs is None:
+                proofs = self._superseding_generic_proofs(prior, successful_by_value)
             if proofs:
                 next_record = self._record_from_proofs(proofs, intent)
                 if next_record is None:
@@ -257,14 +285,25 @@ class DeploymentReconciler:
                     and prior.active_owner not in next_record.owners
                 ):
                     handoffs.append((key, prior.active_owner, next_record.active_owner))
-                next_records[key] = next_record
+                next_records[next_record.locator.key] = next_record
+                superseded_success_keys.add(next_record.locator.key)
                 continue
 
             if key in failed_by_key:
                 next_records[key] = prior
                 retained.append(prior.locator)
                 continue
-            if key in removed_by_key or self._is_stale(prior, intent):
+            if (
+                key in removed_by_key
+                or prior.locator.value in obsolete_absent
+                or self._is_stale(prior, intent)
+                or self._is_generic_stale(
+                    prior,
+                    intent,
+                    successful_by_value,
+                    failed_values,
+                )
+            ):
                 removed.append(prior.locator)
                 continue
 
@@ -276,7 +315,7 @@ class DeploymentReconciler:
                 retained.append(prior.locator)
 
         for key, proofs in successful.items():
-            if key in previous.records:
+            if key in previous.records or key in superseded_success_keys:
                 continue
             record = self._record_from_proofs(proofs, intent)
             if record is None:
@@ -293,6 +332,144 @@ class DeploymentReconciler:
             failed=tuple(failed_by_key.values()),
             changed=dict(previous.records) != next_records,
         )
+
+    @staticmethod
+    def _successful_by_value(
+        successful: Mapping[str, list[MaterializationResult]],
+    ) -> dict[str, list[MaterializationResult]]:
+        """Group trusted current-run materializations by their persisted value."""
+        by_value: dict[str, list[MaterializationResult]] = {}
+        for proofs in successful.values():
+            for proof in proofs:
+                by_value.setdefault(proof.locator.value, []).append(proof)
+        return by_value
+
+    def _superseding_generic_proofs(
+        self,
+        prior: DeploymentRecord,
+        successful_by_value: Mapping[str, list[MaterializationResult]],
+    ) -> list[MaterializationResult] | None:
+        """Return current proofs that supersede one legacy generic row by value."""
+        if prior.locator.target in self.target_profiles:
+            return None
+        return successful_by_value.get(prior.locator.value)
+
+    def _is_generic_stale(
+        self,
+        record: DeploymentRecord,
+        intent: DeploymentIntent,
+        successful_by_value: Mapping[str, list[MaterializationResult]],
+        failed_values: set[str],
+    ) -> bool:
+        """Decide whether a governed generic row has no safe surviving claim."""
+        if (
+            record.locator.target in self.target_profiles
+            or intent.generic_governed_values is None
+            or record.locator.value not in intent.generic_governed_values
+        ):
+            return False
+        value = record.locator.value
+        return value not in successful_by_value and value not in failed_values
+
+    def _obsolete_absent_values(
+        self,
+        previous: DeploymentLedger,
+        intent: DeploymentIntent,
+        successful_by_value: Mapping[str, list[MaterializationResult]],
+        failed_values: set[str],
+    ) -> frozenset[str]:
+        """Retire absent dependency claims only with complete owner-scoped evidence."""
+        from apm_cli.core.deployment_ledger import UNATTRIBUTED_TARGET
+
+        completed = intent.completed_reintegration
+        if (
+            not intent.authoritative_targets
+            or completed is None
+            or completed.owner in {".", "legacy", "_local"}
+            or not completed.targets
+            or not completed.targets <= intent.active_targets
+        ):
+            return frozenset()
+        candidates = (
+            intent.verified_absent_values
+            - completed.current_values
+            - intent.unprocessed_claims
+            - successful_by_value.keys()
+            - failed_values
+        )
+        allowed_targets = completed.targets | {UNATTRIBUTED_TARGET}
+        protected = {
+            record.locator.value
+            for record in previous.records.values()
+            if record.owners != (completed.owner,)
+            or record.locator.kind != LocatorKind.PROJECT_RELATIVE
+            or record.locator.target not in allowed_targets
+        }
+        candidates -= protected
+        if not candidates:
+            return frozenset()
+        proven_skill_values = self._proven_skill_values(completed, candidates, successful_by_value)
+        unresolved = candidates - proven_skill_values
+        if unresolved:
+            self.diagnostics.warn(
+                "Historical dependency claims retained: APM cannot confirm these paths "
+                "belong to a current skill. Use --verbose for retained paths and check "
+                "which files the dependency currently deploys.",
+                package=completed.owner,
+                detail=", ".join(sorted(unresolved)),
+            )
+        return frozenset(candidates & proven_skill_values)
+
+    def _proven_skill_values(
+        self,
+        completed: CompletedReintegration,
+        candidates: frozenset[str] | set[str],
+        successful_by_value: Mapping[str, list[MaterializationResult]],
+    ) -> frozenset[str]:
+        """Bind candidates to source-backed skill markers using canonical routing."""
+        from apm_cli.security.primitive_discovery import primitive_surfaces
+
+        processed = [
+            self.target_profiles[name]
+            for name in sorted(completed.targets)
+            if name in self.target_profiles
+        ]
+        skill_surfaces = [
+            surface
+            for surface in primitive_surfaces(self.project_root, processed)
+            if surface.kind == "skills"
+        ]
+        # Other targets' non-skill paths remain protected, even outside this run's skill scope.
+        other_surfaces = [
+            surface
+            for surface in primitive_surfaces(
+                self.project_root, list(self.target_profiles.values())
+            )
+            if surface.kind != "skills"
+        ]
+        markers = completed.skill_values & completed.current_values & successful_by_value.keys()
+        roots = set()
+        for marker in markers:
+            marker_path = self.project_root / marker
+            if (
+                all(
+                    proof.owners == frozenset({completed.owner})
+                    and proof.locator.kind == LocatorKind.PROJECT_RELATIVE
+                    and proof.locator.target in completed.targets
+                    for proof in successful_by_value[marker]
+                )
+                and any(surface.contains(marker_path) for surface in skill_surfaces)
+                and not any(surface.contains(marker_path) for surface in other_surfaces)
+            ):
+                roots.add(marker_path.parent)
+        proven = set()
+        for value in candidates:
+            candidate_path = self.project_root / value
+            if roots.intersection(candidate_path.parents) and not any(
+                surface.contains(candidate_path) for surface in other_surfaces
+            ):
+                proven.add(value)
+        return frozenset(proven)
 
     def _record_from_proofs(
         self,
@@ -348,14 +525,26 @@ class DeploymentReconciler:
         )
 
     def _is_stale(self, record: DeploymentRecord, intent: DeploymentIntent) -> bool:
+        """Decide whether an unrefreshed row lost its target this run.
+
+        A row of an active target is stale unless it lies under another
+        profile root of that target (``CLAUDE_CONFIG_DIR``, ``HERMES_HOME``).
+        A row of a known target dropped from the declared set is stale too.
+        """
+        if not intent.authoritative_targets:
+            return False
         target = record.locator.target
-        if intent.authoritative_targets and target in intent.active_targets:
-            return True
+        if target in intent.active_targets:
+            from apm_cli.integration.targets import is_other_profile_path
+
+            profile = self.target_profiles.get(target)
+            return profile is None or not is_other_profile_path(profile, record.locator.value)
         return (
             intent.declared_targets is not None
             and target in self.target_profiles
             and target not in intent.declared_targets
             and target not in intent.active_targets
+            and record.locator.value not in intent.unprocessed_claims
         )
 
     @staticmethod

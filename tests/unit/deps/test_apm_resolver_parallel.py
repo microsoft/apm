@@ -20,9 +20,11 @@ resolution must honour:
 from __future__ import annotations
 
 import random
+import shutil
 import threading
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 
@@ -30,6 +32,7 @@ from apm_cli.deps import apm_resolver
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.dependency_graph import DependencyNode
 from apm_cli.models.apm_package import APMPackage, DependencyReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
 
 def _write_pkg(root: Path, name: str, deps: list[str] | None = None) -> Path:
@@ -173,8 +176,74 @@ def test_parallel_resolution_is_deterministic_under_jitter(tmp_path):
     assert all(r == runs[0] for r in runs), runs
 
 
-def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
-    """The flattened winner, callback, loaded metadata, and disk must agree."""
+def test_parallel_local_dependencies_serialize_shared_materialization_path(
+    tmp_path: Path,
+) -> None:
+    """Same-basename local packages must not race in their shared legacy slot."""
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    source_roots = {}
+    dependencies = []
+    for parent, version in (("one", "1.0.0"), ("two", "2.0.0")):
+        source = tmp_path / parent / "Shared Package"
+        source.mkdir(parents=True)
+        (source / "apm.yml").write_text(
+            yaml.safe_dump({"name": "Shared Package", "version": version}),
+            encoding="utf-8",
+        )
+        relative = f"./{source.relative_to(tmp_path).as_posix()}"
+        source_roots[relative] = source
+        dependencies.append({"path": relative})
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "root",
+                "version": "0.0.1",
+                "dependencies": {"apm": dependencies},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    active = 0
+    max_active = 0
+    callback_lock = threading.Lock()
+
+    def copy_local(dep_ref, mods_dir, parent_chain="", parent_pkg=None):
+        del parent_chain, parent_pkg
+        nonlocal active, max_active
+        with callback_lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            destination = dep_ref.get_install_path(mods_dir)
+            shutil.rmtree(destination, ignore_errors=True)
+            shutil.copytree(source_roots[dep_ref.local_path], destination)
+            time.sleep(0.01)
+            return destination
+        finally:
+            with callback_lock:
+                active -= 1
+
+    graph = APMDependencyResolver(
+        apm_modules_dir=modules,
+        download_callback=copy_local,
+        max_parallel=2,
+    ).resolve_dependencies(tmp_path)
+
+    versions = {
+        node.dependency_ref.local_path: node.package.version
+        for node in graph.dependency_tree.nodes.values()
+    }
+    assert versions == {
+        "./one/Shared Package": "1.0.0",
+        "./two/Shared Package": "2.0.0",
+    }
+    assert max_active == 1
+
+
+def test_equivalent_refs_select_winner_before_parallel_download(tmp_path):
+    """Equivalent tag spellings still materialize one deterministic winner."""
     modules = tmp_path / "apm_modules"
     modules.mkdir()
     (tmp_path / "apm.yml").write_text(
@@ -218,10 +287,16 @@ def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
             with callback_lock:
                 active_workers -= 1
 
+    refs = Mock()
+    refs.list_remote_refs.return_value = [
+        RemoteRef("v1", GitReferenceType.TAG, "a" * 40),
+        RemoteRef("v2", GitReferenceType.TAG, "a" * 40),
+    ]
     graph = APMDependencyResolver(
         apm_modules_dir=modules,
         download_callback=download,
         max_parallel=2,
+        reference_resolver=refs,
     ).resolve_dependencies(tmp_path)
 
     winner = graph.flattened_dependencies.get_dependency("org/shared")
@@ -233,6 +308,7 @@ def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
     assert winner is not None and winner.reference == "v1"
     assert winner_node.package.version == "v1"
     assert disk_manifest["version"] == "v1"
+    assert graph.is_valid()
     assert graph.flattened_dependencies.has_conflicts()
 
 

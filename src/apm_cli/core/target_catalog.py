@@ -22,6 +22,8 @@ class TargetCapability:
     compile_family: str | None
     runtimes: tuple[str, ...]
     commands: frozenset[str]
+    meta_target: bool = False
+    accepts_agent_skills_packages: bool = False
 
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
@@ -39,6 +41,8 @@ def _capability(
     primitive_profile: str | None = None,
     compile_family: str | None = None,
     runtimes: tuple[str, ...] = (),
+    meta_target: bool = False,
+    accepts_agent_skills_packages: bool = False,
 ) -> TargetCapability:
     """Create catalog data shared by all target-selecting commands."""
     return TargetCapability(
@@ -53,6 +57,8 @@ def _capability(
         compile_family=compile_family,
         runtimes=runtimes,
         commands=_TARGET_COMMANDS,
+        meta_target=meta_target,
+        accepts_agent_skills_packages=accepts_agent_skills_packages,
     )
 
 
@@ -104,48 +110,11 @@ def _build_target_catalog(
 TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
     (
         _capability(
-            "copilot",
-            "GitHub Copilot native .github configuration",
-            aliases=("vscode", "agents"),
-            in_all=True,
-            primitive_profile="copilot",
-            compile_family="vscode",
-            runtimes=("vscode", "agents"),
-        ),
-        _capability(
-            "claude",
-            "Claude Code native .claude configuration",
-            in_all=True,
-            primitive_profile="claude",
-            compile_family="claude",
-        ),
-        _capability(
-            "cursor",
-            "Cursor native .cursor configuration",
-            in_all=True,
-            primitive_profile="cursor",
-            compile_family="agents",
-        ),
-        _capability(
-            "kiro",
-            "Kiro native .kiro configuration",
-            in_all=True,
-            primitive_profile="kiro",
-            compile_family="agents",
-        ),
-        _capability(
-            "opencode",
-            "OpenCode native .opencode configuration",
-            in_all=True,
-            primitive_profile="opencode",
-            compile_family="agents",
-        ),
-        _capability(
-            "gemini",
-            "Gemini CLI native .gemini configuration",
-            in_all=True,
-            primitive_profile="gemini",
-            compile_family="gemini",
+            "agent-skills",
+            "Cross-client native .agents skills configuration",
+            explicit_only=True,
+            primitive_profile="agent-skills",
+            meta_target=True,
         ),
         _capability(
             "antigravity",
@@ -156,6 +125,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "claude",
+            "Claude Code native .claude configuration",
+            in_all=True,
+            primitive_profile="claude",
+            compile_family="claude",
+        ),
+        _capability(
             "codex",
             "Codex native .codex and .agents configuration",
             in_all=True,
@@ -163,36 +139,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
-            "windsurf",
-            "Windsurf native .windsurf and .agents configuration",
+            "copilot",
+            "GitHub Copilot native .github configuration",
+            aliases=("vscode", "agents"),
             in_all=True,
-            primitive_profile="windsurf",
-            compile_family="agents",
-        ),
-        _capability(
-            "agent-skills",
-            "Cross-client native .agents skills configuration",
-            explicit_only=True,
-            primitive_profile="agent-skills",
-        ),
-        _capability(
-            "openclaw",
-            "OpenClaw native skills configuration",
-            experimental_flag="openclaw",
-            primitive_profile="openclaw",
-        ),
-        _capability(
-            "hermes",
-            "Hermes native skills and MCP configuration",
-            experimental_flag="hermes",
-            primitive_profile="hermes",
-            compile_family="agents",
-        ),
-        _capability(
-            "copilot-cowork",
-            "Microsoft 365 Copilot Cowork native skills configuration",
-            experimental_flag="copilot_cowork",
-            primitive_profile="copilot-cowork",
+            primitive_profile="copilot",
+            compile_family="vscode",
+            runtimes=("copilot", "vscode", "agents"),
         ),
         _capability(
             "copilot-app",
@@ -201,12 +154,87 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             primitive_profile="copilot-app",
         ),
         _capability(
+            "copilot-cowork",
+            "Microsoft 365 Copilot Cowork native skills configuration",
+            experimental_flag="copilot_cowork",
+            primitive_profile="copilot-cowork",
+        ),
+        _capability(
+            "cursor",
+            "Cursor native .cursor configuration",
+            in_all=True,
+            primitive_profile="cursor",
+            compile_family="agents",
+        ),
+        _capability(
+            "gemini",
+            "Gemini CLI native .gemini configuration",
+            in_all=True,
+            primitive_profile="gemini",
+            compile_family="gemini",
+        ),
+        _capability(
+            "grok-bot",
+            "Grok Bot native agent-data/workflows skills configuration",
+            explicit_only=True,
+            primitive_profile="grok-bot",
+            accepts_agent_skills_packages=True,
+        ),
+        _capability(
+            "grok-build",
+            "xAI Grok Build native .grok configuration",
+            in_all=True,
+            primitive_profile="grok-build",
+            compile_family="agents",
+        ),
+        _capability(
+            "grok-cloud",
+            "xAI Grok Cloud native .grok/skills configuration",
+            explicit_only=True,
+            experimental_flag="grok_cloud",
+            primitive_profile="grok-cloud",
+        ),
+        _capability(
+            "hermes",
+            "Hermes native skills and MCP configuration",
+            explicit_only=True,
+            primitive_profile="hermes",
+            compile_family="agents",
+        ),
+        _capability(
             "intellij",
             "IntelliJ MCP integration using the Copilot primitive profile",
             mcp_only=True,
             primitive_profile="copilot",
             compile_family="agents",
             runtimes=("intellij",),
+        ),
+        _capability(
+            "kiro",
+            "Kiro native .kiro configuration",
+            in_all=True,
+            primitive_profile="kiro",
+            compile_family="agents",
+        ),
+        _capability(
+            "openclaw",
+            "OpenClaw native skills configuration",
+            experimental_flag="openclaw",
+            primitive_profile="openclaw",
+        ),
+        _capability(
+            "opencode",
+            "OpenCode native .opencode configuration",
+            in_all=True,
+            primitive_profile="opencode",
+            compile_family="agents",
+        ),
+        _capability(
+            "windsurf",
+            "Windsurf native .windsurf and .agents configuration",
+            in_all=True,
+            primitive_profile="windsurf",
+            compile_family="agents",
         ),
     )
 )
@@ -242,12 +270,14 @@ def accepted_target_values(command: str | None = None) -> frozenset[str]:
 
 
 def manifest_target_names() -> frozenset[str]:
-    """Return canonical target identifiers accepted in ``apm.yml``."""
-    return frozenset(
+    """Return target identifiers accepted in ``apm.yml``."""
+    names = {
         capability.name
         for capability in TARGET_CAPABILITIES.values()
         if capability.experimental_flag is None and not capability.mcp_only
-    )
+    }
+    names.add("vscode")
+    return frozenset(names)
 
 
 def normalize_target_name(name_or_alias: str) -> str:
@@ -275,6 +305,25 @@ def expand_all(command: str) -> tuple[str, ...]:
 def target_help_fragment(command: str) -> str:
     """Return the generated accepted-values fragment for command help."""
     return f"Values: {', '.join(sorted(accepted_target_values(command)))}."
+
+
+def target_all_exclusion_help() -> str:
+    """Return the generated 'all' exclusion clause for command help strings.
+
+    Produces a sorted list of names excluded from 'all': explicit-only
+    non-experimental targets, 'experimental targets' as a category, and
+    mcp-only targets.  Adding a new catalog entry automatically appears here.
+    """
+    explicit_non_experimental = sorted(
+        cap.name
+        for cap in TARGET_CAPABILITIES.values()
+        if cap.explicit_only and cap.experimental_flag is None
+    )
+    mcp_only_names = sorted(cap.name for cap in TARGET_CAPABILITIES.values() if cap.mcp_only)
+    parts = [*explicit_non_experimental, "experimental targets", *mcp_only_names]
+    if len(parts) == 1:
+        return f"'all' excludes {parts[0]}"
+    return f"'all' excludes {', '.join(parts[:-1])}, and {parts[-1]}"
 
 
 def target_error_values(command: str) -> tuple[str, ...]:

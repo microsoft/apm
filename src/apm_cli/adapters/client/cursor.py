@@ -1,12 +1,11 @@
 """Cursor IDE implementation of MCP client adapter.
 
 Cursor uses the standard ``mcpServers`` JSON format at ``.cursor/mcp.json``
-(repo-local).  Unlike the Copilot adapter, this adapter emits Cursor-native
-transport discriminators (``type: stdio`` / ``type: http``) and omits
-Copilot-only fields (``tools``, ``id``).
+(repo-local) or ``~/.cursor/mcp.json`` (user scope). Unlike the Copilot
+adapter, this adapter emits Cursor-native transport discriminators
+(``type: stdio`` / ``type: http``) and omits Copilot-only fields (``tools``, ``id``).
 
-APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` directory
-already exists -- Cursor support is opt-in.
+At project scope APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` directory already exists -- Cursor support is opt-in.
 """
 
 import json
@@ -25,15 +24,36 @@ class CursorClientAdapter(CopilotClientAdapter):
     emit Cursor-native transport discriminators instead of Copilot-only fields.
     """
 
-    supports_user_scope: bool = False
+    supports_user_scope: bool = True
     target_name: str = "cursor"
     mcp_servers_key: str = "mcpServers"
 
-    # Cursor's mcp.json runtime-substitution support has not yet been
-    # individually audited (see #1152). Pin to the legacy install-time
-    # resolution behaviour so this adapter is unchanged by the Copilot
-    # security fix; revisit in a follow-up.
-    _supports_runtime_env_substitution: bool = False
+    # APM normalizes Cursor env, args, and headers to ${env:NAME}, not command/url.
+    # Keep manifest env references native in the project-local config, so
+    # those referenced values are not baked into the file. Explicit mcp.env
+    # literals remain literal below; shared GitHub token injection is separate.
+    _supports_runtime_env_substitution: bool = True
+
+    def _format_runtime_env_placeholder(self, name: str) -> str:
+        """Return Cursor's native env-var placeholder syntax."""
+        return "${env:" + name + "}"
+
+    def _resolve_environment_variables(
+        self,
+        env_vars: dict[str, object] | list[dict[str, object]],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Translate explicit env references while preserving authored literals.
+
+        APM's shared translate-mode dict resolver treats ordinary string
+        values as candidates for environment substitution. In Cursor's
+        project-local config, an explicit static value must keep its authored
+        value; only recognized references are rewritten for Cursor.
+        """
+        if not isinstance(env_vars, dict):
+            return super()._resolve_environment_variables(env_vars, env_overrides)
+
+        return self._resolve_explicit_environment_values(env_vars, env_overrides)
 
     # ------------------------------------------------------------------ #
     # Auth-header injection override (for testability)
@@ -42,54 +62,79 @@ class CursorClientAdapter(CopilotClientAdapter):
     def _apply_auth_and_headers(
         self, config, remote, server_info, env_overrides, runtime_label="Cursor"
     ):
-        """Inject GitHub token and registry-supplied headers into *config*.
+        """Merge registry headers without persisting a resolved GitHub token.
 
         Overrides the parent to supply ``GitHubTokenManager`` from *this*
         module's namespace, allowing tests to patch
-        ``apm_cli.adapters.client.cursor.GitHubTokenManager`` correctly.
+        ``apm_cli.adapters.client.cursor.GitHubTokenManager`` correctly. Cursor
+        reads project-local config, so GitHub credentials must be supplied as
+        runtime environment references rather than resolved during install.
         """
         self._apply_auth_and_headers_impl(
-            config, remote, server_info, env_overrides, runtime_label, GitHubTokenManager
+            config,
+            remote,
+            server_info,
+            env_overrides,
+            runtime_label,
+            GitHubTokenManager,
         )
 
-    def get_config_path(self):
-        """Return the path to ``.cursor/mcp.json`` in the repository root.
+    @staticmethod
+    def config_path_for(project_root: Path, user_scope: bool) -> Path:
+        """Return the Cursor MCP config path for a scope.
 
-        Unlike the Copilot adapter this is a **repo-local** path.  The
-        ``.cursor/`` directory is *not* created automatically -- APM only
-        writes here when the directory already exists.
+        ``~/.cursor/mcp.json`` at user scope, else ``.cursor/mcp.json`` under
+        *project_root*.  Static so stale cleanup can locate the file without
+        constructing an adapter.
         """
-        cursor_dir = self.project_root / ".cursor"
-        return str(cursor_dir / "mcp.json")
+        root = Path.home() if user_scope else Path(project_root)
+        return root / ".cursor" / "mcp.json"
+
+    def get_config_path(self):
+        """Return the project or user-scope Cursor MCP config path.
+
+        The project ``.cursor/`` directory is *not* created automatically.
+        User-scope installs write to ``~/.cursor/mcp.json`` from any cwd.
+        """
+        return str(self.config_path_for(self.project_root, self.user_scope))
 
     # ------------------------------------------------------------------ #
-    # Config read / write -- override to avoid auto-creating the directory
+    # Config read / write -- project scope never creates ``.cursor/``
     # ------------------------------------------------------------------ #
+
+    def validate_config_for_install(self) -> bool:
+        """Refuse unsafe user configs even when no server write would be needed."""
+        return (
+            not self.user_scope
+            or self._read_json_config_for_update(Path(self.get_config_path())) is not None
+        )
 
     def update_config(self, config_updates):
         """Merge *config_updates* into the ``mcpServers`` section.
 
-        The ``.cursor/`` directory must already exist; if it does not, this
-        method returns silently (opt-in behaviour).
+        The project ``.cursor/`` directory must already exist. User-scope
+        installs create ``~/.cursor/`` when needed.  Returns ``False`` without
+        writing when the existing file cannot be rewritten safely.
         """
         config_path = Path(self.get_config_path())
 
-        # Opt-in: only write when .cursor/ already exists
-        if not config_path.parent.exists():
-            return
+        # Project scope is opt-in; the user-scope directory can be created.
+        if not self.user_scope and not config_path.parent.is_dir():
+            return None
 
-        current_config = self.get_current_config()
+        current_config = self._read_json_config_for_update(config_path)
+        if current_config is None:
+            return False
         if "mcpServers" not in current_config:
             current_config["mcpServers"] = {}
 
         current_config["mcpServers"].update(config_updates)
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
-        os.chmod(config_path, 0o600)
+        self._write_json_config(config_path, current_config)
+        return True
 
     def get_current_config(self):
-        """Read the current ``.cursor/mcp.json`` contents."""
+        """Read the current Cursor MCP config contents."""
         config_path = self.get_config_path()
 
         if not os.path.exists(config_path):
@@ -134,6 +179,8 @@ class CursorClientAdapter(CopilotClientAdapter):
         if raw:
             config["type"] = "stdio"
             config["command"] = raw["command"]
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args: dict = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(
@@ -212,7 +259,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         server_info_cache=None,
         runtime_vars=None,
     ):
-        """Configure an MCP server in Cursor's ``.cursor/mcp.json``.
+        """Configure an MCP server in Cursor's project or user-scope ``mcp.json``.
 
         Delegates entirely to the parent implementation but prints a
         Cursor-specific success message.
@@ -221,9 +268,9 @@ class CursorClientAdapter(CopilotClientAdapter):
             print("Error: server_url cannot be empty")
             return False
 
-        # Opt-in: skip silently when .cursor/ does not exist
+        # Project scope is opt-in; global installs work from any directory.
         cursor_dir = self.project_root / ".cursor"
-        if not cursor_dir.exists():
+        if not self.user_scope and not cursor_dir.is_dir():
             return True  # nothing to do, not an error
 
         try:
@@ -231,10 +278,11 @@ class CursorClientAdapter(CopilotClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            self.update_config({config_key: server_config})
+            if self.update_config({config_key: server_config}) is False:
+                return False
 
             print(f"Successfully configured MCP server '{config_key}' for Cursor")
             return True

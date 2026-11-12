@@ -336,7 +336,8 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_binary_p
         assert not (deployed / fname).exists(), f"Primitive {fname} survived cascade uninstall"
 
 
-def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_binary_path):
+@pytest.mark.parametrize("aliased", [False, True])
+def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_binary_path, aliased):
     """Regression for #857: a transitive ../sibling resolves against the
     DECLARING package's directory, not the consumer's project root.
 
@@ -356,8 +357,16 @@ def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_binary_path):
     pkgs = consumer / "packages"
     pkgs.mkdir()
 
-    _write_pkg(pkgs / "base", "base-pkg", [], "base-skill")
-    _write_pkg(pkgs / "specialized", "specialized-pkg", ["../base"], "specialized-skill")
+    _write_pkg(pkgs / "leaf", "leaf-pkg", [], "leaf-skill")
+    leaf_ref = {"path": "../leaf", "alias": "foo..bar"} if aliased else "../leaf"
+    base_ref = {"path": "../base", "alias": ".safe"} if aliased else "../base"
+    root_ref = (
+        {"path": "./packages/specialized", "alias": "my-skill.v2"}
+        if aliased
+        else "./packages/specialized"
+    )
+    _write_pkg(pkgs / "base", "base-pkg", [leaf_ref], "base-skill")
+    _write_pkg(pkgs / "specialized", "specialized-pkg", [base_ref], "specialized-skill")
 
     (consumer / "apm.yml").write_text(
         yaml.dump(
@@ -365,7 +374,7 @@ def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_binary_path):
                 "name": "consumer",
                 "version": "1.0.0",
                 "target": "copilot",
-                "dependencies": {"apm": ["./packages/specialized"]},
+                "dependencies": {"apm": [root_ref]},
             }
         )
     )
@@ -383,8 +392,16 @@ def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_binary_path):
     # Both packages must be materialized — the transitive ../base proves the
     # anchor is on specialized/, not on consumer/. Install path uses the
     # source-dir basename (NOT the apm.yml `name` field).
-    assert (consumer / "apm_modules" / "_local" / "specialized").exists()
-    assert len(list((consumer / "apm_modules" / "_local").glob("*/base"))) == 1
+    modules = consumer / "apm_modules"
+    if aliased:
+        for alias in ("my-skill.v2", ".safe", "foo..bar"):
+            assert (modules / alias / "apm.yml").is_file()
+    else:
+        assert (modules / "_local" / "specialized").exists()
+        for name in ("base", "leaf"):
+            assert len(list((modules / "_local").glob(f"*/{name}"))) == 1
+    for name in ("specialized", "base", "leaf"):
+        assert (consumer / ".github" / "instructions" / f"{name}-skill.instructions.md").is_file()
     # No "outside the project root" rejection should appear in either stream.
     combined = result.stdout + result.stderr
     assert "outside the project root" not in combined, combined

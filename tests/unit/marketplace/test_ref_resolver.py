@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import os
 import subprocess
 import time
 import urllib.parse
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +20,7 @@ from apm_cli.marketplace.ref_resolver import (
     _parse_ls_remote_output,
     _redact_token,
 )
+from apm_cli.utils.git_env import get_git_executable
 
 # ---------------------------------------------------------------------------
 # _parse_ls_remote_output
@@ -46,14 +49,63 @@ class TestParseLsRemoteOutput:
         refs = _parse_ls_remote_output(output)
         assert len(refs) == 3
 
-    def test_peeled_tag_skipped(self) -> None:
+    def test_annotated_tag_takes_peeled_commit_sha(self) -> None:
+        # Tag object first, then the commit it points to (#3048).
         output = (
             "aaaa23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0\n"
             "bbbb23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0^{}\n"
         )
         refs = _parse_ls_remote_output(output)
+        assert refs == [
+            RemoteRef(
+                name="refs/tags/v1.0.0",
+                sha="bbbb23456789abcdef1234567890abcdef123456",
+                peeled_sha="bbbb23456789abcdef1234567890abcdef123456",
+            )
+        ]
+
+    def test_peeled_line_before_tag_line(self) -> None:
+        output = (
+            "bbbb23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0^{}\n"
+            "aaaa23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0\n"
+        )
+        refs = _parse_ls_remote_output(output)
+        assert refs == [
+            RemoteRef(
+                name="refs/tags/v1.0.0",
+                sha="bbbb23456789abcdef1234567890abcdef123456",
+                peeled_sha="bbbb23456789abcdef1234567890abcdef123456",
+            )
+        ]
+
+    def test_only_annotated_tags_change(self) -> None:
+        output = (
+            "1111111111111111111111111111111111111111\trefs/heads/main\n"
+            "2222222222222222222222222222222222222222\trefs/tags/v1.0.0\n"
+            "3333333333333333333333333333333333333333\trefs/tags/v2.0.0\n"
+            "4444444444444444444444444444444444444444\trefs/tags/v2.0.0^{}\n"
+        )
+        refs = _parse_ls_remote_output(output)
+        assert refs == [
+            RemoteRef(name="refs/heads/main", sha="1" * 40),
+            RemoteRef(name="refs/tags/v1.0.0", sha="2" * 40),
+            RemoteRef(name="refs/tags/v2.0.0", sha="4" * 40, peeled_sha="4" * 40),
+        ]
+
+    def test_peeled_line_without_tag_line_adds_nothing(self) -> None:
+        output = "bbbb23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0^{}\n"
+        assert _parse_ls_remote_output(output) == []
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_peeled_tag_retained_with_corrected_source_sha(self, reverse: bool) -> None:
+        output = f"{'a' * 40}\trefs/tags/v1.0.0\n{'b' * 40}\trefs/tags/v1.0.0^{{}}\n"
+        if reverse:
+            output = "\n".join(reversed(output.splitlines()))
+        refs = _parse_ls_remote_output(output)
         assert len(refs) == 1
         assert refs[0].name == "refs/tags/v1.0.0"
+        assert refs[0].sha == "b" * 40
+        assert refs[0].peeled_sha == "b" * 40
 
     def test_invalid_sha_skipped(self) -> None:
         output = "not-a-sha\trefs/tags/v1.0.0\n"
@@ -195,6 +247,134 @@ class TestRefResolver:
     """Tests for RefResolver with mocked subprocess."""
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_remote_url_uses_canonical_dependency_url(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """ADO callers can supply the URL built by DependencyReference."""
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
+        remote_url = "https://dev.azure.com/apm-org/apm-project/_git/consume-contract"
+
+        resolver.list_remote_refs(
+            "apm-org/apm-project/consume-contract",
+            remote_url=remote_url,
+        )
+
+        command = mock_run.call_args.args[0]
+        parsed = urllib.parse.urlparse(command[-1])
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "dev.azure.com"
+        assert parsed.path == "/apm-org/apm-project/_git/consume-contract"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_visualstudio_remote_uses_legacy_two_segment_path(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="contoso.visualstudio.com",
+        )
+        resolver.list_remote_refs(
+            "contoso/Platform/standards",
+            remote_url="https://contoso.visualstudio.com/Platform/_git/standards",
+        )
+
+        parsed = urllib.parse.urlparse(mock_run.call_args.args[0][-1])
+        assert parsed.hostname == "contoso.visualstudio.com"
+        assert parsed.path == "/Platform/_git/standards"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_server_remote_preserves_explicit_port(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        with patch.dict(
+            os.environ,
+            {"ADO_HOST": "ado.example.test"},
+            clear=False,
+        ):
+            resolver = RefResolver(
+                timeout_seconds=5.0,
+                host="ado.example.test",
+                port=8443,
+            )
+            resolver.list_remote_refs(
+                "DefaultCollection/Platform/standards",
+                remote_url=(
+                    "https://ado.example.test:8443/DefaultCollection/Platform/_git/standards"
+                ),
+            )
+
+        parsed = urllib.parse.urlparse(mock_run.call_args.args[0][-1])
+        assert parsed.hostname == "ado.example.test"
+        assert parsed.port == 8443
+        resolver.close()
+
+    @pytest.mark.parametrize(
+        "remote_url",
+        (
+            "http://dev.azure.com/apm-org/apm-project/_git/repo",
+            "https://attacker.example.invalid/apm-org/apm-project/_git/repo",
+            "https://user@dev.azure.com/apm-org/apm-project/_git/repo",
+            "https://user:secret@dev.azure.com/apm-org/apm-project/_git/repo",
+            "https://dev.azure.com/apm-org/apm-project/_git/repo?ref=v1",
+            "https://dev.azure.com/apm-org/apm-project/_git/repo#fragment",
+            "https://dev.azure.com/apm-org/other-project/_git/consume-contract",
+        ),
+    )
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_remote_url_rejects_unsafe_variants(
+        self,
+        mock_run: MagicMock,
+        remote_url: str,
+    ) -> None:
+        """Credentials never flow to an unsafe caller-supplied URL."""
+        resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
+
+        with pytest.raises(GitLsRemoteError, match="dependency coordinates") as exc_info:
+            resolver.list_remote_refs(
+                "apm-org/apm-project/consume-contract",
+                remote_url=remote_url,
+            )
+
+        assert exc_info.value.package == "apm-org/apm-project/consume-contract"
+        mock_run.assert_not_called()
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_remote_url_is_part_of_cache_identity(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """Distinct canonical URLs cannot share one owner/repo cache slot."""
+        mock_run.side_effect = (
+            _make_completed(stdout=f"{_SHA_A}\trefs/tags/v1.0.0\n"),
+            _make_completed(stdout=f"{_SHA_B}\trefs/tags/v2.0.0\n"),
+        )
+        resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
+        owner_repo = "apm-org/apm-project/consume-contract"
+
+        first = resolver.list_remote_refs(
+            owner_repo,
+            remote_url="https://dev.azure.com/apm-org/apm-project/_git/consume-contract",
+        )
+        second = resolver.list_remote_refs(
+            "apm-org/other-project/consume-contract",
+            remote_url="https://dev.azure.com/apm-org/other-project/_git/consume-contract",
+        )
+
+        assert first[0].sha == _SHA_A
+        assert second[0].sha == _SHA_B
+        assert mock_run.call_count == 2
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_list_remote_refs_success(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -202,6 +382,37 @@ class TestRefResolver:
         assert len(refs) == 3
         assert refs[0].name == "refs/tags/v1.0.0"
         assert refs[0].sha == _SHA_A
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_anonymous_first_retries_with_resolved_auth(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = (
+            _make_completed(returncode=128, stderr="authentication required"),
+            _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT),
+        )
+        auth_resolver = MagicMock()
+
+        def try_with_fallback(_target, operation, **kwargs):
+            assert kwargs["unauth_first"] is True
+            assert kwargs["base_env"] == {"BASE": "1"}
+            with pytest.raises(RuntimeError, match="authentication required"):
+                operation(None, {"ATTEMPT": "anonymous"})
+            return operation("resolved-token", {"ATTEMPT": "authenticated"})
+
+        auth_resolver.try_with_fallback.side_effect = try_with_fallback
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            auth_resolver=auth_resolver,
+            git_env={"BASE": "1"},
+            unauth_first=True,
+        )
+
+        refs = resolver.list_remote_refs("acme/tools")
+
+        assert len(refs) == 3
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0].kwargs["env"]["ATTEMPT"] == "anonymous"
+        assert mock_run.call_args_list[1].kwargs["env"]["ATTEMPT"] == "authenticated"
         resolver.close()
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
@@ -303,6 +514,7 @@ class TestRefResolver:
         assert refs == []
         resolver.close()
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_correct_command_args(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout="")
@@ -310,13 +522,140 @@ class TestRefResolver:
         resolver.list_remote_refs("acme/tools")
         args, kwargs = mock_run.call_args
         cmd = args[0]
-        assert cmd[:4] == ["git", "ls-remote", "--tags", "--heads"]
+        assert cmd[0] == get_git_executable()
+        assert cmd[1:4] == ["ls-remote", "--tags", "--heads"]
         parsed = urllib.parse.urlparse(cmd[4])
         assert parsed.hostname == "github.com"
         assert parsed.path.rstrip("/") == "/acme/tools.git"
         assert kwargs["timeout"] == 7.5
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_uses_ssh_url_without_http_auth(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            token="secret-token",
+            git_env={
+                "GIT_TOKEN": "secret-token",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": "Authorization: Bearer secret-token",
+            },
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args
+        assert args[0][4] == "git@github.com:acme/tools.git"
+        assert "GIT_TOKEN" not in kwargs["env"]
+        count = int(kwargs["env"].get("GIT_CONFIG_COUNT", "0"))
+        keys = {kwargs["env"].get(f"GIT_CONFIG_KEY_{index}", "").lower() for index in range(count)}
+        assert all("extraheader" not in key for key in keys)
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_with_custom_port_uses_explicit_url(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            transport_scheme="ssh",
+            port=2222,
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "ssh://git@github.com:2222/acme/tools.git"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_preserves_exact_unsuffixed_rewrite_request(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """Git must receive the exact SSH URL that matched an insteadOf rule."""
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            transport_scheme="ssh",
+        )
+        requested_url = "git@github.com:acme/tools"
+
+        resolver.list_remote_refs("acme/tools", remote_url=requested_url)
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == requested_url
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_rejects_requested_url_for_different_remote(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """An exact rewrite request cannot change the selected repository."""
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            transport_scheme="ssh",
+        )
+
+        with pytest.raises(GitLsRemoteError, match="canonical SSH remote URL"):
+            resolver.list_remote_refs(
+                "acme/tools",
+                remote_url="git@github.com:attacker/other",
+            )
+
+        mock_run.assert_not_called()
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_ssh_transport_uses_azure_devops_remote_shape(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("contoso/platform/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_ssh_transport_accepts_git_path_from_canonical_owner(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """ADO SSH URL construction routes through the canonical coordinate owner."""
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("contoso/platform/_git/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
         resolver.close()
 
     def test_close_clears_cache(self) -> None:
@@ -345,6 +684,7 @@ class TestResolveRefSha:
         assert sha == _SHA_A
         resolver.close()
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_resolves_specific_ref(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
@@ -356,7 +696,8 @@ class TestResolveRefSha:
         # Verify command uses the ref directly (no --tags --heads).
         args, kwargs = mock_run.call_args  # noqa: RUF059
         cmd = args[0]
-        assert cmd[:2] == ["git", "ls-remote"]
+        assert cmd[0] == get_git_executable()
+        assert cmd[1] == "ls-remote"
         assert cmd[-1] == "main"
         parsed = urllib.parse.urlparse(cmd[2])
         assert parsed.hostname == "github.com"
@@ -560,8 +901,8 @@ class TestRefResolverGHEHost:
 class TestRefResolverTokenInjection:
     """Token injection into ls-remote URLs."""
 
-    def test_token_injected_in_url(self) -> None:
-        """When token is provided, URL uses x-access-token auth and ends with .git."""
+    def test_token_uses_header_and_url_has_no_userinfo(self) -> None:
+        """When token is provided, the URL remains credential-free."""
         resolver = RefResolver(host="github.com", token="ghp_testtoken123")
         with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
@@ -572,8 +913,15 @@ class TestRefResolverTokenInjection:
             parsed = urllib.parse.urlparse(url_arg)
             assert parsed.scheme == "https"
             assert parsed.hostname == "github.com"
-            assert parsed.username == "x-access-token"
+            assert parsed.username is None
+            assert parsed.password is None
             assert parsed.path.endswith(".git")
+            values = [
+                value
+                for key, value in mock_run.call_args.kwargs["env"].items()
+                if key.startswith("GIT_CONFIG_VALUE_")
+            ]
+            assert any(value.startswith("Authorization: Basic ") for value in values)
 
     def test_no_token_url_has_git_suffix(self) -> None:
         """Without token, URL still ends with .git and has no userinfo."""
@@ -587,8 +935,8 @@ class TestRefResolverTokenInjection:
             assert parsed.path.endswith(".git")
             assert parsed.username is None
 
-    def test_resolve_ref_sha_with_token(self) -> None:
-        """Token is also injected in resolve_ref_sha URL."""
+    def test_resolve_ref_sha_with_token_uses_header(self) -> None:
+        """Single-ref resolution also keeps the token out of its URL."""
         resolver = RefResolver(host="corp.ghe.com", token="ghp_xxx")
         with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("bbbb" * 10 + "\trefs/heads/main\n")
@@ -598,7 +946,8 @@ class TestRefResolverTokenInjection:
             url_arg = cmd_args[2]
             parsed = urllib.parse.urlparse(url_arg)
             assert parsed.hostname == "corp.ghe.com"
-            assert parsed.username == "x-access-token"
+            assert parsed.username is None
+            assert parsed.password is None
             assert parsed.path.endswith(".git")
 
     def test_bearer_auth_rejects_non_ado_host(self) -> None:
@@ -628,6 +977,206 @@ class TestRefResolverTokenInjection:
         assert parsed.hostname == "dev.azure.com"
         assert parsed.username is None
         env = mock_run.call_args.kwargs["env"]
-        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        # Header index is not fixed (#2368: appended after retained entries),
+        # so locate it instead of assuming slot 0.
         expected = base64.b64encode(b":ado_pat").decode()
-        assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Basic {expected}"
+        headers = [
+            (env[f"GIT_CONFIG_KEY_{i}"], v)
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+            if "Authorization" in (v := env[f"GIT_CONFIG_VALUE_{i}"])
+        ]
+        assert headers == [
+            (
+                "http.https://dev.azure.com/contoso/platform/_git/repo.extraheader",
+                f"Authorization: Basic {expected}",
+            )
+        ]
+
+    def test_ado_ssh_transport_skips_bearer_retry(self) -> None:
+        """SSH transport never retries an ADO PAT as an HTTP bearer flow."""
+        auth_resolver = MagicMock()
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="ado_pat",
+            auth_scheme="basic",
+            auth_resolver=auth_resolver,
+            auth_target="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed(
+                stderr="TF401019: The Git repository does not exist or you do not have permissions.",
+                returncode=128,
+            )
+
+            with pytest.raises(GitLsRemoteError):
+                resolver.list_remote_refs("contoso/platform/repo")
+
+        auth_resolver.execute_with_bearer_fallback.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# #2368: auth header injection must preserve retained GIT_CONFIG entries
+# ---------------------------------------------------------------------------
+
+
+class TestGitUrlAndEnvPreservesRetainedGitConfig:
+    """The env returned by _git_url_and_env must keep non-auth git config."""
+
+    @staticmethod
+    def _retained() -> dict[str, str]:
+        return {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_0": "/corporate/ca.pem",
+        }
+
+    def test_ado_bearer_appends_after_retained_entries(self) -> None:
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="aad-jwt",
+            auth_scheme="bearer",
+            git_env=self._retained(),
+        )
+        _url, env = resolver._git_url_and_env("contoso/platform/repo")
+        assert env["GIT_CONFIG_COUNT"] == "3"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_2"] == "Authorization: Bearer aad-jwt"
+        resolver.close()
+
+    def test_ado_basic_appends_after_retained_entries(self) -> None:
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="ado_pat",
+            auth_scheme="basic",
+            git_env=self._retained(),
+        )
+        _url, env = resolver._git_url_and_env("contoso/platform/repo")
+        expected = base64.b64encode(b":ado_pat").decode()
+        assert env["GIT_CONFIG_COUNT"] == "3"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_2"] == f"Authorization: Basic {expected}"
+        resolver.close()
+
+    def test_ado_bearer_replaces_stale_header_instead_of_stacking(self) -> None:
+        stale = {
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Bearer stale-jwt",
+            "GIT_CONFIG_KEY_1": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_1": "/corporate/ca.pem",
+        }
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="fresh-jwt",
+            auth_scheme="bearer",
+            git_env=stale,
+        )
+        _url, env = resolver._git_url_and_env("contoso/platform/repo")
+        headers = [
+            v
+            for k, v in env.items()
+            if k.startswith("GIT_CONFIG_VALUE_") and "Authorization" in str(v)
+        ]
+        assert headers == ["Authorization: Bearer fresh-jwt"]
+        assert env["GIT_CONFIG_COUNT"] == "3"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        resolver.close()
+
+
+# ---------------------------------------------------------------------------
+# commit_exists -- real git against a local bare remote (#3458)
+# ---------------------------------------------------------------------------
+
+
+def _git(*args: str, cwd) -> str:
+    return subprocess.run(
+        [
+            get_git_executable(),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+class TestCommitExists:
+    """A commit-SHA pin is verified by fetching that exact commit."""
+
+    @pytest.fixture
+    def remote(self, tmp_path, monkeypatch):
+        work = tmp_path / "work"
+        work.mkdir()
+        _git("init", "-q", "-b", "main", cwd=work)
+        (work / "f.txt").write_text("v1", encoding="utf-8")
+        _git("add", "f.txt", cwd=work)
+        _git("commit", "-q", "-m", "one", cwd=work)
+        old = _git("rev-parse", "HEAD", cwd=work)
+        tree = _git("rev-parse", "HEAD^{tree}", cwd=work)
+        (work / "f.txt").write_text("v2", encoding="utf-8")
+        _git("commit", "-q", "-am", "two", cwd=work)
+        tip = _git("rev-parse", "HEAD", cwd=work)
+        bare = tmp_path / "remote.git"
+        _git("clone", "-q", "--bare", str(work), str(bare), cwd=tmp_path)
+        probe_root = tmp_path / "apm-tmp"
+        probe_root.mkdir()
+        monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: probe_root)
+        resolver = RefResolver()
+        monkeypatch.setattr(
+            resolver,
+            "_git_url_and_env",
+            lambda owner_repo, remote_url=None: (str(bare), {}),
+        )
+        yield SimpleNamespace(resolver=resolver, old=old, tip=tip, tree=tree, probe_root=probe_root)
+        resolver.close()
+
+    def test_non_tip_commit_is_reachable(self, remote) -> None:
+        assert remote.old != remote.tip
+        assert remote.resolver.commit_exists("acme/pkg", remote.old) is True
+
+    def test_tip_commit_is_reachable(self, remote) -> None:
+        assert remote.resolver.commit_exists("acme/pkg", remote.tip) is True
+
+    def test_unknown_commit_is_unreachable(self, remote) -> None:
+        assert remote.resolver.commit_exists("acme/pkg", "0" * 40) is False
+
+    def test_non_commit_object_is_rejected(self, remote) -> None:
+        assert remote.resolver.commit_exists("acme/pkg", remote.tree) is False
+
+    @pytest.mark.parametrize("configured", ["none", "str"])
+    def test_probe_directory_is_removed(self, remote, monkeypatch, configured) -> None:
+        # get_apm_temp_dir() returns None (system temp) or a str, never a Path.
+        if configured == "none":
+            monkeypatch.setattr("tempfile.tempdir", str(remote.probe_root))
+            monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: None)
+        else:
+            monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: str(remote.probe_root))
+        assert remote.resolver.commit_exists("acme/pkg", remote.old) is True
+        assert list(remote.probe_root.iterdir()) == []
+
+    @pytest.mark.parametrize("bad", ["abc1234", "A" * 40, "g" * 40, ""])
+    def test_rejects_non_full_sha(self, bad) -> None:
+        with pytest.raises(ValueError, match="not a full commit SHA"):
+            RefResolver().commit_exists("acme/pkg", bad)
+
+    def test_offline_raises_without_network(self) -> None:
+        with pytest.raises(OfflineMissError):
+            RefResolver(offline=True).commit_exists("acme/pkg", "a" * 40)

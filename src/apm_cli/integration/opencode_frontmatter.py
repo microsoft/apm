@@ -22,6 +22,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from apm_cli.utils.diagnostics import printable_ascii_text
+
 # OpenCode theme color enum (see sst/opencode config schema).
 OPENCODE_THEME_COLORS = frozenset(
     {"primary", "secondary", "accent", "success", "warning", "error", "info"}
@@ -29,22 +31,6 @@ OPENCODE_THEME_COLORS = frozenset(
 
 # Hex color regex: #RGB or #RRGGBB, case-insensitive.
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-
-
-def _ascii_safe_name(name: str) -> str:
-    """Return ``name`` with any non-printable or non-ASCII bytes replaced by ``?``.
-
-    Used for filenames and package identifiers interpolated into
-    human-readable warning text (where preserving readability matters
-    more than round-trip fidelity). Keeps diagnostics within the
-    repository's printable-ASCII contract even when an agent file has
-    a non-ASCII filename, and strips ASCII control characters
-    (U+0000-U+001F plus U+007F) so a maliciously named file cannot
-    inject ANSI escape sequences or break terminal rendering when its
-    name is echoed in a warning.
-    """
-    ascii_only = name.encode("ascii", "replace").decode("ascii")
-    return "".join("?" if (ord(ch) < 0x20 or ord(ch) == 0x7F) else ch for ch in ascii_only)
 
 
 def _ascii_repr(value: object) -> str:
@@ -81,8 +67,8 @@ def validate_opencode_frontmatter(
         return []
 
     messages: list[str] = []
-    safe_name = _ascii_safe_name(source.name)
-    identifier = f"{_ascii_safe_name(package_name)}/{safe_name}" if package_name else safe_name
+    safe_name = printable_ascii_text(source.name)
+    identifier = f"{printable_ascii_text(package_name)}/{safe_name}" if package_name else safe_name
 
     if "tools" in fm:
         tools = fm["tools"]

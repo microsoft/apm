@@ -7,21 +7,35 @@ from pathlib import Path
 import requests
 
 from ..core.token_manager import GitHubTokenManager
+from ..utils.console import _rich_info
 from .client import SimpleRegistryClient
 
 logger = logging.getLogger(__name__)
 
 
+def _registry_recovery_hint(registry_client: SimpleRegistryClient) -> str:
+    """Return source-specific recovery guidance for custom registry failures."""
+    source = getattr(registry_client, "registry_source", None)
+    if source == "flag":
+        return "verify the --registry URL and registry reachability"
+    if source == "env":
+        return "verify MCP_REGISTRY_URL and registry reachability"
+    if source == "config":
+        return "verify the configured registry URL and registry reachability"
+    return "verify MCP_REGISTRY_URL or the configured registry URL and registry reachability"
+
+
 class MCPServerOperations:
     """Handles MCP server operations like conflict detection and installation status."""
 
-    def __init__(self, registry_url: str | None = None):
+    def __init__(self, registry_url: str | None = None, registry_source: str | None = None):
         """Initialize MCP server operations.
 
         Args:
-            registry_url: Optional registry URL override
+            registry_url: Optional registry URL override.
+            registry_source: Optional source label for recovery text.
         """
-        self.registry_client = SimpleRegistryClient(registry_url)
+        self.registry_client = SimpleRegistryClient(registry_url, registry_source=registry_source)
 
     def check_servers_needing_installation(
         self,
@@ -30,6 +44,7 @@ class MCPServerOperations:
         project_root: Path | str | None = None,
         user_scope: bool = False,
         max_workers: int = 4,
+        server_info_cache: dict[str, dict] | None = None,
     ) -> list[str]:
         """Check which MCP servers actually need installation across target runtimes.
 
@@ -66,7 +81,11 @@ class MCPServerOperations:
         def _check_one(server_ref: str) -> tuple[str, bool]:
             """Return (server_ref, needs_install)."""
             try:
-                server_info = self.registry_client.find_server_by_reference(server_ref)
+                server_info = None
+                if server_info_cache is not None:
+                    server_info = server_info_cache.get(server_ref)
+                if server_info is None:
+                    server_info = self.registry_client.find_server_by_reference(server_ref)
                 if not server_info:
                     return (server_ref, True)
                 server_id = server_info.get("id")
@@ -125,7 +144,7 @@ class MCPServerOperations:
 
                 if isinstance(config, dict):
                     if runtime == "copilot":
-                        # Copilot stores servers in mcpServers object in mcp-config.json
+                        # Copilot config stores servers in its mcpServers object.
                         mcp_servers = config.get("mcpServers", {})
                         for server_name, server_config in mcp_servers.items():  # noqa: B007
                             if isinstance(server_config, dict):
@@ -134,11 +153,13 @@ class MCPServerOperations:
                                     installed_ids.add(server_id)
 
                     elif runtime == "codex":
+                        from ..adapters.client.codex import CodexClientAdapter
+
                         # Codex stores servers as mcp_servers.{name} sections in config.toml
                         mcp_servers = config.get("mcp_servers", {})
                         for server_name, server_config in mcp_servers.items():  # noqa: B007
                             if isinstance(server_config, dict):
-                                server_id = server_config.get("id")
+                                server_id = CodexClientAdapter.get_registry_id(server_config)
                                 if server_id:
                                     installed_ids.add(server_id)
 
@@ -176,7 +197,12 @@ class MCPServerOperations:
         return installed_ids
 
     def validate_servers_exist(
-        self, server_references: list[str], max_workers: int = 4
+        self,
+        server_references: list[str],
+        max_workers: int = 4,
+        *,
+        fail_closed: bool = False,
+        server_info_cache: dict[str, dict] | None = None,
     ) -> tuple[list[str], list[str]]:
         """Validate that all servers exist in the registry before attempting installation.
 
@@ -191,62 +217,117 @@ class MCPServerOperations:
         Args:
             server_references: List of MCP server references to validate
             max_workers: Max parallel HTTP lookups (default 4).
+            fail_closed: Raise on registry network errors instead of assuming
+                the reference is valid.
+            server_info_cache: Optional destination for successfully resolved
+                server documents.
 
         Returns:
             Tuple of (valid_servers, invalid_servers)
         """
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         valid_servers: list[str] = []
         invalid_servers: list[str] = []
 
-        def _validate_one(server_ref: str) -> tuple[str, bool]:
-            """Return (server_ref, is_valid)."""
+        def _validate_one(server_ref: str) -> tuple[str, bool, dict | None]:
+            """Return the reference, validity, and resolved server document."""
             try:
                 server_info = self.registry_client.find_server_by_reference(server_ref)
-                return (server_ref, server_info is not None)
+                return (server_ref, server_info is not None, server_info)
             except requests.RequestException:
-                if getattr(self.registry_client, "_is_custom_url", False):
+                if fail_closed or getattr(self.registry_client, "_is_custom_url", False):
+                    from apm_cli.registry.client import (
+                        mcp_registry_recovery_hint,
+                        redact_mcp_registry_url,
+                    )
+
+                    registry_url = redact_mcp_registry_url(self.registry_client.registry_url)
+                    source = getattr(
+                        self.registry_client,
+                        "registry_url_source",
+                        getattr(self.registry_client, "registry_source", "explicit"),
+                    )
+                    if getattr(self.registry_client, "_is_custom_url", False):
+                        recovery = mcp_registry_recovery_hint(source)
+                    else:
+                        recovery = "Check network connectivity and registry reachability."
                     raise RuntimeError(  # noqa: B904
-                        f"Could not reach MCP registry at "
-                        f"{self.registry_client.registry_url} while validating "
-                        f"server '{server_ref}'. MCP_REGISTRY_URL is set -- "
-                        f"verify the URL is correct and reachable."
+                        f"Could not reach MCP registry at {registry_url} while validating "
+                        f"server '{server_ref}'. {recovery}"
                     )
                 logger.debug(
                     "Registry lookup failed for %s, assuming valid (transient error)",
                     server_ref,
                     exc_info=True,
                 )
-                return (server_ref, True)
+                return (server_ref, True, None)
 
         workers = min(max_workers, len(server_references)) if server_references else 1
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-validate") as executor:
-            for ref, is_valid in executor.map(_validate_one, server_references):
+        results: dict[str, tuple[bool, dict | None]] = {}
+        executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-validate")
+        futures = {executor.submit(_validate_one, ref): ref for ref in server_references}
+        try:
+            for future in as_completed(futures):
+                ref, is_valid, server_info = future.result()
+                results[ref] = (is_valid, server_info)
+        except Exception:
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
+
+        for ref in server_references:
+            if ref in results:
+                is_valid, server_info = results[ref]
                 if is_valid:
                     valid_servers.append(ref)
+                    if server_info_cache is not None and server_info is not None:
+                        server_info_cache[ref] = server_info
                 else:
                     invalid_servers.append(ref)
 
         return valid_servers, invalid_servers
 
-    def batch_fetch_server_info(self, server_references: list[str]) -> dict[str, dict | None]:
+    def batch_fetch_server_info(
+        self,
+        server_references: list[str],
+        max_workers: int = 4,
+    ) -> dict[str, dict | None]:
         """Batch fetch server info for all servers to avoid duplicate registry calls.
+
+        Each registry lookup is independent. Lookups run in a bounded
+        ThreadPoolExecutor (same pattern as ``check_servers_needing_installation``)
+        and results are collected in submission order via ``executor.map``.
+        The shared registry client's ``find_server_by_reference`` must support
+        concurrent calls. Callers must not change the client's configuration
+        until the batch completes.
 
         Args:
             server_references: List of MCP server references
+            max_workers: Requested parallel lookups; clamped to 4.
 
         Returns:
             Dictionary mapping server reference to server info (or None if not found)
         """
-        server_info_cache = {}
+        from concurrent.futures import ThreadPoolExecutor
 
-        for server_ref in server_references:
+        def _fetch_one(server_ref: str) -> tuple[str, dict | None]:
             try:
-                server_info = self.registry_client.find_server_by_reference(server_ref)
-                server_info_cache[server_ref] = server_info
+                return (server_ref, self.registry_client.find_server_by_reference(server_ref))
             except Exception:
-                server_info_cache[server_ref] = None
+                return (server_ref, None)
+
+        server_info_cache: dict[str, dict | None] = {}
+        if not server_references:
+            return server_info_cache
+
+        workers = min(max(1, max_workers), 4, len(server_references))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-fetch") as executor:
+            for server_ref, server_info in executor.map(_fetch_one, server_references):
+                server_info_cache[server_ref] = server_info
 
         return server_info_cache
 
@@ -280,20 +361,42 @@ class MCPServerOperations:
                 if not server_info:
                     continue
 
-                # Extract runtime variables from runtime_arguments
+                # Extract variables from both registry argument phases.
                 packages = server_info.get("packages", [])
                 for package in packages:
                     if isinstance(package, dict):
-                        runtime_arguments = package.get("runtime_arguments", [])
-                        for arg in runtime_arguments:
-                            if isinstance(arg, dict) and "variables" in arg:
-                                variables = arg.get("variables", {})
-                                for var_name, var_info in variables.items():
-                                    if isinstance(var_info, dict):
-                                        collected_runtime_vars[var_name] = {
-                                            "description": var_info.get("description", ""),
-                                            "required": var_info.get("is_required", True),
-                                        }
+                        for field_name in ("runtime_arguments", "package_arguments"):
+                            for arg in package.get(field_name, []):
+                                if isinstance(arg, dict) and "variables" in arg:
+                                    variables = arg.get("variables", {})
+                                    if not isinstance(variables, dict):
+                                        continue
+                                    for var_name, var_info in variables.items():
+                                        if isinstance(var_info, dict):
+                                            configured_value = var_info.get("value")
+                                            if configured_value in (None, ""):
+                                                configured_value = var_info.get(
+                                                    "default",
+                                                    "",
+                                                )
+                                            if configured_value and not isinstance(
+                                                configured_value,
+                                                str,
+                                            ):
+                                                continue
+                                            collected_runtime_vars[var_name] = {
+                                                "description": var_info.get("description", ""),
+                                                "required": var_info.get(
+                                                    "is_required",
+                                                    var_info.get("isRequired", True),
+                                                ),
+                                                "value": configured_value,
+                                                "secret": var_info.get(
+                                                    "is_secret",
+                                                    var_info.get("isSecret", False),
+                                                )
+                                                is True,
+                                            }
 
             except Exception:  # noqa: S112
                 # Skip servers we can't analyze
@@ -301,7 +404,10 @@ class MCPServerOperations:
 
         # Prompt user for collected runtime variables.
         if collected_runtime_vars:
-            return self._prompt_for_environment_variables(collected_runtime_vars)
+            return self._prompt_for_environment_variables(
+                collected_runtime_vars,
+                prompt_defaults=True,
+            )
 
         return {}
 
@@ -387,11 +493,19 @@ class MCPServerOperations:
 
         return shared_env_vars
 
-    def _prompt_for_environment_variables(self, required_vars: dict[str, dict]) -> dict[str, str]:
-        """Prompt user for environment variables.
+    def _prompt_for_environment_variables(
+        self,
+        required_vars: dict[str, dict],
+        *,
+        prompt_defaults: bool = False,
+    ) -> dict[str, str]:
+        """Prompt user for registry-provided variables.
 
         Args:
             required_vars: Dictionary mapping var names to their metadata
+            prompt_defaults: Prompt for required defaults instead of applying
+                them silently. Runtime argument variables use this so a registry
+                default remains an overrideable suggestion.
 
         Returns:
             Dictionary mapping variable names to their values
@@ -414,9 +528,9 @@ class MCPServerOperations:
 
                 if existing_value:
                     env_vars[var_name] = existing_value
+                elif default_value:
+                    env_vars[var_name] = default_value
                 elif not required:
-                    if default_value:
-                        env_vars[var_name] = default_value
                     continue
                 else:  # noqa: PLR5501
                     # Provide sensible defaults for known variables
@@ -448,7 +562,12 @@ class MCPServerOperations:
             from rich.prompt import Prompt
 
             console = Console()
-            console.print("Environment variables needed:", style="cyan")
+            console.print(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:",
+                style="cyan",
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -462,13 +581,15 @@ class MCPServerOperations:
                 if existing_value:
                     console.print(f"  [+] {var_name}: [dim]using existing value[/dim]")
                     env_vars[var_name] = existing_value
+                elif default_value and not (prompt_defaults and required):
+                    if var_info.get("secret", False) is True:
+                        _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
+                    env_vars[var_name] = default_value
                 elif not required:
-                    if default_value:
-                        env_vars[var_name] = default_value
                     continue
                 else:
                     # Determine if this looks like a password/secret
-                    is_sensitive = any(
+                    is_sensitive = var_info.get("secret", False) is True or any(
                         keyword in var_name.lower()
                         for keyword in ["password", "secret", "key", "token", "api"]
                     )
@@ -477,7 +598,15 @@ class MCPServerOperations:
                     if description:
                         prompt_text += f" ({description})"
 
-                    value = Prompt.ask(prompt_text, password=is_sensitive)
+                    prompt_default = "" if is_sensitive else default_value
+                    value = Prompt.ask(
+                        prompt_text,
+                        default=prompt_default,
+                        show_default=bool(prompt_default),
+                        password=is_sensitive,
+                    )
+                    if not value and is_sensitive:
+                        value = default_value
 
                     env_vars[var_name] = value
 
@@ -487,7 +616,11 @@ class MCPServerOperations:
             # Fallback to simple input
             import click
 
-            click.echo("Environment variables needed:")
+            click.echo(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:"
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -500,9 +633,11 @@ class MCPServerOperations:
                 if existing_value:
                     click.echo(f"  [+] {var_name}: using existing value")
                     env_vars[var_name] = existing_value
+                elif default_value and not (prompt_defaults and required):
+                    if var_info.get("secret", False) is True:
+                        _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
+                    env_vars[var_name] = default_value
                 elif not required:
-                    if default_value:
-                        env_vars[var_name] = default_value
                     continue
                 else:
                     prompt_text = f"  {var_name}"
@@ -510,14 +645,20 @@ class MCPServerOperations:
                         prompt_text += f" ({description})"
 
                     # Simple input for fallback
-                    is_sensitive = any(
+                    is_sensitive = var_info.get("secret", False) is True or any(
                         keyword in var_name.lower()
                         for keyword in ["password", "secret", "key", "token", "api"]
                     )
+                    prompt_default = "" if is_sensitive else default_value
 
                     value = click.prompt(
-                        prompt_text, hide_input=is_sensitive, default="", show_default=False
+                        prompt_text,
+                        hide_input=is_sensitive,
+                        default=prompt_default,
+                        show_default=bool(prompt_default),
                     )
+                    if not value and is_sensitive:
+                        value = default_value
                     env_vars[var_name] = value
 
             click.echo()

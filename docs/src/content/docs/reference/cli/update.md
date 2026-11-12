@@ -15,14 +15,23 @@ apm update [OPTIONS] [PACKAGES...]
 
 ## Description
 
-`apm update` re-resolves every dependency in your project's `apm.yml` against the newest version or Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+`apm update` re-resolves every dependency in your project's `apm.yml` against the newest version or Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before changing refs. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+
+When every ref is already current but the locked `apm_modules/` cache is empty, `apm update` restores the cache from the same resolved refs without prompting. It uses the normal dependency materialization path without changing `apm.yml` or `apm.lock.yaml`. `--dry-run` remains read-only and does not restore files.
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
-This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
+Partial updates retain deployment targets in `apm.lock.yaml` for both refreshed
+and untouched packages, including skills deployed under the shared
+`.agents/skills/` directory. A follow-up `apm install` is not needed to restore
+target records.
+
+This command refreshes dependencies, not the CLI. For CLI upgrades, use your
+package manager (`brew upgrade apm` for Homebrew), or
+[`apm self-update`](../self-update/) for standalone installs.
 
 :::note[Consent gate]
-The interactive prompt defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to proceed; otherwise `apm update` aborts without modifying the manifest, lockfile, or workspace.
+The interactive prompt for ref changes defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to apply ref changes. Restoring an empty cache from unchanged locked refs does not require consent.
 :::
 
 For a read-only install that pins to whatever is already in `apm.lock.yaml` -- the right command for CI -- use [`apm install --frozen`](../install/).
@@ -41,9 +50,9 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the manifest, lockfile, or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
 | `--global`, `-g` | off | Refresh user-scope dependencies under `~/.apm/` instead of the current project (mirrors `apm install -g`). |
-| `--force` | off | Overwrite locally-authored files on collision. |
+| `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
-| `--target TARGET`, `-t TARGET` | auto-detect | Agent harness(es) to update for. Accepts a single value (`claude`, `copilot`, `cursor`, `windsurf`, `kiro`, `codex`, `opencode`, `gemini`) or comma-separated list (`--target claude,cursor`). Overrides `apm.yml targets:` and auto-detection. |
+| `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
 
 ## Examples
 
@@ -89,7 +98,15 @@ apm update
 ## Behavior
 
 - **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
-- **Registry deps.** Registry semver deps are re-resolved against their configured registry. Deps already at the latest version satisfying their constraint appear as **unchanged** in the plan.
+- **Refreshes preserve the active package.** Replacement content downloads and
+  passes package validation in an isolated transaction path before publication.
+  Failed downloads or validation keep the previous package active. Failed
+  activation attempts restoration without changing the lockfile. If
+  restoration is also denied, preserve the reported backups and follow
+  [recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
+  before rerunning `apm update`; the prior package may not be active.
+- **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
+- **Registry deps.** Updates stay within the manifest constraint and use the configured registry. An exact `1.7.0` or `=1.7.0` pin remains **unchanged** even when `apm outdated` reports `Latest` as `1.8.0`. To take an outside-constraint release, [select it explicitly](../outdated/#registry-reporting). Unlike read-only `outdated`, `update` can write the manifest, lockfile, modules, and deployed files.
 - **Structured plan.** Output is grouped into four sections:
   - **added** -- present in the new resolution but not in the previous lockfile.
   - **updated** -- ref or version moved.
@@ -98,18 +115,28 @@ apm update
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the manifest, lockfile, and workspace are untouched.
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
-- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files and lockfile ownership for targets no longer declared in `apm.yml`, even when no dependency ref changes.
+- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files, lockfile ownership, and merge-hook config/sidecar entries for targets no longer declared in `apm.yml`, even when no dependency ref changes -- same contract as [`apm install`'s target-contraction note](../install/#notes); see [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for what the merge-hook config/sidecar files are.
+- **One target decision covers services.** The effective target used for package deployment is reused for MCP and LSP reconciliation. Saved config targets are not re-detected or dropped after package updates. Required native config failures exit non-zero.
+- **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
+- **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
+
+### Missing annotated revision-pin tags
+
+When a revision-pinned dependency has no eligible stable annotated semver tag,
+APM emits one summary warning and retains its current SHA while continuing with
+unrelated updates. Use `--verbose` to list each retained pin. Transport failures
+and malformed or ambiguous tag records still fail the update before writes.
 
 ## Back-compat: `apm update` used to be the self-updater
 
 In earlier releases, `apm update` self-updated the **APM CLI binary**. That behavior moved to [`apm self-update`](../self-update/) and `apm update` was repurposed as the dependency updater described above.
 
-For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update` so existing muscle memory and scripts keep working. This shim is removed in the next minor release -- update your scripts to call `apm self-update` directly.
+For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update`. This shim is removed in the next minor release. Use your package manager for CLI upgrades, or `apm self-update` for standalone installs.
 
 ## Related
 
 - [`apm install --frozen`](../install/) -- read-only install pinned to `apm.lock.yaml`; fails on drift. Use this in CI.
-- [`apm self-update`](../self-update/) -- upgrade the APM CLI binary itself.
+- [CLI upgrades](../../../consumer/update-and-refresh/#update-the-apm-cli-binary) -- package-manager and standalone update paths.
 - [`apm outdated`](../outdated/) -- report dependencies with newer refs available, without changing anything.
 - [Manage dependencies (consumer guide)](../../../consumer/manage-dependencies/) -- task-oriented walkthrough.
 - [Update and refresh](../../../consumer/update-and-refresh/) -- when to use `update`, `install --frozen`, and `self-update`.

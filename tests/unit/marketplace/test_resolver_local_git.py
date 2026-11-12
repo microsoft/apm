@@ -42,6 +42,7 @@ def _plugin(name: str, source: object) -> MarketplacePlugin:
     return MarketplacePlugin(name=name, source=source)
 
 
+@pytest.mark.windows_compat
 def test_local_marketplace_relative_source_yields_local_path_canonical(tmp_path: Path) -> None:
     src = MarketplaceSource(name="local-mkt", url=f"file://{tmp_path}", ref="main")
     plugin = _plugin("my-skill", "./skills/my-skill")
@@ -51,10 +52,14 @@ def test_local_marketplace_relative_source_yields_local_path_canonical(tmp_path:
         result = resolve_marketplace_plugin("my-skill", "local-mkt")
 
     assert result.dependency_reference is None
-    assert result.canonical == f"{tmp_path}/skills/my-skill"
+    # Local canonicals are OS-native filesystem paths (``str(Path)``), so the
+    # expectation must be built with the platform separator -- a hard-coded
+    # "/" only matches on POSIX.
+    assert result.canonical == str(tmp_path / "skills" / "my-skill")
     assert DependencyReference.is_local_path(result.canonical)
 
 
+@pytest.mark.windows_compat
 def test_local_marketplace_bare_name_source_with_plugin_root(tmp_path: Path) -> None:
     src = MarketplaceSource(name="local-mkt", url=f"file://{tmp_path}", ref="main")
     plugin = _plugin("hello", "hello")
@@ -68,9 +73,10 @@ def test_local_marketplace_bare_name_source_with_plugin_root(tmp_path: Path) -> 
     ):
         result = resolve_marketplace_plugin("hello", "local-mkt")
 
-    assert result.canonical == f"{tmp_path}/plugins/hello"
+    assert result.canonical == str(tmp_path / "plugins" / "hello")
 
 
+@pytest.mark.windows_compat
 def test_local_marketplace_root_source_returns_repo_root(tmp_path: Path) -> None:
     src = MarketplaceSource(name="local-mkt", url=f"file://{tmp_path}", ref="main")
     plugin = _plugin("root-plugin", ".")

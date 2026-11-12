@@ -21,28 +21,43 @@ see [Primitive types](../primitive-types/).
 |-----------------|------------------------|:------------:|:-------:|:------:|:------:|:--------:|:-----:|:---:|
 | copilot         | `.github/`             |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | claude          | `.claude/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
+| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
+| kiro            | `.kiro/`               |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
+| hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
+| grok-bot        | `agent-data/` (`~/agent-data/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
-below). Claude and Kiro keep target-native skill directories.
+Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
+[Skills convergence](#skills-convergence) below). Claude, Grok Build, Kiro, and
+Hermes user scope keep target-native skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
-`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
-Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
-gated behind experimental flags and not listed above. See
-[Experimental](../experimental/).
+`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
+desktop App), `grok-cloud` (xAI Grok Cloud), and `openclaw` (OpenClaw agent
+runtime) are gated behind experimental flags and not listed above. Hermes is
+stable but explicit-only. See [Experimental](../experimental/).
+
+## Post-install instruction compilation
+
+After a project install stages dependency instructions, the APM CLI requires a
+separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
+It emits the
+[`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
+All other targets in this matrix either deploy instructions as native per-file
+rules, do not support dependency instructions, or have no verified
+root-context reader, so they do not trigger that reminder. A target not
+classified here does not trigger it by default.
 
 ## Detection and resolution
 
@@ -53,16 +68,23 @@ priority:
 2. `targets:` in `apm.yml`.
 3. Auto-detection from filesystem signals (table below).
 
-If none of the above produce a target, the command falls back to
-`copilot`. Use [`apm targets`](../cli/targets/) to preview the resolved
-list before `compile` or `install`.
+For MCP installation, the equivalent explicit legacy `--runtime` flag also
+has highest priority. MCP machine discovery runs only when `targets:` is
+omitted (or legacy `all` is treated as omission). Declared targets therefore produce portable MCP ownership in `apm.lock.yaml`;
+omitted targets intentionally make that ownership machine-dependent.
+
+`apm install` fails closed when no target can be detected. `apm compile`
+retains its documented unsignalled fallback because install writes
+runtime-specific configuration while compile only generates project output. Use
+[`apm targets`](../cli/targets/) to preview the resolved list.
 
 ### Detection signal whitelist
 
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
+| copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
 | claude   | `.claude/` directory, or `CLAUDE.md` file     |
-| copilot  | `.github/copilot-instructions.md` file        |
+| grok-build | `.grok/` directory                          |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
@@ -76,15 +98,15 @@ user-scope `mcp.json`. That global signal does not auto-select file-primitive
 deployment. When `intellij` is selected explicitly, package file primitives use
 the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
-`agent-skills` is a canonical target key; `antigravity` is explicit-only for
-auto-detection. Both are available with `--target` and can be listed in a
-project's `apm.yml` `targets:` field so contributors running plain `apm
-install` pick them up automatically.
+`agent-skills`, `antigravity`, `hermes` and `grok-bot` are stable explicit-only
+targets: never auto-detected and excluded from `all`. Select them with
+`--target` or list them in a project's `apm.yml` `targets:` field so
+contributors running plain `apm install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `openclaw`, and `hermes` are experimental targets
-that require `apm experimental enable <name>` before use. They are selected
-with `--target` only and cannot be listed in `apm.yml` (the canonical
-targets validator will reject them).
+`copilot-cowork`, `copilot-app`, `grok-cloud`, and `openclaw` are
+experimental targets that require `apm experimental enable <name>` before use.
+They are selected with `--target` only and cannot be listed in `apm.yml` (the
+canonical targets validator will reject them).
 
 ## copilot
 
@@ -94,15 +116,28 @@ GitHub Copilot (CLI and IDE).
 - **Deploy directory.** `.github/` at project scope; `~/.copilot/` at user scope.
 - **Supported primitives.** instructions, prompts, agents, skills, hooks, mcp.
 - **File conventions.**
-  - instructions: `.github/instructions/<name>.instructions.md`
+  - instructions: `.github/instructions/<name>.instructions.md` (project scope),
+    `~/.copilot/instructions/<name>.instructions.md` (user scope)
   - prompts: `.github/prompts/<name>.prompt.md`
   - agents: `.github/agents/<name>.agent.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` at project scope and
+    `~/.agents/skills/<name>/SKILL.md` at user scope
   - hooks: `.github/hooks/<name>.json`
-  - generated: `.github/copilot-instructions.md` (compile output)
-- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` from all packages are concatenated into `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file at user scope). User-scope deploys land under `~/.copilot/`, not `~/.github/`.
+  - generated: `.github/copilot-instructions.md` (compile output, project scope only)
+- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
+  `instructions` deploy individually under `~/.copilot/instructions/`, mirroring
+  the project-scope layout. User-scope deploys land under `~/.copilot/`, not
+  `~/.github/`; hook script commands (`~/.copilot/hooks/`) resolve from any
+  working directory (see the per-harness `$HOME` rule in
+  [Hooks and commands](../../producer/author-primitives/hooks-and-commands/#pitfalls)).
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
+- **Prompt harness limitation.** In VS Code, only Local harness sessions load
+  `.github/prompts/` files; the Copilot harness and Copilot CLI do not. See
+  [VS Code prompt files](https://code.visualstudio.com/docs/agent-customization/prompt-files).
+  For those harnesses, ship the workflow as a skill, with
+  `disable-model-invocation: true` where the host supports it. See
+  [Author a prompt](../../producer/author-primitives/prompts/#copilot-harness-limitation).
 
 ## claude
 
@@ -112,30 +147,40 @@ Claude Code.
 - **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: `.claude/rules/<name>.md`
+  - instructions: deployed directly by `apm install` to
+    `.claude/rules/<name>.md`
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md` and per-rule files under `.claude/rules/`.
+- **Compile output.** `CLAUDE.md`; instructions already deployed under
+  `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
 
 ## cursor
 
 Cursor.
 
 - **Detection.** `.cursor/` directory, or legacy `.cursorrules` file.
-- **Deploy directory.** `.cursor/`.
+- **Deploy directory.** `.cursor/` (project scope); `~/.cursor/` (user scope).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
   - instructions: `.cursor/rules/<name>.mdc`
   - agents: `.cursor/agents/<name>.md`
   - commands: `.cursor/commands/<name>.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `~/.agents/skills/<name>/SKILL.md` (user)
   - hooks: `.cursor/hooks.json`
-- **User scope.** Partial. `instructions` is excluded at user scope; Cursor reads global rules from its Settings UI rather than from disk.
-- **Global compile.** `apm compile -g` can render global instructions to
-  `~/.cursor/AGENTS.md` for root-context readers that honor `AGENTS.md`; Cursor
-  global rules still use the Settings UI.
+- **User scope.** Supported. Instructions deploy to
+  `~/.cursor/rules/<name>.mdc` (same `cursor_rules` transform as project
+  scope), and `apm uninstall -g` removes only package-owned rules. As at
+  project scope, an existing rule with the same filename as a package rule is
+  replaced on install. Local
+  Cursor 2.1+ clients include `~/.cursor/rules` in context
+  ([changelog](https://cursor.com/changelog/2-1)). APM manages the files;
+  other Cursor surfaces, such as cloud agents or remote workspaces, are not
+  qualified. Settings UI "User Rules" are separate and not managed by APM.
+- **Global compile.** `apm compile -g` can also render global instructions to
+  `~/.cursor/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 - **Caveat.** Command files use the shared `claude_command` transformer today; Cursor-specific frontmatter keys (`author`, `mcp`, `parameters`, ...) are dropped at install time and surfaced via diagnostics.
 
 ## codex
@@ -188,10 +233,12 @@ OpenCode.
 - **File conventions.**
   - agents: `.opencode/agents/<name>.md`
   - commands: `.opencode/commands/<name>.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `~/.config/opencode/skills/<name>/SKILL.md` (user)
 - **Caveat.** OpenCode has no hooks concept; the `hooks` primitive is silently skipped for this target.
 - **Global compile.** `apm compile -g` writes
-  `~/.config/opencode/AGENTS.md` from global instructions.
+  `~/.config/opencode/AGENTS.md`. OpenCode also retains `applyTo` sections
+  in that generated file; other user-root targets compile only global instructions.
 
 ## windsurf
 
@@ -210,18 +257,45 @@ Windsurf / Cascade.
 
 ## kiro
 
-Kiro IDE.
+Kiro IDE and CLI V3 target layout.
 
 - **Detection.** `.kiro/` directory.
 - **Deploy directory.** `.kiro/` (project and user scope).
-- **Supported primitives.** instructions, skills, hooks, mcp.
+- **Supported primitives.** agents, instructions, prompts, skills, hooks, mcp.
 - **File conventions.**
+  - agents: `.kiro/agents/<relative-stem>.md` -- identity derives from the
+    relative path. Only `description`, `model`, and `tools` frontmatter are
+    emitted; `name` and unknown fields are stripped. Tools are
+    permission-bearing: APM fails closed (no partial write) if any tool
+    value is outside the approved set (`read`, `write`, `shell`, `web`,
+    `subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
+    `*`). Kiro may warn and fall back if the specified `model` is
+    unavailable; APM passes model values through without validation.
+    Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
+    (accessed 2026-08-03).
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
+  - prompts: `.kiro/prompts/<name>.md` (project) or `~/.kiro/prompts/<name>.md` (user).
+    Qualified against Kiro CLI 2.33.0's V3 prompt loader, not the IDE.
+    APM converts `<name>.prompt.md` into body-only Markdown: the filename
+    supplies the slash-command name, and YAML frontmatter is removed.
+    Native arguments `${1}` through `${10}`, `$ARGUMENTS`, and `${@}` are
+    preserved. `${input:name}` is not translated; APM warns so authors can
+    replace it. Tool/model frontmatter is not an execution control in Kiro
+    prompts; APM warns when dropping these or other unsupported fields.
+    Workflow-only prompts are excluded. Relative body links are resolved
+    using the source package, as for other prompt targets.
   - hooks: one JSON file per hook action under `.kiro/hooks/`
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
-- **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.
+- **Scope.** Covers the documented Kiro IDE and CLI v3 layout (unified harness). Ref: [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/) (accessed 2026-08-03).
+- **Prompt precedence.** In the qualified CLI loader, project prompts take
+  precedence over same-name user prompts; file prompts take precedence over
+  same-name MCP prompts. APM does not change native precedence or trust.
+  Local user-authored files are preserved unless `--force` is requested;
+  uninstall removes only APM-owned prompts. Edited managed prompts are
+  retained, and uninstall fails until those edits are resolved. This does not establish IDE
+  prompt parity or authenticated model execution.
 
 ## intellij
 
@@ -232,7 +306,8 @@ GitHub Copilot for JetBrains IDEs.
   file-primitive target.
 - **Deploy directory.** User-scope `mcp.json`; see the
   [JetBrains integration guide](../../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
-  for OS-specific paths.
+  for OS-specific paths. macOS and Linux use `$XDG_CONFIG_HOME` (default
+  `~/.config`), while Windows uses `%LOCALAPPDATA%`.
 - **Supported primitives.** The IntelliJ-specific adapter supports MCP.
   Instructions, prompts, agents, and hooks deploy through the Copilot profile
   under `.github/`; skills deploy under `.agents/skills/`.
@@ -249,6 +324,76 @@ Cross-client shared skills directory.
 - **Supported primitives.** skills only.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
+
+## hermes
+
+Hermes Agent.
+
+- **Detection.** Never auto-detected. Select with `--target hermes` or list it
+  in `apm.yml`.
+- **Deploy directory.** Project-scope skills use `.agents/skills/`. User-scope
+  skills and MCP servers use `$HERMES_HOME` (default `~/.hermes`).
+- **Supported primitives.** skills, mcp, and compiled instructions.
+- **File conventions.**
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `$HERMES_HOME/skills/<name>/SKILL.md` (user)
+  - mcp: `$HERMES_HOME/config.yaml` under the `mcp_servers:` block
+  - compiled instructions: `AGENTS.md`
+- **Compile behavior.** `apm compile --target hermes` emits `AGENTS.md`.
+
+## grok-bot
+
+Grok Bot agent skills deployment.
+
+- **Detection.** Never auto-detected. Select with `--target grok-bot` or list
+  it in `apm.yml`.
+- **Deploy directory.** `agent-data/` at project scope; `~/agent-data/` at
+  user scope (`--global`).
+- **Supported primitives.** skills only.
+- **Package `targets:`.** Packages that declare `agent-skills` are also accepted by
+  `grok-bot`. With an explicit `--target`, the install fails only when no
+  dependency has a compatible target, or when a package named on the command
+  line and its whole subtree have none; other filtered dependencies warn.
+- **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
+  `~/agent-data/workflows/<name>/SKILL.md` (user).
+- **Recommended install.** For a live Grok Bot, use
+  `apm install --target grok-bot --global`. Grok Bot reads skills from
+  `~/agent-data/workflows/`; a project-scope install only lands in
+  `./agent-data/workflows/` under the current folder.
+- **Use case.** Deploys skill packages so Grok Bot reads them directly from
+  `agent-data/workflows/` without a manual copy or symlink from
+  `.agents/skills/` or `apm_modules`.
+- **Commit posture.** `agent-data/` is a project-visible directory like
+  `.claude/` or `.cursor/`, not a cache -- commit it (or `.gitignore` it
+  deliberately) the same way you would any other target's deploy root.
+- **Security model.** Skill deployment reuses the same `BaseIntegrator`
+  collision- and path-containment checks as `hermes` and `agent-skills`;
+  deployed files cannot escape the `agent-data/workflows/` subtree.
+
+## grok-build
+
+[Grok Build](https://github.com/xai-org/grok-build) native configuration.
+
+- **Detection.** Auto-detected when `.grok/` exists.
+- **Selection.** Included in `all`; no experimental flag is required.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** instructions, agents, commands, and skills.
+- **File conventions.** `.grok/rules/*.md`,
+  `.grok/agents/*.md`, `.grok/commands/*.md`, and
+  `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** Produces `AGENTS.md`.
+
+## grok-cloud (experimental)
+
+xAI Grok Cloud skills deployment.
+
+- **Detection.** Never auto-detected. After enabling the experimental flag,
+  selecting `--target grok-cloud` creates the deploy directory when needed.
+- **Enable.** `apm experimental enable grok-cloud`.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** skills only.
+- **File conventions.** `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
 
 ## openclaw (experimental)
 
@@ -269,7 +414,9 @@ Cross-client shared skills directory.
 
 ## Skills convergence
 
-By default, every target with a `skills` primitive deploys to `.agents/skills/<name>/SKILL.md` rather than under the target root. This matches the cross-tool agent skills convention so a single skill bundle serves every harness.
+Most targets with a `skills` primitive deploy to
+`.agents/skills/<name>/SKILL.md`. Claude, Grok Build, Kiro, and experimental
+Grok Cloud keep target-native skill directories.
 
 To restore the pre-convergence per-target layout (skills land under each target's own root), use the `--legacy-skill-paths` flag on `apm install` or set `APM_LEGACY_SKILL_PATHS=1`.
 

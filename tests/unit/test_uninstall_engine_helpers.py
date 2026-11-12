@@ -9,13 +9,17 @@ in existing integration-style uninstall tests:
 - _cleanup_stale_mcp
 """
 
+import errno
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apm_cli.commands.uninstall.engine import (
+    MCPUninstallCleanupError,
     _build_children_index,
     _cleanup_stale_mcp,
+    _cleanup_transitive_orphans,
     _dry_run_uninstall,
     _parse_dependency_entry,
     _remove_packages_from_disk,
@@ -23,6 +27,8 @@ from apm_cli.commands.uninstall.engine import (
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.path_security import safe_rmtree as real_safe_rmtree
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,7 +105,7 @@ class TestValidateUninstallPackages:
         to_remove, not_found = _validate_uninstall_packages(["org/missing"], ["org/other"], logger)
         assert to_remove == []
         assert "org/missing" in not_found
-        logger.warning.assert_called_once()
+        logger.error.assert_called_once()
 
     def test_invalid_format_no_slash_logs_error(self):
         """Package without slash is rejected with an error message and tracked in not_found."""
@@ -166,10 +172,10 @@ class TestValidateUninstallPackages:
         # mistake the path for a malformed marketplace ref.
         to_remove, not_found = _validate_uninstall_packages([win_path, rel_win], [], logger)
         assert to_remove == []
-        # Both arguments are reported "not found in apm.yml" (warning) rather
-        # than "Invalid package format" (error). The latter would leave the
-        # copilot-app integration cleanup with nothing to clean.
-        logger.error.assert_not_called()
+        # Both arguments reach the ordinary not-found path instead of the
+        # invalid package-format branch.
+        assert logger.error.call_count == 2
+        assert all("not found in apm.yml" in call.args[0] for call in logger.error.call_args_list)
         assert win_path in not_found
         assert rel_win in not_found
 
@@ -222,7 +228,7 @@ class TestRemovePackagesFromDisk:
         assert removed == 2
 
     def test_path_traversal_is_rejected(self, tmp_path):
-        """PathTraversalError during dep resolution is caught and logged."""
+        """Path traversal stops removal before the caller can release ownership."""
         from apm_cli.utils.path_security import PathTraversalError
 
         modules = tmp_path / "apm_modules"
@@ -233,30 +239,141 @@ class TestRemovePackagesFromDisk:
         bad_ref = MagicMock()
         bad_ref.get_install_path.side_effect = PathTraversalError("traversal")
 
-        with patch(
-            "apm_cli.commands.uninstall.engine._parse_dependency_entry",
-            return_value=bad_ref,
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine._parse_dependency_entry",
+                return_value=bad_ref,
+            ),
+            pytest.raises(PathTraversalError, match="traversal"),
         ):
-            removed = _remove_packages_from_disk(["../evil"], modules, logger)
+            _remove_packages_from_disk(["../evil"], modules, logger)
 
-        assert removed == 0
         logger.error.assert_called_once()
 
-    def test_rmtree_exception_is_caught(self, tmp_path):
-        """Exception during safe_rmtree is logged without crashing."""
+    def test_deletion_containment_refusal_names_package(self, tmp_path: Path) -> None:
+        """The deletion boundary must retain the operand in its diagnostic."""
+        modules = tmp_path / "apm_modules"
+        (modules / "org" / "repo").mkdir(parents=True)
+        logger = _make_logger()
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine.safe_rmtree",
+                side_effect=PathTraversalError("containment refused"),
+            ),
+            pytest.raises(PathTraversalError, match="containment refused"),
+        ):
+            _remove_packages_from_disk(["org/repo"], modules, logger)
+        logger.error.assert_called_once_with(
+            "Refusing to remove org/repo from apm_modules/: containment refused"
+        )
+
+    def test_rmtree_exception_is_propagated(self, tmp_path):
+        """A deletion error is logged and stops the caller's ownership release."""
         modules = tmp_path / "apm_modules"
         pkg_dir = modules / "org" / "repo"
         pkg_dir.mkdir(parents=True)
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.safe_rmtree",
-            side_effect=OSError("permission denied"),
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine.safe_rmtree",
+                side_effect=OSError("permission denied"),
+            ),
+            pytest.raises(OSError, match="permission denied"),
         ):
-            removed = _remove_packages_from_disk(["org/repo"], modules, logger)
+            _remove_packages_from_disk(["org/repo"], modules, logger)
 
-        assert removed == 0
+        assert pkg_dir.exists()
         logger.error.assert_called_once()
+
+
+@pytest.mark.parametrize("at_resolution", [True, False], ids=["resolve", "delete"])
+def test_orphan_containment_refusal_has_no_fallback(tmp_path: Path, at_resolution: bool) -> None:
+    """Containment refusals are not parse errors eligible for key-derived deletion."""
+    modules = tmp_path / "apm_modules"
+    orphan_path = modules / "org" / "orphan"
+    orphan_path.mkdir(parents=True)
+    payload = orphan_path / "payload"
+    payload.write_bytes(b"retain ownership")
+    logger = _make_logger()
+    lockfile = MagicMock()
+    reference = lockfile.get_dependency.return_value.to_dependency_ref.return_value
+    reference.get_install_path.return_value = orphan_path
+    if at_resolution:
+        reference.get_install_path.side_effect = PathTraversalError("containment refused")
+    with (
+        patch(
+            "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+            return_value=({"org/orphan"}, {}),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.engine.safe_rmtree",
+            side_effect=PathTraversalError("containment refused"),
+        ) as remove,
+        pytest.raises(PathTraversalError, match="containment refused"),
+    ):
+        _cleanup_transitive_orphans(lockfile, ["org/parent"], modules, None, logger)
+    assert payload.read_bytes() == b"retain ownership"
+    assert remove.call_count == (0 if at_resolution else 1)
+    logger.error.assert_called_once_with(
+        "Refusing to remove transitive dep org/orphan: containment refused"
+    )
+
+
+@pytest.mark.parametrize("removal_kind", ["direct", "orphan"])
+def test_partial_failure_cleans_deleted_package_parents_for_retry(
+    tmp_path: Path, removal_kind: str
+) -> None:
+    """A later deletion failure must not strand an earlier package's owner directory."""
+    modules = tmp_path / "apm_modules"
+    first = modules / "org1" / "a"
+    second = modules / "org2" / "b"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    logger = _make_logger()
+    packages = ["org1/a", "org2/b"]
+    lockfile = LockFile()
+    for package in packages:
+        lockfile.add_dependency(
+            LockedDependency(repo_url=package, resolved_commit=f"{package}-commit")
+        )
+
+    def remove_with_second_failure(path: Path, root: Path) -> None:
+        if path == second:
+            raise PermissionError(errno.EACCES, "permission denied", path)
+        real_safe_rmtree(path, root)
+
+    def remove() -> None:
+        if removal_kind == "direct":
+            _remove_packages_from_disk(packages, modules, logger)
+        else:
+            _cleanup_transitive_orphans(lockfile, ["org/parent"], modules, None, logger)
+
+    with (
+        patch(
+            "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+            return_value=(packages, {}),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.engine.safe_rmtree",
+            side_effect=remove_with_second_failure,
+        ),
+        pytest.raises(PermissionError, match="permission denied"),
+    ):
+        remove()
+
+    assert not (modules / "org1").exists()
+    assert second.exists()
+
+    with patch(
+        "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+        return_value=(packages, {}),
+    ):
+        remove()
+
+    assert modules.exists()
+    assert not (modules / "org1").exists()
+    assert not (modules / "org2").exists()
 
 
 # ===========================================================================
@@ -382,6 +499,8 @@ class TestCleanupStaleMcp:
         apm_package = MagicMock()
         apm_package.get_mcp_dependencies.return_value = []
         lockfile = MagicMock()
+        lockfile.mcp_target_servers = {"claude": ["stale-server"]}
+        lockfile._mcp_target_servers_present = True
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale-server"}
 
@@ -402,9 +521,13 @@ class TestCleanupStaleMcp:
 
         mock_mcp.remove_stale.assert_called_once_with(
             {"stale-server"},
+            runtime="claude",
             project_root=None,
             user_scope=False,
             scope=None,
+            fail_on_write_error=True,
+            stored_configs=lockfile.mcp_configs,
+            native_hashes={},
         )
         mock_mcp.update_lockfile.assert_called_once()
 
@@ -438,6 +561,8 @@ class TestCleanupStaleMcp:
         apm_package = MagicMock()
         apm_package.get_mcp_dependencies.return_value = []
         lockfile = MagicMock()
+        lockfile.mcp_target_servers = {"claude": ["stale"]}
+        lockfile._mcp_target_servers_present = True
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale"}
 
@@ -458,10 +583,166 @@ class TestCleanupStaleMcp:
 
         mock_mcp.remove_stale.assert_called_once_with(
             {"stale"},
+            runtime="claude",
             project_root=None,
             user_scope=False,
             scope="user",
+            fail_on_write_error=True,
+            stored_configs=lockfile.mcp_configs,
+            native_hashes={},
         )
+
+    def test_target_ownership_limits_cleanup_to_owning_runtime(self, tmp_path):
+        """A server name owned in one runtime must not be removed from all runtimes."""
+        lockfile = LockFile(
+            mcp_servers=["shared-name"],
+            mcp_target_servers={"hermes": ["shared-name"]},
+        )
+
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
+            mock_mcp.get_server_names.return_value = set()
+            _cleanup_stale_mcp(
+                MagicMock(),
+                lockfile,
+                tmp_path / "apm.lock.yaml",
+                {"shared-name"},
+                modules_dir=tmp_path / "apm_modules",
+                persist=False,
+            )
+
+        mock_mcp.remove_stale.assert_called_once_with(
+            {"shared-name"},
+            runtime="hermes",
+            project_root=None,
+            user_scope=False,
+            scope=None,
+            fail_on_write_error=True,
+            stored_configs={},
+            native_hashes={},
+        )
+
+    def test_partial_target_ownership_retains_unmapped_aggregate_server(self, tmp_path):
+        """A partial runtime map must not discard legacy aggregate ownership."""
+        lockfile = LockFile(
+            mcp_servers=["mapped", "legacy-unmapped"],
+            mcp_target_servers={"hermes": ["mapped"]},
+        )
+
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
+            mock_mcp.get_server_names.return_value = set()
+            _cleanup_stale_mcp(
+                MagicMock(),
+                lockfile,
+                tmp_path / "apm.lock.yaml",
+                {"mapped", "legacy-unmapped"},
+                modules_dir=tmp_path / "apm_modules",
+                persist=False,
+            )
+
+        mock_mcp.remove_stale.assert_called_once_with(
+            {"mapped"},
+            runtime="hermes",
+            project_root=None,
+            user_scope=False,
+            scope=None,
+            fail_on_write_error=True,
+            stored_configs={},
+            native_hashes={},
+        )
+        assert lockfile.mcp_servers == ["legacy-unmapped"]
+        assert lockfile.mcp_target_servers == {}
+
+    @pytest.mark.windows_compat
+    def test_cleanup_failure_retains_lock_ownership(self, tmp_path):
+        """Native cleanup must succeed before in-memory ownership is dropped."""
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        apm_package = MagicMock()
+        lockfile = LockFile(
+            mcp_servers=["stale"],
+            mcp_target_servers={"hermes": ["stale"]},
+        )
+        before_servers = list(lockfile.mcp_servers)
+        before_targets = dict(lockfile.mcp_target_servers)
+
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
+            mock_mcp.get_server_names.return_value = set()
+            mock_mcp.remove_stale.side_effect = RequiredIntegrationError("cleanup failed")
+            with pytest.raises(
+                MCPUninstallCleanupError,
+                match=r"MCP cleanup failed.*cleanup failed",
+            ):
+                _cleanup_stale_mcp(
+                    apm_package,
+                    lockfile,
+                    tmp_path / "apm.lock.yaml",
+                    {"stale"},
+                    modules_dir=tmp_path / "apm_modules",
+                    persist=False,
+                )
+
+        assert lockfile.mcp_servers == before_servers
+        assert lockfile.mcp_target_servers == before_targets
+
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize("user_scope", [False, True])
+    def test_claude_atomic_failure_retains_live_bytes_and_ownership(self, tmp_path, user_scope):
+        """A failed Claude replace cannot precede lock ownership removal."""
+        from types import SimpleNamespace
+
+        from apm_cli.core.scope import InstallScope
+
+        if not user_scope:
+            (tmp_path / ".claude").mkdir()
+        config_path = tmp_path / (".claude.json" if user_scope else ".mcp.json")
+        original = (
+            b'{"mcpServers":{"stale":{"type":"stdio","command":"old","args":[]}},"theme":"dark"}\n'
+        )
+        config_path.write_bytes(original)
+        lockfile = LockFile(
+            mcp_servers=["stale"],
+            mcp_target_servers={"claude": ["stale"]},
+            mcp_configs={
+                "stale": {
+                    "name": "stale",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "old",
+                }
+            },
+        )
+        before_servers = list(lockfile.mcp_servers)
+        before_targets = dict(lockfile.mcp_target_servers)
+
+        with (
+            patch(
+                "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
+                return_value=SimpleNamespace(dependencies=[], configs={}, provenance={}),
+            ),
+            patch(
+                "apm_cli.utils.atomic_io._replace_atomic_file",
+                side_effect=OSError("simulated crash"),
+            ) as replace_file,
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(MCPUninstallCleanupError, match=r"MCP cleanup failed"),
+        ):
+            _cleanup_stale_mcp(
+                MagicMock(),
+                lockfile,
+                tmp_path / "apm.lock.yaml",
+                {"stale"},
+                modules_dir=tmp_path / "apm_modules",
+                project_root=tmp_path,
+                user_scope=user_scope,
+                scope=InstallScope.USER if user_scope else None,
+                persist=False,
+            )
+
+        assert config_path.read_bytes() == original
+        replace_file.assert_called_once()
+        assert lockfile.mcp_servers == before_servers
+        assert lockfile.mcp_target_servers == before_targets
+        assert list(tmp_path.glob("apm-atomic-*")) == []
 
     def test_get_mcp_dependencies_exception_handled(self, tmp_path):
         """Exception from apm_package.get_mcp_dependencies is swallowed."""
@@ -767,6 +1048,242 @@ class TestResolveMarketplacePackages:
 
 
 # ===========================================================================
+# _resolve_marketplace_packages -- multi-entry first-match regression
+# ===========================================================================
+
+
+class TestResolveMarketplacePackagesMultiEntry:
+    """Regression contract for first-match / provenance behavior with multiple same-plugin entries.
+
+    These tests encode the observable ordering semantics that any optimisation
+    of _resolve_marketplace_packages must preserve:
+    - Exact-match (discovered_via == marketplace_name AND marketplace_plugin_name
+      == plugin_name) takes priority over a provenance-mismatch entry regardless
+      of insertion order.
+    - When no exact match exists, the *first* insertion-order same-plugin entry
+      whose discovered_via != marketplace_name is used.
+    - The warning text for the provenance-mismatch path is stable and includes
+      the plugin name, the requested marketplace, the actual marketplace, and
+      the canonical that will be uninstalled.
+    """
+
+    def test_first_exact_match_wins_among_multiple_entries(self):
+        """When multiple entries share the same plugin+marketplace, first one wins."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep_first = LockedDependency(
+            repo_url="acme/plugin-v1",
+            resolved_commit="aaa",
+            discovered_via="official",
+            marketplace_plugin_name="multi-plugin",
+        )
+        dep_second = LockedDependency(
+            repo_url="acme/plugin-v2",
+            resolved_commit="bbb",
+            discovered_via="official",
+            marketplace_plugin_name="multi-plugin",
+        )
+        lockfile.add_dependency(dep_first)
+        lockfile.add_dependency(dep_second)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["multi-plugin@official"], lockfile, logger)
+
+        # First insertion-order exact match must win; second entry is never consulted
+        assert result["multi-plugin@official"] == dep_first.get_unique_key()
+        logger.warning.assert_not_called()
+        logger.error.assert_not_called()
+
+    def test_first_provenance_mismatch_entry_wins_among_multiple(self):
+        """When no exact match exists, first insertion-order mismatch entry wins."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep_first = LockedDependency(
+            repo_url="acme/mismatch-first",
+            resolved_commit="c11",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="shared-plugin",
+        )
+        dep_second = LockedDependency(
+            repo_url="acme/mismatch-second",
+            resolved_commit="d22",
+            discovered_via="another-marketplace",
+            marketplace_plugin_name="shared-plugin",
+        )
+        lockfile.add_dependency(dep_first)
+        lockfile.add_dependency(dep_second)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["shared-plugin@official"], lockfile, logger)
+
+        # First insertion-order mismatch entry must win
+        assert result["shared-plugin@official"] == dep_first.get_unique_key()
+        logger.warning.assert_called_once()
+
+    def test_exact_match_priority_over_earlier_mismatch_entry(self):
+        """Exact match wins even when a mismatch entry appears earlier in insertion order."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        # Mismatch entry inserted first
+        dep_mismatch = LockedDependency(
+            repo_url="acme/via-other",
+            resolved_commit="e33",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="ordered-plugin",
+        )
+        # Exact match inserted second
+        dep_exact = LockedDependency(
+            repo_url="acme/via-official",
+            resolved_commit="f44",
+            discovered_via="official",
+            marketplace_plugin_name="ordered-plugin",
+        )
+        lockfile.add_dependency(dep_mismatch)
+        lockfile.add_dependency(dep_exact)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["ordered-plugin@official"], lockfile, logger)
+
+        # Exact match must always win over any mismatch entry, regardless of order
+        assert result["ordered-plugin@official"] == dep_exact.get_unique_key()
+        logger.warning.assert_not_called()
+        logger.error.assert_not_called()
+
+    def test_provenance_mismatch_warning_text_exact(self):
+        """Warning text for provenance mismatch must contain plugin, marketplace, and canonical."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="org/warned-plugin",
+            resolved_commit="g55",
+            discovered_via="source-marketplace",
+            marketplace_plugin_name="warned-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(
+            ["warned-plugin@target-marketplace"], lockfile, logger
+        )
+
+        assert result["warned-plugin@target-marketplace"] == dep.get_unique_key()
+        logger.warning.assert_called_once()
+        warn_text = logger.warning.call_args[0][0]
+        assert "warned-plugin@target-marketplace" in warn_text
+        assert "installed via source-marketplace" in warn_text
+        assert "Proceeding with uninstall of" in warn_text
+        assert dep.get_unique_key() in warn_text
+
+
+# ===========================================================================
+# _resolve_marketplace_packages -- single-values-call performance contract
+# ===========================================================================
+
+
+class _IterationCountingDepsView:
+    """Wrap a dict to count calls to ``values()``.
+
+    Assigned to ``lockfile.dependencies`` so _resolve_marketplace_packages
+    can be audited without touching its internals.
+    """
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+        self.values_call_count = 0
+
+    def values(self):
+        """Count each call and delegate to the real dict."""
+        self.values_call_count += 1
+        return self._data.values()
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
+
+    def get(self, key: object, default: object = None) -> object:
+        return self._data.get(key, default)
+
+    def __getitem__(self, key: object) -> object:
+        return self._data[key]
+
+    def __setitem__(self, key: object, value: object) -> None:
+        self._data[key] = value
+
+
+class TestResolveMarketplacePackagesSingleTraversal:
+    """Call-count guard: lockfile.dependencies.values() must be called
+    exactly once for the whole batch, not once or twice per package.
+
+    This test FAILS with the pre-optimisation code (which calls .values() twice
+    per package) and PASSES after the pre-index optimisation is applied.
+    """
+
+    def _make_lockfile_with_counter(self, deps: list) -> tuple:
+        """Return (lockfile, counter) where counter tracks .values() calls."""
+        lockfile = LockFile()
+        for dep in deps:
+            lockfile.add_dependency(dep)
+        counter = _IterationCountingDepsView(lockfile.dependencies)
+        lockfile.dependencies = counter
+        return lockfile, counter
+
+    def test_values_called_once_for_three_package_batch(self):
+        """For a batch of 3 packages, .values() must be called exactly once."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        dep_a = LockedDependency(
+            repo_url="acme/alpha",
+            resolved_commit="a1",
+            discovered_via="official",
+            marketplace_plugin_name="alpha",
+        )
+        dep_b = LockedDependency(
+            repo_url="acme/beta",
+            resolved_commit="b2",
+            discovered_via="official",
+            marketplace_plugin_name="beta",
+        )
+        lockfile, counter = self._make_lockfile_with_counter([dep_a, dep_b])
+        logger = _make_logger()
+
+        _resolve_marketplace_packages(
+            ["alpha@official", "beta@official", "gamma@official"],
+            lockfile,
+            logger,
+        )
+
+        # Pre-index path: one values() call for the whole batch regardless of N.
+        assert counter.values_call_count == 1, (
+            f"Expected exactly 1 call to lockfile.dependencies.values() "
+            f"for a 3-package batch, got {counter.values_call_count}. "
+            "The optimisation must call values() once before the package loop."
+        )
+
+    def test_values_called_once_even_when_all_packages_need_fallback(self):
+        """Fallback for every package still requires only one values() call."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile, counter = self._make_lockfile_with_counter([])
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_reg:
+            mock_reg.side_effect = RuntimeError("no network in test")
+            _resolve_marketplace_packages(
+                ["p1@mkt", "p2@mkt", "p3@mkt"],
+                lockfile,
+                logger,
+            )
+
+        assert counter.values_call_count == 1, (
+            f"Expected 1 values() call when all packages fall through to registry, "
+            f"got {counter.values_call_count}."
+        )
+
+
+# ===========================================================================
 # _validate_uninstall_packages -- marketplace ref extensions
 # ===========================================================================
 
@@ -815,7 +1332,7 @@ class TestValidateUninstallPackagesMarketplace:
 
         assert to_remove == []
         assert "my-plugin@official" in not_found
-        warning_msg = logger.warning.call_args[0][0]
+        warning_msg = logger.error.call_args[0][0]
         # Marketplace-specific not-found wording contains both ref and canonical
         assert "my-plugin@official" in warning_msg
         assert "acme/my-plugin" in warning_msg

@@ -1,6 +1,7 @@
 """Tests for the APM lock file module."""
 
-from pathlib import Path  # noqa: F401
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -9,10 +10,24 @@ import yaml
 from apm_cli.deps.lockfile import (
     LockedDependency,
     LockFile,
+    LockfileFormatError,
     get_lockfile_path,
     migrate_lockfile_if_needed,
+    resolve_lockfile_path_for_read,
 )
 from apm_cli.models.apm_package import DependencyReference
+
+
+@pytest.mark.parametrize("name", ["", 42])
+def test_malformed_mcp_omission_keys_rejected(name: str | int) -> None:
+    """Invalid omission keys retain explicit, selection-safe recovery guidance."""
+    data = yaml.safe_load(LockFile().to_yaml())
+    data["mcp_omissions"] = {name: {"reason": "only-apm"}}
+    with pytest.raises(LockfileFormatError, match="invalid server names") as error:
+        LockFile.from_yaml(yaml.safe_dump(data))
+    assert "Restore a known-good lockfile and repeat the intended install selection" in str(
+        error.value
+    )
 
 
 class TestLockedDependency:
@@ -233,6 +248,7 @@ class TestLockFile:
         yaml_str = lock.to_yaml()
         data = yaml.safe_load(yaml_str)
         assert data["lockfile_version"] == "1"
+        assert "generated_at" not in data
         assert len(data["dependencies"]) == 1
 
     def test_from_yaml(self):
@@ -250,6 +266,149 @@ class TestLockFile:
         loaded = LockFile.read(lock_path)
         assert loaded is not None
         assert loaded.has_dependency("owner/repo")
+
+    def test_write_refreshes_existing_generated_at(self, tmp_path, monkeypatch):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        lock.add_dependency(LockedDependency(repo_url="owner/repo"))
+        next_write = datetime(2026, 1, 1, tzinfo=UTC)
+        fixed_datetime = Mock()
+        fixed_datetime.now.return_value = next_write
+        monkeypatch.setattr("apm_cli.deps.lockfile.datetime", fixed_datetime)
+
+        lock.write(lock_path)
+
+        assert yaml.safe_load(lock_path.read_text(encoding="utf-8"))["generated_at"] == (
+            next_write.isoformat()
+        )
+
+    def test_write_preserves_existing_generated_at_on_noop(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        original_timestamp = "2025-01-01T00:00:00+00:00"
+        lock_path.write_text(
+            f"lockfile_version: '1'\ngenerated_at: '{original_timestamp}'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile()
+
+        lock.write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["generated_at"] == original_timestamp
+        assert lock.generated_at == original_timestamp
+
+    def test_write_overwrites_timestamp_free_file_without_schema_validation(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ndependencies: {}\n",
+            encoding="utf-8",
+        )
+
+        LockFile().write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["dependencies"] == []
+        assert "generated_at" not in written
+
+    def test_write_repairs_malformed_legacy_file_and_refreshes_timestamp(
+        self, tmp_path, monkeypatch
+    ):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: {}\n",
+            encoding="utf-8",
+        )
+        next_write = datetime(2026, 1, 1, tzinfo=UTC)
+        fixed_datetime = Mock()
+        fixed_datetime.now.return_value = next_write
+        monkeypatch.setattr("apm_cli.deps.lockfile.datetime", fixed_datetime)
+
+        LockFile().write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["dependencies"] == []
+        assert written["generated_at"] == next_write.isoformat()
+
+    def test_write_parses_legacy_lockfile_once(self, tmp_path, monkeypatch):
+        from apm_cli.utils import yaml_io
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        real_load_yaml_str = yaml_io.load_yaml_str
+        load_calls = 0
+
+        def counting_load_yaml_str(text):
+            nonlocal load_calls
+            load_calls += 1
+            return real_load_yaml_str(text)
+
+        monkeypatch.setattr(yaml_io, "load_yaml_str", counting_load_yaml_str)
+
+        LockFile().write(lock_path)
+
+        assert load_calls == 1
+
+    def test_write_reuses_preloaded_destination(self, tmp_path, monkeypatch):
+        from apm_cli.utils import yaml_io
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        existing = LockFile.read(lock_path)
+        assert existing is not None
+        candidate = LockFile()
+        candidate.add_dependency(LockedDependency(repo_url="owner/repo"))
+
+        def unexpected_parse(_text):
+            raise AssertionError("preloaded lockfile must avoid a second YAML parse")
+
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.setattr(yaml_io, "load_yaml_str", unexpected_parse)
+            candidate.write(lock_path, existing_lockfile=existing)
+
+        assert candidate.generated_at is not None
+        written = LockFile.read(lock_path)
+        assert written is not None
+        assert written.has_dependency("owner/repo")
+
+    def test_timestamp_free_destination_discards_in_memory_legacy_timestamp(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile(generated_at="2025-01-01T00:00:00+00:00")
+
+        lock.write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert "generated_at" not in written
+        assert lock.generated_at is None
+
+    def test_legacy_noop_restores_persisted_timestamp(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        persisted_timestamp = "2025-01-01T00:00:00+00:00"
+        lock_path.write_text(
+            f"lockfile_version: '1'\ngenerated_at: '{persisted_timestamp}'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile(generated_at="2026-01-01T00:00:00+00:00")
+
+        lock.write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["generated_at"] == persisted_timestamp
+        assert lock.generated_at == persisted_timestamp
 
     def test_mcp_servers_round_trip(self, tmp_path):
         """mcp_servers must survive a write → read cycle."""
@@ -387,19 +546,33 @@ class TestLockFile:
         yaml_str = lock.to_yaml()
         assert "lsp_configs" not in yaml_str
 
+    def test_lsp_target_servers_round_trip_through_deployment_ledger(self, tmp_path):
+        """Target-scoped LSP ownership must survive lockfile serialization."""
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        lock = LockFile()
+        DeploymentLedgerCodec.replace_lsp_target_servers(
+            lock,
+            {"claude": ["pyright"], "copilot": ["ruff-lsp", "pyright"]},
+        )
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+
+        loaded = LockFile.read(lock_path)
+
+        assert loaded is not None
+        assert loaded.lsp_target_servers == {
+            "claude": ["pyright"],
+            "copilot": ["pyright", "ruff-lsp"],
+        }
+        assert loaded._lsp_target_servers_present is True
+
     def test_read_nonexistent(self, tmp_path):
         loaded = LockFile.read(tmp_path / "apm.lock.yaml")
         assert loaded is None
 
     def test_from_installed_packages(self):
-        dep_ref = Mock()
-        dep_ref.repo_url = "owner/repo"
-        dep_ref.host = "github.com"
-        dep_ref.reference = "main"
-        dep_ref.virtual_path = None
-        dep_ref.is_virtual = False
-        dep_ref.is_local = False
-        dep_ref.local_path = None
+        dep_ref = DependencyReference(repo_url="owner/repo", host="github.com", reference="main")
         installed = [(dep_ref, "commit123", 1, None)]
         lock = LockFile.from_installed_packages(installed, Mock())
         assert lock.has_dependency("owner/repo")
@@ -409,6 +582,46 @@ class TestGetLockfilePath:
     def test_get_lockfile_path(self, tmp_path):
         path = get_lockfile_path(tmp_path)
         assert path == tmp_path / "apm.lock.yaml"
+
+
+class TestResolveLockfilePathForRead:
+    def test_read_only_returns_legacy_path_without_migrating(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "apm.lock"
+        legacy.write_text("legacy", encoding="utf-8")
+
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=True)
+
+        assert path == legacy
+        assert legacy.read_text(encoding="utf-8") == "legacy"
+        assert not (tmp_path / "apm.lock.yaml").exists()
+
+    def test_read_only_prefers_canonical_path_when_both_exist(self, tmp_path: Path) -> None:
+        canonical = tmp_path / "apm.lock.yaml"
+        canonical.write_text("canonical", encoding="utf-8")
+        legacy = tmp_path / "apm.lock"
+        legacy.write_text("legacy", encoding="utf-8")
+
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=True)
+
+        assert path == canonical
+        assert canonical.read_text(encoding="utf-8") == "canonical"
+        assert legacy.read_text(encoding="utf-8") == "legacy"
+
+    def test_read_only_returns_canonical_path_when_neither_exists(self, tmp_path: Path) -> None:
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=True)
+
+        assert path == tmp_path / "apm.lock.yaml"
+        assert list(tmp_path.iterdir()) == []
+
+    def test_writable_read_migrates_legacy_path(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "apm.lock"
+        legacy.write_text("legacy", encoding="utf-8")
+
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=False)
+
+        assert path == tmp_path / "apm.lock.yaml"
+        assert path.read_text(encoding="utf-8") == "legacy"
+        assert not legacy.exists()
 
 
 class TestMigrateLockfileIfNeeded:
@@ -509,10 +722,35 @@ class TestLockFileSemanticEquivalence:
         b = self._make_lock(mcp_configs={"s": {"cmd": "b"}})
         assert not a.is_semantically_equivalent(b)
 
+    @pytest.mark.parametrize(
+        "other,equivalent",
+        [
+            ({"reason": "only-apm", "declaration": "sha256:original"}, True),
+            ({"declaration": "sha256:changed", "reason": "only-apm"}, False),
+            ({"declaration": "sha256:original", "reason": "untrusted-transitive"}, False),
+            ({}, False),
+        ],
+    )
+    def test_mcp_omission_semantic_equivalence(
+        self, other: dict[str, str], equivalent: bool
+    ) -> None:
+        """Changing omission evidence is semantic; mapping key order is not."""
+        a = self._make_lock(
+            mcp_omissions={"s": {"declaration": "sha256:original", "reason": "only-apm"}}
+        )
+        b = self._make_lock(mcp_omissions={"s": other})
+        assert a.is_semantically_equivalent(b) is equivalent
+        assert b.is_semantically_equivalent(a) is equivalent
+
     def test_changed_mcp_config_provenance_not_equivalent(self):
         a = self._make_lock(mcp_config_provenance={"s": "package-a"})
         b = self._make_lock(mcp_config_provenance={"s": "package-b"})
         assert not a.is_semantically_equivalent(b)
+
+    def test_mcp_config_provenance_list_order_irrelevant(self):
+        a = self._make_lock(mcp_config_provenance={"s": ["package-b", "package-a"]})
+        b = self._make_lock(mcp_config_provenance={"s": ["package-a", "package-b"]})
+        assert a.is_semantically_equivalent(b)
 
     def test_changed_lsp_servers_not_equivalent(self):
         a = self._make_lock(lsp_servers=["server-a"])

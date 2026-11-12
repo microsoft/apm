@@ -7,10 +7,12 @@ file-length guardrail. These are pure, stateless helpers with no dependency on
 without collapsing their distinct local-detection semantics.
 
 ``normalize_package_repo_url`` is the single casing-normalization boundary for
-package identity. Callers must not lowercase repository paths independently.
+comparison identity. It must never be used as a display or filesystem path.
 """
 
 import re
+from enum import Enum
+from functools import lru_cache
 
 from ...utils.github_host import default_host, is_github_hostname
 
@@ -27,8 +29,37 @@ from ...utils.github_host import default_host, is_github_hostname
 # list-form ``argv`` so there is no shell-expansion vector.
 _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
+_PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE = r"^(?:[a-zA-Z0-9._~-]|%[0-9A-Fa-f]{2})+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+_ASCII_LOWER_TRANSLATION = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "abcdefghijklmnopqrstuvwxyz",
+)
+
+
+class PackageIdentityCase(Enum):
+    """Case-normalization extent for one package identity."""
+
+    SENSITIVE = "sensitive"
+    REPOSITORY = "repository"
+    # ALL covers every repo_url segment; virtual_path remains a package boundary.
+    ALL = "all"
+
+
+def _split_shorthand_host_port(host_segment: str) -> tuple[str, int | None]:
+    """Split and validate the host segment used by DependencyReference shorthand."""
+    if ":" not in host_segment:
+        return host_segment, None
+    host, _, raw_port = host_segment.rpartition(":")
+    error = "Invalid shorthand port. Expected an integer from 1 to 65535"
+    if not host or not re.fullmatch(r"[0-9]{1,5}", raw_port):
+        raise ValueError(error)
+    port = int(raw_port)
+    if not 1 <= port <= 65535:
+        raise ValueError(error)
+    return host, None if port == _DEFAULT_SCHEME_PORTS["https"] else port
 
 
 def normalize_package_repo_url(
@@ -47,19 +78,107 @@ def normalize_package_repo_url(
     hosts retain their path casing because their repository semantics may be
     case-sensitive.
     """
-    if is_local or source == "local" or is_marketplace:
+    identity_case = classify_package_identity_case(
+        host=host,
+        source=source,
+        registry_prefix=registry_prefix,
+        is_local=is_local,
+        is_marketplace=is_marketplace,
+    )
+    if identity_case is PackageIdentityCase.SENSITIVE:
         return repo_url
+    return repo_url.lower()
 
+
+def classify_package_identity_case(
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> PackageIdentityCase:
+    """Return the canonical case-normalization extent for a package identity."""
+    if is_local or source == "local" or is_marketplace:
+        return PackageIdentityCase.SENSITIVE
     if source == "registry" or registry_prefix:
-        return repo_url.lower()
+        return PackageIdentityCase.ALL
+    effective_host = host or default_host()
+    if is_github_hostname(effective_host):
+        return PackageIdentityCase.REPOSITORY
+    return PackageIdentityCase.SENSITIVE
 
-    configured_default_host = default_host()
-    effective_host = host or configured_default_host
-    if effective_host.lower() == configured_default_host.lower() or is_github_hostname(
-        effective_host
-    ):
-        return repo_url.lower()
-    return repo_url
+
+def is_case_insensitive_package_identity(
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> bool:
+    """Return whether repository casing is excluded from package identity."""
+    return (
+        classify_package_identity_case(
+            host=host,
+            source=source,
+            registry_prefix=registry_prefix,
+            is_local=is_local,
+            is_marketplace=is_marketplace,
+        )
+        is not PackageIdentityCase.SENSITIVE
+    )
+
+
+def case_insensitive_identity_prefix_segments(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> int:
+    """Return how many leading repository path segments exclude casing."""
+    identity_case = classify_package_identity_case(
+        host=host,
+        source=source,
+        registry_prefix=registry_prefix,
+        is_local=is_local,
+        is_marketplace=is_marketplace,
+    )
+    if identity_case is PackageIdentityCase.SENSITIVE:
+        return 0
+    return len(repo_url.split("/"))
+
+
+@lru_cache(maxsize=512)
+def normalize_package_policy_identity(
+    value: str,
+    *,
+    case_insensitive_prefix_segments: int,
+) -> str:
+    """Normalize only the repository prefix of a dependency-policy operand.
+
+    The caller must source ``case_insensitive_prefix_segments`` from
+    ``case_insensitive_identity_prefix_segments``. Recursive globs end a
+    positional repository prefix; virtual paths and ``#ref`` suffixes stay
+    case-sensitive.
+    """
+    if case_insensitive_prefix_segments <= 0:
+        return value
+
+    name, separator, reference = value.partition("#")
+    segments = name.split("/")
+    normalized: list[str] = []
+    for index, segment in enumerate(segments):
+        if index >= case_insensitive_prefix_segments or "**" in segment:
+            normalized.extend(segments[index:])
+            break
+        normalized.append(segment.translate(_ASCII_LOWER_TRANSLATION))
+
+    normalized_name = "/".join(normalized)
+    return f"{normalized_name}{separator}{reference}"
 
 
 def build_dependency_unique_key(
@@ -73,6 +192,7 @@ def build_dependency_unique_key(
     registry_prefix: str | None = None,
     declaring_parent: str | None = None,
     anchored_local_path: str | None = None,
+    is_marketplace: bool = False,
 ) -> str:
     """Return the lockfile/dedup key for a dependency identity.
 
@@ -94,7 +214,14 @@ def build_dependency_unique_key(
             return f"local:{anchored_local_path}"
         return local_path
 
-    key = repo_url
+    key = normalize_package_repo_url(
+        repo_url,
+        host=host,
+        source=source,
+        registry_prefix=registry_prefix,
+        is_local=source == "local",
+        is_marketplace=is_marketplace,
+    )
     if is_virtual and virtual_path:
         key = f"{key}/{virtual_path}"
 

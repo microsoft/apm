@@ -29,8 +29,8 @@ import urllib.parse
 # counts as an SCP-shorthand SSH URL (e.g. EMU users, Azure DevOps users).
 SCP_LIKE_RE = re.compile(
     r"^(?P<user>[a-zA-Z0-9_][a-zA-Z0-9_.+-]*)@"
-    r"(?P<host>[^:/]+)"
-    r":(?P<path>.+)$"
+    r"(?P<host>[^:/\[\]]+)"
+    r":(?P<path>[^?]+)$"
 )
 
 # Default ports to strip
@@ -104,12 +104,16 @@ def normalize_repo_url(url: str) -> str:
         if port and _DEFAULT_PORTS.get(scheme) == port:
             port = None
         # Reconstruct the authority (Step 3 lowercase host, Step 4 drop password)
-        authority = f"{username}@{hostname}" if username else hostname
+        # IPv6 literals require brackets in a reconstructed URI authority.
+        rendered_host = (
+            f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+        )
+        authority = f"{username}@{rendered_host}" if username else rendered_host
         if port:
             authority = f"{authority}:{port}"
 
-    # Step 1: Strip trailing .git from path
-    path = parsed.path or ""
+    # Step 1: Strip trailing slash and one trailing .git suffix from path.
+    path = (parsed.path or "").rstrip("/")
     if path.endswith(".git"):
         path = path[:-4]
 
@@ -121,9 +125,6 @@ def normalize_repo_url(url: str) -> str:
     _CASE_INSENSITIVE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
     if hostname in _CASE_INSENSITIVE_HOSTS:
         path = path.lower()
-
-    # Strip trailing slash from path
-    path = path.rstrip("/")
 
     # Reconstruct normalized URL
     return f"{scheme}://{authority}{path}"

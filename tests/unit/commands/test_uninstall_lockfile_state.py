@@ -51,3 +51,53 @@ def test_duplicate_locator_values_update_each_target_record_hash(tmp_path) -> No
     assert len(hashes) == 1
     assert next(iter(hashes)).startswith("sha256:")
     assert hashes != {"sha256:old"}
+
+
+def test_fully_refreshed_survivor_replaces_complete_deployed_file_view(
+    tmp_path,
+) -> None:
+    """A shared-slot refresh records added files and drops stale survivor files."""
+    old_path = ".github/instructions/old.instructions.md"
+    new_path = ".github/instructions/new.instructions.md"
+    new_file = tmp_path / new_path
+    new_file.parent.mkdir(parents=True)
+    new_file.write_text("# refreshed\n", encoding="ascii")
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="copilot",
+        value=old_path,
+        runtime=None,
+        scope="project",
+    )
+    dependency = LockedDependency(
+        repo_url="survivor",
+        deployed_files=[old_path],
+        deployed_file_hashes={old_path: "sha256:old"},
+    )
+    lockfile = LockFile(
+        dependencies={"survivor": dependency},
+        deployment_ledger=DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("survivor",),
+                    active_owner="survivor",
+                    content_hash="sha256:old",
+                )
+            }
+        ),
+        _deployments_present=True,
+    )
+
+    changed = reconcile_uninstall_deployment_state(
+        lockfile,
+        deploy_root=tmp_path,
+        all_deployed_files={old_path},
+        surviving_deployed_files={"survivor": {new_path}},
+        fully_refreshed_dependency_keys={"survivor"},
+    )
+
+    assert changed is True
+    assert dependency.deployed_files == [new_path]
+    assert set(dependency.deployed_file_hashes) == {new_path}
+    assert dependency.deployed_file_hashes[new_path].startswith("sha256:")

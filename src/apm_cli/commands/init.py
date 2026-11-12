@@ -7,15 +7,21 @@ from pathlib import Path
 
 import click
 
+from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..core.project_name import (
+    resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
+)
+from ..core.project_name import validate_project_name as _validate_project_name
 from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
     detect_signals,
     manifest_targets_from_target_option,
 )
+from ..install.locking import serialized_lifecycle_unless
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -29,8 +35,8 @@ from ._helpers import (
     _get_default_config,
     _rich_blank_line,
     _validate_plugin_name,
-    _validate_project_name,
 )
+from .discover import discover_options, run_discover
 
 
 def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
@@ -63,7 +69,23 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 ]
 
 
+def _invalid_project_name_message(name: str) -> str:
+    """Return the project-name rule shared by the argument, --name, and prompts."""
+    return (
+        f"Invalid project name '{name}': "
+        "project names must not be empty or whitespace-only and must not contain "
+        "path separators ('/' or '\\\\') or be '..'."
+    )
+
+
 @click.command(help="Initialize a new APM project")
+@click.option(
+    "--discover",
+    "discover_flag",
+    is_flag=True,
+    help="Inventory existing local packages without writes",
+)
+@discover_options
 @click.argument("project_name", required=False)
 @click.option(
     "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
@@ -92,23 +114,32 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     help="Project name written to apm.yml. Ignored when a positional project name is given.",
 )
 @click.option("--description", default=None, help="Project description (default: auto-detected)")
-@click.option("--version", default=None, help="Project version (default: 1.0.0)")
+@click.option(
+    "--version",
+    default=None,
+    help="Project version (default: 1.0.0, or 0.1.0 with --plugin)",
+)
 @click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
+@serialized_lifecycle_unless("discover_flag")
 def init(
-    ctx,
-    project_name,
-    yes,
-    plugin,
-    marketplace_flag,
-    target_flag,
-    name,
-    description,
-    version,
-    author,
-    verbose,
-):
+    ctx: click.Context,
+    project_name: str | None,
+    yes: bool,
+    plugin: bool,
+    marketplace_flag: bool,
+    target_flag: str | list[str] | None,
+    verbose: bool,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
+    discover_flag: bool = False,
+    write: bool = False,
+    output_format: str = "text",
+    global_: bool = False,
+) -> None:
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -123,6 +154,55 @@ def init(
     --marketplace flags on 'apm init' are kept for backward
     compatibility and will be removed in v0.16.
     """
+    if discover_flag:
+        metadata_flags = (name, description, version, author)
+        if (
+            project_name
+            or plugin
+            or marketplace_flag
+            or target_flag
+            or any(flag is not None for flag in metadata_flags)
+        ):
+            raise click.UsageError(
+                "--discover cannot scaffold a name/plugin/marketplace, set project "
+                "metadata, or select targets."
+            )
+        run_discover(
+            write=write, output_format=output_format, global_=global_, yes=yes, verbose=verbose
+        )
+        return
+    if write or global_ or output_format != "text":
+        raise click.UsageError("--apply, --write, --global and --format require --discover.")
+    _init_scaffold(
+        ctx,
+        project_name,
+        yes,
+        plugin,
+        marketplace_flag,
+        target_flag,
+        verbose,
+        name=name,
+        description=description,
+        version=version,
+        author=author,
+    )
+
+
+def _init_scaffold(
+    ctx,
+    project_name,
+    yes,
+    plugin,
+    marketplace_flag,
+    target_flag,
+    verbose,
+    *,
+    name=None,
+    description=None,
+    version=None,
+    author=None,
+):
+    """Keep the pre-existing init flow serialized, outside read-only discovery."""
     # Soft deprecation warnings -- legacy flags still work.
     if plugin:
         click.echo(
@@ -165,6 +245,7 @@ def _perform_init(
     version=None,
     author=None,
     source="init",
+    plugin_mode: str | None = None,
 ):
     """Shared init body. Called by `apm init` and `apm plugin init`.
 
@@ -178,33 +259,44 @@ def _perform_init(
     """
     logger = CommandLogger(source, verbose=verbose)
     try:
+        effective_plugin_mode = plugin_mode
+        if effective_plugin_mode is None:
+            effective_plugin_mode = (
+                "agent" if PREFERRED_PLUGIN_FORMAT is BundleFormat.AGENT_PLUGIN else "claude"
+            )
+
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
 
         # Reject names containing path separators before any filesystem use
-        if project_name and not _validate_project_name(project_name):
-            logger.error(
-                f"Invalid project name '{project_name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'."
-            )
+        if project_name is not None and not _validate_project_name(project_name):
+            logger.error(_invalid_project_name_message(project_name))
             sys.exit(1)
+
+        # Metadata flags get the same whitespace trimming as prompt answers.
+        name, description, version, author = (
+            None if value is None else value.strip()
+            for value in (name, description, version, author)
+        )
 
         # The positional argument also creates and enters a directory, so it
         # keeps precedence over --name, which only labels the manifest. Report
         # the ignored flag rather than dropping it silently.
-        if project_name and name:
+        if project_name and name is not None:
             logger.warning(
                 f"--name '{name}' ignored: positional project name "
                 f"'{project_name}' takes precedence."
             )
             name = None
 
-        if name and not _validate_project_name(name):
-            logger.error(
-                f"Invalid project name '{name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'."
-            )
+        if name is not None and not _validate_project_name(name):
+            logger.error(_invalid_project_name_message(name))
+            sys.exit(1)
+
+        # apm.yml requires a non-empty version string.
+        if version is not None and not version:
+            logger.error("Invalid project version: --version must not be empty or whitespace-only.")
             sys.exit(1)
 
         # Determine project directory and name
@@ -216,24 +308,44 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            final_project_name = name or project_dir.name
+            if name is not None:
+                final_project_name = name
+            else:
+                # A filesystem root has no directory name, so resolve a valid fallback.
+                derived_project_name = project_dir.name
+                final_project_name = _resolve_bootstrap_project_name(derived_project_name)
+                if final_project_name != derived_project_name:
+                    logger.verbose_detail(
+                        f'Using default project name "{final_project_name}" because '
+                        f"derived name {derived_project_name!a} is invalid"
+                    )
         project_root = Path.cwd()
 
         # Validate plugin name early
         if plugin and not _validate_plugin_name(final_project_name):
             logger.error(
                 f"Invalid plugin name '{final_project_name}'. "
-                "Must be kebab-case (lowercase letters, numbers, hyphens), "
-                "start with a letter, and be at most 64 characters."
+                "Use 1-64 lowercase letters, numbers, dots, or hyphens; "
+                "begin and end with a letter or number; and do not use '..' or '--'."
             )
             sys.exit(1)
 
-        # Check for existing apm.yml
+        # Check for existing generated files
         apm_yml_exists = Path(APM_YML_FILENAME).exists()
+        generated_paths = [Path(APM_YML_FILENAME)]
+        if plugin:
+            generated_paths.append(Path("plugin.json"))
+            if effective_plugin_mode == "agent":
+                generated_paths.append(Path("mcp.json"))
+        existing_generated_paths = [path for path in generated_paths if path.exists()]
 
-        # Handle existing apm.yml in brownfield projects
-        if apm_yml_exists:
-            logger.warning("apm.yml already exists")
+        # Handle existing generated files in brownfield projects
+        if existing_generated_paths:
+            rendered_paths = ", ".join(path.as_posix() for path in existing_generated_paths)
+            if existing_generated_paths == [Path(APM_YML_FILENAME)]:
+                logger.warning("apm.yml already exists")
+            else:
+                logger.warning(f"Generated files already exist: {rendered_paths}")
 
             if not yes:
                 confirm = click.confirm("Continue and overwrite?")
@@ -242,7 +354,7 @@ def _perform_init(
                     logger.progress("Initialization cancelled.")
                     return
             else:
-                logger.progress("--yes specified, overwriting apm.yml...")
+                logger.progress(f"--yes specified, overwriting: {rendered_paths}")
 
         # Get project configuration (interactive mode or defaults)
         if not yes:
@@ -286,8 +398,6 @@ def _perform_init(
 
         logger.start(f"Initializing APM project: {config['name']}", symbol="running")
 
-        # Create apm.yml (with devDependencies for plugin mode)
-        _create_minimal_apm_yml(config, plugin=plugin)
         native_sources = find_plugin_root_sources(project_root)
         if native_sources and not (project_root / ".apm").is_dir():
             rendered_sources = ", ".join(
@@ -300,9 +410,12 @@ def _perform_init(
                 "to source from that directory.",
             )
 
-        # Create plugin.json for plugin mode
-        if plugin:
-            _create_plugin_json(config)
+        if plugin and effective_plugin_mode == "agent":
+            _write_and_validate_agent_plugin_scaffold(project_root, config)
+        else:
+            _create_minimal_apm_yml(config, plugin=plugin)
+            if plugin:
+                _create_plugin_json(config, mode=effective_plugin_mode)
 
         # Append marketplace authoring block when requested.
         if marketplace_flag:
@@ -336,6 +449,8 @@ def _perform_init(
                 ]
                 if plugin:
                     files_data.append(("*", "plugin.json", "Plugin metadata"))
+                    if effective_plugin_mode == "agent":
+                        files_data.append(("*", "mcp.json", "MCP server configuration"))
                 table = _create_files_table(files_data, title="Created Files")
                 console.print(table)
         except (ImportError, NameError):
@@ -343,6 +458,8 @@ def _perform_init(
             click.echo("  * apm.yml - Project configuration")
             if plugin:
                 click.echo("  * plugin.json - Plugin metadata")
+                if effective_plugin_mode == "agent":
+                    click.echo("  * mcp.json - MCP server configuration")
 
         _rich_blank_line()
 
@@ -356,7 +473,8 @@ def _perform_init(
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Pack as plugin:          apm pack",
+                "Pack as Agent Plugins v1:             apm pack --format agent-plugin",
+                "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
         elif source == "init":
             next_steps = [
@@ -370,7 +488,7 @@ def _perform_init(
                 "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
                 "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
                 "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
-                "Author your own plugin:         apm pack",
+                "Author your own plugin:         apm pack --format agent-plugin",
             ]
 
         # Agentrc integration (#518): suggest agentrc when no instructions exist.
@@ -436,6 +554,75 @@ def _perform_init(
         sys.exit(1)
 
 
+def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) -> None:
+    """Stage, validate, and commit all native scaffold files as one transaction."""
+    import json
+    import tempfile
+
+    from ..agent_plugins import (
+        MCP_SCHEMA_ID,
+        DiagnosticSeverity,
+        load_agent_plugin,
+    )
+
+    mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
+    with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
+        staged_root = Path(stage)
+        _create_minimal_apm_yml(
+            config,
+            plugin=True,
+            target_path=staged_root / APM_YML_FILENAME,
+        )
+        _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
+        (staged_root / "mcp.json").write_text(
+            json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        plugin = load_agent_plugin(staged_root)
+        errors = [
+            diagnostic.message
+            for diagnostic in plugin.diagnostics
+            if diagnostic.severity is DiagnosticSeverity.ERROR
+        ]
+        if errors:
+            raise ValueError("Generated Agent Plugin scaffold is invalid: " + "; ".join(errors))
+
+        _commit_staged_scaffold(
+            staged_root,
+            project_root,
+            (APM_YML_FILENAME, "plugin.json", "mcp.json"),
+        )
+
+
+def _commit_staged_scaffold(
+    staged_root: Path,
+    project_root: Path,
+    filenames: tuple[str, ...],
+) -> None:
+    """Replace a generated file set, restoring every prior file on failure."""
+    backup_root = staged_root / ".backup"
+    backup_root.mkdir()
+    backups: dict[str, Path] = {}
+    committed: list[str] = []
+    try:
+        for filename in filenames:
+            destination = project_root / filename
+            if destination.exists():
+                backup = backup_root / filename
+                os.replace(destination, backup)
+                backups[filename] = backup
+        for filename in filenames:
+            os.replace(staged_root / filename, project_root / filename)
+            committed.append(filename)
+    except Exception:
+        for filename in committed:
+            (project_root / filename).unlink(missing_ok=True)
+        for filename, backup in backups.items():
+            if backup.exists():
+                os.replace(backup, project_root / filename)
+        raise
+
+
 def _interactive_project_setup(
     default_name, logger, *, description=None, version=None, author=None
 ):
@@ -450,9 +637,11 @@ def _interactive_project_setup(
     """
     from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
-    auto_author = author or _auto_detect_author()
-    auto_description = description or _auto_detect_description(default_name)
-    auto_version = version or "1.0.0"
+    auto_author = author if author is not None else _auto_detect_author()
+    auto_description = (
+        description if description is not None else _auto_detect_description(default_name)
+    )
+    auto_version = version if version is not None else "1.0.0"
 
     try:
         from rich.console import Console  # type: ignore
@@ -468,7 +657,8 @@ def _interactive_project_setup(
                 break
             console.print(
                 f"[error]Invalid project name '{name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
+                "project names must not be empty or whitespace-only and must not contain "
+                "path separators ('/' or '\\\\') or be '..'.[/error]"
             )
 
         version = Prompt.ask("Version", default=auto_version).strip()
@@ -485,7 +675,8 @@ def _interactive_project_setup(
                 break
             click.echo(
                 f"{ERROR}Invalid project name '{name}': "
-                f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
+                f"project names must not be empty or whitespace-only and must not contain "
+                f"path separators ('/' or '\\\\') or be '..'.{RESET}"
             )
 
         version = click.prompt("Version", default=auto_version).strip()

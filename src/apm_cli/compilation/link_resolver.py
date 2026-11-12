@@ -9,13 +9,13 @@ Following KISS principle - simple, pragmatic implementation.
 """
 
 import builtins
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.paths import portable_link_relpath
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -311,13 +311,8 @@ class UnifiedLinkResolver:
             return None
 
         # Calculate relative path from target location to actual source file
-        # Use os.path.relpath to support ../ for paths outside target directory
-        try:
-            relative_path = os.path.relpath(actual_file, ctx.target_location)
-            # Normalize to forward slashes for markdown link compatibility
-            return relative_path.replace(os.sep, "/")
-        except Exception:
-            return None
+        # The shared helper owns ../ handling and cross-drive refusal.
+        return portable_link_relpath(actual_file, ctx.target_location)
 
     def _resolve_to_actual_file(self, link_path: str, source_file: Path) -> Path | None:
         """Resolve a link path to the actual file on disk.
@@ -539,12 +534,14 @@ class UnifiedLinkResolver:
                 return None
 
         try:
-            relative_path = os.path.relpath(candidate_in_deployment, ctx.target_location)
+            relative_path = portable_link_relpath(
+                candidate_in_deployment,
+                ctx.target_location,
+            )
         except (OSError, ValueError):
             return None
 
-        rewritten = relative_path.replace(os.sep, "/")
-        return f"{rewritten}{suffix}"
+        return f"{relative_path}{suffix}" if relative_path is not None else None
 
 
 # Legacy functions for backward compatibility

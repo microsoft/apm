@@ -90,15 +90,7 @@ class TestFromInstalledPackagesIsDev:
     """Tests for LockFile.from_installed_packages with 5-element tuples."""
 
     def _mock_dep_ref(self, repo_url):
-        ref = Mock()
-        ref.repo_url = repo_url
-        ref.host = None
-        ref.reference = "main"
-        ref.virtual_path = None
-        ref.is_virtual = False
-        ref.is_local = False
-        ref.local_path = None
-        return ref
+        return DependencyReference(repo_url=repo_url, reference="main")
 
     def test_5_element_tuple_with_is_dev_true(self):
         dep_ref = self._mock_dep_ref("dev/pkg")

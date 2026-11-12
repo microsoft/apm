@@ -3,10 +3,9 @@
 Provides validation functions for marketplace.json integrity checking.
 Used by ``apm marketplace validate``.
 
-All validators operate on parsed ``MarketplaceManifest`` / ``MarketplacePlugin``
-objects. The JSON parser (``models.py``) already drops entries that are
-structurally unrecognizable; these validators enforce additional business
-rules on the successfully parsed entries.
+The tolerant JSON parser (``models.py``) retains structural diagnostics for
+this module to surface. The remaining validators enforce business rules on
+successfully parsed ``MarketplacePlugin`` entries.
 """
 
 from collections.abc import Sequence
@@ -32,11 +31,20 @@ def validate_marketplace(
 
     Returns a list of ``ValidationResult`` objects, one per check.
     """
-    plugins = manifest.plugins
     return [
-        validate_plugin_schema(plugins),
-        validate_no_duplicate_names(plugins),
+        validate_marketplace_structure(manifest),
+        validate_plugin_schema(manifest.plugins),
+        validate_no_duplicate_names(manifest.plugins),
     ]
+
+
+def validate_marketplace_structure(manifest: MarketplaceManifest) -> ValidationResult:
+    """Report raw manifest structure errors retained by the tolerant parser."""
+    return ValidationResult(
+        check_name="Structure",
+        passed=not manifest.structural_errors,
+        errors=list(manifest.structural_errors),
+    )
 
 
 def validate_plugin_schema(

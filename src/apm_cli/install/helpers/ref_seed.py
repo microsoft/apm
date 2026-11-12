@@ -17,8 +17,8 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
 
     For every locked dep that records a concrete ``resolved_commit`` for a
     named ``resolved_ref`` (a branch or tag), inject ``ref -> commit`` into
-    the per-run cache BEFORE resolution runs. Any later
-    ``resolve_git_reference()`` for that (repo, ref) then hits L0 and never
+    the dependency-scoped lock-seed cache BEFORE resolution runs. Any later
+    ``resolve_git_reference()`` for that dependency and ref hits L0 and never
     fires the commits-API tier (L1) or a clone.
 
     This closes a gap the semver lockfile-replay path
@@ -34,17 +34,17 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     in ``download_callback`` still runs against the manifest ref, so a
     changed pin is still caught and re-resolved.
 
-    Cache-key invariant: correctness relies on ``locked.repo_url`` and
-    ``locked.resolved_ref`` being identical to the ``(repo_url, ref)`` pair
-    that ``resolve()`` will look up at download time. Both originate from the
-    same ``DependencyReference`` that was serialised into the lockfile, so
-    the invariant holds today. Any future URL canonicalisation (e.g. ``.git``
-    suffix stripping, case folding, or host-qualification) must be applied
-    symmetrically at lockfile-write and lockfile-read time; an asymmetric
-    change silently degrades the seed to a no-op (graceful fallback to the
-    pre-PR resolve path, no incorrectness).
+    Cache-key invariant: the locked dependency is reconstructed as a
+    ``DependencyReference`` so its complete package identity, repository
+    transport, and effective host provider match ``resolve()``. A sibling
+    virtual package cannot inherit this seed; only fresh upstream answers
+    are shared repository-wide.
     """
-    if ctx.update_refs or ctx.refresh:
+    from apm_cli.deps.tiered_ref_resolver import ref_freshness_policy_for_install
+    from apm_cli.models.dependency.replacement import build_replacement_index
+
+    freshness_policy = ref_freshness_policy_for_install(ctx)
+    if not freshness_policy.allows_lock_seed:
         return
     resolver = getattr(ctx, "ref_resolver", None)
     lockfile = ctx.existing_lockfile
@@ -53,12 +53,22 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     seed = getattr(resolver, "seed", None)
     if not callable(seed):
         return
+    package = getattr(ctx, "apm_package", None)
+    rules = build_replacement_index(package.replace_rules or [] if package is not None else [])
     seeded = 0
     for locked in lockfile.get_all_dependencies():
         ref = getattr(locked, "resolved_ref", None)
         sha = getattr(locked, "resolved_commit", None)
         repo = getattr(locked, "repo_url", None)
-        if repo and ref and sha and seed(repo, ref, sha):
+        to_dependency_ref = getattr(locked, "to_dependency_ref", None)
+        if not repo or not callable(to_dependency_ref):
+            continue
+        selected = to_dependency_ref()
+        expected_rule = rules.lookup(selected.ownership_reference)
+        stored_rule = selected.replacement.rule if selected.replacement is not None else None
+        if expected_rule != stored_rule:
+            continue
+        if ref and sha and seed(selected.source_reference, ref, sha):
             seeded += 1
     if seeded and ctx.logger:
         ctx.logger.verbose_detail(

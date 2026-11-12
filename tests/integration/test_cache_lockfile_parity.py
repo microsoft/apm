@@ -3,13 +3,13 @@
 Regression-trap for the worst silent failure the cache layer could
 introduce: lockfile drift between cached and non-cached runs. If
 ``apm install`` produces a different ``apm.lock.yaml`` (modulo the
-``generated_at`` write-timestamp) when ``APM_NO_CACHE=1`` is set vs.
+optional legacy ``generated_at`` write metadata) when ``APM_NO_CACHE=1`` is set vs.
 when the cache is hot, a CI run that ships with a stale cache would
 commit a lockfile that disagrees with the reproducible-from-scratch
 baseline -- and downstream installs would diverge.
 
 The contract: ``apm install`` from the same ``apm.yml`` MUST produce
-a content-identical lockfile (excluding ``generated_at``) regardless
+a content-identical lockfile (excluding legacy ``generated_at`` metadata) regardless
 of cache state. This test asserts it across three regimes:
 
   Run A: cold cache (cache empty)
@@ -17,52 +17,41 @@ of cache state. This test asserts it across three regimes:
   Run C: APM_NO_CACHE=1 (cache layer disabled entirely)
 
 A.lock == B.lock == C.lock is the parity invariant.
+The suite uses an owned local Git origin exposed as
+``microsoft/apm-sample-package`` so the cache/lockfile contract stays
+hermetic while preserving GitHub-shaped lockfile provenance.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 import shutil
-import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.requires_github_token
+from tests.utils.hermetic_packaged_sample import HermeticPackagedSample
+
+pytestmark = [
+    pytest.mark.requires_apm_binary,
+]
 
 
-@pytest.fixture
-def project_with_apm(tmp_path: Path) -> Path:
-    """Minimal APM project with one stable APM dep for parity checks."""
-    project = tmp_path / "parity-test"
-    project.mkdir()
-    (project / ".github").mkdir()
-    (project / "apm.yml").write_text(
-        """\
-name: parity-test
-version: 0.1.0
-target: copilot
-dependencies:
-  apm:
-    - microsoft/apm-sample-package
-""",
-        encoding="utf-8",
-    )
-    return project
-
-
-def _run_install(apm: str, project: Path, *, env_overrides: dict[str, str]) -> None:
-    env = os.environ.copy()
+def _run_install(
+    packaged_sample: HermeticPackagedSample,
+    project: Path,
+    *,
+    scenario_id: str,
+    env_overrides: Mapping[str, str],
+) -> None:
+    env = dict(packaged_sample.environment)
     env.update(env_overrides)
-    # Quiet output keeps the test fast and avoids parsing fragility.
-    result = subprocess.run(
-        [apm, "install"],
-        cwd=str(project),
+    result = packaged_sample.runner.run(
+        ("install",),
+        scenario_id=scenario_id,
+        cwd=project,
         env=env,
-        capture_output=True,
-        text=True,
-        timeout=240,
     )
     assert result.returncode == 0, (
         f"apm install failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
@@ -72,10 +61,10 @@ def _run_install(apm: str, project: Path, *, env_overrides: dict[str, str]) -> N
 def _lockfile_sha(project: Path) -> str:
     """Hash the lockfile excluding the `generated_at` line.
 
-    `generated_at` is a wall-clock timestamp captured at write time, so it
-    necessarily differs between independent runs. The parity invariant is
-    about resolution outcome (resolved_commit, content_hash, deployed_files,
-    package_type, ...), not the write timestamp.
+    Legacy lockfiles may carry `generated_at`, a wall-clock timestamp refreshed
+    at write time. The parity invariant is about resolution outcome
+    (resolved_commit, content_hash, deployed_files, package_type, ...), not
+    optional compatibility metadata.
     """
     lock = project / "apm.lock.yaml"
     assert lock.is_file(), "apm.lock.yaml not produced by install"
@@ -103,11 +92,10 @@ def _clone_project(template: Path, dest: Path) -> Path:
 
 
 def test_lockfile_byte_identical_across_cache_regimes(
-    apm_binary_path: str,
-    project_with_apm: Path,
+    hermetic_packaged_sample: HermeticPackagedSample,
     tmp_path: Path,
 ) -> None:
-    """A, B, C must produce content-identical apm.lock.yaml (modulo `generated_at`).
+    """A, B, C must match after excluding optional legacy `generated_at` metadata.
 
     A: cold cache (fresh APM_CACHE_DIR pointing at empty dir)
     B: warm cache (same dir, second run reuses entries)
@@ -117,29 +105,32 @@ def test_lockfile_byte_identical_across_cache_regimes(
     cache_dir.mkdir()
 
     # Run A: cold cache
-    project_a = _clone_project(project_with_apm, tmp_path / "run-a")
+    project_a = _clone_project(hermetic_packaged_sample.project.root, tmp_path / "run-a")
     _run_install(
-        apm_binary_path,
+        hermetic_packaged_sample,
         project_a,
-        env_overrides={"APM_CACHE_DIR": str(cache_dir), "CI": "1"},
+        scenario_id="cache-lockfile-parity-cold",
+        env_overrides={"APM_CACHE_DIR": str(cache_dir)},
     )
     sha_a = _lockfile_sha(project_a)
 
     # Run B: warm cache (same APM_CACHE_DIR retained, fresh project tree)
-    project_b = _clone_project(project_with_apm, tmp_path / "run-b")
+    project_b = _clone_project(hermetic_packaged_sample.project.root, tmp_path / "run-b")
     _run_install(
-        apm_binary_path,
+        hermetic_packaged_sample,
         project_b,
-        env_overrides={"APM_CACHE_DIR": str(cache_dir), "CI": "1"},
+        scenario_id="cache-lockfile-parity-warm",
+        env_overrides={"APM_CACHE_DIR": str(cache_dir)},
     )
     sha_b = _lockfile_sha(project_b)
 
     # Run C: cache disabled (fresh project tree)
-    project_c = _clone_project(project_with_apm, tmp_path / "run-c")
+    project_c = _clone_project(hermetic_packaged_sample.project.root, tmp_path / "run-c")
     _run_install(
-        apm_binary_path,
+        hermetic_packaged_sample,
         project_c,
-        env_overrides={"APM_NO_CACHE": "1", "CI": "1"},
+        scenario_id="cache-lockfile-parity-no-cache",
+        env_overrides={"APM_NO_CACHE": "1"},
     )
     sha_c = _lockfile_sha(project_c)
 

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import subprocess
-from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
-from apm_cli.core.auth import AuthResolver
+from apm_cli.core.auth import AuthContext, AuthResolver
 
 
 def test_marketplace_check_uses_ado_url_and_bearer_auth(monkeypatch, tmp_path) -> None:
@@ -36,9 +35,12 @@ marketplace:
     monkeypatch.setattr(
         AuthResolver,
         "resolve",
-        lambda _self, host, org=None: SimpleNamespace(
+        lambda _self, host, org=None: AuthContext(
             token=bearer,
             source="AAD_BEARER_AZ_CLI",
+            token_type="unknown",
+            host_info=AuthResolver.classify_host(host),
+            git_env={},
             auth_scheme="bearer",
         ),
     )
@@ -50,9 +52,19 @@ marketplace:
         assert parsed.path == "/contoso/platform/_git/my-package"
         assert parsed.username is None
         env = kwargs["env"]
-        assert env["GIT_CONFIG_COUNT"] == "1"
-        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
-        assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {bearer}"
+        # Header index is not fixed (#2368: appended after retained entries),
+        # so locate it instead of assuming slot 0.
+        headers = [
+            (env[f"GIT_CONFIG_KEY_{i}"], v)
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+            if "Authorization" in (v := env[f"GIT_CONFIG_VALUE_{i}"])
+        ]
+        assert headers == [
+            (
+                "http.https://dev.azure.com/contoso/platform/_git/my-package.extraheader",
+                f"Authorization: Bearer {bearer}",
+            )
+        ]
         return subprocess.CompletedProcess(
             command,
             0,

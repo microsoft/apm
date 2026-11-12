@@ -7,8 +7,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="tip" title="Coming from npm? You already know this.">
 `apm update` refreshes your project's package dependencies, just like
-`npm update`. To update the `apm` CLI binary itself, use
-`apm self-update` (think `npm install -g npm`).
+`npm update`. CLI upgrades depend on how you installed APM:
+[use your package manager or the standalone updater](#update-the-apm-cli-binary).
 </Aside>
 
 Two things drift out of date in an APM project:
@@ -25,9 +25,16 @@ apm update
 ```
 
 Re-resolves every dependency in `apm.yml` to its latest matching version or ref,
-prints the planned changes, and prompts for consent before
-rewriting `apm.lock.yaml` and redeploying primitives. Pass one or more
-package names (`apm update org/pkg-a org/pkg-b`) to refresh only those.
+prints the planned changes, and prompts for consent before applying ref changes
+and redeploying primitives. If refs are unchanged but the locked
+`apm_modules/` cache is empty, APM [restores it without
+prompting](../../reference/cli/update/). Pass one or more package names
+(`apm update org/pkg-a org/pkg-b`) to refresh only those.
+
+Mutable Git refs are established from the authenticated upstream. If APM cannot
+reach that source, update exits non-zero instead of silently substituting a
+stale ref from the local bare Git cache. Once the fresh SHA is known, cached
+content for that SHA may still be reused.
 
 Useful flags:
 
@@ -36,7 +43,9 @@ Useful flags:
 - `-v, --verbose` -- show per-dependency resolution detail.
 - `-g, --global` -- refresh user-scope dependencies under `~/.apm/`
   instead of the current project (pairs with `apm outdated -g`).
-- `--force` -- overwrite locally-authored files on collision.
+- `--force` -- overwrite locally-authored files and deploy despite critical
+  security findings. It does not weaken the upstream freshness check. Use only
+  after independent verification.
 - `--parallel-downloads N` -- cap concurrent downloads (default 4;
   `0` disables parallelism).
 
@@ -51,7 +60,8 @@ apm outdated
 
 Compares each entry in `apm.lock.yaml` against its remote source and
 reports which dependencies have new commits or new tags available.
-Read-only.
+Read-only. An unavailable remote reports `unknown`; cached bare refs are not
+reported as current upstream state.
 
 Useful flags:
 
@@ -84,6 +94,13 @@ When the lockfile is already satisfied, install prints:
 That is the nudge: install never silently bumps versions. Use
 `apm update` when you want to.
 
+Use `apm install --refresh` when you need both current upstream refs and a
+content re-download. It re-resolves mutable refs and bypasses cached package
+content; `apm update` may reuse content already cached at the fresh SHA.
+
+Use `apm lock --update` when you need the same upstream ref refresh but want to
+rewrite only `apm.lock.yaml`, without deploying or deleting harness files.
+
 See [Promise 1: Portable by manifest](../../concepts/the-three-promises/)
 for why this matters in CI and for new contributors.
 
@@ -101,31 +118,36 @@ followed by an `apm update`.
 `--frozen` is mutually exclusive with `--update`: one trusts the
 lockfile, the other rewrites it.
 
-Note that `apm install --force` does not refresh remote refs either.
-It only bypasses the security gate for an already-resolved set. If you
-want new commit SHAs, run `apm update`.
+`apm install --force` does not refresh remote refs. It overwrites local
+collisions and may deploy despite critical built-in scan findings; the scan
+still runs. If you want new commit SHAs, run `apm update`.
 
 ## Update the apm CLI binary
 
+Use the tool that installed APM. For **Homebrew**:
+
 ```bash
-apm self-update
+brew upgrade apm
 ```
 
-Downloads the latest release of the `apm` CLI from the official
-installer URL and replaces the binary in place. Use `--check` to see
-whether an update exists without installing it:
+Homebrew core disables `apm self-update` and startup update notices; see the
+[self-update reference](../../reference/cli/self-update/#description).
+For **pip**, run `pip install --upgrade apm-cli`; for **Scoop**, run `scoop update apm`.
+
+For **standalone installs only**, check for a release, then update through the
+official installer:
 
 ```bash
 apm self-update --check
+apm self-update
 ```
 
-That is the entire surface. It does not read `apm.yml`. It does not
-touch `apm_modules/`. It does not modify the lockfile.
+CLI upgrades do not refresh project dependencies or change the lockfile.
 
 <Aside type="note" title="Back-compat shim">
 If you run the legacy `apm update --check`, the CLI prints a
-deprecation notice and forwards to `apm self-update --check`. Update
-your scripts to call `apm self-update --check` directly.
+deprecation notice and forwards to `apm self-update --check`. Use that command
+directly only for standalone installs.
 </Aside>
 
 ## When to use which
@@ -135,10 +157,12 @@ your scripts to call `apm self-update --check` directly.
 | See which deps have new versions | `apm outdated` |
 | Preview a dep refresh | `apm update --dry-run` |
 | Bump deps and rewrite the lockfile | `apm update` |
+| Refresh only the lockfile from upstream refs | `apm lock --update` |
 | Reproduce the locked versions exactly | `apm install` |
 | Fail CI on lockfile drift | `apm install --frozen` |
-| Update the `apm` CLI itself | `apm self-update` |
-| See if a CLI update exists | `apm self-update --check` |
+| Update a Homebrew-installed CLI | `brew upgrade apm` |
+| Update a standalone CLI | `apm self-update` |
+| Check for a standalone CLI update | `apm self-update --check` |
 
 ## Next steps
 

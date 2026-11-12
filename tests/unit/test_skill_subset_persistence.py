@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 
@@ -48,6 +48,12 @@ class TestSkillSubsetFilterTokens:
             "foo",
         }
 
+    def test_blank_name_does_not_hide_later_names(self) -> None:
+        assert skill_subset_filter_tokens([" ", "category/reviewer"]) == {
+            "category/reviewer",
+            "reviewer",
+        }
+
 
 # ============================================================================
 # DependencyReference — parse_from_dict with skills: field
@@ -80,6 +86,11 @@ class TestDependencyReferenceSkillSubset:
         entry = {"git": "owner/repo", "skills": []}
         with pytest.raises(ValueError, match="must contain at least one"):
             DependencyReference.parse_from_dict(entry)
+
+    @pytest.mark.parametrize("invalid_name", [None, 7, " "])
+    def test_parse_skills_rejects_non_string_or_blank_name(self, invalid_name: object) -> None:
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict({"git": "owner/repo", "skills": [invalid_name]})
 
     def test_parse_skills_path_traversal_rejects(self):
         """Skill name with path traversal is rejected."""
@@ -483,10 +494,8 @@ class TestSkillSubsetConsistencyCheck:
         return manifest
 
     def _make_lock_mock(self, locked_deps):
-        """Create a lock mock: get_dependency(key) → locked_dep."""
-        lock = Mock()
-        lock.get_dependency = lambda key: locked_deps.get(key)
-        return lock
+        """Use the real lookup owner so fixtures follow the lockfile contract."""
+        return LockFile(dependencies=locked_deps)
 
     def _make_dep_ref(self, repo_url, skill_subset=None):
         ref = Mock()
@@ -495,24 +504,38 @@ class TestSkillSubsetConsistencyCheck:
         return ref
 
     def _make_locked_dep(self, package_type="skill_bundle", skill_subset=None):
-        dep = Mock()
-        dep.package_type = package_type
-        dep.skill_subset = skill_subset if skill_subset else []
-        return dep
+        return LockedDependency(
+            repo_url="owner/repo",
+            package_type=package_type,
+            skill_subset=skill_subset or [],
+        )
 
-    def test_consistent_passes(self):
+    def _package_with_skills(self, tmp_path: Path, *names: str) -> Path:
+        package = tmp_path / "pkg"
+        for name in names:
+            skill = package / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+        return package
+
+    def test_consistent_passes(self, tmp_path: Path):
         """Matching skill_subset → check passes."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha", "beta"])
+        dep_ref.get_install_path.return_value = self._package_with_skills(
+            tmp_path,
+            "alpha",
+            "beta",
+        )
         locked = self._make_locked_dep(skill_subset=["alpha", "beta"])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
 
-    def test_mismatch_fails(self):
+    def test_mismatch_fails(self, tmp_path: Path):
         """Different skill_subset → check fails."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -521,11 +544,11 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is False
         assert "mismatch" in result.message
 
-    def test_no_manifest_subset_vs_lock_subset_fails(self):
+    def test_no_manifest_subset_vs_lock_subset_fails(self, tmp_path: Path):
         """Manifest has no skills: but lockfile has skill_subset → fails."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -534,11 +557,11 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is False
 
-    def test_non_bundle_skipped(self):
-        """Non skill_bundle packages are skipped."""
+    def test_marketplace_plugin_subset_mismatch_fails(self, tmp_path: Path):
+        """Plugin package subsets are checked because CLI --skill supports them."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha"])
@@ -546,10 +569,10 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
-        assert result.passed is True
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        assert result.passed is False
 
-    def test_missing_from_lock_skipped(self):
+    def test_missing_from_lock_skipped(self, tmp_path: Path):
         """Deps not in lockfile are skipped (other checks catch this)."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -557,10 +580,10 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
 
-    def test_both_empty_passes(self):
+    def test_both_empty_passes(self, tmp_path: Path):
         """Both manifest and lockfile with no skill_subset → passes."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
@@ -569,7 +592,7 @@ class TestSkillSubsetConsistencyCheck:
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
-        result = _check_skill_subset_consistency(manifest, lock)
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
 
 
@@ -738,3 +761,82 @@ class TestSkillSubsetAdditiveMerge:
 
         entry = apm_yml_entries["owner/repo"]
         assert entry["skills"] == ["qa"]
+
+
+# ============================================================================
+# _resolve_package_references -- registry identity must not silently convert
+# to git form (regression: PR #2166 review)
+# ============================================================================
+
+
+class TestResolvePackageReferencesPreservesRegistryForm:
+    """A CLI positional matching an existing registry-longhand identity must
+    not be silently rewritten to git form when combined with --skill."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_package_registry(self, monkeypatch):
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"registries": True}})
+
+    def test_cli_skill_flag_preserves_registry_form(self):
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"id": "testorg/demo-pkg", "version": "1.0.0"}]
+        existing_identities = {"testorg/demo-pkg"}
+
+        with patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=True,
+        ):
+            (
+                valid_outcomes,
+                invalid_outcomes,
+                _validated,
+                _mktplace,
+                apm_yml_entries,
+                _changed,
+            ) = _resolve_package_references(
+                ["testorg/demo-pkg#1.0.0"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("skill-gamma",),
+            )
+
+        assert invalid_outcomes == []
+        assert len(valid_outcomes) == 1
+        entry = apm_yml_entries["testorg/demo-pkg#1.0.0"]
+        assert isinstance(entry, dict)
+        assert entry.get("id") == "testorg/demo-pkg"
+        assert "git" not in entry
+        assert entry["skills"] == ["skill-gamma"]
+
+    def test_current_deps_not_converted_to_git(self):
+        """The persisted current_deps list itself must keep the registry shape."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"id": "testorg/demo-pkg", "version": "1.0.0"}]
+        existing_identities = {"testorg/demo-pkg"}
+
+        with patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=True,
+        ):
+            _resolve_package_references(
+                ["testorg/demo-pkg#1.0.0"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("skill-gamma",),
+            )
+
+        # update_existing_dependency_entry_if_needed only rewrites current_deps
+        # when apm_yml_entries already holds a merged entry for this canonical;
+        # the assertion that matters is that IF it rewrites, it keeps registry shape.
+        assert all("git" not in dep for dep in current_deps if isinstance(dep, dict))
+        assert any(
+            isinstance(dep, dict) and dep.get("id") == "testorg/demo-pkg" for dep in current_deps
+        )

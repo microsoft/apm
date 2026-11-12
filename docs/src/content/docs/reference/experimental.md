@@ -172,11 +172,12 @@ apm experimental reset verbose-version
 | `verbose-version`     | Show Python version, platform, and install path in `apm --version`.              |
 | `copilot-cowork`      | Deploy APM skills to Microsoft 365 Copilot Cowork via OneDrive.                  |
 | `copilot-app`         | Deploy APM prompts that carry workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day`) as workflows in the GitHub Copilot desktop App (`~/.copilot/data.db`). See [Copilot App integration](../../integrations/copilot-app/). |
+| `grok-cloud`          | Deploy skills to xAI Grok Cloud (`.grok/skills/`). Grok Build is a separate stable target. |
 | `marketplace-authoring`| Enable marketplace authoring commands (init, build, publish, etc.).              |
 | `registries`          | Enable REST-based APM package registries in `apm.yml`.                           |
 | `external-scanners`   | Ingest third-party SARIF scanners into `apm audit` (`--external`, including SkillSpector LLM mode and allowlisted `--external-args`), the `external.<name>.{llm,args}` config keys, and the `security.audit.scanners` policy block. See [External scanners](../../integrations/external-scanners/). |
 | `canvas`              | Ship Copilot CLI canvas extensions (`.apm/extensions/<name>/extension.mjs`) through APM packages. Dependency-provided canvases require executable-trust approval (`apm approve <pkg>`). See [Canvas extensions](../../integrations/canvas/). |
-| `hermes`              | Deploy skills, `AGENTS.md`, and MCP servers to the Hermes agent runtime.        |
+| `openclaw`            | Deploy skills to OpenClaw agent runtime directories. See [OpenClaw integration](../../integrations/openclaw/). |
 
 New flags are proposed via [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#how-to-add-an-experimental-feature-flag) and graduate to default when stable. See the contributor recipe for the full lifecycle.
 See also: [Cowork integration](../../integrations/copilot-cowork/).

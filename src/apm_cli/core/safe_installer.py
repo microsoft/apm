@@ -17,6 +17,7 @@ class InstallationSummary:
         self.installed = []
         self.skipped = []
         self.failed = []
+        self.native_hashes: dict[str, str] = {}
 
     def add_installed(self, server_ref: str):
         """Add a server to the installed list."""
@@ -90,6 +91,8 @@ class SafeMCPInstaller:
         env_overrides: dict[str, str] = None,  # noqa: RUF013
         server_info_cache: dict[str, Any] = None,  # noqa: RUF013
         runtime_vars: dict[str, str] = None,  # noqa: RUF013
+        replace_existing: bool = False,
+        managed_fields: set[str] | None = None,
     ) -> InstallationSummary:
         """Install MCP servers with conflict detection.
 
@@ -98,6 +101,7 @@ class SafeMCPInstaller:
             env_overrides: Optional dictionary of environment variable overrides.
             server_info_cache: Optional pre-fetched server info to avoid duplicate registry calls.
             runtime_vars: Optional dictionary of runtime variable values.
+            replace_existing: Configure matching entries instead of skipping them.
 
         Returns:
             InstallationSummary with detailed results.
@@ -105,7 +109,11 @@ class SafeMCPInstaller:
         summary = InstallationSummary()
 
         for server_ref in server_references:
-            if self.conflict_detector.check_server_exists(server_ref):
+            cached_info = (server_info_cache or {}).get(server_ref)
+            exists_kwargs = {"server_info": cached_info} if cached_info else {}
+            if not replace_existing and self.conflict_detector.check_server_exists(
+                server_ref, **exists_kwargs
+            ):
                 summary.add_skipped(server_ref, "already configured")
                 self._log_skip(server_ref)
                 continue
@@ -121,11 +129,17 @@ class SafeMCPInstaller:
                     kwargs["runtime_vars"] = runtime_vars
                 if server_ref.startswith("@") and server_ref.count("/") == 1:
                     kwargs["server_name"] = server_ref
+                if self.runtime == "claude" and replace_existing and managed_fields:
+                    kwargs["managed_fields"] = managed_fields
 
                 result = self.adapter.configure_mcp_server(server_ref, **kwargs)
 
                 if result:
                     summary.add_installed(server_ref)
+                    if server_ref in self.adapter.written_mcp_hashes:
+                        summary.native_hashes[server_ref] = self.adapter.written_mcp_hashes[
+                            server_ref
+                        ]
                     self._log_success(server_ref)
                 else:
                     summary.add_failed(server_ref, "configuration failed")

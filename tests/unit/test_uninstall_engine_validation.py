@@ -13,7 +13,12 @@ Covers missing lines/branches identified in coverage-unit.json:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,18 +32,45 @@ def _make_logger():
 
 
 def _make_lockfile(deps=None):
-    lf = MagicMock()
-    lf.dependencies = deps or {}
-    lf.get_package_dependencies.return_value = list((deps or {}).values())
-    return lf
+    return LockFile(dependencies=deps or {})
 
 
-def _make_locked_dep(key, repo_url=None, resolved_by=None):
-    dep = MagicMock()
-    dep.get_unique_key.return_value = key
-    dep.repo_url = repo_url or key.split("/")[-1]
-    dep.resolved_by = resolved_by
-    return dep
+def _make_locked_dep(key, resolved_by=None):
+    return LockedDependency(repo_url=key, resolved_by=resolved_by)
+
+
+def test_reachability_verbose_diagnostics_redact_local_paths():
+    """Local reachability failures never reveal declared machine paths."""
+    from apm_cli.commands.uninstall.engine import _warn_reachability_incomplete
+
+    local_path = r"C:\Users\runner\Private Package"
+    reachability = SimpleNamespace(unverifiable=[(local_path, f"manifest missing at {local_path}")])
+    logger = _make_logger()
+    logger.verbose = True
+
+    _warn_reachability_incomplete(reachability, logger)
+
+    rendered = "\n".join(call.args[0] for call in logger.verbose_detail.call_args_list)
+    assert local_path not in rendered
+    assert "local dependency" in rendered
+
+
+def test_reintegration_verbose_detail_redacts_only_local_dependency_paths():
+    """Remote errors retain detail while local declarations remain private."""
+    from apm_cli.commands.uninstall.engine import _reintegration_error_detail
+    from apm_cli.models.dependency import DependencyReference
+
+    remote = DependencyReference.parse("owner/repo")
+    local_path = r"C:\Users\runner\Private Package"
+    local = DependencyReference.parse(local_path)
+    error = RuntimeError("failed at remote primitive")
+
+    assert _reintegration_error_detail(remote, error) == (
+        "RuntimeError: failed at remote primitive"
+    )
+    local_detail = _reintegration_error_detail(local, RuntimeError(local_path))
+    assert local_detail == "RuntimeError"
+    assert local_path not in local_detail
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +198,7 @@ class TestDryRunUninstall:
         apm_modules = tmp_path / "apm_modules"
         apm_modules.mkdir()
 
-        orphan_dep = _make_locked_dep("org/child", "child", resolved_by="org/repo")
+        orphan_dep = _make_locked_dep("org/child", resolved_by="org/repo")
         lf = _make_lockfile({"org/child": orphan_dep})
 
         with (
@@ -221,7 +253,7 @@ class TestRemovePackagesFromDisk:
         assert result == 0
         logger.warning.assert_called()
 
-    def test_path_traversal_error_skips(self, tmp_path):
+    def test_path_traversal_error_propagates(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
         from apm_cli.utils.path_security import PathTraversalError
 
@@ -229,12 +261,14 @@ class TestRemovePackagesFromDisk:
         apm_modules = tmp_path / "apm_modules"
         apm_modules.mkdir()
 
-        with patch(
-            "apm_cli.models.apm_package.DependencyReference.parse",
-            side_effect=PathTraversalError("traversal"),
+        with (
+            patch(
+                "apm_cli.models.apm_package.DependencyReference.parse",
+                side_effect=PathTraversalError("traversal"),
+            ),
+            pytest.raises(PathTraversalError, match="traversal"),
         ):
-            result = _remove_packages_from_disk(["../evil"], apm_modules, logger)
-        assert result == 0
+            _remove_packages_from_disk(["../evil"], apm_modules, logger)
         logger.error.assert_called()
 
     def test_removes_existing_package(self, tmp_path):
@@ -324,9 +358,8 @@ class TestCleanupTransitiveOrphans:
         child_dir = org_dir / "child"
         child_dir.mkdir()
 
-        orphan = _make_locked_dep("org/child", "child", resolved_by="org/parent")
+        orphan = _make_locked_dep("org/child", resolved_by="org/parent")
         lf = _make_lockfile({"org/child": orphan})
-        lf.get_dependency.return_value = orphan
 
         (tmp_path / "apm.yml").write_text("name: test\n")
 
@@ -350,9 +383,8 @@ class TestCleanupTransitiveOrphans:
         child_dir = org_dir / "child"
         child_dir.mkdir()
 
-        orphan = _make_locked_dep("org/child", "child", resolved_by="org/parent")
+        orphan = _make_locked_dep("org/child", resolved_by="org/parent")
         lf = _make_lockfile({"org/child": orphan})
-        lf.get_dependency.return_value = orphan
 
         (tmp_path / "apm.yml").write_text("name: test\n")
 
@@ -363,8 +395,9 @@ class TestCleanupTransitiveOrphans:
                 side_effect=OSError("permission denied"),
             ),
             patch("apm_cli.integration.base_integrator.BaseIntegrator.cleanup_empty_parents"),
+            pytest.raises(OSError, match="permission denied"),
         ):
-            _removed, _orphans = _cleanup_transitive_orphans(
+            _cleanup_transitive_orphans(
                 lf, ["org/parent"], apm_modules, tmp_path / "apm.yml", logger
             )
         # Error logged

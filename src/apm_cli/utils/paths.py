@@ -6,6 +6,8 @@ call site gets Windows-safe, forward-slash relative paths by default.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -25,6 +27,20 @@ def portable_relpath(path: Path, base: Path) -> str:
             return path.resolve().as_posix()
         except (OSError, RuntimeError):
             return path.as_posix()
+
+
+def portable_link_relpath(
+    path: str | Path,
+    base: str | Path,
+    *,
+    relpath: Callable[[str, str], str] = os.path.relpath,
+) -> str | None:
+    """Return a relative Markdown path, or ``None`` across incompatible drives."""
+    try:
+        relative = relpath(str(path), str(base))
+    except (OSError, ValueError):
+        return None
+    return relative.replace("\\", "/")
 
 
 def resolve_base_and_source_dirs(

@@ -1,0 +1,22 @@
+def _repository_cache_identity(dep_ref):
+    return normalize_repo_url(
+        dep_ref.to_github_url(),
+        truncate_to_segments=2,
+    )
+
+
+class L0PerRunCache:
+    def try_resolve(self, dep_ref, ref):
+        return self.cache.get(_repository_cache_identity(dep_ref), ref)
+
+
+class TieredRefResolver:
+    def seed(self, repo_ref, ref, sha):
+        dep_ref = self._normalize(repo_ref)
+        self._cache.put(_repository_cache_identity(dep_ref), ref, sha)
+
+    def resolve(self, repo_ref):
+        dep_ref = self._normalize(repo_ref)
+        ref = dep_ref.reference
+        key = (_repository_cache_identity(dep_ref), ref)
+        return self._cache.get(*key)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from types import MappingProxyType
@@ -19,6 +20,17 @@ HostMatcher = Callable[[str], bool]
 
 
 @dataclass(frozen=True)
+class GitTransportPolicy:
+    """Describe the Git credential posture for one resolved remote."""
+
+    use_resolved_credentials: bool
+    allow_native_credential_lookup: bool = True
+    preserve_config_isolation: bool = False
+    suppress_credential_helpers: bool = False
+    reject_https_downgrade: bool = False
+
+
+@dataclass(frozen=True)
 class HostProviderDescriptor:
     """Describe host classification, credentials, and API capabilities."""
 
@@ -30,13 +42,30 @@ class HostProviderDescriptor:
     allow_credential_helper: bool = True
     manifest_types: tuple[str, ...] = ()
 
+    def build_api_base(self, host: str, port: int | None = None) -> str:
+        """Return the provider API base, preserving a self-hosted port."""
+        base = self.api_base(host)
+        if port is None:
+            return base
+        parsed = urllib.parse.urlsplit(base)
+        if parsed.hostname != host.lower() or parsed.port is not None:
+            return base
+        netloc = f"{parsed.hostname}:{port}"
+        return urllib.parse.urlunsplit(
+            (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+        )
+
 
 def _github_api(_host: str) -> str:
     return "https://api.github.com"
 
 
-def _ado_api(_host: str) -> str:
-    return "https://dev.azure.com"
+def _ado_api(host: str) -> str:
+    if host in {"dev.azure.com", "ssh.dev.azure.com"} or host.endswith(".visualstudio.com"):
+        return "https://dev.azure.com"
+    if not is_valid_fqdn(host):
+        raise ValueError(f"Invalid Azure DevOps Server host: {host!r}")
+    return f"https://{host}"
 
 
 def _api_v3(host: str) -> str:
@@ -66,6 +95,7 @@ def _matches_ghes(host: str) -> bool:
         and configured == host
         and configured not in {"github.com", "gitlab.com"}
         and not configured.endswith(".ghe.com")
+        and not is_azure_devops_hostname(configured)
         and is_valid_fqdn(configured)
     )
 
@@ -97,7 +127,7 @@ _HOST_PROVIDERS = (
         kind="ado",
         matcher=_matches_ado,
         api_base=_ado_api,
-        has_public_repos=True,
+        has_public_repos=False,
         credential_purpose="ado_modules",
         allow_credential_helper=False,
     ),
@@ -139,6 +169,55 @@ def accepted_host_types() -> tuple[str, ...]:
     return tuple(host_type for provider in _HOST_PROVIDERS for host_type in provider.manifest_types)
 
 
+def git_transport_policy(host_kind: str, remote_url: str) -> GitTransportPolicy:
+    """Return the canonical credential policy for a host and Git transport.
+
+    Recognized providers retain APM-managed hardened credentials. Generic HTTPS
+    delegates only to native Git credential helpers, while plaintext HTTP
+    suppresses every credential channel. Generic SSH is token-free and lets
+    AuthResolver preserve its noninteractive SSH command.
+    """
+    scheme = urllib.parse.urlsplit(remote_url).scheme.lower()
+    if host_kind == "ado":
+        return GitTransportPolicy(
+            use_resolved_credentials=scheme == "https",
+            allow_native_credential_lookup=False,
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+            reject_https_downgrade=scheme == "https",
+        )
+    if scheme == "http":
+        return GitTransportPolicy(
+            use_resolved_credentials=False,
+            allow_native_credential_lookup=False,
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
+    if host_kind != "generic" and scheme == "https":
+        return GitTransportPolicy(
+            use_resolved_credentials=True,
+            reject_https_downgrade=True,
+        )
+    if scheme == "https":
+        return GitTransportPolicy(
+            use_resolved_credentials=False,
+            allow_native_credential_lookup=False,
+            reject_https_downgrade=True,
+        )
+    return GitTransportPolicy(
+        use_resolved_credentials=False,
+        allow_native_credential_lookup=False,
+    )
+
+
+def git_transport_cache_key(remote_url: str | None) -> str:
+    """Return the transport discriminator used by AuthResolver's cache."""
+    if remote_url is None:
+        return ""
+    scheme = urllib.parse.urlsplit(remote_url).scheme.lower()
+    return scheme or "ssh"
+
+
 def classify_host_provider(
     host: str,
     *,
@@ -177,6 +256,16 @@ def classify_host_provider(
         if provider.matcher(normalized_host):
             return provider
     raise RuntimeError(f"No host provider registered for {host!r}")
+
+
+def effective_host_provider_identity(
+    host: str,
+    *,
+    host_type: str | None = None,
+) -> tuple[str, str]:
+    """Return the backend and credential-route identity for one remote host."""
+    provider = classify_host_provider(host, host_type=host_type)
+    return provider.kind, provider.credential_purpose
 
 
 def register_host_backend(kind: str, backend_factory: type[Any]) -> None:

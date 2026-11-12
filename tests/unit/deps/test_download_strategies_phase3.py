@@ -26,6 +26,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -33,6 +34,12 @@ import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate, _debug
+from apm_cli.deps.git_file_transport import GitFileTransportError
+from apm_cli.deps.transport_selection import (
+    NoOpInsteadOfResolver,
+    ProtocolPreference,
+    TransportSelector,
+)
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.archive import safe_extract_zip
 
@@ -60,10 +67,21 @@ def _make_host(
     # Shared auth_resolver mock
     auth = MagicMock()
     ctx = MagicMock()
-    ctx.token = github_token
-    ctx.source = "GITHUB_APM_PAT_ORG" if github_token else ""
+    resolved_token = ado_token if ado_token is not None else github_token
+    ctx.token = resolved_token
+    ctx.source = (
+        "ADO_APM_PAT" if ado_token is not None else ("GITHUB_APM_PAT_ORG" if github_token else "")
+    )
+    ctx.auth_scheme = "basic"
+    ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
+    auth.execute_with_bearer_fallback.side_effect = (
+        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
+            outcome=primary_op(),
+            bearer_attempted=False,
+        )
+    )
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",
@@ -184,19 +202,19 @@ class TestResilientGet:
         assert result is resp
         assert mock_get.call_args.kwargs["stream"] is True
 
-    def test_429_triggers_retry_after_wait(self) -> None:
-        """A 429 response should sleep and retry; second attempt succeeds."""
+    def test_429_returns_immediately_without_sleep(self) -> None:
+        """A confirmed throttle is returned for the typed caller decision."""
         rate_resp = _fake_response(429, b"slow", headers={"Retry-After": "0.01"})
         ok_resp = _fake_response(200, b"ok")
         with (
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        mock_sleep.assert_called_once()
-        # Wait value should be capped by float("0.01") → ≤ 0.01
-        assert mock_sleep.call_args[0][0] <= 0.02
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
     def test_503_triggers_retry(self) -> None:
         rate_resp = _fake_response(503, b"unavail", headers={})
@@ -205,19 +223,24 @@ class TestResilientGet:
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep"),
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
         assert result is ok_resp
 
-    def test_403_with_rate_limit_remaining_zero_triggers_retry(self) -> None:
-        """403 + X-RateLimit-Remaining: 0 is treated as rate-limited."""
+    def test_403_with_rate_limit_remaining_zero_returns_immediately(self) -> None:
+        """The rate classifier owns this response; transport does not retry it."""
         rate_resp = _fake_response(403, b"rate", headers={"X-RateLimit-Remaining": "0"})
         ok_resp = _fake_response(200, b"ok")
         with (
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
-            patch("time.sleep"),
+            patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
     def test_403_without_rate_limit_header_is_returned_immediately(self) -> None:
         """403 without rate-limit header must NOT trigger retry."""
@@ -227,18 +250,26 @@ class TestResilientGet:
         assert result is forbidden_resp
         assert mock_get.call_count == 1
 
-    def test_rate_limit_exhausts_retries_returns_last_response(self) -> None:
-        """If every attempt is rate-limited, the last rate-limit response is returned."""
+    def test_rate_limit_returns_first_response_without_retry(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A throttle never spends a retry budget."""
         rate_resp = _fake_response(429, b"rate", headers={"Retry-After": "0.001"})
         with (
             patch("requests.get", return_value=rate_resp),
-            patch("time.sleep"),
+            patch("time.sleep") as mock_sleep,
+            patch.dict("os.environ", {"APM_DEBUG": "1"}),
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=2)
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=2, retry_throttles=False
+            )
         assert result is rate_resp
+        mock_sleep.assert_not_called()
+        captured = capsys.readouterr()
+        assert "retry in" not in captured.err
 
-    def test_retry_after_invalid_falls_back_to_backoff(self) -> None:
-        """Non-numeric Retry-After header falls back to exponential back-off."""
+    def test_429_with_invalid_retry_after_still_returns_immediately(self) -> None:
+        """HTTP 429 itself is a confirmed throttle regardless of headers."""
         rate_resp = _fake_response(
             429, b"rate", headers={"Retry-After": "Thu, 01 Jan 2099 00:00:00 GMT"}
         )
@@ -247,14 +278,14 @@ class TestResilientGet:
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        # backoff formula: min(2^0, 30) * (0.5+random) → between 0.5 and 1.5
-        wait_used = mock_sleep.call_args[0][0]
-        assert 0 < wait_used <= 31.0
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
-    def test_reset_at_header_used_when_no_retry_after(self) -> None:
-        """X-RateLimit-Reset is used when Retry-After is absent."""
+    def test_reset_header_does_not_create_a_retry(self) -> None:
+        """Reset metadata is not a retry directive for this transport."""
         import time as _time
 
         future_reset = int(_time.time()) + 2
@@ -264,22 +295,25 @@ class TestResilientGet:
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        # Wait should be ≤ 60 and ≥ 0
-        assert 0 <= mock_sleep.call_args[0][0] <= 60
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
-    def test_reset_at_invalid_falls_back_to_backoff(self) -> None:
-        """Non-numeric X-RateLimit-Reset falls back to exponential back-off."""
+    def test_invalid_reset_header_does_not_create_a_retry(self) -> None:
+        """No header parsing outside the classifier can select a retry."""
         rate_resp = _fake_response(429, b"rate", headers={"X-RateLimit-Reset": "not-a-number"})
         ok_resp = _fake_response(200, b"ok")
         with (
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        assert mock_sleep.called
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
     def test_connection_error_retries_then_raises(self) -> None:
         """ConnectionError should retry and re-raise after exhaustion."""
@@ -319,8 +353,10 @@ class TestResilientGet:
             with pytest.raises(requests.exceptions.RequestException):
                 self.delegate.resilient_get("https://example.com", {}, max_retries=2)
 
-    def test_rate_limit_remaining_low_debug(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Low but non-zero remaining triggers a debug message."""
+    def test_rate_limit_remaining_low_is_not_logged_by_transport(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Header interpretation remains exclusively in the classifier."""
         resp = _fake_response(200, b"ok", headers={"X-RateLimit-Remaining": "5"})
         with (
             patch("requests.get", return_value=resp),
@@ -328,7 +364,7 @@ class TestResilientGet:
         ):
             self.delegate.resilient_get("https://example.com", {})
         captured = capsys.readouterr()
-        assert "rate limit low" in captured.err.lower()
+        assert "rate limit low" not in captured.err.lower()
 
     def test_rate_limit_remaining_invalid_is_ignored(self) -> None:
         """Non-numeric X-RateLimit-Remaining on success path is silently ignored."""
@@ -540,6 +576,8 @@ class TestDownloadArtifactoryArchive:
             )
         assert (tmp_path / "apm.yml").read_bytes() == b"name: test"
         assert host._resilient_get.call_args.kwargs["stream"] is True
+        assert host._resilient_get.call_args.kwargs["allow_netrc"] is False
+        assert "allow_redirects" not in host._resilient_get.call_args.kwargs
 
     def test_http_non_200_tries_next_url(self, tmp_path: Path) -> None:
         zip_bytes = _make_zip({"apm.yml": b"name: test"})
@@ -890,6 +928,25 @@ class TestDownloadAdoFile:
         result = d.download_ado_file(self._dep(), "apm.yml", ref="main")
         assert result == b"fallback content"
 
+    def test_404_fallback_preserves_custom_port(self) -> None:
+        host = _make_host(ado_token="pat")
+        d = DownloadDelegate(host)
+        host._resilient_get.side_effect = [
+            _fake_response(404, b""),
+            _fake_response(200, b"fallback content"),
+        ]
+        result = d.download_ado_file(
+            self._dep(host="ado.example.test", port=8443),
+            "apm.yml",
+            ref="main",
+        )
+        assert result == b"fallback content"
+        parsed_urls = [urlparse(call.args[0]) for call in host._resilient_get.call_args_list]
+        assert [(parsed.hostname, parsed.port) for parsed in parsed_urls] == [
+            ("ado.example.test", 8443),
+            ("ado.example.test", 8443),
+        ]
+
     def test_404_tries_fallback_ref_master_to_main(self) -> None:
         host = _make_host(ado_token="pat")
         d = DownloadDelegate(host)
@@ -993,6 +1050,32 @@ class TestDownloadAdoFile:
         with pytest.raises(RuntimeError, match="sign-in page"):
             d.download_ado_file(self._dep(), "apm.yml")
 
+    def test_html_203_response_is_rejected(self) -> None:
+        host = _make_host(ado_token=None)
+        host.auth_resolver.resolve.return_value = MagicMock(
+            token=None,
+            auth_scheme="basic",
+            source="none",
+        )
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        host._resilient_get.return_value = _fake_response(
+            203,
+            b"<html>Sign In</html>",
+            headers={"Content-Type": "text/html"},
+        )
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            DownloadDelegate(host).download_ado_file(self._dep(), "apm.yml")
+
+    def test_non_200_success_status_is_rejected(self) -> None:
+        host = _make_host(ado_token="pat")
+        host._resilient_get.return_value = _fake_response(
+            206,
+            b"partial",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        with pytest.raises(RuntimeError, match="Unexpected HTTP 206"):
+            DownloadDelegate(host).download_ado_file(self._dep(), "apm.yml")
+
     def test_html_200_response_writes_no_content(self) -> None:
         """Mutation break: HTML sign-in detection must prevent content from being returned."""
         host = _make_host(ado_token=None)
@@ -1051,17 +1134,55 @@ class TestDownloadAdoFile:
         assert "Authorization" in headers
         expected_auth = base64.b64encode(b":my-secret-pat").decode()
         assert expected_auth in headers["Authorization"]
-        # auth_resolver.resolve() must NOT be called when PAT is present
-        host.auth_resolver.resolve.assert_not_called()
+        host.auth_resolver.resolve.assert_called_once_with(
+            "dev.azure.com",
+            "my-org",
+            port=None,
+        )
 
-    def test_bearer_auth_resolver_not_called_when_pat_present(self) -> None:
-        """Mutation break: resolver.resolve() is bypassed entirely when ado_token is set."""
+    def test_pat_resolution_routes_through_auth_resolver(self) -> None:
+        """The REST PAT path must consume the canonical AuthResolver context."""
         host = _make_host(ado_token="pat-value")
         resp = _fake_response(200, b"data", headers={"Content-Type": "application/json"})
         host._resilient_get.return_value = resp
         d = DownloadDelegate(host)
         d.download_ado_file(self._dep(), "apm.yml")
-        host.auth_resolver.resolve.assert_not_called()
+        host.auth_resolver.resolve.assert_called_once_with(
+            "dev.azure.com",
+            "my-org",
+            port=None,
+        )
+
+    def test_rejected_services_pat_retries_with_bearer(self) -> None:
+        """A REST 401 uses AuthResolver's canonical PAT-to-bearer protocol."""
+        host = _make_host(ado_token="stale-pat")
+        host._resilient_get.side_effect = [
+            _fake_response(401, b""),
+            _fake_response(
+                200,
+                b"file bytes",
+                headers={"Content-Type": "application/octet-stream"},
+            ),
+        ]
+
+        def execute(_dep, primary_op, bearer_op, is_auth_failure):
+            primary = primary_op()
+            assert is_auth_failure(primary)
+            return SimpleNamespace(
+                outcome=bearer_op("fresh-bearer"),
+                bearer_attempted=True,
+            )
+
+        host.auth_resolver.execute_with_bearer_fallback.side_effect = execute
+        result = DownloadDelegate(host).download_ado_file(
+            self._dep(),
+            "apm.yml",
+        )
+        assert result == b"file bytes"
+        retry_headers = host._resilient_get.call_args_list[1].kwargs["headers"]
+        scheme, credential = retry_headers["Authorization"].split(" ", 1)
+        assert scheme == "Bearer"
+        assert credential == "fresh-bearer"
 
     def test_html_detection_on_fallback_ref_response(self) -> None:
         """HTML sign-in detection fires on the main/master fallback response too."""
@@ -1110,11 +1231,12 @@ class TestDownloadAdoFile:
         assert result == b"file-bytes"
         assert host._resilient_get.call_count == 2
 
-    def test_bearer_fallback_skipped_when_scheme_not_bearer(self) -> None:
-        """When auth_resolver returns a non-bearer scheme, no Authorization header is injected."""
+    def test_basic_context_uses_ado_pat_header(self) -> None:
+        """A basic AuthResolver context produces an ADO PAT header."""
         host = _make_host(ado_token=None)
         ctx = MagicMock()
         ctx.token = "some-token"
+        ctx.source = "ADO_APM_PAT"
         ctx.auth_scheme = "basic"  # non-bearer scheme -> must not inject as Bearer
         host.auth_resolver.resolve.return_value = ctx
         resp = _fake_response(200, b"content", headers={"Content-Type": "application/octet-stream"})
@@ -1123,7 +1245,9 @@ class TestDownloadAdoFile:
         d.download_ado_file(self._dep(), "apm.yml")
         call_kwargs = host._resilient_get.call_args[1]
         headers = call_kwargs.get("headers", {})
-        assert "Authorization" not in headers
+        scheme, credential = headers["Authorization"].split(" ", 1)
+        assert scheme == "Basic"
+        assert base64.b64decode(credential).decode() == ":some-token"
 
 
 # ---------------------------------------------------------------------------
@@ -1132,6 +1256,19 @@ class TestDownloadAdoFile:
 
 
 class TestDownloadGitlabFile:
+    @pytest.fixture(autouse=True)
+    def _git_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise REST recovery after a selected HTTPS Git attempt fails."""
+        monkeypatch.setattr(
+            DownloadDelegate,
+            "_download_gitlab_file_via_git",
+            MagicMock(side_effect=GitFileTransportError("git transport unavailable")),
+        )
+        monkeypatch.setattr(
+            "apm_cli.deps.download_strategies.validate_git_url_rewrite_safety",
+            lambda requested_url, _env: requested_url,
+        )
+
     def _dep(self) -> DependencyReference:
         return DependencyReference(
             repo_url="mygroup/myproject",
@@ -1140,11 +1277,18 @@ class TestDownloadGitlabFile:
 
     def _setup_host_info(self, host_mock: MagicMock) -> None:
         info = MagicMock()
+        info.kind = "gitlab"
         info.api_base = "https://gitlab.example.com/api/v4"
         host_mock.auth_resolver.classify_host.return_value = info
         ctx = MagicMock()
         ctx.token = "gl-tok"
         host_mock.auth_resolver.resolve.return_value = ctx
+        host_mock.auth_resolver.resolve_for_remote.return_value = ctx
+        host_mock.auth_resolver.git_env_for_remote.return_value = {}
+        host_mock.auth_resolver.build_native_git_credential_env.return_value = {}
+        host_mock._protocol_pref = ProtocolPreference.NONE
+        host_mock._allow_fallback = False
+        host_mock._transport_selector = TransportSelector(NoOpInsteadOfResolver())
 
     def test_success_returns_content(self) -> None:
         host = _make_host()
@@ -1218,12 +1362,8 @@ class TestDownloadGitlabFile:
 
     def test_401_without_token_includes_context(self) -> None:
         host = _make_host()
-        info = MagicMock()
-        info.api_base = "https://gitlab.example.com/api/v4"
-        host.auth_resolver.classify_host.return_value = info
-        ctx = MagicMock()
-        ctx.token = None  # no token
-        host.auth_resolver.resolve.return_value = ctx
+        self._setup_host_info(host)
+        host.auth_resolver.resolve.return_value.token = None
         host.auth_resolver.build_error_context.return_value = "Set GITLAB_APM_PAT."
 
         d = DownloadDelegate(host)
@@ -1287,17 +1427,9 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = resp
         callback = MagicMock()
 
-        with (
-            patch(
-                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-                return_value={},
-            ),
-            patch(
-                "apm_cli.deps.download_strategies.GitSparseFileTransport",
-                return_value=MagicMock(
-                    fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
-                ),
-            ),
+        with patch(
+            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+            return_value={},
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
         # The mocked git failure drives the REST fallback path without spawning
@@ -1455,7 +1587,7 @@ class TestDownloadGithubFile:
         with pytest.raises(RuntimeError, match="File not found"):
             d.download_github_file(self._dep(), "apm.yml", ref="feature/x")
 
-    def test_401_rate_limit_raises_runtime(self) -> None:
+    def test_401_with_rate_headers_remains_an_auth_failure(self) -> None:
         host_mock = _make_host(github_token=None)
         ctx = MagicMock()
         ctx.token = None
@@ -1467,7 +1599,7 @@ class TestDownloadGithubFile:
         host_mock._resilient_get.return_value = resp
 
         with patch.object(d, "try_raw_download", return_value=None):
-            with pytest.raises(RuntimeError, match="rate limit"):
+            with pytest.raises(RuntimeError, match="Authentication failed"):
                 d.download_github_file(self._dep(), "apm.yml")
 
     def test_403_with_token_tries_unauth_retry(self) -> None:

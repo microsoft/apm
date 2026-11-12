@@ -28,16 +28,42 @@ wiring) and rewrites the lockfile.
 
 1. Packages declared in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`)
 2. Packages installed under `apm_modules/`
-3. Packages recorded in `apm.lock.yaml` with their `deployed_files`
+3. Packages recorded in `apm.lock.yaml`, including their `deployed_files` and
+   canonical deployment ownership rows
 
 An installed package is **orphaned** when it is neither declared in either
-dependency list nor retained as a lockfile-resolved transitive dependency.
-`apm prune` removes the orphan's directory under `apm_modules/`, deletes every
-file the orphan deployed into your harness directories (using the
-`deployed_files` manifest in the lockfile), removes the entry from
+dependency list nor needed by a retained package. This preserves transitive
+dependencies, bundled skills, and whole roots containing a needed nested
+package. An unrelated sibling root can still be pruned.
+
+GitHub owner and repository names are compared case-insensitively: changing
+`microsoft/apm` to `Microsoft/APM` does not orphan the installed package.
+Prune preserves its existing directory spelling; it does not rename packages.
+Case-sensitive hosts, local paths, aliases, and paths inside repositories
+retain their existing casing rules. Distinct repositories such as
+`Microsoft/APM` and `microsoft/Other` can coexist. Multiple case-equivalent
+paths for the same package stop cleanup with an error naming the conflicting
+paths under `apm_modules/`; inspect the duplicates and run `apm install` after
+keeping the intended package.
+
+Recognized roots under `apm_modules/`, including manifestless `SKILL.md`
+packages, are managed installation content. Pruning an eligible root removes
+its contents, including manually copied packages and personal files. Keep
+personal source outside `apm_modules/`; preview cleanup with `apm prune --dry-run`.
+Neither a surviving lock entry nor an `.apm-pin` cache marker is required.
+
+`apm prune` removes the orphan's directory under `apm_modules/`, cleans up its
+owned harness deployments using the protections below, removes its entry from
 `apm.lock.yaml`, and cleans up empty parent directories.
 
-If `apm_modules/` does not exist, the command exits cleanly with nothing to do. If `apm.yml` is missing, it exits with an error.
+`apm prune` also parses and reconciles the lockfile's canonical deployment
+ownership metadata on every run, even when `apm_modules/` does not exist or
+no package is orphaned. It also removes stale direct-dependency records whose
+package directory is already absent or retained for a needed nested package,
+allowing a retry to finish after an earlier lockfile write failed. Retained
+source content does not preserve an undeclared package's deployment ownership.
+A stale dependency or owner reference is not
+"nothing to prune." If `apm.yml` is missing, the command exits with an error.
 
 ## Options
 
@@ -71,15 +97,61 @@ apm prune     # cleans up what is no longer declared
 
 For each orphaned package, `apm prune`:
 
-1. Removes the package directory from `apm_modules/<owner>/<repo>` using a path-traversal-safe delete.
+1. Removes the orphan's installed directory under `apm_modules/`, including flat [alias directories](../../lockfile-spec/#per-entry-fields), using a path-traversal-safe delete.
 2. Reads `deployed_files` from the lockfile entry and deletes each deployed file or directory inside the project root.
 3. Removes the entry from `apm.lock.yaml`.
 4. Cleans up empty parent directories under both `apm_modules/` and the harness deploy roots.
 5. Deletes `apm.lock.yaml` if pruning leaves it with zero dependencies.
 
+### Canonical deployment ownership
+
+`apm prune` also reconciles the canonical `deployments` rows in
+`apm.lock.yaml` (see [Lockfile spec](../../lockfile-spec/#canonical-deployment-rows)):
+
+- **Trusted deletion authority.** Only a pruned dependency's own
+  pre-transition `deployed_files` and `deployed_file_hashes` -- captured
+  before that dependency's entry is removed this run -- authorize deleting
+  its bytes. Paths still claimed by a surviving owner after reconciliation
+  are subtracted from that claim first and are never deleted, including
+  external URI deployments such as `cowork://` skills.
+- **Ghost rows are metadata-only repair.** A canonical row referencing an
+  owner that no longer exists in the lockfile is repaired in the ledger, but
+  that repair never authorizes deleting the file the row points at. Existing
+  bytes that no trusted claim covers are preserved; `apm prune` logs a
+  warning naming the path and asking you to inspect and remove it manually.
+- **User-edited, failed, or unmanaged files** follow the same rule: prune
+  removes the stale ownership record, never the untrusted bytes.
+- **`--dry-run`** previews both the packages that would be removed and the
+  ownership records that would be repaired, without mutating anything.
+- Rerunning `apm prune` after a partial or interrupted run converges to the
+  same clean state (idempotent), even when package deletion succeeded before
+  the prior run failed to write `apm.lock.yaml`.
+
+After processing all orphaned packages, `apm prune` also reconciles merged
+hook configuration (`.claude/settings.json`, `.cursor/hooks.json`, and
+similar merge targets, plus their `apm-hooks.json` ownership sidecars):
+entries owned by a pruned package are removed, while entries owned by
+packages that remain in the post-prune lockfile -- direct *and*
+transitive -- and any manually authored entries are preserved and
+rewritten back. This orchestrates the same ownership-aware cleanup
+`apm uninstall` uses; it does not duplicate the filtering logic.
+Hook reconciliation is best-effort: a failure is logged as a warning but
+does not abort the run, since package and lockfile cleanup has already
+completed by that point. If reconciliation logs a warning, run `apm
+install` to rebuild hook configuration from the current dependency set.
+To clean up hooks left by a target removed from `targets:` in `apm.yml`,
+run `apm install` (or `apm compile` / `apm update`); `apm prune` only
+reconciles hooks for packages and targets still declared.
+
 Notes:
 
-- Packages that share an install root with a still-declared sibling subdirectory dependency are not falsely protected by ancestor expansion. The check uses lockfile membership (with `apm.yml` fallback) to identify genuine standalone packages.
+- Manifestless installs containing `SKILL.md` are detected even after `apm install`
+  removes their lockfile entry. Skills inside a declared or retained transitive
+  package remain part of that package and are preserved.
+- A recognized ancestor containing a declared direct/dev or retained transitive
+  dependency is kept intact and reported as retained, not removed.
+- Unrecognized directories are not package-removal candidates. Files deployed
+  outside `apm_modules/` retain the ownership protections described above.
 - A manifest embedded at any depth inside an installed package is owned by that
   package. It is not an independent dependency, orphan, or prune candidate.
 - Deploy paths are validated before deletion; entries that escape the project root are skipped.
@@ -87,16 +159,26 @@ Notes:
 
 ## Exit codes
 
-| Code | Meaning                                               |
-|------|-------------------------------------------------------|
-| 0    | Prune completed (including "nothing to prune").       |
-| 1    | `apm.yml` missing, parse failure, or unhandled error. |
+| Code | Meaning                                                                       |
+|------|--------------------------------------------------------------------------------|
+| 0    | Prune completed with no orphan deletion failures (including "nothing to prune"). |
+| 1    | An orphan deletion failed, `apm.yml` is missing, parsing or lockfile writing failed, or an unhandled error occurred. |
 
-Per-package removal failures are logged but do not abort the run; remaining orphans still process.
+Orphan deletion failures are logged without stopping the remaining packages.
+The final error reports how many packages were removed and how many failed.
+Successful deletions are not rolled back; failed deletions can leave partial
+content, and their lockfile entries are retained. Resolve the reported removal
+errors, then rerun `apm prune`. Best-effort hook warnings alone do not change
+the exit status.
+
+A lockfile write failure after filesystem cleanup has started also exits `1`
+with a partial-cleanup warning: rerun `apm prune`, then run `apm audit` to
+confirm the resulting state.
 
 ## Related
 
 - [`apm install`](../install/) -- install declared dependencies
+- [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
 - [`apm list`](../list/) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
 - [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where

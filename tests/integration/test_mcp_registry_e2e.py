@@ -347,7 +347,7 @@ class TestMCPRegistryE2E:
         not _is_registry_healthy(),
         reason="GitHub MCP server configured as remote-only (no packages) - skipping installation tests",
     )
-    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary_path):
+    def test_empty_string_handling_copilot_e2e(self, temp_e2e_home, apm_binary_path):
         """Test end-to-end empty string and defaults handling during installation."""
         print("\n=== Testing Empty String and Defaults Handling ===")
 
@@ -370,6 +370,7 @@ class TestMCPRegistryE2E:
             with open(apm_yml, "w") as f:
                 f.write("name: empty-string-test\n")
                 f.write("version: 1.0.0\n")
+                f.write("targets:\n  - copilot\n")
                 f.write("dependencies:\n")
                 f.write("  mcp:\n")
                 f.write("    - io.github.github/github-mcp-server\n")
@@ -385,6 +386,7 @@ class TestMCPRegistryE2E:
             with open(apm_yml, "w") as f:
                 f.write("name: copilot-registry-test\n")
                 f.write("version: 1.0.0\n")
+                f.write("targets:\n  - copilot\n")
                 f.write("dependencies:\n")
                 f.write("  mcp:\n")
                 f.write("    - io.github.github/github-mcp-server\n")
@@ -463,7 +465,7 @@ class TestMCPRegistryE2E:
                 print("[WARN] Copilot configuration not created (binary may not be available)")
                 # This is OK for testing - we're validating the adapter logic
 
-    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary_path):  # noqa: F811
+    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary_path):
         """Test end-to-end empty string and defaults handling during installation."""
         print("\n=== Testing Empty String and Defaults Handling ===")
 
@@ -486,6 +488,7 @@ class TestMCPRegistryE2E:
             with open(apm_yml, "w") as f:
                 f.write("name: empty-string-test\n")
                 f.write("version: 1.0.0\n")
+                f.write("targets:\n  - codex\n")
                 f.write("dependencies:\n")
                 f.write("  mcp:\n")
                 f.write("    - io.github.github/github-mcp-server\n")

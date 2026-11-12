@@ -12,10 +12,15 @@ import json
 import tarfile
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 from click.testing import CliRunner
+
+from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+
+_MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 
 _LOCAL_BUNDLE_EXISTS = importlib.util.find_spec("apm_cli.bundle.local_bundle") is not None
 _INTEGRATE_EXISTS = False
@@ -48,7 +53,7 @@ def _make_bundle(
     base: Path,
     *,
     plugin_id: str | None = "test-plugin",
-    pack_target: str = "copilot",
+    pack_target: str | list[str] = "copilot",
     files: dict[str, str] | None = None,
     include_lockfile: bool = True,
 ) -> Path:
@@ -112,11 +117,118 @@ def _make_project(base: Path) -> Path:
     return project
 
 
-def _invoke(project: Path, monkeypatch, *args: str):
+def _make_home(base: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = base / "home"
+    apm_dir = home / ".apm"
+    apm_dir.mkdir(parents=True, exist_ok=True)
+    (apm_dir / "apm.yml").write_text(
+        _MINIMAL_APM_YML,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    import apm_cli.config as _conf
+
+    monkeypatch.setattr(_conf, "CONFIG_DIR", str(apm_dir))
+    monkeypatch.setattr(_conf, "CONFIG_FILE", str(apm_dir / "config.json"))
+    monkeypatch.setattr(_conf, "_config_cache", None)
+    return home
+
+
+def _invoke_cli(project: Path, monkeypatch, command: str, *args: str):
     from apm_cli.cli import cli
 
     monkeypatch.chdir(project)
-    return CliRunner().invoke(cli, ["install", *args], catch_exceptions=False)
+    return CliRunner().invoke(cli, [command, *args], catch_exceptions=False)
+
+
+def _invoke(project: Path, monkeypatch, *args: str):
+    return _invoke_cli(project, monkeypatch, "install", *args)
+
+
+def _packed_command_mapping(target: TargetProfile) -> tuple[Any, Any | None]:
+    """Return the target mapping selected for plugin-native commands."""
+    from apm_cli.bundle.plugin_layout import PLUGIN_LAYOUT
+
+    spec = PLUGIN_LAYOUT["commands"]
+    for primitive_kind in spec.primitive_kinds:
+        mapping = target.primitives.get(primitive_kind)
+        if mapping is not None:
+            return spec, mapping
+    return spec, None
+
+
+def _expected_packed_command_warning(target: TargetProfile) -> bool:
+    """Return whether packed command install should warn instead of deploy."""
+    _spec, mapping = _packed_command_mapping(target)
+    return bool(mapping and mapping.format_id == "gemini_command")
+
+
+def _expected_deployed_command_path(project: Path, target: TargetProfile) -> Path | None:
+    """Derive the packed command destination from KNOWN_TARGETS."""
+    spec, mapping = _packed_command_mapping(target)
+    if mapping is None or _expected_packed_command_warning(target):
+        return None
+    extension = mapping.extension
+    if not extension or extension.startswith("/") or not extension.startswith("."):
+        return None
+    apm_name = spec.apm_basename_fn("test-command.md")
+    stem = apm_name
+    for suffix in (
+        ".instructions.md",
+        ".prompt.md",
+        ".agent.md",
+        ".mdc",
+        ".toml",
+        ".json",
+        ".md",
+    ):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    root = project / (mapping.deploy_root or target.root_dir)
+    if not mapping.subdir:
+        return root / f"{stem}{extension}"
+    return root / mapping.subdir / f"{stem}{extension}"
+
+
+def test_local_bundle_receives_enabled_empty_executable_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bundle LSP filtering must distinguish an enabled empty gate from disabled."""
+    bundle = _make_bundle(
+        tmp_path / "source",
+        files={
+            "lsp.json": json.dumps(
+                {
+                    "lspServers": {
+                        "unsafe": {
+                            "command": "unsafe-language-server",
+                            "extensionToLanguage": {".unsafe": "unsafe"},
+                        }
+                    }
+                }
+            )
+        },
+    )
+    project = _make_project(tmp_path / "destination")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["executables"] = {}
+    (project / "apm.yml").write_text(yaml.dump(manifest), encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "apm_cli.install.local_bundle_handler.install_local_bundle",
+        _capture,
+    )
+
+    result = _invoke(project, monkeypatch, str(bundle), "--no-policy")
+
+    assert result.exit_code == 0, result.output
+    assert captured["allow_executables"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +344,7 @@ _REJECTED_FLAGS: list[tuple[str, str | None]] = [
     ("--ssh", None),
     ("--https", None),
     ("--allow-protocol-fallback", None),
+    ("--auth-first", None),
     ("--mcp", "io.github.test/test"),
     ("--registry", "https://example.com"),
     ("--skill", "my-skill"),
@@ -313,6 +426,18 @@ class TestAllowedFlagsWithLocalBundle:
         assert result.exit_code != 2, (
             f"Allowed flag {flag_args} produced UsageError. output={result.output!r}"
         )
+
+    def test_target_all_does_not_enter_experimental_lookup(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bundle = _make_bundle(tmp_path / "src", pack_target="all")
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke(project, monkeypatch, str(bundle), "--target", "all")
+
+        assert result.exit_code == 0, result.output
 
 
 class TestExceptionHandlerScopeRegression:
@@ -396,18 +521,18 @@ class TestAsAliasDerivation:
         assert result.exit_code == 0, f"output={result.output!r}"
         assert "from-plugin-json" in result.output
 
-    def test_alias_falls_back_to_dirname_when_no_id(
+    def test_alias_uses_manifest_name_when_no_id(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # plugin_id=None -> plugin.json has no "id"; loader falls back to
-        # the bundle directory name (which our helper names "bundle").
+        # plugin_id=None -> plugin.json has no "id"; Agent Plugin identity
+        # comes from its required manifest name.
         bundle = _make_bundle(tmp_path / "src", plugin_id=None)
         project = _make_project(tmp_path / "dst")
 
         result = _invoke(project, monkeypatch, str(bundle), "--verbose", "--target", "copilot")
         assert result.exit_code == 0, f"output={result.output!r}"
-        assert "'bundle'" in result.output, (
-            f"Dirname-derived slug missing. output={result.output!r}"
+        assert "'Test Plugin'" in result.output, (
+            f"Manifest-name alias missing. output={result.output!r}"
         )
 
 
@@ -430,6 +555,262 @@ class TestApmYmlNotMutated:
         assert result.exit_code == 0, f"output={result.output!r}"
         after = (project / "apm.yml").read_bytes()
         assert before == after, "apm.yml mutated by local-bundle install"
+
+
+# ---------------------------------------------------------------------------
+# Grok install / uninstall coverage
+# ---------------------------------------------------------------------------
+
+
+class TestGrokCloudLocalBundleDeployment:
+    """Enabled grok-cloud installs deploy under .grok/."""
+
+    def test_disabled_flag_emits_enable_hint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
+        assert not (project / ".grok").exists()
+
+    def test_disabled_flag_emits_hint_when_stable_target_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target=["claude", "grok-cloud"],
+            files={
+                ".claude/skills/guide/SKILL.md": "# Shared Guide\n",
+                ".grok/skills/guide/SKILL.md": "# Shared Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "claude,grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
+        assert (project / ".claude" / "skills" / "guide" / "SKILL.md").exists()
+        assert not (project / ".claude" / ".grok").exists()
+        assert not (project / ".grok").exists()
+
+    def test_project_scope_install_deploys_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        install_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-cloud",
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        skill_file = project / ".grok" / "skills" / "guide" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text(encoding="utf-8") == "# Grok Guide\n"
+        assert not (project / ".grok" / ".grok").exists()
+
+    def test_global_scope_install_deploys_home_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = _make_home(tmp_path, monkeypatch)
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Global\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        install_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--global",
+            "--target",
+            "grok-cloud",
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        skill_file = home / ".grok" / "skills" / "guide" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
+        assert not (home / ".grok" / ".grok").exists()
+
+    def test_multi_target_install_isolates_deploy_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target=["claude", "grok-cloud"],
+            files={
+                ".claude/skills/claude-guide/SKILL.md": "# Claude Guide\n",
+                ".grok/skills/grok-guide/SKILL.md": "# Grok Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "claude,grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".claude/skills/claude-guide/SKILL.md").exists()
+        assert (project / ".grok/skills/grok-guide/SKILL.md").exists()
+        assert not (project / ".claude/.grok").exists()
+        assert not (project / ".grok/.claude").exists()
+
+
+class TestGrokBuildLocalBundleDeployment:
+    """Stable Grok Build bundles deploy without an experimental flag."""
+
+    def test_project_scope_install_deploys_native_primitives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-build",
+            files={
+                ".grok/rules/review.instructions.md": "# Review Rules\n",
+                ".grok/agents/reviewer.md": "# Reviewer\n",
+                ".grok/commands/review.md": "# Review\n",
+                ".grok/skills/guide/SKILL.md": "# Grok Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-build",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".grok/rules/review.instructions.md").exists()
+        assert (project / ".grok/agents/reviewer.md").exists()
+        assert (project / ".grok/commands/review.md").exists()
+        assert (project / ".grok/skills/guide/SKILL.md").exists()
+        assert "experimental enable" not in result.output
+
+
+class TestLocalBundlePathRouting:
+    """Direct contracts for untrusted packed bundle paths."""
+
+    @pytest.mark.parametrize(
+        "target_name",
+        sorted(KNOWN_TARGETS),
+    )
+    def test_packed_commands_follow_each_target_primitive_mapping(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.services import integrate_local_bundle
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"commands/test-command.md": "# Test Command\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+        target = KNOWN_TARGETS[target_name]
+        diagnostics = DiagnosticCollector()
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        bundle_info = LocalBundleInfo(
+            source_dir=bundle,
+            plugin_json={"id": "test-plugin"},
+            package_id="test-plugin",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+
+        result = integrate_local_bundle(
+            bundle_info,
+            project,
+            targets=(target,),
+            diagnostics=diagnostics,
+            scope=InstallScope.PROJECT,
+        )
+        expected = _expected_deployed_command_path(project, target)
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+
+        if expected is None:
+            assert result["deployed_files"] == []
+            assert not (project / target.root_dir / "commands/test-command.md").exists()
+            if _expected_packed_command_warning(target):
+                assert len(warnings) == 1
+                assert "cannot convert plugin-native files" in warnings[0].message
+            else:
+                assert warnings == []
+            return
+
+        assert result["deployed_files"] == [expected.relative_to(project).as_posix()]
+        assert expected.read_text(encoding="utf-8") == "# Test Command\n"
+        original_path = project / target.root_dir / "commands/test-command.md"
+        if original_path != expected:
+            assert not original_path.exists()
+
+    def test_rejects_traversal_before_prefix_routing(self) -> None:
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            bundle_deploy_relative_path(
+                ".grok/../outside.txt",
+                frozenset({".grok/"}),
+                frozenset({".grok/"}),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +843,7 @@ class TestPathExistsButNotBundle:
     ) -> None:
         """A tarball packed with --format apm (has apm.lock.yaml, no
         plugin.json) must produce a specific error guiding the user to
-        repack with --format plugin or use apm unpack."""
+        repack with --claude-plugin or use apm unpack."""
         # Build a legacy apm-format bundle (mirrors packer.py fmt="apm" output)
         bundle = tmp_path / "test-pkg-0.1.0"
         bundle.mkdir(parents=True)
@@ -499,7 +880,11 @@ class TestPathExistsButNotBundle:
         assert result.exit_code != 0
         # Must mention the legacy format and offer actionable guidance
         assert "--format apm" in result.output or "legacy format" in result.output
-        assert "apm unpack" in result.output or "--format plugin" in result.output
+        assert "apm unpack" in result.output
+        # The suggested repack command must actually produce an installable
+        # Keep recovery advice explicit even though the legacy ``plugin`` alias
+        # is Claude-compatible.
+        assert "apm pack --claude-plugin" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +923,7 @@ class TestLocalBundleCanvasTrust:
         result = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
         assert result.exit_code == 0, result.output
         # Agent deploys; canvas is blocked (feature flag off).
-        assert (project / ".github" / "agents" / "a.md").exists()
+        assert (project / ".github" / "agents" / "a.agent.md").exists()
         assert not (project / ".github" / "extensions" / "widget").exists()
 
     def test_canvas_deployed_when_flag_on_no_enforcement(self, tmp_path, monkeypatch):
@@ -564,6 +949,63 @@ class TestLocalBundleCanvasTrust:
         assert result.exit_code == 0, result.output
         assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
 
+    def test_canvas_requires_exact_bundle_content_approval(self, tmp_path, monkeypatch):
+        import apm_cli.config as _conf
+        from apm_cli.bundle.local_bundle import detect_local_bundle
+        from apm_cli.security.executables import local_bundle_approval_key
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
+        bundle = _make_bundle(
+            tmp_path / "source",
+            files={"extensions/widget/extension.mjs": "export default {};\n"},
+            include_lockfile=False,
+        )
+        bundle_info = detect_local_bundle(bundle)
+        assert bundle_info is not None
+        approval_key = local_bundle_approval_key(
+            bundle_info.package_id,
+            str(bundle_info.plugin_json.get("version") or ""),
+            bundle_info.source_dir,
+            bundle_info.lockfile,
+        )
+        project = _make_project(tmp_path / "generic")
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {"test-plugin": {"canvas": True}}}
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        generic = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert generic.exit_code == 0, generic.output
+        assert not (project / ".github" / "extensions" / "widget").exists()
+        assert approval_key in "".join(generic.output.split())
+        assert "executables:" in generic.output
+        assert "allow:" in generic.output
+        assert "canvas: true" in generic.output
+
+        manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+        exact = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+        assert exact.exit_code == 0, exact.output
+        assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+        (bundle / "extensions" / "widget" / "extension.mjs").write_text(
+            "export default { changed: true };\n",
+            encoding="utf-8",
+        )
+        changed_project = _make_project(tmp_path / "changed")
+        changed_manifest = yaml.safe_load((changed_project / "apm.yml").read_text(encoding="utf-8"))
+        changed_manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
+        (changed_project / "apm.yml").write_text(
+            yaml.safe_dump(changed_manifest),
+            encoding="utf-8",
+        )
+
+        changed = _invoke(changed_project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert changed.exit_code == 0, changed.output
+        assert not (changed_project / ".github" / "extensions" / "widget").exists()
+
     def test_canvas_blocked_when_feature_off_regardless(self, tmp_path, monkeypatch):
         """When the experimental flag is off, canvas is always silently dropped."""
         import apm_cli.config as _conf
@@ -585,7 +1027,7 @@ class TestLocalBundleCanvasTrust:
             "copilot",
         )
         assert result.exit_code == 0, result.output
-        assert (project / ".github" / "agents" / "a.md").exists()
+        assert (project / ".github" / "agents" / "a.agent.md").exists()
         assert not (project / ".github" / "extensions" / "widget").exists()
         # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output

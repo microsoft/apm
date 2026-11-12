@@ -143,30 +143,28 @@ class TestUninstallMultiplePackages:
                 f"Deployed file {rel_path} not cleaned up by multi-uninstall"
             )
 
-    def test_uninstall_partial_unknown_continues_safely(self, temp_project, apm_binary_path):
-        """Engine warns on unknown package but still removes the known one (exit 0)."""
+    def test_uninstall_partial_unknown_aborts_atomically(self, temp_project, apm_binary_path):
+        """One unknown package makes the whole requested removal a read-only failure."""
         _write_apm_yml(temp_project, [PKG_A])
         result_install = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result_install.returncode == 0, (
             f"Install failed:\nSTDOUT: {result_install.stdout}\nSTDERR: {result_install.stderr}"
         )
+        manifest_before = (temp_project / "apm.yml").read_bytes()
+        lock_before = (temp_project / "apm.lock.yaml").read_bytes()
+        package_before = temp_project / "apm_modules" / PKG_A
+        assert package_before.is_dir()
 
         result_un = _run_apm(
             apm_binary_path,
             ["uninstall", PKG_A, "some/unknown-pkg-xyz789"],
             temp_project,
         )
-        assert result_un.returncode == 0, (
-            f"Partial-unknown uninstall failed:\nSTDOUT: {result_un.stdout}\nSTDERR: {result_un.stderr}"
-        )
+        assert result_un.returncode != 0
 
         combined = (result_un.stdout + result_un.stderr).lower()
-        assert "not found" in combined or "unknown" in combined or "warning" in combined, (
-            f"Expected a not-found warning for unknown package; output:\n{result_un.stdout}\n{result_un.stderr}"
-        )
-
-        manifest_after = _read_yaml(temp_project / "apm.yml")
-        apm_deps_after = manifest_after.get("dependencies", {}).get("apm") or []
-        assert "apm-sample-package" not in yaml.dump(apm_deps_after), (
-            f"Known package not removed when batched with unknown one: {apm_deps_after}"
-        )
+        assert "not found" in combined
+        assert "no changes were made" in combined
+        assert (temp_project / "apm.yml").read_bytes() == manifest_before
+        assert (temp_project / "apm.lock.yaml").read_bytes() == lock_before
+        assert package_before.is_dir()

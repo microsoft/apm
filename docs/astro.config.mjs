@@ -85,6 +85,9 @@ export default defineConfig({
 				baseUrl: 'https://github.com/microsoft/apm/edit/main/docs/',
 			},
 			lastUpdated: true,
+			components: {
+				Footer: './src/components/Footer.astro',
+			},
 			head: [
 				{
 					tag: 'meta',
@@ -173,9 +176,11 @@ export default defineConfig({
 						{ label: 'Run scripts', slug: 'consumer/run-scripts' },
 						{ label: 'Update and refresh', slug: 'consumer/update-and-refresh' },
 						{ label: 'Install MCP servers', slug: 'consumer/install-mcp-servers' },
+						{ label: 'Choosing an MCP registry', slug: 'consumer/choosing-an-mcp-registry' },
 						{ label: 'Install LSP servers', slug: 'consumer/install-lsp-servers' },
 						{ label: 'Authentication', slug: 'consumer/authentication' },
 						{ label: 'Private and org packages', slug: 'consumer/private-and-org-packages' },
+						{ label: 'Install Agent Plugins for Copilot', slug: 'consumer/copilot-agent-plugins' },
 						{ label: 'Deploy a local bundle', slug: 'consumer/deploy-a-bundle' },
 						{ label: 'Drift and secure-by-default', slug: 'consumer/drift-and-secure-by-default' },
 						{ label: 'Governance on the consumer ramp', slug: 'consumer/governance-on-the-consumer-ramp' },
@@ -185,6 +190,7 @@ export default defineConfig({
 					label: 'Author a package (Producer)',
 					items: [
 						{ label: 'Overview', slug: 'producer' },
+						{ label: 'Source vs installed', slug: 'producer/source-vs-installed' },
 						{
 							label: 'Author primitives',
 							items: [
@@ -256,7 +262,7 @@ export default defineConfig({
 						{ label: 'Microsoft 365 Copilot Cowork (Experimental)', slug: 'integrations/copilot-cowork' },
 						{ label: 'GitHub Copilot App workflows (Experimental)', slug: 'integrations/copilot-app' },
 						{ label: 'Canvas extensions (Experimental)', slug: 'integrations/canvas' },
-						{ label: 'Hermes Agent (Experimental)', slug: 'integrations/hermes' },
+						{ label: 'Hermes Agent', slug: 'integrations/hermes' },
 						{ label: 'AI runtime compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub rulesets', slug: 'integrations/github-rulesets' },
 					],
@@ -267,7 +273,7 @@ export default defineConfig({
 						{ label: 'Overview', slug: 'reference' },
 						{
 							label: 'Commands',
-							autogenerate: { directory: 'reference/cli' },
+							items: [{ autogenerate: { directory: 'reference/cli' } }],
 						},
 					],
 				},
@@ -278,6 +284,7 @@ export default defineConfig({
 						{ label: 'Lockfile spec', slug: 'reference/lockfile-spec' },
 						{ label: 'Policy schema', slug: 'reference/policy-schema' },
 						{ label: 'Targets matrix', slug: 'reference/targets-matrix' },
+						{ label: 'MCP variable compatibility', slug: 'reference/mcp-variable-compatibility' },
 						{ label: 'Primitive types', slug: 'reference/primitive-types' },
 						{ label: 'Package types', slug: 'reference/package-types' },
 						{ label: 'Baseline checks', slug: 'reference/baseline-checks' },
@@ -322,7 +329,7 @@ export default defineConfig({
 				},
 				{
 					label: 'Contributing',
-					autogenerate: { directory: 'contributing' },
+					items: [{ autogenerate: { directory: 'contributing' } }],
 				},
 			],
 		}),

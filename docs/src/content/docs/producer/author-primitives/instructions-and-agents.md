@@ -70,10 +70,13 @@ applyTo:
   - "**/*.py"
 ```
 
-When a YAML sequence contains multiple patterns, APM preserves the full
-sequence for targets whose native rule format supports multiple globs.
-Prefer the comma-separated string form when you want identical output
-across every target.
+When a YAML sequence contains multiple patterns, APM normalizes every
+non-null entry into the same comma-separated OR expression used by
+[distributed compilation](../../compile/) and target-native installation. Use a
+sequence when its source readability matters. To match a literal comma in a
+filename, escape it as `\,`. Cursor and Antigravity receive the escape inside
+their joined `globs` string but document no literal-comma matching; verify such
+patterns in your tool version.
 
 ```markdown
 ---
@@ -83,9 +86,13 @@ applyTo: "**/*.{css,scss},**/*.tsx"
 ```
 
 On Copilot the comma-list is preserved verbatim (Copilot splits it
-natively). On Claude, Cursor, Windsurf, Kiro, and Antigravity the list is
-expanded to a YAML array under `paths:` / `globs:` /
-`fileMatchPattern:`.
+natively). Other targets use their own native instruction format; the target
+matrix below records the generated shape.
+
+During distributed compilation, an explicitly scoped pattern may match files
+under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
 ### Body conventions
 
@@ -103,10 +110,11 @@ expanded to a YAML array under `paths:` / `globs:` /
 |---|---|---|
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
-| cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
+| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
+| cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
-| antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> no frontmatter (unconditional rule) |
+| antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (one quoted, comma-separated string, for example `"src/**, tests/**"`); missing `applyTo` -> `trigger: always_on` |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |
@@ -133,6 +141,14 @@ my-package/
 
 File names end in `.agent.md` and live under `.apm/agents/`.
 
+For own-project and Git-backed package installs, symlinked agent source
+files and directories (including `.apm/agents -> ../agents`) are skipped.
+`apm install` warns with the skipped source path. Use real files and
+directories under `.apm/agents/` or real `*.agent.md` files at the package
+root, then rerun `apm install`. Local-path dependencies (`./...` or `../...`)
+still work: contained symlinks are validated and copied as real files into
+`apm_modules/` before agent discovery.
+
 ### Frontmatter
 
 ```markdown
@@ -154,14 +170,55 @@ for...
 | `name` | recommended | Display name; defaults to filename stem |
 | `description` | yes | Used by Cascade and Copilot to decide when to surface the agent |
 | `model` | optional | Pinned model the harness should switch to when invoked |
+| `model_reasoning_effort` | optional | Native Codex reasoning effort, supplied as a string |
 | `tools` | optional | Whitelist of tools the persona may call |
 | `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
+| `user-invocable` | optional | `false` records that the agent is intended to be reachable programmatically only (for example via `handoffs:` or a subagent call). Defaults to `true`. `visibility: internal` is an accepted alias. APM preserves the metadata; picker exclusion applies only if the receiving harness supports it |
 
-`model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex receives a TOML translation. Windsurf, Kiro, and
-Gemini do not receive `.agent.md` files at all -- use skills for
-Windsurf or Kiro personas; Gemini CLI has no agents primitive.
+Set `user-invocable: false` (or the `visibility: internal` alias) when
+the agent is intended to be reachable programmatically only, for example
+via another agent's `handoffs:` or a subagent call, and not offered in a
+user-facing picker. APM only preserves that metadata. Exclusion from the
+agent picker, and programmatic-only reachability, take effect only when
+the receiving harness supports them. APM does not filter the picker
+itself. Verbatim targets (Copilot, Claude, Grok Build, Cursor, OpenCode)
+carry the field through unchanged. Codex and Kiro cannot represent it,
+so `apm install` emits a warning naming the agent instead of silently
+dropping it -- the APM source agent stays the authority for the preserved
+metadata.
+
+`model` and `tools` reach Copilot, Claude, Grok Build, Cursor, and OpenCode
+verbatim. Kiro receives `description`, `model`, and `tools` only;
+unknown frontmatter fields (including `name`) are stripped because
+Kiro derives agent identity from the deployed path, not from a `name`
+field. Tools are permission-bearing for Kiro: each value must be one
+of the supported capability tags (`read`, `write`, `shell`, `web`,
+`subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
+`*`). If any unsupported tag is present, the agent is not deployed at
+all -- APM fails closed. Kiro may warn and fall back if the specified
+`model` is unavailable; APM passes the value through without
+validation.
+
+Codex receives `name`, `description`, and the Markdown body as
+`developer_instructions`. Supplied string values for `model` and
+`model_reasoning_effort` become top-level keys in the generated agent TOML,
+as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
+Omitted fields remain absent; APM does not translate model names, choose
+defaults, or validate which models and effort values your Codex supports.
+Non-string values are dropped with a warning naming the field.
+
+Other frontmatter fields are dropped with a warning that APM does not
+translate them for Codex. This includes other native Codex settings and
+any `codex:` block; there is no namespaced or arbitrary passthrough.
+Remove unnecessary fields, or do not rely on their settings in the
+generated agent. APM still cannot preserve `tools` restrictions. When
+`tools` is present, `apm install` warns that the generated agent may
+inherit every project or session MCP server. Remove `tools` if
+unrestricted access is intentional; otherwise, do not use the
+generated agent with Codex. Windsurf and Gemini do not receive
+`.agent.md` files at all -- use skills for Windsurf personas; Gemini
+CLI has no agents primitive.
 
 OpenCode is the strictest of the verbatim targets: it requires
 `tools` as a `tool-name: boolean` **mapping** (not a list, not a
@@ -190,11 +247,13 @@ offending package and field so you can fix the source.
 |---|---|---|
 | copilot | `.github/agents/<name>.agent.md` | verbatim |
 | claude | `.claude/agents/<name>.md` | verbatim |
+| grok-build | `.grok/agents/<name>.md` | verbatim |
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
-| codex | `.codex/agents/<name>.toml` | YAML frontmatter -> TOML; body becomes `developer_instructions` |
+| codex | `.codex/agents/<name>.toml` | `name`, `description`, and supplied string `model` / `model_reasoning_effort` -> top-level TOML; body becomes `developer_instructions`; dropped metadata emits warnings |
+| kiro | `.kiro/agents/<relative-stem>.md` | `description`, `model`, `tools` kept; `name` and unknown fields stripped; identity from path; fail closed on unsupported tools (ref: [kiro.dev/docs/custom-agents](https://kiro.dev/docs/custom-agents/), accessed 2026-08-03) |
+| grok-build | `.grok/agents/<name>.md` | verbatim |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
-| kiro | not deployed | Kiro target v1 ships personas as skills, not `.agent.md` files |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 
 :::caution[Migration]

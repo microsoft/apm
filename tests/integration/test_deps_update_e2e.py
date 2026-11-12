@@ -25,6 +25,8 @@ pytestmark = pytest.mark.requires_github_token
 
 SAMPLE_REPO_URL = "microsoft/apm-sample-package"
 SAMPLE_GIT_URL = "https://github.com/microsoft/apm-sample-package.git"
+ASPIRE_REPO_URL = "github/awesome-copilot"
+ASPIRE_VIRTUAL_PATH = "skills/aspire"
 # Initial commit of microsoft/apm-sample-package (older than current main).
 OLD_SHA = "318a8439"
 NEWER_REF = "main"
@@ -104,6 +106,18 @@ def _get_locked_dep(lockfile, repo_url):
     return None
 
 
+def _get_locked_virtual_dep(lockfile, repo_url, virtual_path):
+    """Return the virtual lockfile entry for *repo_url* and *virtual_path*."""
+    if not lockfile or "dependencies" not in lockfile:
+        return None
+    deps = lockfile["dependencies"]
+    if isinstance(deps, list):
+        for entry in deps:
+            if entry.get("repo_url") == repo_url and entry.get("virtual_path") == virtual_path:
+                return entry
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Up1: `apm deps update` bumps SHA for all packages after a ref change
 # ---------------------------------------------------------------------------
@@ -176,6 +190,8 @@ def test_deps_update_single_package_selective(temp_project, apm_binary_path):
     lockfile1 = _read_lockfile(temp_project)
     dep_sample_before = _get_locked_dep(lockfile1, SAMPLE_REPO_URL)
     assert dep_sample_before is not None, "sample package not in initial lockfile"
+    dep_aspire_before = _get_locked_virtual_dep(lockfile1, ASPIRE_REPO_URL, ASPIRE_VIRTUAL_PATH)
+    assert dep_aspire_before is not None, "aspire package not in initial lockfile"
     sample_old_sha = dep_sample_before.get("resolved_commit")
 
     # Bump the sample package ref so a real update is possible.
@@ -200,6 +216,8 @@ def test_deps_update_single_package_selective(temp_project, apm_binary_path):
     lockfile2 = _read_lockfile(temp_project)
     dep_sample_after = _get_locked_dep(lockfile2, SAMPLE_REPO_URL)
     assert dep_sample_after is not None, "sample package missing after selective update"
+    dep_aspire_after = _get_locked_virtual_dep(lockfile2, ASPIRE_REPO_URL, ASPIRE_VIRTUAL_PATH)
+    assert dep_aspire_after is not None, "unselected aspire package missing after selective update"
     sample_new_sha = dep_sample_after.get("resolved_commit")
     assert sample_new_sha and sample_old_sha and sample_new_sha != sample_old_sha, (
         f"Selected package SHA did not change: {sample_old_sha} -> {sample_new_sha}"

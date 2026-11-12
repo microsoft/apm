@@ -15,14 +15,59 @@ so that silent deletion / rewording trips the suite.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
+from apm_cli.cache.url_normalize import normalize_repo_url
+from apm_cli.deps.git_remote_ops import (
+    RemoteRefParseError,
+    parse_ls_remote_output,
+    validate_ls_remote_tag_output,
+)
+from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+from apm_cli.deps.registry.semver import pick_best
+from apm_cli.deps.revision_pins import (
+    RevisionPinResolutionError,
+    RevisionPinResolutionResult,
+    RevisionPinSkip,
+    find_latest_annotated_tag,
+    package_name,
+    resolve_revision_pin_updates,
+)
+from apm_cli.deps.shared_clone_cache import SharedCloneCache
+from apm_cli.deps.tiered_ref_resolver import (
+    L0PerRunCache,
+    PerRunRefCache,
+    TieredRefResolver,
+    _repository_cache_identity,
+)
+from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+from apm_cli.utils.yaml_io import load_yaml
+from tests.integration.test_immutable_requirements_install import (
+    test_frozen_install_checks_short_pin_without_ref_discovery as _run_frozen_short_pin_contract,
+)
+from tests.integration.test_immutable_requirements_install import (
+    test_install_checks_every_immutable_requirement as _run_immutable_install_contract,
+)
+from tests.integration.test_install_subdir_dedup_e2e import (
+    test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
+)
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_json_fixture,
     load_schema,
 )
+from tests.unit.adopt.test_native_skill_collision import (
+    test_native_skill_preserves_unowned_directory as _native_skill_collision_contract,
+)
+from tests.unit.deps.test_immutable_requirement_conflicts import (
+    test_conflicting_commit_requirements_fail_with_both_chains as _run_immutable_chain_contract,
+)
+from tests.unit.install.test_dry_run_graph import _preview
+from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
+from tests.utils.local_package import LocalPackageFactory
 
 # --- req-rs-001..014 ---------------------------------------------------
 
@@ -36,12 +81,96 @@ def test_resolver_walks_dependency_graph_deterministically():
     )
 
 
+@pytest.mark.req("req-rs-001")
+def test_offline_preview_preserves_breadth_first_declaration_order(tmp_path: Path) -> None:
+    """The preview consumer preserves the existing resolution traversal contract."""
+    factory = LocalPackageFactory(tmp_path)
+    factory.create("left-child")
+    factory.create("right-child")
+    factory.create("left", dependencies=("../left-child",))
+    factory.create("right", dependencies=("../right-child",))
+    consumer = factory.create("consumer", dependencies=("../left", "../right"))
+    plan = _preview(consumer.root)
+    assert not plan.dependency_preview_errors
+    assert [dependency.local_path for dependency in plan.selected_apm_dependencies] == [
+        "../left",
+        "../right",
+        "../left-child",
+        "../right-child",
+    ]
+
+
+@pytest.mark.req("req-rs-001")
+@pytest.mark.parametrize("compatible", [False, True])
+@pytest.mark.parametrize("frozen", [False, True])
+def test_immutable_diamond_constraints_reach_install_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool, frozen: bool
+) -> None:
+    """Fail empty immutable intersections and accept proven equivalent refs."""
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, True, compatible, True, False)
+
+
+@pytest.mark.req("req-rs-010")
+@pytest.mark.parametrize("transitive", [False, True])
+def test_immutable_conflicts_name_ordered_constraint_chains(
+    tmp_path: Path, transitive: bool
+) -> None:
+    """Bind immutable conflict diagnostics to both complete ordered paths."""
+    _run_immutable_chain_contract(tmp_path, transitive, 4)
+
+
+@pytest.mark.req("req-lk-003")
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("compatible", [False, True])
+def test_frozen_short_pin_checks_recorded_commit_without_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool
+) -> None:
+    """Replay only a recorded commit that actually matches its short pin."""
+    _run_frozen_short_pin_contract(tmp_path, monkeypatch, compatible)
+
+
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("frozen", [False, True])
+def test_locked_literal_equivalence_requires_no_remote_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frozen: bool
+) -> None:
+    """Unchanged lock evidence survives a deleted remote tag."""
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, False, True, True, True)
+
+
 @pytest.mark.req("req-rs-002")
 def test_resolver_emits_lockfile_after_successful_resolution():
     assert_spec_contains(
         "MUST emit",
         "apm.lock.yaml",
     )
+
+
+@pytest.mark.req("req-rs-002")
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize("peeled_first", [False, True])
+def test_peeled_tag_identity_survives_shared_parser(peeled_first: bool) -> None:
+    """Both record orders preserve the peeled commit and annotated-only selection."""
+    tag_lines = [
+        f"{'a' * 40}\trefs/tags/v1.0.0",
+        f"{'b' * 40}\trefs/tags/v1.0.0^{{}}",
+    ]
+    if peeled_first:
+        tag_lines.reverse()
+    output = "\n".join(
+        [*tag_lines, f"{'c' * 40}\trefs/tags/v2.0.0", f"{'d' * 40}\trefs/heads/v3.0.0"]
+    )
+    refs = parse_ls_remote_output(output)
+
+    candidate = find_latest_annotated_tag(refs, package_name="tagged-package")
+
+    assert candidate.tag == "v1.0.0"
+    assert candidate.commit_sha == "b" * 40
+    assert {ref.name: ref.annotated for ref in refs} == {
+        "v1.0.0": True,
+        "v2.0.0": False,
+        "v3.0.0": False,
+    }
 
 
 @pytest.mark.req("req-rs-003")
@@ -129,6 +258,22 @@ def test_resolver_records_source_url_in_lockfile():
     )
 
 
+@pytest.mark.req("req-rs-011")
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [("1.7.0", "1.7.0"), ("=1.7.0", "1.7.0"), ("^1.7.0", "1.8.0")],
+)
+def test_registry_refresh_preserves_constraint_after_outdated(
+    tmp_path: Path, selector: str, expected: str
+) -> None:
+    """Bind req-rs-011's constraint-bound selection clause to real archive resolution."""
+    _RegistryResolverContract().test_refresh_keeps_constraint_even_when_outdated_reports_newer(
+        tmp_path, selector, expected
+    )
+    installed_manifest = load_yaml(tmp_path / "package" / "apm.yml")
+    assert installed_manifest["version"] == expected
+
+
 @pytest.mark.req("req-rs-012")
 def test_resolver_records_resolved_ref_in_lockfile():
     assert_spec_contains(
@@ -145,7 +290,7 @@ def test_resolver_fails_closed_on_ambiguous_resolution():
     )
     # Schema enum pin (round-3 fold): the manifest schema MUST admit
     # only `intersection-pick` in v0.1; `nest` is reserved for v0.2.
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     enum = schema["$defs"]["depsBlock"]["properties"]["conflict_resolution"]["enum"]
     assert enum == ["intersection-pick"], (
         f"manifest schema conflict_resolution enum MUST be exactly "
@@ -160,6 +305,35 @@ def test_resolver_honours_prerelease_inclusion_rules():
     assert pr, "oracle MUST exercise pre-release / build-metadata cases"
 
 
+# Oracle cases whose range grammar (partial versions, comma AND, `||`
+# OR, X-ranges) the registry parse-time gate `is_semver_range` does not
+# accept yet. Widening that shared gate is outside the #3466 scope.
+_REGISTRY_GRAMMAR_GAPS = frozenset({"tilde-0_x", "comma-and", "or-union"})
+
+
+def _registry_oracle_cases(*, grammar_gaps: bool) -> list:
+    oracle = load_json_fixture("resolution", "semver-dialect.json")
+    return [
+        pytest.param(case, id=case["id"])
+        for case in oracle["cases"]
+        if not case["prerelease_optin"] and (case["id"] in _REGISTRY_GRAMMAR_GAPS) == grammar_gaps
+    ]
+
+
+@pytest.mark.req("req-rs-007")
+@pytest.mark.req("req-rs-014")
+@pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=False))
+def test_registry_picker_matches_semver_dialect_oracle(case):
+    """Registry version selection honours section 7.3.1 pre-release opt-in."""
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
+
+
+@pytest.mark.xfail(strict=True, reason="registry range grammar does not accept this form yet")
+@pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=True))
+def test_registry_picker_range_grammar_gaps(case):
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
+
+
 @pytest.mark.req("req-rs-015")
 def test_resolver_replays_locked_commit_without_network():
     """A non-update install MUST replay a recorded `resolved_commit`
@@ -168,6 +342,288 @@ def test_resolver_replays_locked_commit_without_network():
         "non-update install",
         "WITHOUT issuing a network ref-resolution",
         "network-free at the resolution step",
+    )
+
+
+@pytest.mark.req("req-rs-016")
+def test_resolver_cache_preserves_complete_repository_identity(tmp_path: Path):
+    """Distinct nested repositories stay separate; identical identities reuse."""
+    cache = SharedCloneCache(base_dir=tmp_path)
+    clone_count = 0
+
+    def clone_fn(target: Path) -> None:
+        nonlocal clone_count
+        clone_count += 1
+        target.mkdir(parents=True)
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+
+    repo_a = "https://gitlab.com/acme/platform/team/repo-a"
+    repo_b = "https://gitlab.com/acme/platform/team/repo-b"
+    path_a = cache.get_or_clone(repo_a, "main", clone_fn)
+    path_b = cache.get_or_clone(repo_b, "main", clone_fn)
+    path_a_reused = cache.get_or_clone(repo_a, "main", clone_fn)
+
+    assert path_a != path_b
+    assert path_a_reused == path_a
+    assert clone_count == 2
+    cache.cleanup()
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_normalizes_safe_syntax_dimensions(tmp_path: Path):
+    """Default ports, credentials, suffixes, query, and fragments normalize safely."""
+    cache = SharedCloneCache(base_dir=tmp_path)
+    clone_count = 0
+
+    def clone_fn(target: Path) -> None:
+        nonlocal clone_count
+        clone_count += 1
+        target.mkdir(parents=True)
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+
+    equivalent_urls = [
+        "https://oauth2:first@gitlab.com/acme/platform/team/repo-a",
+        "https://oauth2:second@GITLAB.COM:443/acme/platform/team/repo-a.git/?q=1#frag",
+        "https://oauth2:third@gitlab.com/acme/platform/team/repo-a.git///",
+    ]
+    paths = [cache.get_or_clone(url, "main", clone_fn) for url in equivalent_urls]
+
+    assert len(set(paths)) == 1
+    assert clone_count == 1
+    assert len({normalize_repo_url(url) for url in equivalent_urls}) == 1
+    cache.cleanup()
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_preserves_nondefault_port_and_path_case(tmp_path: Path):
+    """A non-default port or case-sensitive path difference remains distinct."""
+    cache = SharedCloneCache(base_dir=tmp_path)
+    clone_count = 0
+
+    def clone_fn(target: Path) -> None:
+        nonlocal clone_count
+        clone_count += 1
+        target.mkdir(parents=True)
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+
+    urls = [
+        "https://git.corp:8443/Group/Repo",
+        "https://git.corp/Group/Repo",
+        "https://git.corp/group/repo",
+    ]
+    paths = [cache.get_or_clone(url, "main", clone_fn) for url in urls]
+
+    assert len(set(paths)) == 3
+    assert clone_count == 3
+    cache.cleanup()
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_preserves_literal_path_distinctions():
+    """Percent encoding, dot segments, and repeated slashes do not alias."""
+    canonical = "https://git.corp/acme/platform/team/repo-a"
+    variants = [
+        "https://git.corp/acme/platform/team/repo%2Da",
+        "https://git.corp/acme/platform/team/./repo-a",
+        "https://git.corp/acme/platform//team/repo-a",
+    ]
+
+    assert all(normalize_repo_url(variant) != normalize_repo_url(canonical) for variant in variants)
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_survives_full_install_and_persistent_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Bind the real install/cache/lock/deployment contract to req-rs-016."""
+    _run_nested_install_contract(tmp_path, monkeypatch)
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_isolates_l0_cache_across_hosts():
+    """The in-memory ref cache includes authority hostname in identity."""
+    cache = PerRunRefCache()
+    github_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="github.com",
+        reference="main",
+    )
+    gitlab_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    cache.put(_repository_cache_identity(github_dep), "main", "a" * 40)
+
+    assert L0PerRunCache(cache=cache).try_resolve(gitlab_dep, "main") is None
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_isolates_same_host_nested_repositories_through_resolver():
+    """Real resolver dispatch stores distinct SHAs for sibling nested repositories."""
+    cache = PerRunRefCache()
+
+    class SourceTier:
+        name = "source"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def try_resolve(self, dep_ref: DependencyReference, _ref: str) -> str:
+            self.calls.append(dep_ref.repo_url)
+            return "a" * 40 if dep_ref.repo_url.endswith("repo-a") else "b" * 40
+
+    source = SourceTier()
+    legacy = type("UnusedLegacy", (), {"resolve_full": lambda *_args: None})()
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), source],
+        cache=cache,
+        legacy=legacy,
+    )
+    dep_a = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    dep_b = DependencyReference(
+        repo_url="acme/platform/team/repo-b",
+        host="gitlab.com",
+        reference="main",
+    )
+
+    first_a = resolver.resolve(dep_a)
+    first_b = resolver.resolve(dep_b)
+    warm_a = resolver.resolve(dep_a)
+
+    assert first_a.resolved_commit == "a" * 40
+    assert first_b.resolved_commit == "b" * 40
+    assert warm_a.resolved_commit == "a" * 40
+    assert source.calls == [dep_a.repo_url, dep_b.repo_url]
+    assert cache.size() == 2
+
+
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize(
+    "tag",
+    ["v1.2.3", "revision-pin--v1.2.3", "revision-pin-v1.2.3", "1.2.3"],
+)
+def test_revision_pin_update_accepts_each_normative_tag_form(tag: str) -> None:
+    """Every req-rs-017 tag form maps to the same semantic version."""
+    candidate = find_latest_annotated_tag(
+        [RemoteRef(tag, GitReferenceType.TAG, "b" * 40, annotated=True)],
+        package_name="revision-pin",
+    )
+
+    assert candidate.tag == tag
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_selects_highest_stable_tag_deterministically() -> None:
+    """Selection excludes prerelease/lightweight refs and breaks ties by name."""
+    refs = [
+        RemoteRef("v0.9.0", GitReferenceType.TAG, "b" * 40, annotated=True),
+        RemoteRef("v1.0.0+alpha", GitReferenceType.TAG, "c" * 40, annotated=True),
+        RemoteRef("v1.0.0+zeta", GitReferenceType.TAG, "d" * 40, annotated=True),
+        RemoteRef("v2.0.0-rc.1", GitReferenceType.TAG, "e" * 40, annotated=True),
+        RemoteRef("v3.0.0", GitReferenceType.TAG, "f" * 40, annotated=False),
+        RemoteRef("v4.0.0", GitReferenceType.BRANCH, "1" * 40),
+    ]
+
+    forward = find_latest_annotated_tag(refs, package_name="revision-pin")
+    reverse = find_latest_annotated_tag(reversed(refs), package_name="revision-pin")
+
+    assert forward == reverse
+    assert forward.tag == "v1.0.0+zeta"
+    assert forward.commit_sha == "d" * 40
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_derives_repository_and_virtual_names() -> None:
+    """Repository suffixes and virtual paths produce deterministic tag names."""
+    repository = DependencyReference(repo_url="acme/revision-pin.git")
+    virtual = DependencyReference(
+        repo_url="acme/mono",
+        virtual_path="packages/revision-pin",
+        is_virtual=True,
+    )
+
+    assert package_name(repository) == "revision-pin"
+    assert package_name(virtual) == "revision-pin"
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_retains_missing_release() -> None:
+    """No eligible tag is an entry-local retained-pin result."""
+
+    class TagDownloader:
+        def __init__(self, refs: list[RemoteRef]) -> None:
+            self.refs = refs
+
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            return self.refs
+
+    old_sha = "a" * 40
+    dependency = DependencyReference(
+        repo_url="acme/revision-pin",
+        host="github.com",
+        reference=old_sha,
+    )
+
+    retained = resolve_revision_pin_updates([dependency], TagDownloader([]), max_workers=1)
+    assert retained == RevisionPinResolutionResult(
+        skips=(RevisionPinSkip("acme/revision-pin", old_sha, "acme/revision-pin"),),
+    )
+
+
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize(
+    "output",
+    [
+        "\n",
+        f"{'0' * 40}\trefs/tags/v2.0.0",
+        f"{'a' * 40}\trefs/tags/bad name",
+        f"{'a' * 40}\trefs/tags/v2.0.0 ",
+        f"{'a' * 40}\trefs/tags/v2.0.0\n{'a' * 40}\trefs/tags/v2.0.0",
+        f"{'a' * 40}\trefs/tags/v2.0.0^{{}}",
+    ],
+)
+def test_revision_pin_update_rejects_malformed_tag_records(output: str) -> None:
+    """Every listed malformed-record class fails before candidate selection."""
+    with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+        validate_ls_remote_tag_output(output)
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_wraps_transport_parse_failure() -> None:
+    """Malformed remote data cannot become a retained-pin outcome."""
+
+    class BrokenDownloader:
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+
+    dependency = DependencyReference(
+        repo_url="acme/revision-pin",
+        host="github.com",
+        reference="a" * 40,
+    )
+
+    with pytest.raises(RevisionPinResolutionError, match="Malformed remote tag data"):
+        resolve_revision_pin_updates([dependency], BrokenDownloader(), max_workers=1)
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_projection_and_scope_are_normative() -> None:
+    """The spec pins persistence, replay, scope, and atomic failure semantics."""
+    assert_spec_contains(
+        "resolved_ref",
+        "resolved_commit",
+        "resolved_tag",
+        "does not become a trust anchor",
+        "MUST replay the full commit",
+        "package manifests MUST NOT be rewritten",
+        "aborts the requested update scope",
+        "non-commit object is also a fatal outcome",
     )
 
 
@@ -195,6 +651,46 @@ def test_consumer_rejects_primitive_collisions():
     assert_spec_contains(
         "first declared",
         "MUST NOT replace",
+    )
+
+
+@pytest.mark.req("req-pr-002")
+def test_local_native_skill_overrides_dependency_and_reports_conflict(tmp_path: Path) -> None:
+    """Bind existing local-priority semantics to native skill collision admission."""
+    _native_skill_collision_contract(tmp_path, managed=None)
+
+
+@pytest.mark.req("req-pr-007")
+def test_root_declared_plugin_component_excludes_generated_staging_tree(tmp_path: Path):
+    """A root declaration never re-copies its consumer-generated staging tree."""
+    plugin_root = tmp_path / "plugin"
+    staging_root = plugin_root / ".apm"
+    plugin_root.mkdir()
+    staging_root.mkdir()
+    (plugin_root / "agent.md").write_text("# Agent\n", encoding="ascii")
+    (staging_root / "generated.md").write_text("# Generated\n", encoding="ascii")
+
+    manifest = {"name": "plugin", "agents": ["./"]}
+    _map_plugin_artifacts(plugin_root, staging_root, manifest)
+    first_tree = {
+        path.relative_to(staging_root).as_posix(): path.read_bytes()
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    }
+    _map_plugin_artifacts(plugin_root, staging_root, manifest)
+    second_tree = {
+        path.relative_to(staging_root).as_posix(): path.read_bytes()
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    }
+
+    assert "agents/.apm/generated.md" not in first_tree
+    assert first_tree == second_tree
+    assert_spec_contains(
+        "copying a declared Plugin collection component source",
+        "canonicalize the\nnon-symlink source root",
+        "materialization root created by the current operation",
+        "MUST prune every such staging\nsubtree before traversing the source",
     )
 
 

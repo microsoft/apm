@@ -12,6 +12,7 @@ import builtins
 from collections.abc import Callable
 from typing import Any
 
+from apm_cli.install import registry_wiring
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
 from apm_cli.utils.github_host import build_ssh_url
 
@@ -138,13 +139,13 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     return None
 
 
-def get_existing_skill_subset(
+def get_existing_dep_ref_for_identity(
     current_deps: builtins.list,
     identity: str,
     *,
     dependency_reference_cls: Any,
-) -> builtins.list[str] | None:
-    """Return the persisted ``skills:`` list for *identity*, or None."""
+) -> Any | None:
+    """Return the parsed existing manifest entry matching *identity*, or None."""
     for dep_entry in current_deps:
         try:
             if isinstance(dep_entry, builtins.str):
@@ -156,9 +157,58 @@ def get_existing_skill_subset(
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if existing_ref.get_identity() == identity:
-            subset = getattr(existing_ref, "skill_subset", None)
-            return list(subset) if subset else None
+            return existing_ref
     return None
+
+
+def propagate_existing_registry_source(
+    dep_ref: Any,
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+    logger: Any | None = None,
+) -> bool:
+    """Carry an existing registry-sourced entry's source onto a fresh dep_ref.
+
+    A bare CLI positional (e.g. ``owner/repo#1.0.0``) always parses with
+    ``source=None``/``"git"`` -- the string parser has no registry
+    awareness. When *identity* is already declared as a registry
+    dependency in apm.yml, propagate that onto *dep_ref* in place so
+    downstream serialization (``to_apm_yml_entry``) doesn't silently
+    convert it to a git dependency.
+
+    Returns True when the existing entry was registry-sourced, so the
+    caller can also short-circuit its probe-skip decision the same way.
+    """
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    is_registry = existing_ref is not None and getattr(existing_ref, "source", None) == "registry"
+    if is_registry:
+        dep_ref.source = "registry"
+        dep_ref.registry_name = existing_ref.registry_name
+        if logger:
+            logger.verbose_detail(
+                f"[i] {identity}: registry source propagated from existing manifest entry"
+            )
+    return is_registry
+
+
+def get_existing_skill_subset(
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str] | None:
+    """Return the persisted ``skills:`` list for *identity*, or None."""
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing_ref is None:
+        return None
+    subset = getattr(existing_ref, "skill_subset", None)
+    return list(subset) if subset else None
 
 
 def normalize_and_merge_skill_subset(
@@ -302,11 +352,33 @@ def update_existing_dependency_entry_if_needed(
     dep_ref: Any,
     identity: str,
     dependency_reference_cls: Any,
+    default_registry: str | None = None,
     logger: Any = None,
 ) -> bool:
-    """Rewrite an existing manifest dep when the requested ref changed."""
+    """Apply explicit reference, selection or HTTPS-upgrade intent."""
+    requested_entry = apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry())
+    https_upgrade = False
+    if already_in_deps and getattr(dep_ref, "explicit_scheme", None) == "https":
+        existing_ref = get_existing_dep_ref_for_identity(
+            current_deps, identity, dependency_reference_cls=dependency_reference_cls
+        )
+        if existing_ref is not None and getattr(existing_ref, "is_insecure", False) is True:
+            https_upgrade = True
+            if canonical not in apm_yml_entries:
+                requested_entry = existing_ref.to_apm_yml_entry()
+                requested_entry.update(dependency_reference_to_yaml_entry(existing_ref))
+                if dep_ref.reference:
+                    requested_entry["ref"] = dep_ref.reference
+            elif isinstance(requested_entry, str):
+                requested_entry = dependency_reference_to_yaml_entry(dep_ref)
+            else:
+                requested_entry = dict(requested_entry)
+            requested_entry["git"] = dep_ref.to_github_url()
+            requested_entry.pop("allow_insecure", None)
+
     should_update = already_in_deps and (
-        canonical in apm_yml_entries
+        https_upgrade
+        or canonical in apm_yml_entries
         or (
             dep_ref.reference
             and manifest_has_different_entry_for_identity(
@@ -318,28 +390,61 @@ def update_existing_dependency_entry_if_needed(
         )
     )
     if should_update:
-        merge_structured_entry_into_current_deps(
+        return merge_structured_entry_into_current_deps(
             current_deps,
-            apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry()),
+            requested_entry,
             identity,
             canonical,
             dependency_reference_cls=dependency_reference_cls,
+            default_registry=default_registry,
             logger=logger,
         )
-    return should_update
+    return False
+
+
+def try_update_existing_dependency_entry(
+    current_deps: builtins.list,
+    *,
+    already_in_deps: bool,
+    apm_yml_entries: dict,
+    canonical: str,
+    dep_ref: Any,
+    identity: str,
+    dependency_reference_cls: Any,
+    default_registry: str | None = None,
+    logger: Any = None,
+) -> tuple[bool, str | None]:
+    """Like update_existing_dependency_entry_if_needed, but returns
+    (updated, error) instead of raising, so callers can report a refused
+    registry-to-git conversion as an ordinary invalid-package outcome."""
+    try:
+        updated = update_existing_dependency_entry_if_needed(
+            current_deps,
+            already_in_deps=already_in_deps,
+            apm_yml_entries=apm_yml_entries,
+            canonical=canonical,
+            dep_ref=dep_ref,
+            identity=identity,
+            dependency_reference_cls=dependency_reference_cls,
+            default_registry=default_registry,
+            logger=logger,
+        )
+    except ValueError as e:
+        return False, str(e)
+    return updated, None
 
 
 def merge_structured_entry_into_current_deps(
     current_deps: builtins.list,
-    structured_entry: dict,
+    structured_entry: str | dict,
     identity: str,
     canonical: str,
     *,
     dependency_reference_cls: Any,
+    default_registry: str | None = None,
     logger: Any = None,
-) -> None:
-    """Replace or append *structured_entry* in *current_deps* by *identity*."""
-    replaced = False
+) -> bool:
+    """Replace by identity only when effective manifest intent changes."""
     for idx, dep_entry in enumerate(current_deps):
         try:
             if isinstance(dep_entry, builtins.str):
@@ -351,15 +456,49 @@ def merge_structured_entry_into_current_deps(
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if existing_ref.get_identity() == identity:
+            if getattr(existing_ref, "source", None) == "registry" and not (
+                isinstance(structured_entry, dict)
+                and ("id" in structured_entry or "registry" in structured_entry)
+            ):
+                raise ValueError(
+                    f"'{identity}' is already declared as a registry dependency; "
+                    f"refusing to silently convert it to a git dependency. Use the "
+                    f"object form ('- id: ...' / '- registry: ...') to change its "
+                    f"version, or an explicit '- git:' entry to intentionally "
+                    f"switch resolvers."
+                )
+            requested_ref = (
+                dependency_reference_cls.parse(structured_entry)
+                if isinstance(structured_entry, str)
+                else dependency_reference_cls.parse_from_dict(structured_entry)
+            )
+            requires_explicit_path = (
+                isinstance(structured_entry, dict)
+                and "git" in structured_entry
+                and "path" in structured_entry
+            )
+            has_explicit_path = (
+                isinstance(dep_entry, dict) and "git" in dep_entry and "path" in dep_entry
+            )
+            # Flattened references cannot preserve a probed repository boundary.
+            if (
+                existing_ref.to_apm_yml_entry() == requested_ref.to_apm_yml_entry()
+                and existing_ref.repo_url == requested_ref.repo_url
+                and existing_ref.virtual_path == requested_ref.virtual_path
+                and existing_ref.alias == requested_ref.alias
+                and registry_wiring.should_skip_github_probe_for_dep(existing_ref, default_registry)
+                == registry_wiring.should_skip_github_probe_for_dep(requested_ref, default_registry)
+                and (not requires_explicit_path or has_explicit_path)
+            ):
+                return False
             current_deps[idx] = structured_entry
-            replaced = True
             if logger:
                 logger.verbose_detail(
-                    f"Updated existing dependency entry to structured git+path form: {canonical}"
+                    f"Updated existing dependency entry to structured form: {canonical}"
                 )
-            break
-    if not replaced:
-        current_deps.append(structured_entry)
+            return True
+    current_deps.append(structured_entry)
+    return True
 
 
 def persist_dependency_list_if_changed(

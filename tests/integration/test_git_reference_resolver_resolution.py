@@ -7,6 +7,7 @@ real control flow.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,7 @@ def _make_host() -> MagicMock:
     host.git_env = {"GIT_TERMINAL_PROMPT": "0"}
     host.auth_resolver = MagicMock()
     host.auth_resolver._build_git_env.return_value = {"AUTH": "bearer"}
+    host.auth_resolver.git_env_for_context.return_value = host.git_env
     host.auth_resolver.execute_with_bearer_fallback.side_effect = (
         lambda dep_ref, primary, bearer, is_auth_failure: MagicMock(
             outcome=primary(),
@@ -110,6 +112,7 @@ class TestListRemoteRefs:
             auth_scheme="bearer",
             git_env={"BEARER": "1"},
         )
+        host.auth_resolver.git_env_for_context.return_value = {"BEARER": "1"}
         host._parse_ls_remote_output.return_value = [MagicMock()]
         mock_git = MagicMock()
         mock_git.ls_remote.return_value = "c" * 40 + "\trefs/heads/main\n"
@@ -182,6 +185,7 @@ class TestListRemoteRefs:
             "jwt-token",
             scheme="bearer",
             host_kind="ado",
+            base_env=host.git_env,
         )
 
     def test_ado_without_token_skips_bearer_fallback(self) -> None:
@@ -355,9 +359,12 @@ class TestResolveCommitShaForRef:
 
         assert mock_backend.call_args.kwargs["fallback_host"] == "github.com"
 
-    def test_auth_resolver_failure_still_attempts_request_without_token(self) -> None:
+    def test_public_github_attempts_request_without_token(self) -> None:
         host = _make_host()
-        host.auth_resolver.resolve.side_effect = RuntimeError("no token")
+        host.auth_resolver.uses_public_github_anonymous_first.return_value = True
+        host.auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: (
+            operation(None, {})
+        )
         host._resilient_get.return_value = MagicMock(status_code=200, text="b" * 40)
         backend = MagicMock()
         backend.build_commits_api_url.return_value = (
@@ -369,6 +376,7 @@ class TestResolveCommitShaForRef:
 
         assert result == "b" * 40
         assert "Authorization" not in host._resilient_get.call_args.kwargs["headers"]
+        host.auth_resolver.resolve.assert_not_called()
 
     def test_success_returns_lowercased_sha_and_authorization_header(self) -> None:
         host = _make_host()
@@ -496,6 +504,10 @@ class TestResolve:
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
             ),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                return_value="b" * 40,
+            ),
             patch("apm_cli.deps.github_downloader._rmtree") as mock_rmtree,
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -541,6 +553,10 @@ class TestResolve:
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
             ),
+            patch(
+                "apm_cli.utils.git_env.git_worktree_head",
+                return_value="c" * 40,
+            ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -568,6 +584,14 @@ class TestResolve:
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
             ),
+            patch(
+                "apm_cli.utils.git_env.git_worktree_head",
+                return_value="d" * 40,
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_current_branch",
+                return_value="develop",
+            ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -591,6 +615,10 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                return_value="e" * 40,
             ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
@@ -616,6 +644,13 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                side_effect=[
+                    subprocess.CalledProcessError(1, "git"),
+                    "f" * 40,
+                ],
             ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from tests.integration import test_audit_primitive_contract as audit_contract
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     fixture_path,
@@ -12,6 +15,208 @@ from tests.spec_conformance._helpers import (
     validate_against,
     waive,
 )
+
+audit_project = audit_contract.project
+
+
+@pytest.mark.req("req-pl-020")
+@pytest.mark.parametrize("tracked", [False, True])
+def test_static_user_scope_refuses_automatic_strip_in_real_cli(audit_project, tracked):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.security.file_scanner import scan_project_result
+
+    home = Path.home()
+    workspace = home / ".apm"
+    workspace.mkdir(exist_ok=True)
+    (workspace / "apm.yml").write_text("name: user-audit\nversion: 1.0.0\ntarget: copilot\n")
+    relative = ".copilot/instructions/user-owned.instructions.md"
+    prompt = home / relative
+    prompt.parent.mkdir(parents=True, exist_ok=True)
+    prompt.write_text("user-owned \u202e instructions")
+    LockFile(local_deployed_files=[relative] if tracked else []).write(workspace / "apm.lock.yaml")
+    scan = scan_project_result(workspace)
+    assert scan.inventory and all(not entry.strippable for entry in scan.inventory)
+    assert scan.protected_files == frozenset({relative})
+    assert scan.inventory[0].tracked is tracked
+    paths = [prompt, workspace / "apm.yml", workspace / "apm.lock.yaml"]
+    before = {path: path.read_bytes() for path in paths}
+    result = subprocess.run(
+        [sys.executable, "-m", "apm_cli.cli", "audit", "--strip"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert relative in result.stdout
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+@pytest.mark.req("req-pl-019")
+@pytest.mark.parametrize("ci_mode", [False, True])
+@pytest.mark.parametrize("output_format", ["json", "sarif", "text"])
+@pytest.mark.parametrize("dirty_index", [0, 1])
+def test_native_findings_identify_only_the_offending_field(
+    audit_project, ci_mode, output_format, dirty_index
+):
+    import json
+    from urllib.parse import unquote, urlparse
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    native = audit_project / ".claude/settings.json"
+    native.parent.mkdir()
+    native.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "prompt",
+                                    "prompt": "\u202e" if i == dirty_index else "Clean",
+                                }
+                                for i in range(2)
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    expected = f"/hooks/Stop/0/hooks/{dirty_index}/prompt"
+    args = ["audit", "--no-drift", "--format", output_format]
+    if ci_mode:
+        args += ["--ci", "--no-policy", "--no-fail-fast"]
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 1, result.output
+    if output_format == "text":
+        assert expected in result.output
+        if ci_mode:
+            assert f"unicode: .claude/settings.json{expected}" in " ".join(result.output.split())
+        return
+    report = json.loads(result.output)
+    if output_format == "json":
+        if ci_mode:
+            check = next(c for c in report["checks"] if c["name"] == "content-integrity")
+            findings = check["content_findings"]
+            assert len(check["primitive_coverage"]) == 2
+        else:
+            findings = report["findings"]
+        assert len(findings) == 1
+        assert findings[0]["pointer"] == expected
+        assert findings[0]["file"] == ".claude/settings.json"
+        assert findings[0]["coordinate_space"] == "decoded-prompt"
+        assert "line" not in findings[0] and "column" not in findings[0]
+    else:
+        findings = [f for f in report["runs"][0]["results"] if "pointer" in f.get("properties", {})]
+        assert len(findings) == 1
+        assert findings[0]["properties"]["pointer"] == expected
+        location = findings[0]["locations"][0]["physicalLocation"]
+        assert (
+            unquote(urlparse(location["artifactLocation"]["uri"]).path) == ".claude/settings.json"
+        )
+        assert "region" not in location
+
+
+@pytest.mark.req("req-pl-019")
+@pytest.mark.parametrize("ci_mode", [False, True])
+def test_deployed_prompt_applicability_and_incomplete_exit(audit_project, ci_mode):
+    import json
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.security.file_scanner import scan_project_result
+
+    root = audit_project
+    native = root / ".claude/settings.json"
+    native.parent.mkdir()
+    marker = root / "HOOK_MUST_NOT_RUN"
+    command = f"touch {marker}"
+    native.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": command + "\u202e"},
+                                {"type": "prompt", "prompt": "Check \u202e"},
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    skill = root / ".claude/skills/manual/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("Review \u202e")
+    report = scan_project_result(root)
+    assert set(report.findings_by_file) == {
+        ".claude/settings.json",
+        ".claude/skills/manual/SKILL.md",
+    }
+    assert {entry.status for entry in report.inventory} == {"checked", "not-applicable"}
+    assert all(not entry.tracked for entry in report.inventory)
+    assert not marker.exists()
+    native.write_text('{"hooks":')
+    before = native.read_bytes()
+    args = ["audit", "--no-drift", "--format", "json"]
+    if ci_mode:
+        args += ["--ci", "--no-policy", "--no-fail-fast"]
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 1, result.output
+    assert "incomplete" in result.output
+    assert native.read_bytes() == before
+    assert not marker.exists()
+
+
+@pytest.mark.req("req-pl-020")
+def test_deployed_prompt_protected_remediation_is_atomic(audit_project):
+    import json
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.security.file_scanner import scan_project_result
+
+    root = audit_project
+    settings = root / ".claude/settings.json"
+    settings.parent.mkdir()
+    settings.write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "prompt", "prompt": "\u202e"}]}]}})
+    )
+    skill = root / ".claude/skills/manual/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("\u202e")
+    outside = root.parent / "outside.md"
+    outside.write_text("\u202e")
+    symlink = root / ".claude/rules/linked.md"
+    symlink.parent.mkdir()
+    symlink.symlink_to(outside)
+    transcript = root / ".claude/transcripts/unrelated.md"
+    transcript.parent.mkdir()
+    transcript.write_text("\u202e")
+    scanned = scan_project_result(root)
+    assert scanned.protected_files == frozenset({".claude/settings.json"})
+    assert ".claude/rules/linked.md" not in scanned.scanned_files
+    assert ".claude/transcripts/unrelated.md" not in scanned.scanned_files
+    paths = [settings, skill, outside, transcript, root / "apm.yml", root / "apm.lock.yaml"]
+    before = {p: p.read_bytes() for p in paths}
+    result = CliRunner().invoke(cli, ["audit", "--strip"])
+    assert result.exit_code == 1, result.output
+    assert "does not rewrite native configuration" in " ".join(result.output.split())
+    assert {p: p.read_bytes() for p in paths} == before
+    assert symlink.is_symlink()
 
 
 @pytest.mark.req("req-pl-001")
@@ -119,11 +324,155 @@ def test_policy_provides_default_allow_list_shape():
     assert "allow" in deps and deps["allow"]["oneOf"][0]["type"] == "array"
 
 
+@pytest.mark.req("req-pl-011")
+def test_policy_gitlab_discovery_provider_is_a_distinct_convention():
+    """req-pl-011: discovery is a pluggable, per-host extension point.
+
+    The spec names `gitlab-project-yml` as an example additional provider
+    (Section 6.1.1) alongside the registered `github-owner-dotgithub`
+    default, and requires that "a consumer MUST NOT hard-code a
+    host-specific discovery convention as the sole discovery path." GitLab
+    rejects project paths starting with `.` or `_`, so it cannot reuse the
+    GitHub-default candidate conventions -- it needs (and has) its own
+    valid GitLab project convention. GitLab and ADO intentionally share the
+    ``apm-policy`` leaf name while resolving it under different coordinates.
+    """
+    from apm_cli.policy.discovery import _policy_repo_candidates
+
+    github_candidates = _policy_repo_candidates("github.com")
+    gitlab_candidates = _policy_repo_candidates("gitlab.com")
+
+    assert gitlab_candidates == ("apm-policy",)
+    assert gitlab_candidates != github_candidates
+    assert all(not name.startswith((".", "_")) for name in gitlab_candidates)
+    assert_spec_contains("gitlab-project-yml")
+
+
 @pytest.mark.req("req-pl-012")
 def test_policy_provides_default_deny_list_shape():
     schema = load_schema("policy-v0.1.schema.json")
     deps = schema["properties"]["dependencies"]["properties"]
     assert "deny" in deps and deps["deny"]["oneOf"][0]["type"] == "array"
+
+
+@pytest.mark.req("req-pl-018")
+def test_policy_identity_casing_matches_dependency_source_semantics():
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.matcher import check_mcp_allowed, first_matching_pattern
+    from apm_cli.policy.policy_checks import (
+        _check_dependency_allowlist,
+        _check_dependency_denylist,
+        _check_registry_source,
+        _check_required_package_version,
+        _check_required_packages,
+    )
+    from apm_cli.policy.schema import (
+        DependencyPolicy,
+        McpPolicy,
+        RegistrySourcePolicy,
+    )
+
+    github_dep = DependencyReference.parse("DevExpGbb/Secure-Baseline/Packages/My-Skill")
+    matching = DependencyPolicy(
+        allow=("DevExpGbb/**",),
+        require=("DevExpGbb/Secure-Baseline/Packages/My-Skill",),
+    )
+    denied = DependencyPolicy(
+        allow=("DevExpGbb/**",),
+        deny=("devexpgbb/**",),
+    )
+    wrong_virtual_case = DependencyPolicy(allow=("devexpgbb/secure-baseline/packages/**",))
+    exact_virtual_case = DependencyPolicy(allow=("devexpgbb/secure-baseline/Packages/**",))
+
+    assert _check_dependency_allowlist([github_dep], matching).passed
+    assert _check_required_packages([github_dep], matching).passed
+    assert not _check_dependency_denylist([github_dep], denied).passed
+    assert not _check_dependency_allowlist(
+        [github_dep],
+        wrong_virtual_case,
+    ).passed
+    assert _check_dependency_allowlist(
+        [github_dep],
+        exact_virtual_case,
+    ).passed
+
+    fused_dep = DependencyReference.parse("Contoso/Repo/Docs/Secret")
+    fused_wrong_case = DependencyPolicy(allow=("contoso**/docs/**",))
+    assert not _check_dependency_allowlist([fused_dep], fused_wrong_case).passed
+
+    gitlab_dep = DependencyReference.parse("gitlab.com/DevExpGbb/Secure-Baseline")
+    matching_gitlab = DependencyPolicy(allow=("DevExpGbb/**",))
+    lower_pattern = DependencyPolicy(allow=("devexpgbb/**",))
+    lower_deny = DependencyPolicy(deny=("devexpgbb/**",))
+    assert _check_dependency_allowlist([gitlab_dep], matching_gitlab).passed
+    assert not _check_dependency_allowlist([gitlab_dep], lower_pattern).passed
+    assert _check_dependency_denylist([gitlab_dep], lower_deny).passed
+
+    registry_dep = DependencyReference(
+        repo_url="DevExpGbb/Team/Secure-Baseline",
+        source="registry",
+        registry_name="Corp",
+    )
+    registry_package = DependencyPolicy(
+        allow=("devexpgbb/team/secure-baseline",),
+        require=("DEVEXPGbb/TEAM/SECURE-BASELINE",),
+    )
+    registry_deny = DependencyPolicy(deny=("devexpgbb/team/**",))
+    assert _check_dependency_allowlist([registry_dep], registry_package).passed
+    assert _check_required_packages([registry_dep], registry_package).passed
+    assert not _check_dependency_denylist([registry_dep], registry_deny).passed
+    registry_source = RegistrySourcePolicy(
+        require=("corp",),
+        allow_non_registry=False,
+    )
+    assert not _check_registry_source(
+        [registry_dep],
+        registry_source,
+        {"corp": "https://registry.example.test"},
+    ).passed
+
+    exact_require = DependencyPolicy(require=("DevExpGbb/*",))
+    assert not _check_required_packages([github_dep], exact_require).passed
+
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency.from_dict(
+            {
+                "repo_url": "devexpgbb/secure-baseline",
+                "resolved_ref": "v1.0.0",
+            }
+        )
+    )
+    version_policy = DependencyPolicy(
+        require=("DevExpGbb/Secure-Baseline#V1.0.0",),
+        require_resolution="block",
+    )
+    version_dep = DependencyReference.parse("DevExpGbb/Secure-Baseline#V1.0.0")
+    assert not _check_required_package_version(
+        [version_dep],
+        lock,
+        version_policy,
+    ).passed
+
+    mcp_allowed, _reason = check_mcp_allowed(
+        "github-mcp",
+        McpPolicy(allow=("GitHub-MCP",)),
+    )
+    assert not mcp_allowed
+    assert first_matching_pattern("Docs/readme.md", ("docs/**",)) is None
+    assert first_matching_pattern("[D]ocs/readme.md", ("[D]ocs/**",)) == "[D]ocs/**"
+    assert first_matching_pattern("Docs/readme.md", ("[D]ocs/**",)) is None
+    assert first_matching_pattern("{Docs}/readme.md", ("{Docs}/**",)) == "{Docs}/**"
+
+    assert_spec_contains(
+        "repository path case rule disclosed under",
+        "first pattern segment",
+        "U+0041 through U+005A",
+        "`dependencies.deny` MUST retain precedence",
+        "whole subject and are anchored at",
+        "source rule takes precedence",
+    )
 
 
 @pytest.mark.req("req-pl-013")
@@ -143,6 +492,152 @@ def test_policy_require_hashes_parses_and_is_specified():
         "`security.integrity.require_hashes: true`",
         "fail-closed diagnostic",
     )
+
+
+@pytest.mark.req("req-pl-014")
+@pytest.mark.parametrize("fail_on_drift", [False, True])
+def test_project_self_replay_preserves_governed_drift(
+    audit_project: Path, monkeypatch: pytest.MonkeyPatch, fail_on_drift: bool
+) -> None:
+    """The mixed source layout must not masquerade as governed deployment drift."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    (audit_project / "apm.yml").write_text(
+        "name: self-replay\nversion: 1.0.0\ntarget: copilot\nincludes: auto\n",
+        encoding="ascii",
+    )
+    source = audit_contract._write(
+        audit_project,
+        ".apm/instructions/project.instructions.md",
+        '---\napplyTo: "**"\n---\nOriginal project instruction.\n',
+    )
+    audit_contract._write(
+        audit_project,
+        "skills/hello/SKILL.md",
+        "---\nname: hello\ndescription: Product content.\n---\nHello.\n",
+    )
+    runner = CliRunner()
+    installed = runner.invoke(cli, ["install", "--no-policy", "--parallel-downloads", "0"])
+    assert installed.exit_code == 0, installed.output
+    deployed = audit_project / ".github/instructions/project.instructions.md"
+    assert deployed.read_bytes() == source.read_bytes()
+    assert not (audit_project / ".agents/skills/hello/SKILL.md").exists()
+
+    policy, _ = load_policy(fixture_path("policy", "security-integrity.yml"))
+    policy = replace(
+        policy,
+        security=replace(
+            policy.security,
+            audit=replace(policy.security.audit, fail_on_drift=fail_on_drift),
+        ),
+    )
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    # Supply the remote-policy boundary only; installation and drift replay remain real.
+    monkeypatch.setattr(
+        discovery,
+        "discover_policy_with_chain",
+        lambda project_root: SimpleNamespace(policy=policy),
+    )
+    before_clean = ArtifactSnapshot.capture(audit_project)
+    clean = runner.invoke(cli, ["audit"])
+    assert clean.exit_code == 0, clean.output
+    assert "No drift detected" in clean.output
+    assert_unchanged(before_clean, ArtifactSnapshot.capture(audit_project))
+
+    source.write_text(source.read_text(encoding="ascii") + "Changed source.\n", encoding="ascii")
+    before_drift = ArtifactSnapshot.capture(audit_project)
+    drifted = runner.invoke(cli, ["audit"])
+    assert drifted.exit_code == int(fail_on_drift), drifted.output
+    assert "Drift detected: 1 file(s)" in drifted.output
+    assert "modified (1):" in drifted.output
+    assert "    - .github/instructions/project.instructions.md" in drifted.output
+    assert_unchanged(before_drift, ArtifactSnapshot.capture(audit_project))
+
+
+@pytest.mark.req("req-pl-014")
+@pytest.mark.parametrize("fail_on_drift", [False, True])
+def test_hook_sidecar_comparison_preserves_governed_drift_exit(
+    audit_project: Path, monkeypatch: pytest.MonkeyPatch, fail_on_drift: bool
+) -> None:
+    """Sidecar normalization must preserve req-pl-014's governed drift exit."""
+    import json
+    from types import SimpleNamespace
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    audit_contract._write(
+        audit_project,
+        ".apm/instructions/rules.instructions.md",
+        '---\napplyTo: "**"\n---\nBe brief.\n',
+    )
+    user_hook = {"hooks": [{"type": "command", "command": "echo user"}]}
+    audit_contract._write(
+        audit_project,
+        ".claude/settings.json",
+        json.dumps({"hooks": {"SessionStart": [user_hook]}}),
+    )
+    audit_contract._write(
+        audit_project,
+        ".apm/hooks/events.json",
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo tool"}]}
+                    ],
+                    "SessionStart": [{"hooks": [{"type": "command", "command": "echo start"}]}],
+                }
+            }
+        ),
+    )
+    runner = CliRunner()
+    install = runner.invoke(cli, ["install", "--no-policy", "--parallel-downloads", "0"])
+    assert install.exit_code == 0, install.output
+    sidecar = audit_project / ".claude/apm-hooks.json"
+    entries = json.loads(sidecar.read_text(encoding="utf-8"))
+    reordered = {event: entries[event] for event in ("SessionStart", "PreToolUse")}
+    sidecar.write_text(json.dumps(reordered, indent=4), encoding="utf-8")
+
+    policy_path = audit_project.parent / "governed-sidecar.yml"
+    policy_path.write_text(
+        "name: sidecar-drift\nsecurity:\n  audit:\n"
+        f"    fail_on_drift: {str(fail_on_drift).lower()}\n",
+        encoding="ascii",
+    )
+    policy, _ = load_policy(policy_path)
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    monkeypatch.setattr(
+        discovery, "discover_policy_with_chain", lambda project_root: SimpleNamespace(policy=policy)
+    )
+    before = ArtifactSnapshot.capture(audit_project)
+    clean = runner.invoke(cli, ["audit"])
+    assert clean.exit_code == 0, clean.output
+    assert "No drift detected" in clean.output
+    assert_unchanged(before, ArtifactSnapshot.capture(audit_project))
+
+    reordered["PreToolUse"][0]["hooks"][0]["command"] = "echo changed"
+    sidecar.write_text(json.dumps(reordered), encoding="utf-8")
+    before = ArtifactSnapshot.capture(audit_project)
+    drifted = runner.invoke(cli, ["audit"])
+    assert drifted.exit_code == int(fail_on_drift), drifted.output
+    assert "modified" in drifted.output
+    assert ".claude/apm-hooks.json" in drifted.output
+    assert_unchanged(before, ArtifactSnapshot.capture(audit_project))
+    settings = json.loads((audit_project / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert user_hook in settings["hooks"]["SessionStart"]
 
 
 @pytest.mark.req("req-pl-014")
@@ -210,4 +705,182 @@ def test_unmanaged_files_surfacing_completeness(tmp_path):
     )
 
 
+@pytest.mark.req("req-pl-016")
+def test_deployment_ledger_owner_is_hard_integrity_failure():
+    """req-pl-016: a canonical deployment-ledger owner absent from the
+    lockfile is a hard integrity failure, independent of
+    ``security.audit.fail_on_drift``.
+
+    Binds the spec MUST to the shared authority --
+    ``DeploymentLedgerCodec.owner_reference_violations`` and the
+    ``deployment-ledger-owners`` baseline check -- so a regression that
+    lets a stale owner pass silently breaks at PR time. The non-zero
+    audit-exit path (default and CI) is exercised by
+    ``tests/unit/test_audit_deployment_owners.py``; here we assert the
+    detection surface and the spec language that mandates the unconditional
+    hard failure are intact.
+    """
+    from apm_cli.core.deployment_ledger import (
+        DEPLOYMENT_OWNER_REMEDIATION,
+        DeploymentLedgerCodec,
+    )
+    from apm_cli.core.deployment_state import (
+        DeploymentLedger,
+        DeploymentLocator,
+        DeploymentRecord,
+        LocatorKind,
+    )
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.policy.ci_checks import _check_deployment_ledger_owners
+
+    ghost_owner = "removed/beta"
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="claude",
+        value=".claude/rules/beta.md",
+        runtime=None,
+        scope="project",
+    )
+    record = DeploymentRecord(
+        locator=locator,
+        owners=(ghost_owner,),
+        active_owner=ghost_owner,
+        content_hash=f"sha256:{'a' * 64}",
+    )
+    # Empty dependency set -> the ghost owner resolves to no lockfile entry.
+    lockfile = LockFile(dependencies={})
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records={record.locator.key: record}),
+        lockfile,
+    )
+
+    violations = DeploymentLedgerCodec.owner_reference_violations(lockfile)
+    assert violations, "a ghost owner absent from the lockfile MUST be detected"
+    assert ghost_owner in violations[0].invalid_owners
+
+    check = _check_deployment_ledger_owners(lockfile)
+    assert check.passed is False
+    assert DEPLOYMENT_OWNER_REMEDIATION in check.message
+
+    # Spec-text drift guard: the normative phrasing MUST stay in the body.
+    assert_spec_contains(
+        "hard integrity failure",
+        "independent of the `security.audit.fail_on_drift` control",
+        "**both** its default and CI modes",
+    )
+
+
+@pytest.mark.req("req-pl-017")
+def test_ado_policy_coordinate_fallback_is_404_only():
+    """Azure DevOps discovery uses the valid coordinate before legacy fallback."""
+    from apm_cli.policy.discovery import ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY
+
+    assert (ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY) == ("apm", "apm-policy")
+    assert_spec_contains(
+        "`apm/apm-policy`",
+        "only when the primary request received\nan HTTP 404 response",
+        "MUST NOT try that legacy coordinate after",
+        "actionable migration warning",
+    )
+
+
 _ = waive  # keep import for any future structural waiver
+
+
+def _req_pl_021_project(root):
+    (root / "apm.yml").write_text(
+        "name: req-pl-021\nversion: 1.0.0\npolicy:\n  fetch_failure_default: warn\n",
+        encoding="utf-8",
+    )
+    (root / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: []\n")
+
+
+@pytest.mark.req("req-pl-021")
+@pytest.mark.parametrize("case", ["missing-file", "malformed", "unreachable"])
+def test_explicit_policy_ref_that_cannot_load_fails_closed(tmp_path, monkeypatch, case):
+    from unittest.mock import patch
+
+    import requests
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+
+    monkeypatch.chdir(tmp_path)
+    _req_pl_021_project(tmp_path)
+    ref = {
+        "missing-file": "./missing-policy.yml",
+        "malformed": "bad-policy.yml",
+        "unreachable": "https://policy.invalid/apm-policy.yml",
+    }[case]
+    (tmp_path / "bad-policy.yml").write_text("enforcement: bogus\n", encoding="utf-8")
+
+    with (
+        patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=requests.exceptions.ConnectionError(),
+        ),
+        patch("apm_cli.policy.discovery._fetch_github_contents") as remote,
+    ):
+        result = CliRunner().invoke(
+            audit, ["--ci", "--no-drift", "--no-cache", "--policy", ref], catch_exceptions=False
+        )
+
+    assert result.exit_code != 0, result.output
+    assert "could not be loaded" in result.stderr
+    assert "enforcement skipped" not in result.stderr
+    remote.assert_not_called()
+
+
+@pytest.mark.req("req-pl-021")
+def test_explicit_policy_ref_served_from_stale_cache_counts_as_resolved(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+    from apm_cli.policy.discovery import PolicyFetchResult
+    from apm_cli.policy.schema import ApmPolicy
+
+    monkeypatch.chdir(tmp_path)
+    _req_pl_021_project(tmp_path)
+    stale = PolicyFetchResult(
+        policy=ApmPolicy(enforcement="block"),
+        source="url:https://policy.invalid/apm-policy.yml",
+        cached=True,
+        cache_stale=True,
+        fetch_error="Connection error",
+        outcome="cached_stale",
+    )
+
+    with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=stale):
+        result = CliRunner().invoke(
+            audit,
+            ["--ci", "--no-drift", "--policy", "https://policy.invalid/apm-policy.yml"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "could not be loaded" not in result.stderr
+
+
+@pytest.mark.req("req-pl-021")
+def test_explicit_policy_ref_under_operator_disable_is_disclosed(tmp_path, monkeypatch):
+    import json
+
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APM_POLICY_DISABLE", "1")
+    _req_pl_021_project(tmp_path)
+    (tmp_path / "policy.yml").write_text("name: p\nversion: '1.0'\nenforcement: block\n")
+
+    result = CliRunner().invoke(
+        audit,
+        ["--ci", "--no-drift", "--policy", "policy.yml", "-f", "json"],
+        catch_exceptions=False,
+    )
+
+    assert "--policy policy.yml ignored" in result.stderr
+    assert json.loads(result.stdout)["policy"]["enforced"] is False

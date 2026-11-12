@@ -38,6 +38,18 @@ installed package's source tree are parent-owned content, not separate
 dependencies. Real lockfile-resolved dependencies install at their own package
 roots and remain visible regardless of graph depth.
 
+Declared or locked aliases are found at `apm_modules/<alias>` and displayed
+under their logical dependency identity. The selected project or user store
+remains authoritative; listing does not search another store to fill a gap.
+
+Local dependencies are shown as portable `_local/<name>` keys rather than
+machine-specific absolute paths. For a direct local declaration with matching
+`apm.lock.yaml` metadata, copy that key into `apm uninstall` (with `-g` for user
+scope). Without a lockfile, use the exact path from the manifest. Transitive
+local dependencies are removed through their declaring parent. If more than one
+declared local path has the same name, `apm uninstall` reports an ambiguity and
+changes nothing; use one exact path already declared in `apm.yml`.
+
 ```bash
 apm deps list [OPTIONS]
 ```
@@ -51,7 +63,11 @@ apm deps list [OPTIONS]
 ### `apm deps tree`
 
 Render the complete dependency graph as a hierarchical tree, following
-`resolved_by` relationships at every lockfile depth. When no lockfile is
+`resolved_by` relationships at every lockfile depth. When sibling
+subdirectory packages from one repository share a `resolved_by` value, each
+child is placed under the sibling whose installed `apm.yml` declares it; a
+child that no single parent declares is listed as `could not place in tree`.
+When no lockfile is
 present, the command falls back to a scan of `apm_modules/` and ignores
 parent-owned manifests embedded inside an installed package. Circular
 relationships are marked `(circular)` at the repeated ancestor and do not
@@ -79,7 +95,7 @@ apm deps info PACKAGE
 
 ### `apm deps why`
 
-Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
+Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. Subdirectory packages appear by their full path. The walk uses the lockfile alone, so it does not consult installed manifests to tell same-repository siblings apart. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
 
 ```bash
 apm deps why PACKAGE [OPTIONS]
@@ -116,7 +132,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 |---|---|
 | `-v, --verbose` | Show detailed update information. |
 | `--force` | Overwrite locally-authored files on collision. |
-| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. `copilot-cowork` is also accepted when its experimental flag is enabled. `agent-skills` and `antigravity` are explicit-only and excluded from `all`; combine them with `all` when needed. |
+| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `agents`, `agy`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `vscode`, `windsurf`. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
 | `-g, --global` | Update user-scope dependencies in `~/.apm/`. |
 | `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. |
@@ -147,9 +163,10 @@ apm deps list
 Sample output:
 
 ```
- Package             Version  Source  Prompts  Instructions  Agents  Skills
- compliance-rules    1.0.0    github  2        1             -       1
- design-guidelines   1.0.0    github  -        1             1       -
+ Package             Version  Source  Prompts  Instructions  Agents  Skills  Hooks
+ compliance-rules    1.0.0    github  2        1             -       1       -
+ design-guidelines   1.0.0    github  -        1             1       -       -
+ _local/review-kit   0.4.0    local   1        2             -       -       -
 ```
 
 Show only insecure (HTTP-locked) dependencies and their origin:

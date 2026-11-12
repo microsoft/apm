@@ -12,7 +12,9 @@ import contextlib
 from unittest.mock import MagicMock, patch
 
 import pytest
+from git import Actor, Repo
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
 # ---------------------------------------------------------------------------
@@ -24,6 +26,9 @@ def _make_downloader() -> GitHubPackageDownloader:
     """Construct a downloader with minimal external dependencies mocked."""
     dl = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
     dl.auth_resolver = MagicMock()
+    dl.auth_resolver.build_noninteractive_git_env.side_effect = (
+        AuthResolver.build_noninteractive_git_env
+    )
     dl.token_manager = MagicMock()
     dl.git_env = {}
     dl.github_token = None
@@ -276,48 +281,20 @@ class TestDownloadVirtualFilePackage:
         return dep_ref
 
     def test_frontmatter_description_extracted(self, tmp_path):
-        """Lines 902-912: description extracted from YAML frontmatter."""
-        self._make_dep_ref(
-            virtual_path="owner/repo/.instructions.md",
-            repo_url="owner/repo",
-        )
+        """The real materializer persists the frontmatter description."""
+        from apm_cli.deps.virtual_file import materialize_virtual_file_package
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.models.dependency import DependencyReference
 
+        dep_ref = DependencyReference.parse("owner/repo/.instructions.md")
         file_content = b"---\ndescription: 'My custom description'\n---\n# Instructions\n"
-        tmp_path / "pkg"
-
-        # Mock the HTTP download of the file
-        dl = _make_downloader()
-        dl._strategies.download_file = MagicMock(return_value=file_content)
-
-        with (
-            patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
-            patch("apm_cli.deps.github_downloader.APMPackage") as mock_pkg_cls,
-            patch(
-                "apm_cli.deps.github_downloader.yaml_to_str",
-                return_value="name: owner-repo\n",
-            ),
-        ):
-            mock_result = MagicMock()
-            mock_result.is_valid = True
-            mock_result.package = MagicMock()
-            mock_result.package_type = MagicMock()
-            mock_validate.return_value = mock_result
-            mock_pkg_cls.return_value = MagicMock()
-
-            # Just test the parsing logic directly
-            content_str = file_content.decode("utf-8")
-            description = "Virtual package containing .instructions.md"
-
-            if content_str.startswith("---\n"):
-                end_idx = content_str.find("\n---\n", 4)
-                if end_idx > 0:
-                    front = content_str[4:end_idx]
-                    for line in front.split("\n"):
-                        if line.startswith("description:"):
-                            description = line.split(":", 1)[1].strip().strip("\"'")
-                            break
-
-            assert description == "My custom description"
+        target = tmp_path / "pkg"
+        package = materialize_virtual_file_package(
+            dep_ref, target, ".instructions.md", file_content
+        )
+        assert package.description == "My custom description"
+        assert APMPackage.from_apm_yml(target / "apm.yml").description == package.description
+        assert (target / ".apm/instructions/.instructions.md").read_bytes() == file_content
 
     def test_frontmatter_parse_failure_uses_default(self, tmp_path):
         """Line 913-915: binary/invalid content falls back to default description."""
@@ -347,19 +324,29 @@ class TestDownloadSubdirectoryPersistentCache:
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "packages/my-pkg"
         dep_ref.reference = "main"
+        dep_ref.is_insecure = False
         dep_ref.get_unique_key.return_value = "owner/repo@main"
+        dep_ref.to_github_url.return_value = f"https://gitlab.com/{repo_url}"
         return dep_ref
 
     def test_persistent_cache_hit_used(self, tmp_path):
         """Lines 1082-1090: persistent cache hit -> uses cached checkout."""
-        dep_ref = self._make_dep_ref()
+        dep_ref = self._make_dep_ref("spiritt/tenants/spiritt/agent-cfg")
 
         cached_checkout = tmp_path / "cached"
         cached_checkout.mkdir()
         # Put a valid subdirectory in the cache
         pkg_dir = cached_checkout / "packages" / "my-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text("name: my-pkg\nversion: 1.0.0\n")
+        (pkg_dir / "apm.yml").write_bytes(b"name: my-pkg\nversion: 1.0.0\n")
+        actor = Actor("APM Test", "apm-test@example.invalid")
+        cached_repo = Repo.init(cached_checkout)
+        cached_repo.index.add(["packages/my-pkg/apm.yml"])
+        cached_repo.index.commit(
+            "seed cache",
+            author=actor,
+            committer=actor,
+        )
 
         target_path = tmp_path / "target"
 
@@ -400,14 +387,16 @@ class TestDownloadSubdirectoryPersistentCache:
                 target_path=target_path,
             )
 
-        # persistent_cache.get_checkout was called
-        persistent_cache.get_checkout.assert_called()
+        assert persistent_cache.get_checkout.call_args.args[0] == (
+            "https://gitlab.com/spiritt/tenants/spiritt/agent-cfg"
+        )
 
         # Regression: the subdir-aware sparse_paths and locked_sha (when
         # available) MUST propagate to the persistent cache so the
         # variant-keyed shard ((sha, sparse_paths)) is actually hit and
         # the cold-path bloat fix from #1433 is not silently bypassed.
         call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        assert call_kwargs["env"] == dl._git_env_dict()
         assert "sparse_paths" in call_kwargs
         assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
         # locked_sha is plumbed via the kwarg; presence (not value) is the

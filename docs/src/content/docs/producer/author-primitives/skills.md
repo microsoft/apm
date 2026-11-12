@@ -98,9 +98,10 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 
 | Target            | Deploy directory                             |
 |-------------------|----------------------------------------------|
-| `claude`          | `.claude/skills/<name>/SKILL.md`             |
-| `kiro`            | `.kiro/skills/<name>/SKILL.md`               |
 | `copilot`         | `.agents/skills/<name>/SKILL.md`             |
+| `claude`          | `.claude/skills/<name>/SKILL.md`             |
+| `grok-build`      | `.grok/skills/<name>/SKILL.md`               |
+| `kiro`            | `.kiro/skills/<name>/SKILL.md`               |
 | `cursor`          | `.agents/skills/<name>/SKILL.md`             |
 | `codex`           | `.agents/skills/<name>/SKILL.md`             |
 | `gemini`          | `.agents/skills/<name>/SKILL.md`             |
@@ -108,9 +109,11 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 | `windsurf`        | `.agents/skills/<name>/SKILL.md`             |
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
 
-Six harnesses converge on the cross-tool `.agents/skills/`
-directory. Claude and Kiro keep their harness-native paths
-(`.claude/skills/`, `.kiro/skills/`) because those clients' default
+For user-scope locations, see the [Targets matrix](../../../reference/targets-matrix/).
+
+Seven harnesses converge on the cross-tool `.agents/skills/`
+directory. Claude, Kiro, and Grok Build keep their harness-native paths
+(`.claude/skills/`, `.kiro/skills/`, `.grok/skills/`) because those clients' default
 scan is the per-tool directory. Windsurf (now Devin Desktop) converged
 onto `.agents/skills/` in
 [#1520](https://github.com/microsoft/apm/issues/1520): Cascade
@@ -124,6 +127,13 @@ the `.apm-pin` cache marker are filtered out
 To restore the pre-convergence layout where every harness gets its
 own `.<harness>/skills/` copy, pass `--legacy-skill-paths` or set
 `APM_LEGACY_SKILL_PATHS=1`.
+
+A differing user-owned file at a selected skill destination now refuses the
+whole selected install plan, rather than warning and deploying other copies.
+Choose a distinct skill directory name or a valid existing skill/target
+selection. A shared directory or name alone is not a conflict. This does not
+add namespacing or change native plugin identity or managed-package precedence.
+See [install behavior](../../../reference/cli/install/#behavior).
 
 ## Preview before you commit
 

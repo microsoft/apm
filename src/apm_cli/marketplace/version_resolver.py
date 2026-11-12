@@ -1,8 +1,8 @@
 """Semver-aware version constraint resolution for marketplace dependencies.
 
 Resolves a semver range (e.g. ``~2.1.0``, ``^2.0``, ``>=1.4``) against
-git tags on a marketplace repository using the ``{name}--v{version}``
-naming convention from the Claude Code plugin dependency spec.
+git tags on a marketplace repository using the supplied ``tag_pattern``.
+Metadata created before pattern propagation uses ``{name}--v{version}``.
 
 Reuses the existing infrastructure:
 
@@ -21,7 +21,7 @@ from ._shared import iter_semver_tags
 from .errors import NoMatchingVersionError
 from .ref_resolver import RefResolver
 from .semver import satisfies_range
-from .tag_pattern import build_tag_regex
+from .tag_pattern import build_tag_regex, validate_tag_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,11 @@ def resolve_version_constraint(
     token: str | None = None,
     auth_scheme: str = "basic",
     auth_resolver=None,
+    git_env: dict[str, str] | None = None,
+    port: int | None = None,
+    remote_url: str | None = None,
+    transport_scheme: str = "https",
+    ssh_user: str = "git",
 ) -> tuple[str, str]:
     """Resolve a semver range to the highest matching git tag.
 
@@ -73,6 +78,12 @@ def resolve_version_constraint(
         host: Git host for ``git ls-remote``. Defaults to github.com.
         token: Optional auth token for private repos.
         auth_scheme: Authentication scheme from ``AuthContext``.
+        remote_url: Optional canonical clone URL. When the package lives
+            on a different remote than the marketplace catalog, pass the
+            package URL so ``git ls-remote`` queries the repo that has
+            the tags.
+        transport_scheme: Initial scheme selected by the transport owner.
+        ssh_user: SSH username from the selected package identity.
 
     Returns:
         ``(tag_name, commit_sha)`` of the highest matching version.
@@ -80,6 +91,7 @@ def resolve_version_constraint(
     Raises:
         NoMatchingVersionError: No tag satisfies the range.
     """
+    tag_pattern = validate_tag_pattern(tag_pattern)
     pinned_pattern = tag_pattern.replace("{name}", plugin_name)
     tag_rx = build_tag_regex(pinned_pattern)
 
@@ -88,6 +100,14 @@ def resolve_version_constraint(
         "token": token,
         "auth_scheme": auth_scheme,
     }
+    if git_env is not None:
+        resolver_kwargs["git_env"] = git_env
+    if port is not None:
+        resolver_kwargs["port"] = port
+    if transport_scheme != "https":
+        resolver_kwargs["transport_scheme"] = transport_scheme
+    if ssh_user != "git":
+        resolver_kwargs["ssh_user"] = ssh_user
     if auth_resolver is not None:
         resolver_kwargs.update(
             auth_resolver=auth_resolver,
@@ -95,7 +115,7 @@ def resolve_version_constraint(
         )
     resolver = RefResolver(**resolver_kwargs)
     try:
-        refs = resolver.list_remote_refs(owner_repo)
+        refs = resolver.list_remote_refs(owner_repo, remote_url=remote_url)
     finally:
         resolver.close()
 
@@ -107,10 +127,17 @@ def resolve_version_constraint(
             candidates.append((sv, tag_name, sha))
 
     if not candidates:
+        remote_detail = f"remote='{owner_repo}'"
+        if remote_url:
+            remote_detail += f", remote_url='{remote_url}'"
         raise NoMatchingVersionError(
             plugin_name,
             version_range,
-            detail=f"pattern='{tag_pattern}', remote='{owner_repo}'",
+            detail=(
+                f"pattern='{tag_pattern}', {remote_detail}. "
+                "Verify the published tags or set version to an explicit tag "
+                "such as 'v1.0.0'"
+            ),
         )
 
     candidates.sort(key=lambda c: c[0], reverse=True)

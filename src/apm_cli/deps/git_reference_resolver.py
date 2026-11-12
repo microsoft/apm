@@ -25,6 +25,7 @@ pattern.
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -37,14 +38,26 @@ from ..models.apm_package import (
     RemoteRef,
     ResolvedReference,
 )
+from ..models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_owner,
+    repository_path_segments,
+)
+from ..utils.git_env import get_git_executable, git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
     is_github_hostname,
 )
+from .git_remote_ops import validate_ls_remote_tag_output
+from .github_rate_limit import raise_for_github_throttle
+from .transport_selection import ProtocolPreference, initial_transport_scheme
 
 if TYPE_CHECKING:
+    import requests
+
     from ..core.auth import AuthResolver
+    from .transport_selection import TransportSelector
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +75,8 @@ class _DownloaderContext(Protocol):
     auth_resolver: AuthResolver
     git_env: dict
     shared_clone_cache: object | None
+    _protocol_pref: ProtocolPreference
+    _transport_selector: TransportSelector
 
     def _resolve_dep_token(self, dep_ref: DependencyReference | None = ...) -> str | None: ...
     def _resolve_dep_auth_ctx(self, dep_ref: DependencyReference | None = ...): ...
@@ -82,7 +97,13 @@ class _DownloaderContext(Protocol):
     ) -> str: ...
     def _clone_with_fallback(self, *args, **kwargs): ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
-    def _resilient_get(self, url: str, headers: dict, timeout: int = ...): ...
+    def _resilient_get(
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout: int = ...,
+        max_retries: int = ...,
+    ) -> requests.Response: ...
     def _parse_ls_remote_output(self, output: str) -> list[RemoteRef]: ...
     def _sort_remote_refs(self, refs: list[RemoteRef]) -> list[RemoteRef]: ...
     def _parse_artifactory_base_url(self) -> tuple | None: ...
@@ -107,7 +128,8 @@ class GitReferenceResolver:
 
         Uses ``git ls-remote --tags --heads`` for all git hosts (GitHub,
         Azure DevOps, GitLab, generic). Artifactory dependencies return
-        an empty list (no git repo).
+        an empty list (no git repo), as do all dependencies when
+        registry-only mode (``PROXY_REGISTRY_ONLY``) is active.
         """
         return self._list_remote_refs(dep_ref, include_heads=True)
 
@@ -127,42 +149,139 @@ class GitReferenceResolver:
         if dep_ref.is_artifactory():
             return []
 
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: the proxy is the only sanctioned source,
+            # so skip the direct ls-remote against the upstream host. Mirrors
+            # the is_artifactory() short-circuit above: a registry-only
+            # dependency has no git remote we are permitted to enumerate.
+            return []
+
         is_ado = dep_ref.is_azure_devops()
-        dep_token = host._resolve_dep_token(dep_ref)
-        dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
-        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
-
         repo_url_base = dep_ref.repo_url
+        candidate_uses_ssh = initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh"
+        rewrite_candidate = host._build_repo_url(
+            repo_url_base,
+            use_ssh=candidate_uses_ssh,
+            dep_ref=dep_ref,
+            token="",
+        )
+        anonymous_plan = host._transport_selector.select(
+            dep_ref=dep_ref,
+            cli_pref=host._protocol_pref,
+            allow_fallback=False,
+            has_token=False,
+            candidate_url=rewrite_candidate,
+        )
+        dep_host = dep_ref.host or default_host()
+        public_github_https_first = bool(
+            not dep_ref.is_insecure
+            and anonymous_plan.attempts
+            and anonymous_plan.attempts[0].scheme == "https"
+            and host.auth_resolver.uses_public_github_anonymous_first(
+                dep_host,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            is True
+        )
+        if public_github_https_first:
+            dep_token = None
+            dep_auth_ctx = None
+            dep_auth_scheme = "basic"
+            transport_plan = anonymous_plan
+        else:
+            dep_token = host._resolve_dep_token(dep_ref)
+            dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
+            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+            transport_plan = host._transport_selector.select(
+                dep_ref=dep_ref,
+                cli_pref=host._protocol_pref,
+                allow_fallback=False,
+                has_token=bool(dep_token),
+                candidate_url=rewrite_candidate,
+            )
+        transport_attempt = transport_plan.attempts[0]
+        use_ssh = transport_attempt.scheme == "ssh"
 
-        if dep_token:
-            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                ls_env = dep_auth_ctx.git_env
+        if public_github_https_first:
+            ls_env: dict[str, str] = {}
+            remote_url = ""
+        elif use_ssh:
+            ls_env = host._build_noninteractive_git_env()
+            from ..utils.git_env import clear_git_auth_env
+
+            clear_git_auth_env(ls_env)
+            ls_env.pop("GIT_ASKPASS", None)
+        elif dep_token and transport_attempt.use_token:
+            if dep_auth_ctx is not None:
+                ls_env = host.auth_resolver.git_env_for_context(
+                    dep_auth_ctx,
+                    base_env=host.git_env,
+                )
             else:
-                ls_env = host.git_env
+                classified = host.auth_resolver.classify_host(
+                    dep_host or default_host(),
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+                fallback_kind = "github" if is_github_hostname(dep_host or "") else "generic"
+                ls_env = host.auth_resolver._build_git_env(
+                    dep_token,
+                    host_kind=getattr(classified, "kind", fallback_kind),
+                    base_env=host.git_env,
+                )
+        elif is_ado:
+            ado_context = dep_auth_ctx or host.auth_resolver.resolve_for_dep(dep_ref)
+            ls_env = host.auth_resolver.git_env_for_remote(
+                ado_context,
+                transport_attempt.effective_url or rewrite_candidate,
+                base_env=host.git_env,
+            )
         else:
             ls_env = host._build_noninteractive_git_env(
                 preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
                 suppress_credential_helpers=bool(getattr(dep_ref, "is_insecure", False)),
             )
 
-        remote_url = host._build_repo_url(
-            repo_url_base,
-            use_ssh=False,
-            dep_ref=dep_ref,
-            token=dep_token,
-            auth_scheme=dep_auth_scheme,
-        )
+        if transport_attempt.requested_url is not None:
+            remote_url = transport_attempt.requested_url
+        elif not public_github_https_first:
+            remote_url = host._build_repo_url(
+                repo_url_base,
+                use_ssh=use_ssh,
+                dep_ref=dep_ref,
+                token=(None if use_ssh else ""),
+                auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
+            )
 
-        # Route through the github_downloader module so that test patches
-        # of ``apm_cli.deps.github_downloader.git.cmd.Git`` intercept here.
+        # Keep the GitPython object as a test seam. The network call itself
+        # routes through the direct-subprocess owner unless a test replaces
+        # this method.
         from . import github_downloader as _gd
 
         g = _gd.git.cmd.Git()
         ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
+        def _run_remote(url: str, env: dict[str, str]) -> str:
+            if type(g).__module__.startswith("unittest.mock"):
+                return g.ls_remote(*ls_args, url, env=env)
+            from ..utils.git_env import git_remote_refs
+
+            result = git_remote_refs(url, env=env, options=ls_args)
+            if result.returncode != 0:
+                # auth-delegated: _primary_op and _bearer_op select this environment.
+                raise GitCommandError(
+                    [get_git_executable(), "ls-remote", *ls_args, url],
+                    result.returncode,
+                    stderr=result.stderr,
+                )
+            return result.stdout
+
         def _primary_op():
             try:
-                output = g.ls_remote(*ls_args, remote_url, env=ls_env)
+                output = _run_remote(remote_url, ls_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -170,7 +289,12 @@ class GitReferenceResolver:
         def _bearer_op(bearer):
             # SECURITY: _build_git_env(scheme="bearer") yields a clean env
             # (no leaked PAT). JWT travels via http.extraHeader.
-            bearer_env = host.auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
+            bearer_env = host.auth_resolver._build_git_env(
+                bearer,
+                scheme="bearer",
+                host_kind="ado",
+                base_env=host.git_env,
+            )
             bearer_url = host._build_repo_url(
                 repo_url_base,
                 use_ssh=False,
@@ -179,7 +303,7 @@ class GitReferenceResolver:
                 auth_scheme="bearer",
             )
             try:
-                output = g.ls_remote(*ls_args, bearer_url, env=bearer_env)
+                output = _run_remote(bearer_url, bearer_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -189,9 +313,45 @@ class GitReferenceResolver:
                 return False
             return is_ado_auth_failure_signal(str(outcome[1]))
 
-        ado_eligible = is_ado and dep_auth_scheme == "basic" and dep_token is not None
+        ado_eligible = (
+            is_ado
+            and not use_ssh
+            and transport_attempt.use_token
+            and dep_auth_scheme == "basic"
+            and dep_token is not None
+        )
 
-        if ado_eligible:
+        if public_github_https_first:
+
+            def _public_github_op(
+                token: str | None,
+                git_env: dict[str, str],
+            ) -> tuple[str, str]:
+                public_url = host._build_repo_url(
+                    repo_url_base,
+                    use_ssh=False,
+                    dep_ref=dep_ref,
+                    token="",
+                    auth_scheme="basic",
+                )
+                return ("ok", _run_remote(public_url, git_env))
+
+            org = repository_owner(repo_url_base)
+            try:
+                outcome = host.auth_resolver.try_with_fallback(
+                    dep_host,
+                    _public_github_op,
+                    org=org,
+                    port=dep_ref.port,
+                    path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
+                    unauth_first=True,
+                    base_env=host.git_env,
+                )
+            except (GitCommandError, OSError) as exc:
+                outcome = ("err", exc)
+            ado_bearer_also_failed = False
+        elif ado_eligible:
             fb = host.auth_resolver.execute_with_bearer_fallback(
                 dep_ref, _primary_op, _bearer_op, _is_auth_failure
             )
@@ -202,6 +362,8 @@ class GitReferenceResolver:
             ado_bearer_also_failed = False
 
         if outcome[0] == "ok":
+            if not include_heads:
+                validate_ls_remote_tag_output(outcome[1])
             refs = host._parse_ls_remote_output(outcome[1])
             return host._sort_remote_refs(refs)
 
@@ -212,7 +374,14 @@ class GitReferenceResolver:
 
         ref_kind = "remote refs" if include_heads else "remote tags"
         error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
-        if is_generic:
+        if public_github_https_first and not host.auth_resolver.is_public_github_auth_failure(e):
+            error_msg += (
+                f"Could not connect to {dep_host or default_host()} "
+                "(network error, not an auth failure). "
+                "Check your internet connection and proxy settings. "
+                "Run with --verbose for details."
+            )
+        elif is_generic:
             if dep_host:
                 host_info = host.auth_resolver.classify_host(dep_host, port=dep_ref.port)
                 host_name = host_info.display_name
@@ -225,7 +394,9 @@ class GitReferenceResolver:
             )
         else:
             target_host = dep_host or default_host()
-            org = repo_url_base.split("/")[0] if repo_url_base else None
+            org = (
+                dependency_repository_owner(dep_ref) if dep_ref else repository_owner(repo_url_base)
+            )
             error_msg += host.auth_resolver.build_error_context(
                 target_host,
                 "list refs",
@@ -235,7 +406,7 @@ class GitReferenceResolver:
                 bearer_also_failed=ado_bearer_also_failed,
             )
 
-        sanitized = host._sanitize_git_error(str(e))
+        sanitized = host._sanitize_git_error(git_subprocess_error_text(e))
         error_msg += f" Last error: {sanitized}"
         raise RuntimeError(error_msg) from e
 
@@ -247,6 +418,8 @@ class GitReferenceResolver:
         Returns the SHA on success, or ``None`` on any failure (404,
         network, non-GitHub host, unexpected body shape, etc.).
         Failures are swallowed so callers can still record the ref name.
+        Registry-only mode (``PROXY_REGISTRY_ONLY``) returns ``None``
+        without a request; an already-full SHA is still passed through.
         """
         host = self._host
 
@@ -261,9 +434,21 @@ class GitReferenceResolver:
         if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
             return ref.lower()
 
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: the commits API is on the upstream host,
+            # which the mode forbids contacting. Callers already treat None
+            # as "keep the ref name" and fall through to proxy resolution.
+            return None
+
+        if initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh":
+            return None
+
         try:
-            dep_ref.repo_url.split("/", 1)
-        except (AttributeError, ValueError):
+            if len(repository_path_segments(dep_ref.repo_url)) < 2:
+                return None
+        except AttributeError:
             return None
 
         from .host_backends import backend_for
@@ -273,28 +458,51 @@ class GitReferenceResolver:
         if api_url is None:
             return None
 
-        org = None
-        parts = dep_ref.repo_url.split("/")
-        if parts:
-            org = parts[0]
-        try:
-            file_ctx = host.auth_resolver.resolve(target_host, org, port=dep_ref.port)
-            token = file_ctx.token
-        except Exception:
-            token = None
+        org = dependency_repository_owner(dep_ref)
 
-        headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
-        if token:
-            headers["Authorization"] = f"token {token}"
-
-        try:
-            response = host._resilient_get(api_url, headers=headers, timeout=10)
+        def _request(token: str | None, _git_env: dict[str, str]) -> str | None:
+            headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
+            if token:
+                headers["Authorization"] = f"token {token}"
+            response = host._resilient_get(
+                api_url,
+                headers=headers,
+                timeout=10,
+                max_retries=1,
+            )
             if response.status_code != 200:
-                return None
+                raise_for_github_throttle(response, target_host)
+                error = RuntimeError(f"GitHub commits API returned HTTP {response.status_code}")
+                error.status_code = response.status_code
+                raise error
             body = (response.text or "").strip()
-            if re.match(r"^[a-f0-9]{40}$", body.lower()):
-                return body.lower()
-            return None
+            return body.lower() if re.match(r"^[a-f0-9]{40}$", body.lower()) else None
+
+        try:
+            if (
+                host.auth_resolver.uses_public_github_anonymous_first(
+                    target_host,
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+                is True
+            ):
+                return host.auth_resolver.try_with_fallback(
+                    target_host,
+                    _request,
+                    org=org,
+                    port=dep_ref.port,
+                    path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
+                    unauth_first=True,
+                )
+            file_ctx = host.auth_resolver.resolve(
+                target_host,
+                org,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            return _request(file_ctx.token, file_ctx.git_env)
         except Exception:
             return None
 
@@ -338,8 +546,8 @@ class GitReferenceResolver:
 
             if is_semver_range(ref):
                 remote_refs = self.list_remote_refs(dep_ref)
-                # Build version-string → (tag_name, sha) map.
-                # Strip the common 'v' prefix (e.g. 'v1.2.3' → '1.2.3').
+                # Build version-string -> (tag_name, sha) map.
+                # Strip the common 'v' prefix (e.g. 'v1.2.3' -> '1.2.3').
                 candidates: dict[str, tuple[str, str]] = {}
                 for rr in remote_refs:
                     if rr.ref_type != GitReferenceType.TAG:
@@ -373,15 +581,16 @@ class GitReferenceResolver:
 
             if is_likely_commit:
                 try:
-                    repo = host._clone_with_fallback(
+                    host._clone_with_fallback(
                         dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
                     )
-                    commit = repo.commit(ref)
+                    from ..utils.git_env import git_resolve_commit
+
                     ref_type = GitReferenceType.COMMIT
-                    resolved_commit = commit.hexsha
+                    resolved_commit = git_resolve_commit(temp_dir, ref, env=host.git_env)
                     ref_name = ref
                 except Exception as e:
-                    sanitized_error = host._sanitize_git_error(str(e))
+                    sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                     raise ValueError(  # noqa: B904
                         f"Could not resolve commit '{ref}' in repository "
                         f"{dep_ref.repo_url}: {sanitized_error}"
@@ -391,43 +600,53 @@ class GitReferenceResolver:
                     clone_kwargs = {"depth": 1}
                     if ref:
                         clone_kwargs["branch"] = ref
-                    repo = host._clone_with_fallback(
+                    host._clone_with_fallback(
                         dep_ref.repo_url,
                         temp_dir,
                         progress_reporter=None,
                         dep_ref=dep_ref,
                         **clone_kwargs,
                     )
+                    from ..utils.git_env import git_current_branch, git_worktree_head
+
                     ref_type = GitReferenceType.BRANCH
-                    resolved_commit = repo.head.commit.hexsha
-                    ref_name = ref if ref else repo.active_branch.name
+                    resolved_commit = git_worktree_head(temp_dir, env=host.git_env)
+                    ref_name = ref if ref else git_current_branch(temp_dir, env=host.git_env)
 
                 except GitCommandError:
                     try:
-                        repo = host._clone_with_fallback(
+                        host._clone_with_fallback(
                             dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
                         )
 
                         try:
+                            from ..utils.git_env import git_resolve_commit
+
                             try:
-                                branch = repo.refs[f"origin/{ref}"]
                                 ref_type = GitReferenceType.BRANCH
-                                resolved_commit = branch.commit.hexsha
+                                resolved_commit = git_resolve_commit(
+                                    temp_dir,
+                                    f"refs/remotes/origin/{ref}",
+                                    env=host.git_env,
+                                )
                                 ref_name = ref
-                            except IndexError:
+                            except subprocess.CalledProcessError:
                                 try:
-                                    tag = repo.tags[ref]
                                     ref_type = GitReferenceType.TAG
-                                    resolved_commit = tag.commit.hexsha
+                                    resolved_commit = git_resolve_commit(
+                                        temp_dir,
+                                        f"refs/tags/{ref}",
+                                        env=host.git_env,
+                                    )
                                     ref_name = ref
-                                except IndexError:
+                                except subprocess.CalledProcessError:
                                     raise ValueError(  # noqa: B904
                                         f"Reference '{ref}' not found in repository "
                                         f"{dep_ref.repo_url}"
                                     )
 
                         except Exception as e:
-                            sanitized_error = host._sanitize_git_error(str(e))
+                            sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                             raise ValueError(  # noqa: B904
                                 f"Could not resolve reference '{ref}' in repository "
                                 f"{dep_ref.repo_url}: {sanitized_error}"
@@ -439,7 +658,7 @@ class GitReferenceResolver:
                         ) or "remote: Repository not found" in str(e):
                             error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
                             target_host = dep_ref.host or default_host()
-                            org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url else None
+                            org = dependency_repository_owner(dep_ref)
                             error_msg += host.auth_resolver.build_error_context(
                                 target_host,
                                 "resolve reference",
@@ -449,7 +668,7 @@ class GitReferenceResolver:
                             )
                             raise RuntimeError(error_msg)  # noqa: B904
                         else:
-                            sanitized_error = host._sanitize_git_error(str(e))
+                            sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(  # noqa: B904
                                 f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
                             )

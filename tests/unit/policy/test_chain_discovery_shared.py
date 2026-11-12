@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -223,6 +224,44 @@ class TestChainResolution:
         mock_discover.side_effect = [leaf_fetch, parent_fetch]
         discover_policy_with_chain(Path("/fake"))
         assert mock_write_cache.call_args.kwargs["raw_bytes_hash"] == "sha256:" + ("a" * 64)
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_url_chain_keeps_raw_cache_identity_but_redacts_chain_refs(
+        self,
+        mock_discover: MagicMock,
+        mock_write_cache: MagicMock,
+    ) -> None:
+        raw_leaf = "https://alice:s3cr3t@policy.example.com/apm-policy.yml?sig=private-signature"
+        safe_leaf = "https://policy.example.com/apm-policy.yml"
+        raw_parent = "https://bob:parent-secret@policy.example.com/base.yml"
+        safe_parent = "https://policy.example.com/base.yml"
+        leaf = _make_policy(extends=raw_parent)
+        leaf_fetch = _make_fetch(
+            policy=leaf,
+            source=f"url:{safe_leaf}",
+            cached=False,
+        )
+        leaf_fetch.cache_ref = raw_leaf
+        parent_fetch = _make_fetch(
+            policy=_make_policy(enforcement="block"),
+            source=f"url:{safe_parent}",
+        )
+        parent_fetch.cache_ref = raw_parent
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+
+        discover_policy_with_chain(Path("/fake"))
+
+        assert mock_write_cache.call_args.args[0] == raw_leaf
+        chain_refs = mock_write_cache.call_args.kwargs["chain_refs"]
+        parsed_refs = [urlparse(ref) for ref in chain_refs]
+        assert [(parsed.hostname, parsed.path) for parsed in parsed_refs] == [
+            ("policy.example.com", "/base.yml"),
+            ("policy.example.com", "/apm-policy.yml"),
+        ]
+        assert all(parsed.username is None for parsed in parsed_refs)
+        assert all(parsed.password is None for parsed in parsed_refs)
+        assert all(parsed.query == "" for parsed in parsed_refs)
 
 
 # ======================================================================

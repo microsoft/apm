@@ -1,7 +1,13 @@
 """Typed result containers for APM operations."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
 
 
 class InstallDisposition(str, Enum):
@@ -28,6 +34,11 @@ class InstallResult:
     exit_code: int = 0
     committed: bool = False
     error: BaseException | None = field(default=None, repr=False)
+    target_decision: EffectiveTargetDecision | None = None
+    exec_allow_map: dict[str, dict[str, bool]] | None = None
+    exec_allow_resolved: bool = False
+    # None is unavailable graph evidence; an empty set is a resolved empty graph.
+    active_package_keys: frozenset[str] | None = None
 
 
 @dataclass

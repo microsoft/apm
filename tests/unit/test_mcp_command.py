@@ -540,6 +540,8 @@ class TestMcpInstallAlias:
         assert "--header" in result.output
         assert "--mcp-version" in result.output
         assert "--registry" in result.output
+        # Inherited "(requires --mcp)" notes are explained, not rewritten.
+        assert "'--mcp NAME' is implied" in " ".join(result.output.split())
 
     def test_epilog_does_not_reference_broken_mcp_help_flag(self):
         """Epilog must reference `apm install --help`, not `apm install --mcp --help`.
@@ -587,6 +589,137 @@ class TestMcpInstallAlias:
             assert "http" in forwarded
             assert "--url" in forwarded
             assert "https://example.com/mcp" in forwarded
+
+    def test_forwarded_options_are_borrowed_from_install(self):
+        """#3588: forwarded options are apm install's own definitions, not prose."""
+        from apm_cli.commands.install import install as install_command
+
+        install_cmd = mcp.commands["install"]
+        mcp_ctx = click.Context(install_cmd, info_name="install")
+        install_ctx = click.Context(install_command, info_name="install")
+        install_by_name = {p.name: p for p in install_command.params}
+        forwarded = [
+            p
+            for p in install_cmd.get_params(mcp_ctx)
+            if p.name not in {"name", "help"} and isinstance(p, click.Option)
+        ]
+        # Every install option except the alias-owned --mcp is parsed with
+        # install's arity, so pass-through values stay attached.
+        expected = {
+            p.name
+            for p in install_command.params
+            if isinstance(p, click.Option) and p.name != "mcp_name"
+        }
+        assert {p.name for p in forwarded} == expected
+        for param in forwarded:
+            source = install_by_name[param.name]
+            assert param.opts == source.opts
+            assert param.secondary_opts == source.secondary_opts
+            assert param.type is source.type
+            assert param.help == source.help
+            if not param.hidden:
+                assert param.get_help_record(mcp_ctx) == source.get_help_record(install_ctx)
+
+    def test_pass_through_value_shaped_like_a_flag_stays_attached(self):
+        """``--root --dry-run`` keeps ``--dry-run`` as --root's value, as in apm install."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "api", "--root", "--dry-run"]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
+            result = runner.invoke(mcp, ["install", "api", "--root", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert forwarded[:3] == ["install", "--mcp", "api"]
+        root_idx = forwarded.index("--root")
+        assert forwarded[root_idx + 1] == "--dry-run"
+        assert forwarded.count("--dry-run") == 1
+
+    def test_hidden_install_options_forward_but_stay_out_of_help(self):
+        """Install options outside the shown set still forward verbatim."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp, ["install", "api", "--runtime", "copilot", "--no-trust-bin"]
+            )
+        assert result.exit_code == 0, result.output
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert forwarded[forwarded.index("--runtime") + 1] == "copilot"
+        assert "--no-trust-bin" in forwarded
+        help_result = runner.invoke(mcp, ["install", "--help"])
+        option_lines = [line.strip() for line in help_result.output.splitlines()]
+        assert not any(line.startswith(("--runtime", "--trust-bin")) for line in option_lines)
+
+    def test_forwards_raw_option_values_verbatim(self):
+        """Forwarded options reach apm install as typed, before the ``--``."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "api", "--", "npx", "-y", "srv"]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
+            result = runner.invoke(
+                mcp,
+                [
+                    "install",
+                    "api",
+                    "-t",
+                    "copilot,claude",
+                    "-g",
+                    "--env",
+                    "A=1",
+                    "--env",
+                    "B=2",
+                    "--dry-run",
+                    "--runtime",
+                    "copilot",
+                    "--",
+                    "npx",
+                    "-y",
+                    "srv",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        forwarded = mock_main.call_args.kwargs.get("args")
+        dd = forwarded.index("--")
+        head = forwarded[:dd]
+        assert head[:3] == ["install", "--mcp", "api"]
+        assert head[head.index("--target") + 1] == "copilot,claude"
+        assert "--global" in head
+        assert "--dry-run" in head
+        env_values = [head[i + 1] for i, tok in enumerate(head) if tok == "--env"]
+        assert env_values == ["A=1", "B=2"]
+        # Options not surfaced on mcp install still forward unchanged.
+        assert head[head.index("--runtime") + 1] == "copilot"
+        assert forwarded[dd + 1 :] == ["npx", "-y", "srv"]
+        # Defaults are not materialized into explicit flags.
+        assert "--force" not in head
+        assert "--url" not in head
+
+    def test_forwarded_option_validation_matches_install(self):
+        """Invalid choices fail with install's choice set before forwarding."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main") as mock_main:
+            result = runner.invoke(mcp, ["install", "api", "--transport", "bogus"])
+        assert result.exit_code == 2
+        assert "Invalid value for '--transport'" in result.output
+        mock_main.assert_not_called()
+
+    def test_forwarded_options_shell_complete(self):
+        """Forwarded options complete like apm install's (names and choices)."""
+        from click.shell_completion import ShellComplete
+
+        from apm_cli.cli import cli
+
+        completer = ShellComplete(cli, {}, "apm", "_APM_COMPLETE")
+        names = [c.value for c in completer.get_completions(["mcp", "install", "api"], "--tr")]
+        assert "--transport" in names
+        assert "--trust-transitive-mcp" in names
+        choices = [
+            c.value for c in completer.get_completions(["mcp", "install", "api", "--transport"], "")
+        ]
+        assert choices == ["stdio", "http", "sse", "streamable-http"]
 
     def test_propagates_systemexit_nonzero(self):
         """Failures from the underlying install propagate as non-zero exit codes."""
@@ -720,52 +853,101 @@ class TestMcpInstallAlias:
 
 
 class TestMcpRegistryEnvVar:
-    """All apm mcp commands must pass `RegistryIntegration()` with no positional URL,
-    so the ``MCP_REGISTRY_URL`` fallback in ``SimpleRegistryClient`` actually fires.
-    Regression for issue #813.
+    """Every apm mcp command must let its client resolve the registry URL.
+
+    Issue #813: a hardcoded URL bypassed the ``MCP_REGISTRY_URL`` fallback. The
+    fix is still "do not hand the client a URL", and it now matters for a second
+    reason: a caller-supplied URL is by definition the ``"explicit"`` layer, so
+    pre-resolving would relabel every ambient source and break the
+    layer-aware diagnostics added for #2740.
     """
 
-    def _assert_no_positional_url(self, mock_cls):
-        """Assert RegistryIntegration was constructed without a positional URL arg."""
+    def _assert_no_url_override(self, mock_cls):
+        """Assert RegistryIntegration was constructed without a URL argument."""
         assert mock_cls.called, "RegistryIntegration was not constructed"
-        for call in mock_cls.call_args_list:
-            args, kwargs = call
-            assert not args, (
-                f"RegistryIntegration() called with positional url={args!r}; "
-                "must be no-arg so MCP_REGISTRY_URL env var fallback fires"
-            )
-            url = kwargs.get("registry_url")
+        for args, kwargs in mock_cls.call_args_list:
+            url = args[0] if args else kwargs.get("registry_url")
             assert url is None, (
-                f"RegistryIntegration(registry_url={url!r}) hardcodes the URL; "
-                "must be None so MCP_REGISTRY_URL env var fallback fires"
+                f"RegistryIntegration was built with url={url!r}; the client owns "
+                "the precedence chain, and a caller-supplied URL is recorded as "
+                "the 'explicit' layer no matter where it really came from"
             )
 
-    def test_search_uses_no_arg_constructor(self):
+    def test_search_lets_the_client_resolve(self, monkeypatch):
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://env.internal.example.com")
         runner = make_runner()
         with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
             runner.invoke(mcp, ["search", "cool"])
-        self._assert_no_positional_url(mock_cls)
+        self._assert_no_url_override(mock_cls)
 
-    def test_show_uses_no_arg_constructor(self):
+    def test_show_lets_the_client_resolve(self, monkeypatch):
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda *, create_config=True: "https://config.internal.example.com",
+        )
         runner = make_runner()
         with patch_registry(detail_result=FAKE_SERVER_DETAIL) as mock_cls:
             runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
-        self._assert_no_positional_url(mock_cls)
+        self._assert_no_url_override(mock_cls)
 
-    def test_list_uses_no_arg_constructor(self):
+    def test_list_lets_the_client_resolve(self, monkeypatch):
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url", lambda *, create_config=True: None
+        )
         runner = make_runner()
         with patch_registry(list_result=FAKE_SERVERS) as mock_cls:
             runner.invoke(mcp, ["list"])
-        self._assert_no_positional_url(mock_cls)
+        self._assert_no_url_override(mock_cls)
+
+    def test_diagnostic_reports_the_layer_the_client_recorded(self, monkeypatch):
+        """The printed source comes from the client, not from a second lookup."""
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        mock_console = MagicMock()
+        with patch_registry(list_result=FAKE_SERVERS) as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://config.internal.example.com"
+            mock_cls.return_value.client.registry_url_source = "config"
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                make_runner().invoke(mcp, ["list"])
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "from apm config" in printed
+        assert ("https", "config.internal.example.com") in _printed_urls(printed)
+
+    def test_network_error_hint_names_the_config_layer(self, monkeypatch):
+        """A user who never exported the env var is not sent to look at it.
+
+        Regression trap: while the command pre-resolved the URL, the client
+        recorded ``source="explicit"`` and this hint fell through to the generic
+        "may be temporarily unavailable" line.
+        """
+        import requests as _requests
+
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        mock_console = MagicMock()
+        with patch_registry() as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://config.internal.example.com"
+            mock_cls.return_value.client.registry_url_source = "config"
+            mock_cls.return_value.list_available_packages.side_effect = _requests.ConnectionError(
+                "boom"
+            )
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                result = make_runner().invoke(mcp, ["list"])
+        assert result.exit_code == 1
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "mcp-registry-url is set in apm config" in printed
+        assert "MCP_REGISTRY_URL is set" not in printed
 
     def test_search_diag_line_when_env_var_set(self, monkeypatch):
         """When MCP_REGISTRY_URL is set, search emits a one-line registry diagnostic."""
         monkeypatch.setenv("MCP_REGISTRY_URL", "https://mcp.internal.example.com")
         runner = make_runner()
         mock_console = MagicMock()
-        # Make registry.client.registry_url reflect the env var (RegistryIntegration is mocked out).
+        # Model both attributes the command reads back off its client
+        # (RegistryIntegration is mocked out).
         with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
             mock_cls.return_value.client.registry_url = "https://mcp.internal.example.com"
+            mock_cls.return_value.client.registry_url_source = "env"
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 runner.invoke(mcp, ["search", "x"])
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
@@ -793,6 +975,7 @@ class TestMcpRegistryEnvVar:
         mock_console = MagicMock()
         with patch_registry() as mock_cls:
             mock_cls.return_value.client.registry_url = "https://busted.internal.example.com"
+            mock_cls.return_value.client.registry_url_source = "env"
             mock_cls.return_value.search_packages.side_effect = _requests.ConnectionError("boom")
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 result = runner.invoke(mcp, ["search", "x"])

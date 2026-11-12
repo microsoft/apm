@@ -1,6 +1,6 @@
 ---
 title: "Install failures"
-description: "Diagnose and recover from apm install failures: auth, network, lockfile, cache, and partial installs."
+description: "Diagnose and recover from apm install failures: auth, network, lockfile, cache, partial installs, and Windows Defender false positives."
 sidebar:
   order: 2
 ---
@@ -38,14 +38,15 @@ Common fixes:
 
 ### GHES (GitHub Enterprise Server)
 
-Set `GITHUB_HOST` to switch host classification, transport, and the auth chain:
+Set `GITHUB_HOST` for a GHES instance:
 
 ```bash
 export GITHUB_HOST=ghe.example.com
 export GITHUB_APM_PAT=ghp_ghes_xxx
 ```
 
-The same precedence chain applies; the host just changes which API endpoint is hit and which clone URLs are composed.
+APM applies the GitHub precedence chain and composes API and clone URLs for
+that host. Azure DevOps Server uses the separate host configuration below.
 
 ### GitLab (SaaS and self-managed)
 
@@ -64,21 +65,44 @@ If you operate multiple GitLab instances, list them in `APM_GITLAB_HOSTS` (comma
 
 ### Azure DevOps
 
+Azure DevOps Services hosts (`dev.azure.com` and `*.visualstudio.com`) use:
+
 ```text
-ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   none
+ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   git credential fill
 ```
 
 ```bash
 export ADO_APM_PAT=ado_pat_xxx
 ```
 
-If both are set and the request still fails, APM emits a hint that `ADO_APM_PAT` was rejected and the AAD bearer was tried. Unset the PAT to test AAD auth alone:
+If `ADO_APM_PAT` is set and `az` is logged in but the request still fails,
+APM emits a hint that the PAT was rejected and the bearer was tried. Unset
+the PAT to test bearer auth alone:
 
 ```bash
 unset ADO_APM_PAT
 az login
 apm install
 ```
+
+Azure DevOps Server uses PAT then git credential fill:
+
+```text
+ADO_APM_PAT   ->   git credential fill
+```
+
+```bash
+export ADO_HOST=ado.example.com
+export ADO_APM_PAT=ado_pat_xxx
+```
+
+Use `APM_ADO_HOSTS` for multiple Server instances. A configured ADO host wins
+when `GITHUB_HOST` names the same host. Host variables accept FQDNs only,
+without a scheme, port, or path; put a non-default HTTPS port in the
+dependency URL. Use a root-hosted collection path. APM rejects `/tfs/`
+prefixes. If the PAT is rejected, APM retries path-scoped `git credential fill`
+(Git Credential Manager). Azure CLI bearer auth does not apply to Server.
+If fill also fails, rotate the PAT or store a repository credential in GCM.
 
 ### Test your token
 
@@ -93,12 +117,18 @@ curl -H "Authorization: Bearer $GITHUB_APM_PAT" \
 curl -H "PRIVATE-TOKEN: $GITLAB_APM_PAT" \
      "https://${GITLAB_HOST:-gitlab.com}/api/v4/projects/<owner>%2F<repo>"
 
-# Azure DevOps
+# Azure DevOps Services (PAT)
 curl -u ":${ADO_APM_PAT}" \
      "https://dev.azure.com/<org>/<project>/_apis/git/repositories/<repo>?api-version=7.0"
+
+# Azure DevOps Server (remove :8443 when using default HTTPS)
+curl -u ":${ADO_APM_PAT}" \
+     "https://${ADO_HOST}:8443/DefaultCollection/<project>/_apis/git/repositories/<repo>?api-version=7.0"
 ```
 
-A `200` here with a failing `apm install` points at precedence (a higher-priority var is set to a different token). Run `apm install --verbose` to see which source APM picked.
+A `200` confirms the credential works. If `apm install` still fails, run
+`apm install --verbose` to see which source APM picked. For Server, confirm
+the hostname is registered through `ADO_HOST` or `APM_ADO_HOSTS`.
 
 For end-to-end auth setup see [Authentication](../../getting-started/authentication/).
 
@@ -110,7 +140,7 @@ For end-to-end auth setup see [Authentication](../../getting-started/authenticat
 [!] TLS verification failed
 ```
 
-APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell override, set `REQUESTS_CA_BUNDLE` to a readable PEM bundle. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
+APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell additive setting that retains public trust, set `APM_EXTRA_CA_BUNDLE` to a readable PEM bundle. Use `REQUESTS_CA_BUNDLE` only when you intend to replace the complete Requests trust set. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
 
 ### Timeouts and proxies
 
@@ -146,6 +176,22 @@ apm install
 
 This re-resolves and rewrites `apm.lock.yaml`. Commit the result.
 
+### Merge conflict markers in the lockfile
+
+After a git merge that touched `apm.lock.yaml`, the file may still contain `<<<<<<<` / `>>>>>>>` markers. Commands that require the lockfile then report `apm.lock.yaml contains unresolved git merge conflict markers` instead of a YAML scanner error.
+
+Resolve the conflict in the named file, or restore a known-good lockfile.
+Review the repaired file against the merged `apm.yml`, then retry your original
+command with the same options, including `--global`, `--frozen`, or `--dry-run`.
+This applies even when the markers were copied or committed and no Git merge
+is in progress.
+
+APM leaves the conflicted bytes untouched; it does not discard or regenerate
+the file. Choosing one side during manual repair retains only that side's
+records. Changed or missing dependencies may resolve again on a later install,
+so review the resulting pins before committing. Preview, best-effort readers,
+and lockfiles invalid for other reasons keep their existing behavior.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
@@ -165,6 +211,14 @@ apm audit --ci
 ```
 
 A non-zero exit means the working tree has diverged from `apm.lock.yaml` -- either re-run `apm install` to restore parity, or commit the new lockfile if the drift was intentional.
+
+A fresh project clone can run `apm audit --ci` without `apm_modules/` when its
+manifest, lockfile, and local dependency sources are available. Replay stays
+in scratch space; missing or modified managed files still fail their checks.
+Windows long and native 8.3 paths to the same project are equivalent. A
+missing sibling local source is not a global installation: restore that
+source at its declared path. The `apm install --global` recovery instruction
+applies when auditing the actual user metadata workspace with missing modules.
 
 For the full flag list see [`apm install`](../../reference/cli/install/).
 
@@ -212,7 +266,7 @@ See [`apm cache`](../../reference/cli/cache/) for the full subcommand reference.
 
 ## 5. Partial install recovery
 
-`apm install` is designed to be re-run safely. If a previous invocation died mid-flight (Ctrl-C, OOM, network drop), just run it again:
+`apm install` is designed to be re-run safely. If a previous invocation died mid-flight (Ctrl-C, OOM, network drop), run it again unless it reported incomplete recovery; in that case, inspect the retained paths as described below first:
 
 ```bash
 apm install
@@ -222,6 +276,13 @@ The cache short-circuits already-downloaded packages and the integrate phase ove
 
 If resolution rejects a cyclic dependency graph, fix the package manifests and run `apm install` again. APM rolls back only the package snapshots staged by the rejected resolution, so no manual `apm_modules/` deletion is required.
 
+If an MCP command names `.apm-resolution-staging`, upgrade to a release that
+contains the staging-path fix and retry the same `apm install` command once. If
+the reference or refusal repeats, stop and report the redacted error plus the
+named MCP entry. Do not edit package files, delete the lockfile, or use
+`--refresh` or `--force` solely to repair this path; those actions can move pins
+or bypass unrelated protections.
+
 If files in `apm_modules/` or under target harness directories look corrupt, force a fresh deploy by combining cache bypass with overwrite:
 
 ```bash
@@ -230,13 +291,44 @@ apm install --refresh --force
 
 `--force` overwrites locally-authored files on collision **and** bypasses the security scan's critical-finding block -- use it only after you've inspected the diff. See [`apm install`](../../reference/cli/install/#policy-and-trust).
 
-To wipe everything and start clean:
+To wipe everything and start clean, first save any user changes and recovery
+backups you need. Do not use this reset when APM reports an incomplete rollback:
 
 ```bash
 rm -rf apm_modules/
 apm cache clean
 apm install
 ```
+
+### Windows file locks and incomplete recovery
+
+`WinError 5` (access denied) or `WinError 32` (sharing violation) during
+activation does not mean the destination parent is missing. APM downloads and
+validates a candidate before replacing the installed package. Activation and
+its restore are retried with a short bounded backoff (about 3 seconds), so a
+brief hold by a scanner or indexer clears without failing the install. If the
+denial persists, APM attempts to restore the prior package and manifest without
+changing the locked dependency pins.
+
+Close editors, terminals, or other programs holding the named paths, then retry
+the same command. Do not elevate APM, change ACLs, disable security controls, or
+use `--force` to bypass an OS denial. A persistent denial still fails.
+
+If restoration or cleanup also fails, APM reports those errors and retained
+recovery paths alongside the original failure. The prior package may be in
+`.apm-resolution-staging/<session>/backups/`, **not active at its usual path**.
+Recovery of overlapping parent and child packages is deferred after an
+obstruction so their backups remain recoverable; unrelated packages can still
+be restored.
+Preserve that directory, inspect its contents, and recover needed prior data
+before retrying. Do not delete the entire staging directory: unknown, legacy,
+active, and prior-backup roots can belong to another install or contain the
+only recoverable copy. Include the original and recovery errors when reporting
+an unresolved failure.
+
+Cleanup after a committed install is different: a warning about committed
+staging leaves the validated new package active; it does not roll back to a
+partially deleted backup.
 
 ## 6. Verbose diagnostics
 
@@ -261,3 +353,48 @@ APM_DEBUG=1 apm install --verbose 2>&1 | tee install.log
 ```
 
 If you file an issue, attach `install.log`, the relevant `apm.yml` and `apm.lock.yaml`, and the output of `apm cache info`.
+
+## 7. Windows Defender flags the APM binary
+
+**Symptom:** Windows Defender (or another enterprise AV) quarantines or removes
+the APM executable with a detection such as `Trojan:Script/Wacatac.H!ml` or a
+similar generic ML-based heuristic name.
+
+**Why it happens:** PyInstaller-packed binaries use a self-extracting-archive
+bootloader pattern that triggers ML-based AV heuristics, particularly on
+unsigned executables. This is a false positive -- the APM binary contains no
+malicious code.
+
+**Long-term fix:** Recent APM releases ship with Authenticode code signatures.
+Signed binaries carry a trusted publisher identity and do not trigger these
+heuristics. Upgrade to the latest release.
+
+**Workarounds for older releases or enterprise policies that block new
+downloads:**
+
+1. **Add a Defender exclusion for the install directory** (PowerShell, admin):
+
+   ```powershell
+   Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Programs\apm"
+   ```
+
+   Remove the exclusion once you have upgraded to a signed release:
+
+   ```powershell
+   Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Programs\apm"
+   ```
+
+2. **Install via pip** -- the PyPI package (`apm-cli`) is a pure Python wheel
+   and is not affected by PE-level AV heuristics:
+
+   ```bash
+   pip install apm-cli
+   apm --version
+   ```
+
+   Requires Python 3.11+. See [pip install](../../getting-started/installation/#pip-install).
+
+3. **Submit the binary to Microsoft** if your organisation needs the detection
+   cleared for an older release: use the
+   [Microsoft Security Intelligence submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission)
+   and select "Incorrect detection (False positive)" with the quarantined file.

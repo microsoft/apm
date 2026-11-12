@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 # Check if UPX is available
 def is_upx_available():
     try:
@@ -88,6 +90,10 @@ entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
 datas = [
     (str(repo_root / 'scripts' / 'runtime'), 'scripts/runtime'),  # Bundle runtime setup scripts
     (str(repo_root / 'pyproject.toml'), '.'),  # Bundle pyproject.toml for version reading
+    (str(repo_root / 'LICENSE'), '.'),
+    (str(repo_root / 'LICENSE-DOCS'), '.'),
+    (str(repo_root / 'LICENSING.md'), '.'),
+    (str(repo_root / 'NOTICE'), '.'),
     # Child-runtime TLS trust bootstrap: ships at apm_cli/core/_child_tls/ so
     # ensure_child_tls_bootstrap() can copy the self-contained .pth bootstrap
     # into a child runtime venv's site-packages from the frozen binary.
@@ -228,6 +234,11 @@ hiddenimports = [
     'importlib.metadata',
     'importlib_metadata',
 ]
+# Rich loads versioned cell-width tables dynamically; collect every installed version.
+hiddenimports.extend(collect_submodules('rich._unicode_data'))
+# Lazy Click dispatch uses importlib.import_module; PyInstaller cannot follow
+# those string paths, so freeze every commands.* module into the PYZ.
+hiddenimports.extend(collect_submodules('apm_cli.commands'))
 
 # Modules to exclude to reduce binary size
 excludes = [

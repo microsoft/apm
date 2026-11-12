@@ -339,17 +339,21 @@ class TestCodexDockerArgsFix:
             config = codex_adapter.get_current_config()
             server_config = config["mcp_servers"]["test-docker-server"]
 
-            # Check that both runtime_arguments and package_arguments are combined
-            # Plus -e flags for environment variables (inserted before image name)
+            # docker run [OPTIONS] IMAGE [ARG...]: the -e flag is a run option
+            # and must precede the image, while package_arguments are the
+            # container's own argv and follow it. The previous expectation had
+            # the -e landing inside the container argv (after the image,
+            # splitting --config from its value), where docker never applies
+            # it -- the TEST_TOKEN env var silently did not reach the server.
             expected_args = [
                 "run",
                 "-i",
                 "--rm",
+                "-e",
+                "TEST_TOKEN",
                 "example/test-server",
                 "--verbose",
                 "--config",
-                "-e",
-                "TEST_TOKEN",
                 "/app/config.json",
             ]
             assert server_config["args"] == expected_args
@@ -385,6 +389,8 @@ class TestCodexDockerArgsFix:
                 "-e",
                 "GITHUB_DYNAMIC_TOOLSETS",
                 "-e",
+                "GITHUB_HOST",
+                "-e",
                 "GITHUB_READ_ONLY",
                 "-e",
                 "GITHUB_TOOLSETS",
@@ -397,9 +403,7 @@ class TestCodexDockerArgsFix:
             assert args.count("run") == 1
             assert args.count("-i") == 1
             assert args.count("--rm") == 1
-            assert (
-                args.count("-e") == 4
-            )  # One for each environment variable (including GITHUB_DYNAMIC_TOOLSETS default)
+            assert args.count("-e") == 5
             assert args.count("GITHUB_PERSONAL_ACCESS_TOKEN") == 1
             assert args.count("ghcr.io/github/github-mcp-server") == 1
 
@@ -493,6 +497,8 @@ class TestCodexDockerArgsFix:
                 "GITHUB_PERSONAL_ACCESS_TOKEN",
                 "-e",
                 "GITHUB_DYNAMIC_TOOLSETS",
+                "-e",
+                "GITHUB_HOST",
                 "-e",
                 "GITHUB_READ_ONLY",
                 "-e",

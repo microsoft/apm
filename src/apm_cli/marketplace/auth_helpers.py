@@ -37,7 +37,7 @@ def resolve_auth_for_host(
         else:
             resolver = auth_resolver
         ctx = resolver.resolve(host) if org is None else resolver.resolve(host, org=org)
-        if ctx.token:
+        if ctx.token or ctx.host_info.kind == "ado":
             logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)
             return ctx
     except Exception:

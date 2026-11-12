@@ -22,6 +22,7 @@ class _FakeCtx:
 
     project_root: Path = Path("/fake/root")
     apm_dir: Path = Path("/fake/root/.apm")
+    apm_modules_dir: Any = None
     installed_count: int = 0
     unpinned_count: int = 0
     installed_packages: list[Any] = field(default_factory=list)
@@ -35,6 +36,8 @@ class _FakeCtx:
     logger: Any = None
     package_types: dict[str, str] = field(default_factory=dict)
     scope: Any = field(default_factory=lambda: InstallScope.PROJECT)
+    dry_run: bool = False
+    targets: list[Any] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

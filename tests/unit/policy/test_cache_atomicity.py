@@ -7,15 +7,16 @@ and metadata sidecar.  No torn writes, no truncated JSON, no partial YAML.
 
 from __future__ import annotations
 
-import json  # noqa: F401
+import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.parse import urlparse
 
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
-    _cache_key,  # noqa: F401
+    _cache_key,
     _get_cache_dir,
     _read_cache,
     _read_cache_entry,
@@ -145,6 +146,46 @@ class TestCacheAtomicity(unittest.TestCase):
                 [],
                 f"Leftover .tmp files: {[f.name for f in tmp_files]}",
             )
+
+    def test_cache_metadata_redacts_url_credentials_without_changing_identity(self):
+        """Persisted refs are safe while lookups retain the original cache key."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = (
+                "https://alice:s3cr3t@policy.example.com/apm-policy.yml"
+                "?sig=private-signature#private-fragment"
+            )
+            parent_ref = "https://bob:parent-secret@policy.example.com/base.yml"
+
+            _write_cache(
+                repo_ref,
+                _make_policy(1),
+                root,
+                chain_refs=[parent_ref, repo_ref],
+            )
+
+            meta_path = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            persisted_refs = [meta["repo_ref"], *meta["chain_refs"]]
+            parsed_refs = [urlparse(ref) for ref in persisted_refs]
+
+            self.assertTrue(all(parsed.username is None for parsed in parsed_refs))
+            self.assertTrue(all(parsed.password is None for parsed in parsed_refs))
+            self.assertTrue(all(parsed.query == "" for parsed in parsed_refs))
+            self.assertTrue(all(parsed.fragment == "" for parsed in parsed_refs))
+            self.assertEqual(
+                {(parsed.hostname, parsed.path) for parsed in parsed_refs},
+                {
+                    ("policy.example.com", "/apm-policy.yml"),
+                    ("policy.example.com", "/base.yml"),
+                },
+            )
+            self.assertNotIn("s3cr3t", json.dumps(meta))
+            self.assertNotIn("private-signature", json.dumps(meta))
+
+            entry = _read_cache_entry(repo_ref, root)
+            self.assertIsNotNone(entry)
+            self.assertEqual(entry.policy.name, "writer-1")
 
 
 if __name__ == "__main__":

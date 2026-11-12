@@ -8,7 +8,15 @@ default path, config namespace, mapper, and required package metadata.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from ..utils.path_security import ensure_path_within
+
+if TYPE_CHECKING:
+    from .yml_schema import MarketplaceConfig
 
 _ENV_VAR_PATTERN = re.compile(r"^APM_MARKETPLACE_[A-Z0-9_]+_PATH$")
 _RESERVED_NAMES = frozenset({"all", "none"})
@@ -82,11 +90,20 @@ CODEX_MARKETPLACE_OUTPUT = MarketplaceOutputProfile(
     required_package_fields=("category",),
 )
 
+COPILOT_MARKETPLACE_OUTPUT = MarketplaceOutputProfile(
+    name="copilot",
+    config_attr="copilot",
+    default_output=".github/plugin/marketplace.json",
+    mapper="copilot",
+    path_env_var="APM_MARKETPLACE_COPILOT_PATH",
+)
+
 MARKETPLACE_OUTPUTS: dict[str, MarketplaceOutputProfile] = {
     profile.name: profile
     for profile in (
         DEFAULT_MARKETPLACE_OUTPUT,
         CODEX_MARKETPLACE_OUTPUT,
+        COPILOT_MARKETPLACE_OUTPUT,
     )
 }
 
@@ -98,3 +115,34 @@ for _profile in MARKETPLACE_OUTPUTS.values():
 def known_output_names() -> frozenset[str]:
     """Return the supported marketplace output names."""
     return frozenset(MARKETPLACE_OUTPUTS)
+
+
+def resolve_effective_output_path(
+    config: MarketplaceConfig,
+    profile: MarketplaceOutputProfile,
+    project_root: Path,
+    output_overrides: Mapping[str, str | Path] | None = None,
+) -> Path:
+    """Resolve a profile output path with pack's documented precedence."""
+    if output_overrides and profile.name in output_overrides:
+        configured_path = output_overrides[profile.name]
+    else:
+        explicit_spec = next(
+            (
+                spec
+                for spec in config.output_specs
+                if spec.name == profile.name and spec.path_explicit
+            ),
+            None,
+        )
+        if explicit_spec is not None:
+            configured_path = explicit_spec.path
+        else:
+            profile_config = getattr(config, profile.config_attr, None)
+            configured_path = getattr(profile_config, "output", profile.default_output)
+
+    output_path = Path(configured_path)
+    if not output_path.is_absolute():
+        output_path = project_root / output_path
+    ensure_path_within(output_path, project_root)
+    return output_path

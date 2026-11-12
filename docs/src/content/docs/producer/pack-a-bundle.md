@@ -14,13 +14,18 @@ pins every file by SHA-256. Build it with one command from a project that has
 apm pack
 ```
 
+An explicit `dependencies: {}` mapping also selects bundle output. It is useful
+for packages that distribute only their own local primitives. Omit
+`dependencies:` (or leave it null) when the project should not produce a
+bundle.
+
 This is the producer side of [Deploy a local bundle](../../consumer/deploy-a-bundle/).
 Consumers who receive the artifact run `apm install ./your-bundle` and skip
 the registry resolver entirely.
 
 ## What `apm pack` produces
 
-By default `apm pack` writes a plugin-format directory under `./build/`:
+By default `apm pack` writes a Claude Code plugin directory under `./build/`:
 
 ```
 build/<your-package>/
@@ -29,6 +34,9 @@ build/<your-package>/
 +-- skills/
 +-- commands/
 +-- hooks/
++-- hooks.json         # first-party hook configuration, when present
++-- .claude-plugin/
+|   +-- plugin.json    # native Claude hook discovery, when hooks are present
 +-- apm.lock.yaml      # embedded: pins every file by SHA-256
 ```
 
@@ -42,6 +50,17 @@ $ apm pack
     apm.lock.yaml for install-time integrity verification.
 [i] Share with: apm install build/my-pkg
 ```
+
+Pass `--format agent-plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---format-agent-plugin)
+bundle (`plugin.json` + `skills/` + `mcp.json` only, no Claude-specific
+directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
+That format is stricter -- it fails before writing anything if your source
+has agents, commands, instructions, extensions, hooks, or LSP config it
+cannot represent. To install one, declare it as a dependency in `apm.yml`
+and run `apm install --target copilot`, which registers it natively without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; see
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
 for legacy CI pipelines) instead of a directory; use `-o` to change the output location
@@ -94,6 +113,37 @@ synthesise -- otherwise leave it to `apm pack` and keep `apm.yml` as the
 source of truth. See [Package anatomy](../../concepts/package-anatomy/) for
 the full schema.
 
+### Hook resources in Claude plugin bundles
+
+The legacy Claude plugin format (`--format plugin` or `--claude-plugin`)
+keeps first-party hook configuration in `hooks.json`. When hooks are present,
+both the root `plugin.json` and `.claude-plugin/plugin.json` declare
+`"hooks": "./hooks.json"`, so Claude Code can discover that non-default path.
+The native manifest follows [Claude's plugin layout](https://code.claude.com/docs/en/plugins-reference).
+This does not claim hook compatibility with other hosts or run a native client.
+
+Packing rewrites plugin-root command references to the files' packed locations.
+For example, `${CLAUDE_PLUGIN_ROOT}/.apm/skills/demo/scripts/check.py`
+becomes `${CLAUDE_PLUGIN_ROOT}/skills/demo/scripts/check.py`. A reference to
+`${CLAUDE_PLUGIN_ROOT}/scripts/check.py` can resolve from the source hook
+descriptor's directory; `.apm/hooks/scripts/check.py` is then packed as
+`hooks/scripts/check.py` and the command follows that path. Hook sibling assets
+are preserved, with Node module type retained when needed. No hook or package
+script is executed during packing.
+
+Quoted filenames and split-quoted roots retain their shell meaning.
+References to selected directories, such as `cd "${CLAUDE_PLUGIN_ROOT}/.apm/skills/demo"`,
+follow the packed directory without adding unselected files. The selected files
+must materialize that directory; empty directories fail. Root-level scripts
+retain their Node module type without publishing the rest of the repository.
+
+An explicit `includes` list remains exhaustive: include the hook descriptor
+and its resource directories. Missing, excluded, symlinked, escaping or
+collision-displaced referenced resources fail before replacing the existing
+bundle. `apm pack --dry-run --verbose` checks the same references and lists
+the resource files without writing output. Hook event names and payloads are
+not translated between hosts.
+
 ## Integrity: how install verifies the bundle
 
 `apm pack` writes `pack.bundle_files` into the embedded `apm.lock.yaml` -- a
@@ -145,8 +195,8 @@ it:
 ```
 
 When packing git dependencies, `apm pack` emits **only** what the
-lockfile attests, in every format (`--format plugin` and the default
-`--format apm`). Dependency content is sourced exclusively from the
+lockfile attests, in every bundle format (the default Claude plugin format,
+the explicit Agent Plugin format, and the legacy APM format). Dependency content is sourced exclusively from the
 lockfile `deployed_files` list -- the `apm_modules` cache is never
 packed, because it carries no provenance or integrity guarantee (it can
 be stale, partial, or tampered). Each attested file is verified against
@@ -183,7 +233,7 @@ primitive type:
 | command (prompt) | `.apm/prompts/*.prompt.md` | No |
 | hook | `.apm/hooks/*.json` | Yes: `hooks/*.json` |
 | agent | `.apm/agents/**/*.agent.md` | Yes: `*.agent.md` at package root |
-| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE; for MARKETPLACE_PLUGIN only when `plugin.json` declares it) |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
 `src/apm_cli/integration/command_integrator.py`,
@@ -209,6 +259,10 @@ If you publish a plugin that consumers install via `apm install`, use
 `.apm/<type>/` for **every** primitive type. This layout is the only
 one that works symmetrically through both `apm pack` (export) and
 `apm install` (discovery).
+
+For a marketplace plugin, `plugin.json` is authoritative when it declares
+`skills`: declare each skill or an immediate container, or omit `skills` to
+use conventional discovery. See [Package Types](../../reference/package-types/#plugin-collection-pluginjson).
 
 ```
 plugins/my-plugin/
@@ -271,12 +325,20 @@ bundle. The root `apm pack` builds the marketplace index. See
 **Do not use `--format apm` for bundles you expect consumers to install.**
 The legacy APM bundle layout has no `plugin.json` and `apm install` rejects
 it with a targeted error. The flag exists for tooling that still consumes
-the older layout; new bundles should use the default `--format plugin`. If
-you only have a legacy artifact, repack it:
+the older layout; new bundles should use the default Claude plugin format
+(no format flag needed). If you only have a legacy artifact, repack it:
 
 ```bash
-apm pack --format plugin --archive
+apm pack --archive
 ```
+
+**Install Agent Plugin output through the declarative route.** `apm pack --format agent-plugin`
+produces a valid, portable Agent Plugins v1 bundle. Declare it as a dependency
+in `apm.yml` and run `apm install --target copilot`, which registers it without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; the imperative `apm install <bundle>` route fails
+closed for Agent Plugins. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 **Do not set `--target`.** The flag is deprecated. Bundles are
 target-agnostic: the consumer's project decides which harness layouts
@@ -294,7 +356,7 @@ after `apm install`, its bytes no longer match the `deployed_file_hashes`
 SHA-256 recorded in `apm.lock.yaml` and `apm pack` fails with
 `... does not match the hash recorded in apm.lock.yaml`. A deleted file
 raises a sibling error that also points at `apm install` (the exact
-wording differs between `--format apm` and `--format plugin`). Run
+wording differs between the legacy APM format and the plugin formats). Run
 `apm install` to restore the attested content, then pack again.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the

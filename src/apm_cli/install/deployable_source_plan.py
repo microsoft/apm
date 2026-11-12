@@ -1,0 +1,374 @@
+"""Authorized source paths for one package deployment.
+
+The plan is built only after target, subset, and executable authorization.
+It is the single source of truth for both the pre-deploy security scan and
+skill materialization, so a source-only fixture cannot become deployable
+because it happens to be scanned.
+"""
+
+from __future__ import annotations
+
+import stat
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from apm_cli.install.cache_pin import MARKER_FILENAME
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.utils.diagnostics import printable_ascii_text
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within_resolved,
+    has_symlink_component,
+)
+from apm_cli.utils.paths import portable_relpath
+
+if TYPE_CHECKING:
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+def _is_safe_source_path(
+    path: Path,
+    source_root: Path,
+    on_symlink: Callable[[Path], None] | None = None,
+) -> bool:
+    """Check containment; notify on_symlink only for symlink-component rejection."""
+    try:
+        path.relative_to(source_root)
+    except ValueError:
+        return False
+    if has_symlink_component(source_root, path):
+        if on_symlink is not None:
+            on_symlink(path)
+        return False
+    try:
+        ensure_path_within_resolved(path, source_root)
+    except (OSError, PathTraversalError, RuntimeError):
+        return False
+    return True
+
+
+def _optional_source_directory(root: Path) -> bool | None:
+    """Distinguish an absent optional root from a non-directory or an access failure."""
+    try:
+        return stat.S_ISDIR(root.stat().st_mode)
+    except FileNotFoundError:
+        return None
+
+
+@dataclass(frozen=True)
+class DeployableSourcePlan:
+    """Authorized sources plus a skill-scoped discovery witness.
+
+    Skill roots and members are source-relative coverage witnesses for the
+    materializer, not certificates for other primitives. Legacy/plugin skill
+    selectors without complete discovery stay unknown.
+    """
+
+    source_root: Path
+    paths: frozenset[str]
+    selected_skill_names: frozenset[str] | None = None
+    authorized_parent_prefixes: frozenset[str] = frozenset()
+    hook_source_selection: Any | None = None
+    plugin_bin_deployable: bool = False
+    skill_discovery_complete: bool = False
+    skill_source_roots: frozenset[str] = frozenset()
+    skill_source_files: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        """Index authorized parents for constant-time copy filtering."""
+        if self.authorized_parent_prefixes:
+            return
+        prefixes = {
+            parent.as_posix()
+            for path in self.paths
+            for parent in Path(path).parents
+            if parent.as_posix() != "."
+        }
+        object.__setattr__(self, "authorized_parent_prefixes", frozenset(prefixes))
+
+    @classmethod
+    def create(
+        cls,
+        package_info: Any,
+        targets: list[Any],
+        *,
+        skill_subset: tuple[str, ...] | None,
+        hooks_approved: bool,
+        canvas_approved: bool,
+        skip_bin: bool,
+        plugin_bin_deployable: bool = False,
+        native_plugin_root: Path | None = None,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+    ) -> DeployableSourcePlan:
+        """Build the authorized deploy set after all deployment gates resolve."""
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        source_root = Path(package_info.install_path).resolve()
+        # Require the package root itself, while optional primitive roots may be absent.
+        if not source_root.is_dir():
+            raise OSError(
+                f"Cannot enumerate source {source_root}: package root is missing or not a directory. "
+                "Restore the package source and retry installation."
+            )
+        paths: set[str] = set()
+        skill_source_roots: set[str] = set()
+        skill_source_files: set[str] = set()
+        discovery_complete = native_plugin_root is None
+        selected_skill_names: frozenset[str] | None = None
+        hook_source_selection = None
+        target_primitives = {primitive for target in targets for primitive in target.primitives}
+
+        def safe(path: Path, on_symlink: Callable[[Path], None] | None = None) -> bool:
+            nonlocal discovery_complete
+            admitted = _is_safe_source_path(path, source_root, on_symlink)
+            discovery_complete = discovery_complete and admitted
+            return admitted
+
+        def warn_agent_symlink(path: Path) -> None:
+            if diagnostics is not None:
+                # Name the rejected link, not the target portable_relpath resolves.
+                relative = path.relative_to(source_root).as_posix()
+                diagnostics.warn(
+                    message=(
+                        "Skipped symlinked agent source: "
+                        f"{printable_ascii_text(relative)}. "
+                        "Symlinked agent sources are not deployed. "
+                        "Use real files and directories in .apm/agents/ "
+                        "(or real *.agent.md files at the package root), then rerun apm install."
+                    ),
+                    package=printable_ascii_text(package_name),
+                )
+
+        def add_file(
+            path: Path,
+            on_symlink: Callable[[Path], None] | None = None,
+            *,
+            skill_member: bool = False,
+        ) -> None:
+            nonlocal discovery_complete
+            if safe(path, on_symlink) and path.is_file():
+                relative = portable_relpath(path, source_root)
+                if native_plugin_root is not None and (
+                    relative == MARKER_FILENAME or ".git" in Path(relative).parts
+                ):
+                    return
+                paths.add(relative)
+                if skill_member:
+                    skill_source_files.add(relative)
+            else:
+                discovery_complete = False
+
+        def source_directory(root: Path, on_symlink: Callable[[Path], None] | None = None) -> bool:
+            nonlocal discovery_complete
+            if not safe(root, on_symlink):
+                return False
+            directory = _optional_source_directory(root)
+            discovery_complete = discovery_complete and directory is not False
+            return directory is True
+
+        def tree_files(
+            root: Path, on_symlink: Callable[[Path], None] | None = None
+        ) -> Iterator[Path]:
+            if not source_directory(root, on_symlink):
+                return
+            for parent, directory_names, file_names in BaseIntegrator.walk_source_tree(root):
+                parent_path = Path(parent)
+                directory_names[:] = [
+                    name for name in directory_names if safe(parent_path / name, on_symlink)
+                ]
+                yield from (parent_path / name for name in file_names)
+
+        def add_tree(root: Path) -> None:
+            for path in tree_files(root):
+                add_file(path)
+
+        def add_matching_files(
+            root: Path, pattern: str, on_symlink: Callable[[Path], None] | None = None
+        ) -> None:
+            for path in tree_files(root, on_symlink):
+                if path.match(pattern):
+                    add_file(path, on_symlink)
+
+        def add_direct_matching_files(
+            root: Path, pattern: str, on_symlink: Callable[[Path], None] | None = None
+        ) -> None:
+            if not source_directory(root, on_symlink):
+                return
+            for path in root.iterdir():
+                if path.match(pattern):
+                    add_file(path, on_symlink)
+
+        if "prompts" in target_primitives or "commands" in target_primitives:
+            add_direct_matching_files(source_root, "*.prompt.md")
+            add_matching_files(source_root / ".apm" / "prompts", "*.prompt.md")
+
+        if "agents" in target_primitives:
+            add_direct_matching_files(source_root, "*.agent.md", warn_agent_symlink)
+            add_matching_files(source_root / ".apm" / "agents", "*.md", warn_agent_symlink)
+
+        if "instructions" in target_primitives:
+            add_matching_files(source_root / ".apm" / "instructions", "*.instructions.md")
+
+        if hooks_approved and "hooks" in target_primitives:
+            from apm_cli.integration.hook_integrator import HookIntegrator
+
+            hook_target_names = [
+                target.name
+                for target in targets
+                if "hooks" in target.primitives and hasattr(target, "name")
+            ]
+            hook_source_selection = HookIntegrator.select_deployable_hook_sources(
+                source_root,
+                hook_target_names,
+            )
+            for path in hook_source_selection.files:
+                add_file(path)
+
+        if native_plugin_root is not None:
+            if native_plugin_root != source_root:
+                raise ValueError("Native source plan must use the admitted package root.")
+            for parent, directories, files in BaseIntegrator.walk_source_tree(source_root):
+                for name in (*directories, *files):
+                    path = Path(parent) / name
+                    if not _is_safe_source_path(path, source_root):
+                        raise ValueError(
+                            "Native plugin contains an unsafe path or symlink; "
+                            "a live loader cannot honor partial source exclusions."
+                        )
+                    add_file(path)
+                directories[:] = [name for name in directories if name != ".git"]
+
+        if canvas_approved and "canvas" in target_primitives:
+            from apm_cli.integration.canvas_integrator import CanvasIntegrator
+
+            for bundle in CanvasIntegrator.find_canvas_bundles(source_root):
+                add_tree(bundle)
+
+        if "skills" in target_primitives:
+            from apm_cli.models.apm_package import PackageType
+
+            is_marketplace_plugin = (
+                getattr(package_info, "package_type", None) is PackageType.MARKETPLACE_PLUGIN
+            )
+            if is_marketplace_plugin:
+                # Legacy plugin normalization exposes membership, not a complete-discovery proof.
+                discovery_complete = False
+            source_skill = source_root / "SKILL.md"
+            has_root_skill = safe(source_skill) and source_skill.is_file()
+            if has_root_skill:
+                skill_source_roots.add(".")
+                for path in tree_files(source_root):
+                    relative = path.relative_to(source_root)
+                    if (
+                        relative.parts[0] == ".apm"
+                        or path.name == MARKER_FILENAME
+                        or (skip_bin and relative.parts[0] == "bin")
+                        or (
+                            is_marketplace_plugin
+                            and len(relative.parts) == 1
+                            and path.name == "apm.yml"
+                        )
+                    ):
+                        continue
+                    add_file(path, skill_member=True)
+
+            selected = skill_subset_filter_tokens(skill_subset)
+            selected_skill_names = frozenset(selected) if selected is not None else None
+            if has_root_skill and selected is not None:
+                discovery_complete = False
+            if is_marketplace_plugin and not has_root_skill:
+                from apm_cli.deps.plugin_parser import normalized_plugin_skill_sources
+
+                plugin_sources, _declared = normalized_plugin_skill_sources(source_root)
+                candidates = [
+                    plugin_sources[name]
+                    for name in (
+                        sorted(selected) if selected is not None else sorted(plugin_sources)
+                    )
+                    if name in plugin_sources
+                ]
+            else:
+                candidates = []
+                for skills_root in (
+                    source_root / "skills",
+                    source_root / ".apm" / "skills",
+                ):
+                    if not source_directory(skills_root) or (
+                        has_root_skill
+                        and selected is None
+                        and skills_root == source_root / "skills"
+                    ):
+                        continue
+                    candidates.extend(
+                        [skills_root / name for name in sorted(selected)]
+                        if selected is not None
+                        else skills_root.iterdir()
+                    )
+
+            for skill_dir in candidates:
+                if not (
+                    safe(skill_dir)
+                    and skill_dir.is_dir()
+                    and safe(skill_dir / "SKILL.md")
+                    and (skill_dir / "SKILL.md").is_file()
+                    and (selected is None or skill_dir.name in selected)
+                ):
+                    continue
+                skill_source_roots.add(portable_relpath(skill_dir, source_root))
+                for path in tree_files(skill_dir):
+                    relative = path.relative_to(skill_dir)
+                    if skip_bin and relative.parts[0] == "bin":
+                        continue
+                    add_file(path, skill_member=True)
+            if selected is not None and not set(selected).issubset(
+                Path(root).name for root in skill_source_roots
+            ):
+                discovery_complete = False
+
+        if plugin_bin_deployable:
+            add_tree(source_root / "bin")
+            add_file(source_root / ".claude-plugin" / "plugin.json")
+
+        return cls(
+            source_root=source_root,
+            paths=frozenset(paths),
+            selected_skill_names=selected_skill_names,
+            hook_source_selection=hook_source_selection,
+            plugin_bin_deployable=plugin_bin_deployable,
+            skill_discovery_complete=discovery_complete,
+            skill_source_roots=frozenset(skill_source_roots),
+            skill_source_files=frozenset(skill_source_files),
+        )
+
+    def includes(self, relative_path: str) -> bool:
+        """Return whether a portable source-relative path is authorized."""
+        return relative_path.replace("\\", "/") in self.paths
+
+    def scan_security(self, *, policy, force: bool = False):
+        """Scan exactly the source files authorized by this plan."""
+        from apm_cli.security.gate import SecurityGate
+
+        return SecurityGate.scan_files(
+            self.source_root,
+            policy=policy,
+            force=force,
+            paths=self.paths,
+        )
+
+    def copy_ignore(self, directory: str, contents: list[str]) -> list[str]:
+        """Return source entries excluded from a skill copy by this plan."""
+        current = Path(directory)
+        ignored: list[str] = []
+        for name in contents:
+            candidate = current / name
+            if not _is_safe_source_path(candidate, self.source_root):
+                ignored.append(name)
+                continue
+            relative = portable_relpath(candidate, self.source_root)
+            if self.includes(relative) or relative in self.authorized_parent_prefixes:
+                continue
+            ignored.append(name)
+        return ignored

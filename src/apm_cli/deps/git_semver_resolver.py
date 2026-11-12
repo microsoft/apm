@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..marketplace.ref_resolver import RefResolver, RemoteRef
 from ..marketplace.semver import SemVer, parse_semver, satisfies_range
@@ -39,6 +39,7 @@ __all__ = [
     "GitSemverResolution",
     "GitSemverResolver",
     "NoMatchingTagError",
+    "RegistryOnlySemverError",
     "iter_semver_tags",
     "utc_now_iso",
 ]
@@ -81,7 +82,7 @@ def utc_now_iso() -> str:
     spelling.  Kept out of :mod:`datetime` import sites to make the
     timestamp easy to stub in tests.
     """
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 class NoMatchingTagError(Exception):
@@ -96,6 +97,16 @@ class NoMatchingTagError(Exception):
         super().__init__(f"{summary}\n{hint}" if hint else summary)
         self.summary = summary
         self.hint = hint
+
+
+class RegistryOnlySemverError(NoMatchingTagError):
+    """Raised when a semver range is requested in registry-only mode.
+
+    Subclasses :class:`NoMatchingTagError` so existing callers that
+    already handle range-resolution failure keep working; the distinct
+    type lets callers that care tell "no tag matched" apart from "ranges
+    are unavailable in this mode".
+    """
 
 
 @dataclass(frozen=True)
@@ -219,6 +230,7 @@ class GitSemverResolver:
         owner_repo: str,
         package_name: str,
         constraint: str,
+        remote_url: str | None = None,
         tag_patterns: Sequence[str] = DEFAULT_TAG_PATTERNS,
         now_iso: str | None = None,
     ) -> GitSemverResolution:
@@ -235,6 +247,8 @@ class GitSemverResolver:
         constraint:
             Semver range (e.g. ``"^1.2.0"``, ``"~2.1"``, ``">=1.0 <2.0"``)
             or exact version (``"1.2.3"``).
+        remote_url:
+            Canonical ADO URL supplied by ``DependencyReference``.
         tag_patterns:
             Ordered tag patterns to try.  Defaults to
             :data:`DEFAULT_TAG_PATTERNS`.  A bare-version fallback
@@ -255,8 +269,38 @@ class GitSemverResolver:
         NoMatchingTagError
             When no tag on the remote satisfies the constraint after
             trying the default patterns and the bare-version fallback.
+        RegistryOnlySemverError
+            When registry-only mode (``PROXY_REGISTRY_ONLY``) is active
+            and ``constraint`` is a range. A range needs a version
+            listing, and the proxy exposes no enumeration surface, so
+            resolving one would require querying the upstream host the
+            mode exists to avoid. Exact versions never reach this method
+            in registry-only mode: ``maybe_resolve_git_semver`` declines
+            the semver route for them so they resolve as a literal ref
+            through the proxy.
         """
-        refs = self._ref_resolver.list_remote_refs(owner_repo)
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            raise RegistryOnlySemverError(
+                summary=(
+                    f"Cannot resolve the range '{constraint}' for"
+                    f" '{owner_repo}' in registry-only mode."
+                ),
+                hint=(
+                    "PROXY_REGISTRY_ONLY is set, so the upstream host cannot be"
+                    " queried for the tag listing a range needs, and the proxy"
+                    " exposes no version enumeration surface. Pin one exact"
+                    " version, written as the upstream tag name (e.g. 'v1.2.3'"
+                    " or '1.2.3'), which resolves through the proxy without a"
+                    " listing, or unset PROXY_REGISTRY_ONLY to resolve ranges"
+                    " from the upstream host."
+                ),
+            )
+        if remote_url is None:
+            refs = self._ref_resolver.list_remote_refs(owner_repo)
+        else:
+            refs = self._ref_resolver.list_remote_refs(owner_repo, remote_url=remote_url)
         primary_patterns = tuple(tag_patterns)
         # Two-pass: try the author-supplied patterns first; only if they
         # find zero candidates do we widen to the bare-version fallback.

@@ -16,6 +16,7 @@ from apm_cli.core.scope import (
     get_manifest_path,
     get_modules_dir,
     get_unsupported_targets,
+    is_user_scope,
     warn_unsupported_user_scope,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -39,6 +40,12 @@ class TestInstallScope:
     def test_invalid_raises(self):
         with pytest.raises(ValueError):
             InstallScope("global")
+
+    def test_user_scope_identity_is_fail_closed(self):
+        assert is_user_scope(InstallScope.USER)
+        assert not is_user_scope(InstallScope.PROJECT)
+        assert not is_user_scope("user")
+        assert not is_user_scope(None)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +171,8 @@ class TestTargetProfileUserScope:
             "opencode",
             "codex",
             "gemini",
+            "grok-build",
+            "grok-cloud",
             "antigravity",
             "windsurf",
             "kiro",
@@ -172,6 +181,7 @@ class TestTargetProfileUserScope:
             "agent-skills",
             "openclaw",
             "hermes",
+            "grok-bot",
         }
         assert set(KNOWN_TARGETS.keys()) == expected
 
@@ -187,10 +197,10 @@ class TestTargetProfileUserScope:
     def test_copilot_is_partially_supported(self):
         assert KNOWN_TARGETS["copilot"].user_supported == "partial"
 
-    def test_cursor_is_partially_supported(self):
-        assert KNOWN_TARGETS["cursor"].user_supported == "partial"
+    def test_cursor_is_supported_at_user_scope(self):
+        assert KNOWN_TARGETS["cursor"].user_supported is True
         assert KNOWN_TARGETS["cursor"].user_root_dir == ".cursor"
-        assert "instructions" in KNOWN_TARGETS["cursor"].unsupported_user_primitives
+        assert KNOWN_TARGETS["cursor"].unsupported_user_primitives == ()
 
     def test_opencode_is_partially_supported(self):
         assert KNOWN_TARGETS["opencode"].user_supported == "partial"
@@ -232,12 +242,12 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is True
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is True
 
-    def test_supports_at_user_scope_cursor_partial(self):
-        # Cursor supports agents at user scope but not instructions
+    def test_supports_at_user_scope_cursor(self):
+        # Cursor fully supports instructions, agents, skills, and hooks at user scope.
         assert KNOWN_TARGETS["cursor"].supports_at_user_scope("agents") is True
         assert KNOWN_TARGETS["cursor"].supports_at_user_scope("skills") is True
         assert KNOWN_TARGETS["cursor"].supports_at_user_scope("hooks") is True
-        assert KNOWN_TARGETS["cursor"].supports_at_user_scope("instructions") is False
+        assert KNOWN_TARGETS["cursor"].supports_at_user_scope("instructions") is True
 
     def test_supports_at_user_scope_opencode_partial(self):
         # OpenCode supports agents at user scope but not hooks
@@ -296,18 +306,18 @@ class TestScopeWarnings:
         assert "cursor" in msg
         assert "opencode" in msg
         assert "copilot" in msg
-        # Claude is fully supported
+        # Claude and Cursor are fully supported
         assert "claude" in msg
         assert "fully supported" in msg.lower()
-        # Copilot, cursor, opencode are partially supported
+        # Copilot, opencode (and others) remain partially supported
         assert "partially supported" in msg.lower()
 
     def test_warn_message_includes_unsupported_primitives(self):
         msg = warn_unsupported_user_scope()
         # Copilot now supports instructions at user scope (#650); not in warning.
         assert "copilot (instructions)" not in msg
-        # Cursor excludes instructions
-        assert "cursor (instructions)" in msg
+        # Cursor now supports instructions at user scope; not in warning.
+        assert "cursor (instructions)" not in msg
         # OpenCode excludes hooks
         assert "opencode (hooks)" in msg
         # Windsurf excludes instructions

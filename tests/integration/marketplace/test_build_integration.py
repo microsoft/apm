@@ -19,7 +19,8 @@ from unittest.mock import MagicMock, call, patch  # noqa: F401
 import pytest
 
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
-from apm_cli.marketplace.ref_resolver import RemoteRef  # noqa: F401
+from apm_cli.marketplace.models import parse_marketplace_json
+from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.yml_schema import load_marketplace_yml  # noqa: F401
 
 from .conftest import (
@@ -99,7 +100,7 @@ class TestBuildGoldenFile:
             assert keys[-1] == "source"
 
     def test_source_key_order(self, tmp_path: Path, mock_ref_resolver_golden):
-        """Each source block must follow: source, repo/url, (path), ref, sha."""
+        """Each source block must follow: source, repo/url, (path), ref, sha, (tag_pattern)."""
         _write_yml(tmp_path, GOLDEN_YML)
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
         builder.build()
@@ -108,16 +109,20 @@ class TestBuildGoldenFile:
         # test-generator has subdir -> path must appear between url and ref
         tg = next(p for p in data["plugins"] if p["name"] == "test-generator")
         src_keys = list(tg["source"].keys())
-        assert src_keys == ["source", "url", "path", "ref", "sha"]
+        assert src_keys == ["source", "url", "path", "ref", "sha", "tag_pattern"]
 
     def test_no_apm_only_keys_in_output(self, tmp_path: Path, mock_ref_resolver_golden):
-        """APM-only fields must not appear in marketplace.json."""
+        """APM-only fields must not appear in marketplace.json.
+
+        Note: tag_pattern is intentionally emitted so consumers can honour
+        the marketplace's declared naming convention (issue #2319).
+        """
         _write_yml(tmp_path, GOLDEN_YML)
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
         builder.build()
 
         data = _read_json(tmp_path)
-        apm_only = {"subdir", "version_range", "tag_pattern", "include_prerelease"}
+        apm_only = {"subdir", "version_range", "include_prerelease"}
         for plugin in data["plugins"]:
             assert not apm_only.intersection(plugin.keys()), (
                 f"APM-only key found in plugin {plugin['name']}: "
@@ -275,3 +280,167 @@ class TestBuildCLI:
         assert "Traceback" not in result.stderr
         combined = result.stdout + result.stderr
         assert "removed" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# Issue #2319 -- tag_pattern producer-to-consumer closure
+# ---------------------------------------------------------------------------
+
+_SLASH_PATTERN_YML = """\
+name: lsp-infra-hub
+description: LSP infrastructure packages
+version: 1.0.0
+owner:
+  name: LSP Infra
+  email: infra@example.com
+build:
+  tagPattern: "{name}/{version}"
+packages:
+  - name: apm-skill-creator
+    description: Skill creator helper
+    source: lsp-infra/hub
+    version: "^0.1.0"
+    tags:
+      - skills
+"""
+
+_SLASH_REFS = [
+    RemoteRef(name="refs/tags/apm-skill-creator/0.1.3", sha="a" * 40),
+    RemoteRef(name="refs/tags/apm-skill-creator/0.1.4", sha="b" * 40),
+    RemoteRef(name="refs/heads/main", sha="c" * 40),
+]
+
+
+class TestTagPatternClosure:
+    """Regression tests for issue #2319.
+
+    Verifies that the marketplace's declared tagPattern is stored by apm pack
+    and then read back by the consumer-side semver resolver.
+    """
+
+    def test_producer_emits_tag_pattern_in_marketplace_json(self, tmp_path: Path):
+        """apm pack stores the effective tag_pattern in the plugin source dict."""
+        _write_yml(tmp_path, _SLASH_PATTERN_YML)
+
+        with patch(
+            "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+            return_value=_SLASH_REFS,
+        ):
+            builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
+            builder.build()
+
+        data = _read_json(tmp_path)
+        plugins = data.get("plugins", [])
+        assert plugins, "marketplace.json has no plugins"
+        plugin = plugins[0]
+        source = plugin.get("source", {})
+        assert source.get("tag_pattern") == "{name}/{version}", (
+            f"tag_pattern not emitted in source dict: {source}"
+        )
+        assert source.get("ref") == "apm-skill-creator/0.1.4"
+
+    def test_package_pattern_overrides_build_pattern(self, tmp_path: Path):
+        """A package override is emitted instead of the build-level default."""
+        yml = _SLASH_PATTERN_YML.replace(
+            '    version: "^0.1.0"\n',
+            '    version: "^0.1.0"\n    tag_pattern: "release-{name}-v{version}"\n',
+        )
+        refs = [
+            RemoteRef(
+                name="refs/tags/release-apm-skill-creator-v0.1.5",
+                sha="d" * 40,
+            )
+        ]
+        _write_yml(tmp_path, yml)
+
+        with patch(
+            "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+            return_value=refs,
+        ):
+            MarketplaceBuilder(tmp_path / "marketplace.yml").build()
+
+        source = _read_json(tmp_path)["plugins"][0]["source"]
+        assert source["tag_pattern"] == "release-{name}-v{version}"
+        assert source["ref"] == "release-apm-skill-creator-v0.1.5"
+
+    def test_consumer_parses_tag_pattern_from_marketplace_json(self, tmp_path: Path):
+        """parse_marketplace_json populates MarketplacePlugin.tag_pattern."""
+        _write_yml(tmp_path, _SLASH_PATTERN_YML)
+
+        with patch(
+            "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+            return_value=_SLASH_REFS,
+        ):
+            builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
+            builder.build()
+
+        data = _read_json(tmp_path)
+        manifest = parse_marketplace_json(data, source_name="lsp-infra-hub")
+        plugin = manifest.find_plugin("apm-skill-creator")
+        assert plugin is not None
+        assert plugin.tag_pattern == "{name}/{version}"
+
+    def test_consumer_semver_resolution_uses_slash_pattern(self, tmp_path: Path):
+        """resolve_version_constraint is called with the correct tag_pattern."""
+        from apm_cli.marketplace.models import (
+            MarketplaceManifest,
+            MarketplacePlugin,
+            MarketplaceSource,
+        )
+        from apm_cli.marketplace.resolver import resolve_marketplace_plugin
+
+        plugin = MarketplacePlugin(
+            name="apm-skill-creator",
+            source={
+                "type": "github",
+                "repo": "lsp-infra/hub",
+                "ref": "apm-skill-creator/0.1.4",
+                "tag_pattern": "{name}/{version}",
+            },
+            tag_pattern="{name}/{version}",
+            source_marketplace="lsp-infra-hub",
+        )
+        manifest = MarketplaceManifest(
+            name="lsp-infra-hub",
+            plugins=(plugin,),
+            plugin_root="",
+        )
+        source = MarketplaceSource(
+            name="lsp-infra-hub",
+            owner="lsp-infra",
+            repo="hub",
+        )
+
+        captured: dict = {}
+
+        def _fake_resolve(pname, owner_repo, vspec, **kwargs):
+            captured.update(kwargs)
+            return ("apm-skill-creator/0.1.4", "b" * 40)
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=manifest,
+            ),
+            patch(
+                "apm_cli.marketplace.version_resolver.resolve_version_constraint",
+                side_effect=_fake_resolve,
+            ),
+            patch("apm_cli.marketplace.version_pins.check_ref_pin", return_value=None),
+            patch("apm_cli.marketplace.version_pins.record_ref_pin"),
+            patch("apm_cli.marketplace.shadow_detector.detect_shadows", return_value=[]),
+        ):
+            canonical, _ = resolve_marketplace_plugin(
+                "apm-skill-creator",
+                "lsp-infra-hub",
+                version_spec="^0.1.0",
+            )
+
+        assert captured.get("tag_pattern") == "{name}/{version}", (
+            f"resolve_version_constraint was not called with custom tag_pattern: {captured}"
+        )
+        assert "apm-skill-creator/0.1.4" in canonical

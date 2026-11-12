@@ -163,3 +163,13 @@ experimental flag, so a previously-installed canvas can always be removed.
 
 See the [primitives and targets](/apm/concepts/primitives-and-targets/) matrix
 for where the canvas primitive sits.
+
+## Autopilot maintainer canvas
+
+`packages/autopilot/autopilot-maintainer-canvas` is a CODEOWNER control
+surface for `microsoft/apm`. It reads live GitHub labels, can apply
+`status/accepted`, `status/deferred`, and `panel-review`, and spawns
+isolated canonical autopilot skills. It does not assign, request
+reviewers, merge, or run scheduler/worker logic in the canvas session.
+Agentic Workflows must not open it. Open it in Copilot App after
+install: "Open the Autopilot maintainer canvas".

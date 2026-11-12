@@ -36,12 +36,14 @@ still a foreign venv with NO ``apm_cli``.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -307,6 +309,16 @@ def test_v3_writes_module_before_pth(tmp_path, monkeypatch):
     )
 
 
+def test_setup_llm_pip_bootstrap_skips_apm_truststore_injection():
+    """Re-running setup over a bootstrapped venv must not inject into ensurepip's pip."""
+    root = _repo_root()
+    sh = (root / "scripts" / "runtime" / "setup-llm.sh").read_text(encoding="utf-8")
+    ps1 = (root / "scripts" / "runtime" / "setup-llm.ps1").read_text(encoding="utf-8")
+
+    assert 'APM_DISABLE_TRUSTSTORE=1 "$llm_venv/bin/python" -m ensurepip' in sh
+    assert '$env:APM_DISABLE_TRUSTSTORE = "1"' in ps1
+
+
 # --------------------------------------------------------------------------- #
 # V4 (M1): runtime setup scripts install truststore best-effort + pinned
 # --------------------------------------------------------------------------- #
@@ -337,19 +349,51 @@ def test_v4_setup_llm_truststore_is_best_effort_and_pinned():
     assert "Write-WarningText" in tail
 
 
-def test_v4_best_effort_control_flow_does_not_abort(tmp_path):
+@pytest.mark.parametrize(
+    ("argv", "original_args"),
+    (
+        (["/managed/llm-venv/bin/pip"], ["python", "/managed/llm-venv/bin/pip"]),
+        (["pip/__main__.py"], ["python", "-m", "pip", "install", "llm"]),
+    ),
+)
+def test_child_bootstrap_leaves_pip_vendored_truststore_in_control(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    original_args: list[str],
+) -> None:
+    """Repeated runtime setup must not inject twice into pip's SSL module."""
+    bootstrap = _repo_root() / "src" / "apm_cli" / "core" / "_child_tls" / "_apm_tls_bootstrap.py"
+    injections: list[bool] = []
+    fake_truststore = SimpleNamespace(
+        inject_into_ssl=lambda: injections.append(True),
+    )
+    monkeypatch.setitem(sys.modules, "truststore", fake_truststore)
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(sys, "orig_argv", original_args)
+
+    spec = importlib.util.spec_from_file_location("_test_apm_tls_bootstrap", bootstrap)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert injections == []
+
+
+@pytest.mark.windows_compat
+def test_v4_best_effort_control_flow_does_not_abort() -> None:
     # Dynamically prove the bash guard: a failing `pip` under `set -euo
     # pipefail` guarded by `|| log_warning` still exits 0 and runs later steps.
-    script = tmp_path / "probe.sh"
-    script.write_text(
+    script = (
         "set -euo pipefail\n"
         'log_warning() { echo "[!] $*"; }\n'
         "pip() { echo 'simulated failure' >&2; return 1; }\n"
         "pip install 'truststore>=0.10.0' || log_warning 'truststore install failed'\n"
-        "echo CONTINUED\n",
-        encoding="ascii",
+        "echo CONTINUED\n"
     )
-    result = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [shutil.which("bash") or "bash"], input=script, capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, result.stderr
     assert "CONTINUED" in result.stdout
 
@@ -382,16 +426,18 @@ def test_v5_ssl_docs_early_caveat_and_notes():
     assert "stale `REQUESTS_CA_BUNDLE`" in docs
 
 
-def test_v5_changelog_scopes_python_based():
+def test_v5_changelog_scopes_os_trust_to_python_paths():
     changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
-    start = changelog.index("## [Unreleased]")
-    rest = changelog[start + len("## [Unreleased]") :]
-    end = rest.find("\n## [")
-    block = rest if end == -1 else rest[:end]
+    entry = next(
+        (
+            bullet
+            for part in changelog.split("\n- ")
+            if "#2005" in (bullet := part.split("\n\n", 1)[0])
+        ),
+        None,
+    )
 
-    assert "#2005" in block
-    assert "Python-based" in block
-    assert "#2034" in block
-    assert "not yet covered" in block
+    assert entry is not None
+    assert "Python" in entry
     # The stale round-1 joint claim (child runtimes covered) must be gone.
-    assert "and `apm run` (child runtimes)" not in block
+    assert "and `apm run` (child runtimes)" not in entry

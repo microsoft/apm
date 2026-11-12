@@ -984,6 +984,136 @@ class TestApplyToCommaInOptimizer:
         assert placement
         assert not any("matched no files" in w for w in opt._warnings)
 
+    def test_yaml_list_expression_matches_supported_hidden_tool_trees(self, comma_project):
+        """Hidden tool trees remain available to explicitly scoped applyTo patterns."""
+        (comma_project / ".opencode").mkdir()
+        (comma_project / ".github").mkdir()
+        (comma_project / ".apm" / "context").mkdir(parents=True)
+        (comma_project / ".git").mkdir()
+        (comma_project / ".opencode" / "guide.md").touch()
+        (comma_project / ".github" / "guide.md").touch()
+        (comma_project / ".apm" / "context" / "guide.md").touch()
+        (comma_project / ".git" / "ignored.md").touch()
+        expression = ".opencode/**/*.md,.github/**/*.md,**/.apm/**/*.md"
+        opt = ContextOptimizer(str(comma_project))
+        instruction = Instruction(
+            name="hidden-tool-rule",
+            file_path=Path("hidden-tool-rule.instructions.md"),
+            description="hidden tool rule",
+            apply_to=expression,
+            content="rules",
+            source="local",
+        )
+
+        placement = opt.optimize_instruction_placement([instruction])
+
+        assert opt._find_matching_directories(expression) == {
+            (comma_project / ".opencode").resolve(),
+            (comma_project / ".github").resolve(),
+            (comma_project / ".apm" / "context").resolve(),
+        }
+        assert all(".git" not in path.parts for path in opt._directory_cache)
+        assert placement
+        assert not any("matched no files" in warning for warning in opt._warnings)
+
+    def test_generic_patterns_do_not_scan_hidden_tool_trees(self, comma_project):
+        """Hidden tool trees require an applyTo segment that names their root."""
+        (comma_project / ".github").mkdir()
+        (comma_project / ".github" / "guide.md").touch()
+        generic = Instruction(
+            name="generic-rule",
+            file_path=Path("generic-rule.instructions.md"),
+            description="generic rule",
+            apply_to="**/*.md",
+            content="rules",
+            source="local",
+        )
+
+        opt = ContextOptimizer(str(comma_project))
+        opt.optimize_instruction_placement([generic])
+
+        assert (comma_project / ".github").resolve() not in opt._directory_cache
+
+    def test_nested_hidden_directories_stay_pruned_inside_supported_tool_tree(self, comma_project):
+        """A permitted tool root does not admit nested hidden directories."""
+        allowed = comma_project / ".apm" / "context"
+        hidden = comma_project / ".apm" / ".cache"
+        allowed.mkdir(parents=True)
+        hidden.mkdir()
+        (allowed / "guide.md").touch()
+        (hidden / "secret.md").touch()
+        opt = ContextOptimizer(str(comma_project))
+        instruction = Instruction(
+            name="apm-rule",
+            file_path=Path("apm-rule.instructions.md"),
+            description="apm rule",
+            apply_to="**/.apm/**/*.md",
+            content="rules",
+            source="local",
+        )
+
+        opt.optimize_instruction_placement([instruction])
+
+        assert allowed.resolve() in opt._directory_cache
+        assert hidden.resolve() not in opt._directory_cache
+
+    def test_unsupported_hidden_root_does_not_receive_fallback_placement(self, comma_project):
+        """A no-match pattern cannot write generated rules into .git."""
+        (comma_project / ".git").mkdir()
+        instruction = Instruction(
+            name="git-rule",
+            file_path=Path("git-rule.instructions.md"),
+            description="git rule",
+            apply_to=".git/**/*.md",
+            content="rules",
+            source="local",
+        )
+
+        placement = ContextOptimizer(str(comma_project)).optimize_instruction_placement(
+            [instruction]
+        )
+
+        assert (comma_project / ".git") not in placement
+
+    def test_backslash_hidden_root_pattern_is_recognized(self, comma_project):
+        """Windows-authored applyTo paths still admit their targeted root."""
+        target = comma_project / ".opencode"
+        target.mkdir()
+        (target / "guide.md").touch()
+        instruction = Instruction(
+            name="windows-hidden-rule",
+            file_path=Path("windows-hidden-rule.instructions.md"),
+            description="windows hidden rule",
+            apply_to=r".opencode\**\*.md",
+            content="rules",
+            source="local",
+        )
+
+        optimizer = ContextOptimizer(str(comma_project))
+        optimizer.optimize_instruction_placement([instruction])
+
+        assert target.resolve() in optimizer._directory_cache
+
+    def test_literal_comma_list_pattern_matches_hidden_tool_tree(self, comma_project):
+        """YAML-list literal commas remain one pattern during hidden placement."""
+        target = comma_project / ".opencode"
+        target.mkdir()
+        (target / "guide,example.md").touch()
+        instruction = Instruction(
+            name="literal-comma-rule",
+            file_path=Path("literal-comma-rule.instructions.md"),
+            description="literal comma rule",
+            apply_to=r".opencode/**/guide\,example.md,**/*.nope",
+            content="rules",
+            source="local",
+        )
+
+        opt = ContextOptimizer(str(comma_project))
+        placement = opt.optimize_instruction_placement([instruction])
+
+        assert placement
+        assert not any("matched no files" in warning for warning in opt._warnings)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

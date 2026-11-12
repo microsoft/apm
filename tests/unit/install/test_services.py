@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict  # noqa: F401, UP035
 from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
-from apm_cli.install.services import IntegratorBundle, _deployed_path_entry
+from apm_cli.install.deployed_paths import skill_bundle_file_entries
+from apm_cli.install.services import (
+    IntegratorBundle,
+    _deployed_path_entry,
+    _plugin_bin_deployable,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.paths import portable_relpath
 
@@ -70,6 +76,42 @@ def _make_cowork_target(cowork_root: Path) -> Any:
 def _make_copilot_app_target(app_root: Path) -> Any:
     """Return a TargetProfile with resolved_deploy_root set for copilot-app."""
     return replace(KNOWN_TARGETS["copilot-app"], resolved_deploy_root=app_root)
+
+
+def test_plugin_bin_plan_includes_only_deployable_plugin_content(tmp_path: Path) -> None:
+    """Only plugin bins that can reach Claude are admitted to the source plan."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.models.apm_package import PackageType
+
+    package_root = tmp_path / "plugin"
+    (package_root / "bin").mkdir(parents=True)
+    package = SimpleNamespace(
+        package_type=PackageType.MARKETPLACE_PLUGIN,
+        install_path=package_root,
+        get_canonical_dependency_string=lambda: "owner/plugin",
+    )
+    claude = SimpleNamespace(
+        name="claude",
+        auto_create=True,
+        supports=lambda primitive: primitive == "skills",
+    )
+
+    assert _plugin_bin_deployable(
+        package,
+        [claude],
+        project_root=tmp_path,
+        scope=InstallScope.USER,
+        policy=None,
+        skip_bin=False,
+    )
+    assert not _plugin_bin_deployable(
+        package,
+        [claude],
+        project_root=tmp_path,
+        scope=InstallScope.PROJECT,
+        policy=None,
+        skip_bin=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +256,26 @@ class TestDeployedPathEntry:
         result = _deployed_path_entry(target_path, project_root, targets=[])
         expected = f"{dir_prefix}/sub/file.md"
         assert result == expected
+
+
+@pytest.mark.windows_compat
+def test_skill_bundle_file_entries_omit_python_compiled_artifacts(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    skill_dir = project_root / ".agents" / "skills" / "example"
+    scripts = skill_dir / "scripts"
+    cache = scripts / "__pycache__"
+    cache.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Example\n", encoding="utf-8")
+    (scripts / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+    (scripts / "helper.pyc").write_bytes(b"legacy-bytecode")
+    (cache / "helper.cpython-312.pyc").write_bytes(b"cached-bytecode")
+
+    entries = skill_bundle_file_entries(skill_dir, project_root, targets=[])
+
+    assert sorted(entries) == [
+        ".agents/skills/example/SKILL.md",
+        ".agents/skills/example/scripts/helper.py",
+    ]
 
 
 # ---------------------------------------------------------------------------

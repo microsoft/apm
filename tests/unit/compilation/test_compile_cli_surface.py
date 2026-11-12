@@ -683,6 +683,52 @@ class TestCompileCommandDistributedSuccess:
             or result.exit_code in (0, 1)
         )
 
+    def test_distributed_success_reports_nested_repository_skips(self) -> None:
+        """Partial distributed output names the nested placements that were skipped."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            self._setup_project_dir()
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = []
+            mock_result.errors = []
+            mock_result.stats = {
+                "agents_files_written": 2,
+                "copilot_root_instructions_generated": 1,
+                "copilot_root_instructions_written": 1,
+                "nested_git_placements_skipped": 1,
+            }
+            mock_result.has_critical_security = False
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 0
+        normalized_output = " ".join(result.output.split())
+        assert "Compiled 3 output files (2 AGENTS.md files)" in normalized_output
+        assert "skipped 1 nested Git repository placement" in normalized_output
+
     def test_result_errors_exits_1(self) -> None:
         """result.errors → exit code 1."""
         from click.testing import CliRunner

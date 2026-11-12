@@ -9,13 +9,23 @@ Verifies:
 
 from __future__ import annotations
 
+import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
+
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked Git subprocesses carry no objects; real-git tests cover links."""
+    with patch("apm_cli.deps.bare_cache.materialize_tracked_symlinks"):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # SharedCloneCache unit tests
@@ -36,7 +46,7 @@ class TestSharedCloneCache:
             (target / "skills" / "X").mkdir(parents=True)
             (target / "skills" / "X" / "apm.yml").write_text("name: X\nversion: 1.0.0\n")
 
-        result = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+        result = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
         assert result.exists()
         assert (result / "skills" / "X" / "apm.yml").exists()
         assert clone_count["n"] == 1
@@ -55,8 +65,8 @@ class TestSharedCloneCache:
             (target / "skills" / "X" / "apm.yml").write_text("name: X\n")
             (target / "agents" / "Y" / "apm.yml").write_text("name: Y\n")
 
-        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
-        path2 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+        path1 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
+        path2 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
 
         assert clone_count["n"] == 1
         assert path1 == path2
@@ -74,11 +84,101 @@ class TestSharedCloneCache:
             target.mkdir(parents=True, exist_ok=True)
             (target / "data.txt").write_text(f"ref-{clone_count['n']}")
 
-        path1 = cache.get_or_clone("github.com", "owner", "repo", "v1.0", clone_fn)
-        path2 = cache.get_or_clone("github.com", "owner", "repo", "v2.0", clone_fn)
+        path1 = cache.get_or_clone("https://github.com/owner/repo", "v1.0", clone_fn)
+        path2 = cache.get_or_clone("https://github.com/owner/repo", "v2.0", clone_fn)
 
         assert clone_count["n"] == 2
         assert path1 != path2
+        cache.cleanup()
+
+    def test_nested_gitlab_repositories_clone_independently(self, tmp_path: Path) -> None:
+        """Full nested paths distinguish projects under a common group prefix."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count = {"n": 0}
+
+        def clone_fn(target: Path) -> None:
+            clone_count["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        path1 = cache.get_or_clone(
+            "https://gitlab.com/spiritt/tenants/spiritt/repo-a", "main", clone_fn
+        )
+        path2 = cache.get_or_clone(
+            "https://gitlab.com/spiritt/tenants/spiritt/repo-b", "main", clone_fn
+        )
+
+        assert clone_count["n"] == 2
+        assert path1 != path2
+        cache.cleanup()
+
+    def test_self_hosted_repositories_preserve_path_case(self, tmp_path: Path) -> None:
+        """Case-distinct paths remain separate on case-sensitive Git hosts."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count = {"n": 0}
+
+        def clone_fn(target: Path) -> None:
+            clone_count["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        path1 = cache.get_or_clone("https://git.corp/Group/Repo", "main", clone_fn)
+        path2 = cache.get_or_clone("https://git.corp/group/repo", "main", clone_fn)
+
+        assert clone_count["n"] == 2
+        assert path1 != path2
+        cache.cleanup()
+
+    def test_tier0_bare_lookup_is_scoped_to_full_repository(self, tmp_path: Path) -> None:
+        """A SHA fetch must not mutate a sibling nested project's bare clone."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        fetched = {"n": 0}
+        cloned = {"n": 0}
+
+        def clone_fn(target: Path) -> None:
+            cloned["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fetch_fn(_bare_path: Path, _sha: str) -> bool:
+            fetched["n"] += 1
+            return True
+
+        cache.get_or_clone("https://gitlab.com/spiritt/tenants/spiritt/repo-a", "main", clone_fn)
+        cache.get_or_clone(
+            "https://gitlab.com/spiritt/tenants/spiritt/repo-b",
+            "a" * 40,
+            clone_fn,
+            fetch_fn=fetch_fn,
+        )
+
+        assert fetched["n"] == 0
+        assert cloned["n"] == 2
+        cache.cleanup()
+
+    def test_tier0_fetch_miss_logs_safe_repository_context(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Diagnostics identify the repository without exposing URL credentials."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        repository_url = "https://oauth2:secret@git.corp/Group/Repo.git"
+
+        def clone_fn(target: Path) -> None:
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fail_fetch(_bare: Path, _ref: str) -> bool:
+            raise RuntimeError("miss")
+
+        cache.get_or_clone(repository_url, "main", clone_fn)
+
+        with caplog.at_level(logging.INFO, logger="apm_cli.deps.shared_clone_cache"):
+            cache.get_or_clone(
+                repository_url,
+                "a" * 40,
+                clone_fn,
+                fetch_fn=fail_fetch,
+            )
+
+        assert "git.corp/Group/Repo" in caplog.text
+        assert "oauth2" not in caplog.text
+        assert "secret" not in caplog.text
         cache.cleanup()
 
     def test_failure_surfaces_to_all_consumers(self, tmp_path: Path) -> None:
@@ -95,11 +195,11 @@ class TestSharedCloneCache:
             raise RuntimeError("network timeout")
 
         with pytest.raises(RuntimeError, match="network timeout"):
-            cache.get_or_clone("github.com", "owner", "repo", "main", failing_clone)
+            cache.get_or_clone("https://github.com/owner/repo", "main", failing_clone)
 
         # Second attempt retries (error cleared).
         with pytest.raises(RuntimeError, match="network timeout"):
-            cache.get_or_clone("github.com", "owner", "repo", "main", failing_clone)
+            cache.get_or_clone("https://github.com/owner/repo", "main", failing_clone)
 
         # Both attempts called clone_fn (failure not cached).
         assert call_count["n"] == 2
@@ -124,7 +224,7 @@ class TestSharedCloneCache:
 
         def worker() -> None:
             try:
-                p = cache.get_or_clone("github.com", "owner", "repo", "main", slow_clone)
+                p = cache.get_or_clone("https://github.com/owner/repo", "main", slow_clone)
                 results.append(p)
             except Exception as e:
                 errors.append(e)
@@ -147,7 +247,7 @@ class TestSharedCloneCache:
             def clone_fn(target: Path) -> None:
                 target.mkdir(parents=True, exist_ok=True)
 
-            path = cache.get_or_clone("github.com", "o", "r", None, clone_fn)
+            path = cache.get_or_clone("https://github.com/o/r", None, clone_fn)
             assert path.exists()
 
         # After exit, temp dirs should be cleaned
@@ -161,6 +261,84 @@ class TestSharedCloneCache:
 
 class TestDownloaderSharedCloneIntegration:
     """Test that the downloader uses shared_clone_cache when set."""
+
+    def test_nested_gitlab_repositories_do_not_share_clone(self, tmp_path: Path) -> None:
+        """Nested projects with a common group prefix need distinct cache entries."""
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+        from apm_cli.models.apm_package import DependencyReference
+
+        dep_a = DependencyReference.parse_from_dict(
+            {
+                "git": "gitlab.com/spiritt/tenants/spiritt/repo-a",
+                "path": "skills/tool",
+                "ref": "main",
+            }
+        )
+        dep_b = DependencyReference.parse_from_dict(
+            {
+                "git": "gitlab.com/spiritt/tenants/spiritt/repo-b",
+                "path": "skills/tool",
+                "ref": "main",
+            }
+        )
+
+        target_a = tmp_path / "modules" / "repo-a-tool"
+        target_b = tmp_path / "modules" / "repo-b-tool"
+
+        downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+        downloader.auth_resolver = MagicMock()
+        downloader.token_manager = MagicMock()
+        downloader._transport_selector = MagicMock()
+        downloader._protocol_pref = MagicMock()
+        downloader._allow_fallback = False
+        downloader._fallback_port_warned = set()
+        downloader._strategies = MagicMock()
+        downloader.git_env = {}
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        cache = SharedCloneCache(base_dir=cache_dir)
+        downloader.shared_clone_cache = cache
+        downloader.persistent_git_cache = None
+
+        cloned_repositories: list[str] = []
+
+        def fake_bare_clone(repo_url, bare_target, **kwargs):
+            cloned_repositories.append(repo_url)
+            bare_target.mkdir(parents=True, exist_ok=True)
+            (bare_target / "HEAD").write_text("ref: refs/heads/main\n")
+            (bare_target / "repository").write_text(repo_url)
+
+        def fake_materialize(bare_path, consumer_dir, **kwargs):
+            repo_url = (bare_path / "repository").read_text()
+            package_dir = consumer_dir / "skills" / "tool"
+            package_dir.mkdir(parents=True)
+            (package_dir / "apm.yml").write_text(
+                f"name: {repo_url.rsplit('/', 1)[-1]}\nversion: 1.0.0\n"
+            )
+            return "abc1234567890"
+
+        with (
+            patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone),
+            patch.object(downloader, "_materialize_from_bare", side_effect=fake_materialize),
+            patch.object(downloader, "_git_env_dict", return_value={}),
+            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
+        ):
+            mock_result = MagicMock()
+            mock_result.is_valid = True
+            mock_result.package = MagicMock()
+            mock_result.package.version = "1.0.0"
+            mock_result.package_type = "skill"
+            mock_validate.return_value = mock_result
+
+            downloader.download_subdirectory_package(dep_a, target_a)
+            downloader.download_subdirectory_package(dep_b, target_b)
+
+        assert cloned_repositories == [dep_a.repo_url, dep_b.repo_url]
+        assert "name: repo-a" in (target_a / "apm.yml").read_text()
+        assert "name: repo-b" in (target_b / "apm.yml").read_text()
+        cache.cleanup()
 
     def test_two_subdir_deps_share_single_clone(self, tmp_path: Path) -> None:
         """Mock _clone_with_fallback and verify call_count == 1 for 2 subdir deps."""
@@ -217,6 +395,7 @@ class TestDownloaderSharedCloneIntegration:
             patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone),
             patch.object(downloader, "_materialize_from_bare", side_effect=fake_materialize),
             patch.object(downloader, "_git_env_dict", return_value={}),
+            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
             patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
         ):
             # Configure validate mock
@@ -285,6 +464,7 @@ def _make_bare_repo(path: Path) -> None:
 class TestBareCacheRaceCondition:
     """6.1: regression test for the parallel sparse-checkout race (#1126)."""
 
+    @pytest.mark.windows_compat
     def test_parallel_different_subdirs_both_succeed(self, tmp_path: Path) -> None:
         """Two threads request same key, then extract different subdirs from
         the shared bare. Both must succeed (the v1 race lost one thread's
@@ -308,7 +488,7 @@ class TestBareCacheRaceCondition:
 
         def thread_a() -> None:
             try:
-                bare = cache.get_or_clone("h", "o", "r", "main", populate_bare)
+                bare = cache.get_or_clone("https://h/o/r", "main", populate_bare)
                 # Force parallel materialize step.
                 materialize_barrier.wait(timeout=5)
                 consumer = tmp_path / "consumer_a"
@@ -339,7 +519,7 @@ class TestBareCacheRaceCondition:
 
         def thread_b() -> None:
             try:
-                bare = cache.get_or_clone("h", "o", "r", "main", populate_bare)
+                bare = cache.get_or_clone("https://h/o/r", "main", populate_bare)
                 materialize_barrier.wait(timeout=5)
                 consumer = tmp_path / "consumer_b"
                 import subprocess as sp
@@ -367,12 +547,10 @@ class TestBareCacheRaceCondition:
             except Exception as e:
                 results["errors"].append(("b", e))
 
-        ta = threading.Thread(target=thread_a)
-        tb = threading.Thread(target=thread_b)
-        ta.start()
-        tb.start()
-        ta.join(timeout=10)
-        tb.join(timeout=10)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(thread_a), executor.submit(thread_b)]
+            for future in futures:
+                future.result()
 
         assert results["errors"] == [], f"Errors: {results['errors']}"
         assert "X" in results["subdirs_seen"]
@@ -448,7 +626,7 @@ class TestBareCloneFallback:
 
         # Verify tier-1 sequence
         cmd_strings = [" ".join(c) for c in captured]
-        assert any("init --bare" in s for s in cmd_strings), "missing init --bare"
+        assert any("init" in c and "--bare" in c for c in captured), "missing init --bare"
         assert any("remote add origin" in s for s in cmd_strings), "missing remote add"
         assert any("fetch --depth=1" in s for s in cmd_strings), "missing fetch --depth=1"
         # 6.18: update-ref HEAD <sha> MUST be called
@@ -505,8 +683,8 @@ class TestBareCloneFallback:
         cmd_strings = [" ".join(c) for c in captured]
         # Tier 2: full clone --bare invoked after tier-1 failed
         assert any(
-            "clone --bare" in s and "--depth=1" not in s and "--branch" not in s
-            for s in cmd_strings
+            "clone" in c and "--bare" in c and "--depth=1" not in c and "--branch" not in c
+            for c in captured
         ), f"missing tier-2 full bare clone: {cmd_strings}"
         # rev-parse --verify validates the SHA
         assert any("rev-parse --verify" in s and "^{commit}" in s for s in cmd_strings), (
@@ -552,14 +730,14 @@ class TestBareCloneFallback:
 
         cmd_strings = [" ".join(c) for c in captured]
         # Tier 1 (init+fetch) MUST NOT be attempted for short SHAs.
-        assert not any("init --bare" in s for s in cmd_strings), (
+        assert not any("init" in c and "--bare" in c for c in captured), (
             f"tier-1 must be skipped for short SHA, got {cmd_strings}"
         )
         assert not any("fetch --depth=1" in s for s in cmd_strings), (
             "tier-1 fetch must be skipped for short SHA"
         )
         # Tier 2 full clone + rev-parse + update-ref
-        assert any("clone --bare" in s for s in cmd_strings), "missing tier-2 clone"
+        assert any("clone" in c and "--bare" in c for c in captured), "missing tier-2 clone"
         update_ref_calls = [
             c for c in captured if len(c) >= 4 and c[-3] == "update-ref" and c[-2] == "HEAD"
         ]
@@ -591,9 +769,14 @@ class TestBareCloneFallback:
             )
 
         cmd_strings = [" ".join(c) for c in captured]
-        assert any("clone --bare --depth=1 --branch main" in s for s in cmd_strings), (
-            f"missing tier-1 shallow clone: {cmd_strings}"
-        )
+        assert any(
+            "clone" in c
+            and "--bare" in c
+            and "--depth=1" in c
+            and c[c.index("--branch") + 1] == "main"
+            for c in captured
+            if "--branch" in c
+        ), f"missing tier-1 shallow clone: {cmd_strings}"
 
 
 class TestMaterializeFromBare:
@@ -788,7 +971,7 @@ class TestMaterializeFromBare:
             (target / ".git").mkdir()
 
         with pytest.raises(RuntimeError, match="not a bare repo"):
-            cache.get_or_clone("h", "o", "r", "main", bad_populate)
+            cache.get_or_clone("https://h/o/r", "main", bad_populate)
         cache.cleanup()
 
     def test_apm_debug_accepts_bare_clone(self, tmp_path: Path, monkeypatch) -> None:
@@ -799,7 +982,7 @@ class TestMaterializeFromBare:
             target.mkdir(parents=True)
             (target / "HEAD").write_text("ref: refs/heads/main\n")
 
-        path = cache.get_or_clone("h", "o", "r", "main", good_populate)
+        path = cache.get_or_clone("https://h/o/r", "main", good_populate)
         assert (path / "HEAD").is_file()
         cache.cleanup()
 
@@ -1009,11 +1192,13 @@ class TestAdoBareBearerRetry:
     """
 
     def _make_ado_downloader(self, tmp_path: Path):
+        from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
 
         d = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
-        d.auth_resolver = MagicMock()
+        d.auth_resolver = AuthResolver()
+        d.auth_resolver.emit_stale_pat_diagnostic = MagicMock()
         d.token_manager = MagicMock()
         d._transport_selector = MagicMock()
         d._protocol_pref = MagicMock()
@@ -1032,9 +1217,19 @@ class TestAdoBareBearerRetry:
             )
         )
         d._resolve_dep_token = MagicMock(return_value="pat-token")
-        ctx = MagicMock()
-        ctx.auth_scheme = "basic"
-        ctx.git_env = {}
+        ctx = AuthContext(
+            token="pat-token",
+            source="ADO_APM_PAT",
+            token_type="unknown",
+            host_info=HostInfo(
+                host="dev.azure.com",
+                kind="ado",
+                has_public_repos=False,
+                api_base="https://dev.azure.com",
+            ),
+            git_env={},
+            auth_scheme="basic",
+        )
         d._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
         d._sanitize_git_error = MagicMock(side_effect=lambda s: s)
 
@@ -1058,8 +1253,7 @@ class TestAdoBareBearerRetry:
         urls_seen: list[str] = []
 
         def fake_run(args, **kwargs):
-            cmd_str = " ".join(args)
-            if "clone --bare" in cmd_str:
+            if "clone" in args and "--bare" in args:
                 # URL appears in args; locate it by content rather than position
                 # (varies for tier-1 shallow vs tier-2 full clone).
                 url = next((a for a in args if a.startswith("https://")), "")
@@ -1081,10 +1275,6 @@ class TestAdoBareBearerRetry:
             patch(
                 "apm_cli.core.azure_cli.get_bearer_provider",
                 return_value=bearer_provider,
-            ),
-            patch(
-                "apm_cli.utils.github_host.build_ado_bearer_git_env",
-                return_value={"GIT_CONFIG_COUNT": "1"},
             ),
         ):
             d._bare_clone_with_fallback(
@@ -1375,14 +1565,12 @@ class TestSharedCloneCacheRepoReuse:
             return True
 
         # First call: normal clone with "main"
-        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+        path1 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn_1)
 
         # Second call: fetch_fn should be tried for the SHA
         sha = "a" * 40
         path2 = cache.get_or_clone(
-            "github.com",
-            "owner",
-            "repo",
+            "https://github.com/owner/repo",
             sha,
             clone_fn_2,
             fetch_fn=fetch_fn_mock,
@@ -1415,14 +1603,12 @@ class TestSharedCloneCacheRepoReuse:
             return False
 
         # First call: normal clone
-        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+        path1 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn_1)
 
         # Second call: fetch_fn fails, should fall through to clone_fn_2
         sha = "b" * 40
         path2 = cache.get_or_clone(
-            "github.com",
-            "owner",
-            "repo",
+            "https://github.com/owner/repo",
             sha,
             clone_fn_2,
             fetch_fn=fetch_fn_fail,
@@ -1454,14 +1640,12 @@ class TestSharedCloneCacheRepoReuse:
             raise RuntimeError("Fetch failed unexpectedly")
 
         # First call: normal clone
-        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+        path1 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn_1)
 
         # Second call: fetch_fn raises, should be caught and fall through
         sha = "c" * 40
         path2 = cache.get_or_clone(
-            "github.com",
-            "owner",
-            "repo",
+            "https://github.com/owner/repo",
             sha,
             clone_fn_2,
             fetch_fn=fetch_fn_raises,
@@ -1495,13 +1679,11 @@ class TestSharedCloneCacheRepoReuse:
             return True
 
         # First call: clone with "main"
-        _ = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+        _ = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn_1)
 
         # Second call: with "develop" ref, fetch_fn should be called
         _ = cache.get_or_clone(
-            "github.com",
-            "owner",
-            "repo",
+            "https://github.com/owner/repo",
             "develop",
             clone_fn_2,
             fetch_fn=fetch_fn_track,
@@ -1532,13 +1714,11 @@ class TestSharedCloneCacheRepoReuse:
             return True
 
         # First call: clone with "main"
-        _ = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+        _ = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn_1)
 
         # Second call: with ref=None, fetch_fn should NOT be called
         _ = cache.get_or_clone(
-            "github.com",
-            "owner",
-            "repo",
+            "https://github.com/owner/repo",
             None,
             clone_fn_2,
             fetch_fn=fetch_fn_track,
@@ -1560,16 +1740,16 @@ class TestSharedCloneCacheRepoReuse:
             (target / "HEAD").write_text("ref: refs/heads/main\n")
 
         # Clone to populate _repo_bares
-        path = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+        path = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
         assert path is not None
 
         # Verify _find_repo_bare finds it
-        found = cache._find_repo_bare("github.com", "owner", "repo")
+        found = cache._find_repo_bare("https://github.com/owner/repo")
         assert found is not None
 
         # After cleanup, _find_repo_bare should return None
         cache.cleanup()
-        found_after = cache._find_repo_bare("github.com", "owner", "repo")
+        found_after = cache._find_repo_bare("https://github.com/owner/repo")
         assert found_after is None
 
     def test_fetch_fn_none_skips_tier0(self, tmp_path: Path) -> None:
@@ -1583,7 +1763,7 @@ class TestSharedCloneCacheRepoReuse:
             (target / "HEAD").write_text("ref: refs/heads/main\n")
 
         # First clone populates _repo_bares
-        cache.get_or_clone("gh", "o", "r", "main", clone_fn)
+        cache.get_or_clone("https://gh/o/r", "main", clone_fn)
 
         # Second call with fetch_fn=None should NOT try Tier-0
         clone2_called = threading.Event()
@@ -1593,7 +1773,7 @@ class TestSharedCloneCacheRepoReuse:
             target.mkdir(parents=True, exist_ok=True)
             (target / "HEAD").write_text("ref: refs/heads/main\n")
 
-        cache.get_or_clone("gh", "o", "r", "dev", clone_fn2, fetch_fn=None)
+        cache.get_or_clone("https://gh/o/r", "dev", clone_fn2, fetch_fn=None)
         assert clone2_called.is_set(), "Should have cloned fresh when fetch_fn=None"
         cache.cleanup()
 

@@ -6,10 +6,10 @@
 //   const handler = createHandler({ ghExec, session, startedSessions, ... });
 //   const server = createServer(handler);
 
-import { readFileSync } from "node:fs";
-import { join, resolve, normalize } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import { randomBytes } from "node:crypto";
-import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
+import { parsePanelReview, extractFollowUpItems, parseTriageAdvice } from "./logic.mjs";
 
 // Sanitize user-controlled strings before interpolation into session prompts.
 // Strips backticks and angle brackets to prevent prompt injection via
@@ -49,33 +49,185 @@ const MIME_TYPES = {
     ".ttf": "font/ttf",
 };
 
+const DEFAULT_POST_BODY_LIMIT_BYTES = 64 * 1024;
+const REFINED_COMMENT_BODY_LIMIT_BYTES = 1024 * 1024;
+const ASSET_ROUTE_PREFIX = "/assets/";
+const ENCODED_OCTET = /%[0-9a-f]{2}/i;
+const NATIVE_PATH_API = { isAbsolute, relative, resolve, sep };
+
+export function isPathWithinRoot(root, candidatePath, pathApi = NATIVE_PATH_API) {
+    const relPath = pathApi.relative(root, candidatePath);
+    return relPath !== ".." &&
+        !relPath.startsWith(`..${pathApi.sep}`) &&
+        !pathApi.isAbsolute(relPath);
+}
+
+function isMissingPathError(error) {
+    return error?.code === "ENOENT" || error?.code === "ENOTDIR";
+}
+
+function isUnsafeAssetPath(assetPath) {
+    if (!assetPath || assetPath.includes("\0") || assetPath.includes("\\")) {
+        return true;
+    }
+    if (ENCODED_OCTET.test(assetPath) ||
+        isAbsolute(assetPath) ||
+        win32.isAbsolute(assetPath) ||
+        /^[a-z]:/i.test(assetPath)) {
+        return true;
+    }
+    return assetPath.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+export function resolveStaticRequest(rawUrl, distDir, options = {}) {
+    const rawPath = typeof rawUrl === "string" ? rawUrl.split("?")[0] : "";
+    let urlPath;
+    try {
+        urlPath = decodeURIComponent(rawPath);
+    } catch {
+        return { kind: "malformed" };
+    }
+
+    if (!urlPath.startsWith(ASSET_ROUTE_PREFIX)) {
+        return { kind: "route", urlPath };
+    }
+
+    const assetPath = urlPath.slice(ASSET_ROUTE_PREFIX.length);
+    if (isUnsafeAssetPath(assetPath)) {
+        return { kind: "forbidden" };
+    }
+
+    const pathApi = options.pathApi || NATIVE_PATH_API;
+    const canonicalize = options.realpathSync || realpathSync;
+    const root = pathApi.resolve(distDir);
+    const candidatePath = pathApi.resolve(root, "assets", ...assetPath.split("/"));
+    if (!isPathWithinRoot(root, candidatePath, pathApi)) {
+        return { kind: "forbidden" };
+    }
+
+    let canonicalRoot;
+    let canonicalCandidate;
+    try {
+        canonicalRoot = canonicalize(root);
+        canonicalCandidate = canonicalize(candidatePath);
+    } catch (error) {
+        return { kind: isMissingPathError(error) ? "missing" : "forbidden" };
+    }
+
+    if (!isPathWithinRoot(canonicalRoot, canonicalCandidate, pathApi)) {
+        return { kind: "forbidden" };
+    }
+
+    // Read the canonical path so the requested symlink is not followed again.
+    // Concurrent writers to the canonical tree are outside this loopback
+    // server's remote-request threat model.
+    return {
+        kind: "asset",
+        filePath: canonicalCandidate,
+        // MIME follows the requested extension, not the canonical target name.
+        mimePath: candidatePath,
+    };
+}
+
 // Write endpoints that perform state-changing operations
 const WRITE_ENDPOINTS = new Set([
     "/start-session", "/open-session", "/run-panel", "/approve-pipeline",
     "/approve-pr", "/approve-workflow-runs", "/merge-when-ready",
     "/submit-comment", "/refine-comment", "/create-follow-up-issues",
+    "/refresh-data",
 ]);
 
-function serveStatic(res, filePath) {
+function serveStatic(res, filePath, mimePath = filePath) {
     try {
         const data = readFileSync(filePath);
-        const ext = filePath.slice(filePath.lastIndexOf("."));
+        const ext = mimePath.slice(mimePath.lastIndexOf("."));
         const mime = MIME_TYPES[ext] || "application/octet-stream";
         const cache = ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable";
         res.writeHead(200, { "Content-Type": mime, "Cache-Control": cache });
         res.end(data);
     } catch {
-        res.writeHead(404);
-        res.end("Not found");
+        sendStaticError(res, 404, "Not found");
     }
 }
 
+function sendStaticError(res, statusCode, message) {
+    res.writeHead(statusCode, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(message);
+}
+
+function createPayloadTooLargeError() {
+    const error = new Error("Request body exceeds server limit");
+    error.code = "PAYLOAD_TOO_LARGE";
+    error.statusCode = 413;
+    return error;
+}
+
+function isPayloadTooLargeError(error) {
+    return error?.code === "PAYLOAD_TOO_LARGE" || error?.statusCode === 413;
+}
+
+function sendPayloadTooLarge(res) {
+    res.writeHead(413, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "Request body exceeds server limit" }));
+}
+
+function sendBodyReadError(res, error = new Error("Unable to read request body")) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+}
+
 function readBody(req) {
-    return new Promise((resolve) => {
-        let body = "";
-        req.on("data", (chunk) => { body += chunk; });
-        req.on("end", () => resolve(body));
+    const maxBytes = req.maxBytes || DEFAULT_POST_BODY_LIMIT_BYTES;
+    const limit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : DEFAULT_POST_BODY_LIMIT_BYTES;
+
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let bytes = 0;
+        const cleanup = () => {
+            req.off("data", onData);
+            req.off("end", onEnd);
+            req.off("error", onError);
+        };
+        const onData = (chunk) => {
+            bytes += chunk.length;
+            if (bytes > limit) {
+                cleanup();
+                req.once("error", () => {});
+                req.resume();
+                reject(createPayloadTooLargeError());
+                return;
+            }
+            chunks.push(chunk);
+        };
+        const onError = (error) => {
+            cleanup();
+            reject(error);
+        };
+        const onEnd = () => {
+            cleanup();
+            resolve(Buffer.concat(chunks).toString("utf8"));
+        };
+        req.on("data", onData);
+        req.on("end", onEnd);
+        req.on("error", onError);
     });
+}
+
+function getBodyLimitForPath(pathname) {
+    if (pathname === "/refine-comment") return REFINED_COMMENT_BODY_LIMIT_BYTES;
+    return DEFAULT_POST_BODY_LIMIT_BYTES;
+}
+
+async function readBodyWithLimit(req, pathname) {
+    req.maxBytes = getBodyLimitForPath(pathname);
+    try {
+        return await readBody(req);
+    } catch (error) {
+        if (isPayloadTooLargeError(error)) {
+            return { isPayloadTooLarge: true };
+        }
+        return { isBodyReadError: true, error };
+    }
 }
 
 /**
@@ -95,7 +247,11 @@ function readBody(req) {
  * @param {string}  deps.distDir - absolute path to dist/ folder
  */
 export function createHandler(deps) {
-    const { ghExec, session, startedSessions, sessionIds = new Map(), saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
+    const {
+        ghExec, session, startedSessions, sessionIds = new Map(), saveSessions,
+        getIssueData, getPrData, getLastUpdated, getLastError, refreshData,
+        refreshIntervalMs = 15 * 60 * 1000, repo, distDir,
+    } = deps;
 
     // CSRF token -- generated once per server lifetime, embedded in index.html
     const csrfToken = deps.csrfToken || randomBytes(32).toString("hex");
@@ -126,7 +282,15 @@ export function createHandler(deps) {
 
         // POST /start-session
         if (req.method === "POST" && req.url === "/start-session") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number, title, model } = JSON.parse(raw);
                 startedSessions.add(number);
@@ -138,7 +302,7 @@ export function createHandler(deps) {
                 const modelClause = safeModel ? ` Use model "${safeModel}".` : "";
                 setTimeout(() => {
                     session.send({
-                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan".${modelClause} The session should plan the implementation of this issue. After the session is created, immediately call the register_session canvas action with the new session's project_session_id and issue_number ${number} so the dashboard can navigate directly next time.`,
+                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff.mode "plan".${modelClause} The session must first read GOVERNANCE.md, CONTRIBUTING.md and the issue's human approval record. Labels (including status/accepted and accepted), agent recommendations and silence are not approval. Without explicit responsible-maintainer scope approval and a review contact, limit work to investigation and a proposed scope brief; ask the maintainer before implementation. Do not treat starting this session as implementation authorization. After the session is created, immediately call the register_session canvas action with the new session's project_session_id and issue_number ${number} so the dashboard can navigate directly next time.`,
                     });
                 }, 0);
             } catch (e) {
@@ -150,7 +314,15 @@ export function createHandler(deps) {
 
         // POST /open-session
         if (req.method === "POST" && req.url === "/open-session") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number, title } = JSON.parse(raw);
                 res.setHeader("Content-Type", "application/json");
@@ -190,6 +362,43 @@ export function createHandler(deps) {
             return;
         }
 
+        // POST /refresh-data
+        if (req.method === "POST" && req.url === "/refresh-data") {
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
+            res.setHeader("Content-Type", "application/json");
+            try {
+                const body = JSON.parse(raw);
+                if (!body || Array.isArray(body) || typeof body !== "object") {
+                    throw new TypeError("Request body must be a JSON object");
+                }
+            } catch (e) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+                return;
+            }
+            if (typeof refreshData !== "function") {
+                res.writeHead(503);
+                res.end(JSON.stringify({ ok: false, error: "Refresh is unavailable" }));
+                return;
+            }
+            try {
+                const result = await refreshData();
+                res.end(JSON.stringify(result));
+            } catch (e) {
+                res.writeHead(500);
+                res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+            }
+            return;
+        }
+
         // GET /api/issue/:n
         const issueMatch = req.url.match(/^\/api\/issue\/(\d+)$/);
         if (issueMatch) {
@@ -210,7 +419,7 @@ export function createHandler(deps) {
                     createdAt: c.createdAt || "",
                     url: c.url || "",
                     isBot: /\[bot\]/.test(c.author?.login || ""),
-                    isTriagePanel: (c.body || "").includes("```json triage-decision"),
+                    isTriagePanel: Boolean(parseTriageAdvice(c.body)),
                 }));
                 res.end(JSON.stringify({
                     number: data.number,
@@ -282,7 +491,15 @@ export function createHandler(deps) {
 
         // POST /run-panel
         if (req.method === "POST" && req.url === "/run-panel") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 try {
@@ -308,7 +525,15 @@ export function createHandler(deps) {
 
         // POST /approve-pipeline
         if (req.method === "POST" && req.url === "/approve-pipeline") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 const checksOut = await ghExec(["pr", "checks", String(number), "--repo", repo, "--json", "name,state,link"]);
@@ -334,7 +559,15 @@ export function createHandler(deps) {
 
         // POST /approve-pr
         if (req.method === "POST" && req.url === "/approve-pr") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 await ghExec(["pr", "review", String(number), "--repo", repo, "--approve"]);
@@ -349,7 +582,15 @@ export function createHandler(deps) {
 
         // POST /approve-workflow-runs
         if (req.method === "POST" && req.url === "/approve-workflow-runs") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { branch } = JSON.parse(raw);
                 const runsOut = await ghExec(["run", "list", "--repo", repo, "--branch", branch, "--limit", "10", "--json", "databaseId,conclusion"]);
@@ -370,7 +611,15 @@ export function createHandler(deps) {
 
         // POST /merge-when-ready
         if (req.method === "POST" && req.url === "/merge-when-ready") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 await ghExec(["pr", "merge", String(number), "--repo", repo, "--auto", "--squash"]);
@@ -385,7 +634,15 @@ export function createHandler(deps) {
 
         // POST /submit-comment -- post a comment to an issue or PR via gh CLI
         if (req.method === "POST" && req.url === "/submit-comment") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { type, number, body } = JSON.parse(raw);
                 const cmd = type === "pr" ? "pr" : "issue";
@@ -402,7 +659,15 @@ export function createHandler(deps) {
 
         // POST /refine-comment -- send a draft to the chat session for agent refinement
         if (req.method === "POST" && req.url === "/refine-comment") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { type, number, draft, title } = JSON.parse(raw);
                 res.setHeader("Content-Type", "application/json");
@@ -439,7 +704,15 @@ export function createHandler(deps) {
 
         // POST /create-follow-up-issues -- create GitHub issues from panel review deferred/recommended items
         if (req.method === "POST" && req.url === "/create-follow-up-issues") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             res.setHeader("Content-Type", "application/json");
             try {
                 const { number, panelReview } = JSON.parse(raw);
@@ -469,7 +742,7 @@ export function createHandler(deps) {
             return;
         }
 
-        // GET /api/triage -- fetch issues with triage-decision comments (lazy, cached)
+        // GET /api/triage -- v2 and legacy comments are advice, never approval.
         // Performance: single GraphQL query fetches all open issues + their recent comments
         // in one round trip (vs the old N+1 approach of one gh-issue-view call per issue).
         if (req.url === "/api/triage") {
@@ -522,14 +795,12 @@ query($owner: String!, $repo: String!, $cursor: String) {
                         const comments = issue.comments?.nodes || [];
                         let triageComment = null;
                         for (const c of comments) {
-                            const body = c.body || "";
-                            const m = body.match(/```json\s+triage-decision\s*\n([\s\S]*?)\n```/);
-                            if (!m) continue;
-                            try {
-                                const td = JSON.parse(m[1]);
-                                triageComment = { comment: c, td };
-                                break;
-                            } catch (_) { /* malformed JSON */ }
+                            if (c.isMinimized) continue;
+                            const td = parseTriageAdvice(c.body);
+                            if (!td) continue;
+                            if (td.error) throw new Error(`Issue #${issue.number}: ${td.error}`);
+                            // Comments arrive oldest-first; retain the latest advice.
+                            triageComment = { comment: c, td };
                         }
                         if (!triageComment) continue;
                         const { comment: c, td } = triageComment;
@@ -545,18 +816,8 @@ query($owner: String!, $repo: String!, $cursor: String) {
                             triageAuthor: c.author?.login || "unknown",
                             triageCreatedAt: c.createdAt || "",
                             commentBody: c.body,
-                            commentMarkdown: td.comment_markdown || "",
                             nonTriageComments,
-                            decision: td.decision || "",
-                            decisionDetail: td.decision_detail || "",
-                            theme: td.theme || "",
-                            areas: Array.isArray(td.areas) ? td.areas : [],
-                            type: td.type || "",
-                            status: td.status || "",
-                            priority: td.priority || "",
-                            milestone: td.milestone || "",
-                            nextAction: td.next_action || "",
-                            preservedLabels: Array.isArray(td.preserved_labels) ? td.preserved_labels : [],
+                            ...td,
                         });
                     }
                     if (!issuesPage.pageInfo.hasNextPage) break;
@@ -585,25 +846,36 @@ query($owner: String!, $repo: String!, $cursor: String) {
         }
 
         // Static file serving from dist/
-        const urlPath = decodeURIComponent(req.url.split("?")[0]);
+        const staticRequest = resolveStaticRequest(req.url, distDir);
+        if (staticRequest.kind === "malformed") {
+            sendStaticError(res, 400, "Bad request");
+            return;
+        }
+        if (staticRequest.kind === "forbidden") {
+            sendStaticError(res, 403, "Forbidden");
+            return;
+        }
+        if (staticRequest.kind === "missing") {
+            sendStaticError(res, 404, "Not found");
+            return;
+        }
+        if (staticRequest.kind === "asset") {
+            serveStatic(res, staticRequest.filePath, staticRequest.mimePath);
+            return;
+        }
+
+        const { urlPath } = staticRequest;
         if (urlPath === "/" || urlPath === "/index.html") {
             // Inject CSRF token into HTML so the client can send it with write requests
             try {
                 let html = readFileSync(join(distDir, "index.html"), "utf-8");
-                const tokenScript = `<script>window.__CANVAS_TOKEN__="${csrfToken}";</script>`;
-                html = html.replace("</head>", `${tokenScript}</head>`);
+                const runtimeScript = `<script>window.__CANVAS_TOKEN__="${csrfToken}";window.__APM_DASHBOARD_REFRESH_INTERVAL_MS__=${refreshIntervalMs};</script>`;
+                html = html.replace("</head>", `${runtimeScript}</head>`);
                 res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-cache" });
                 res.end(html);
             } catch {
-                res.writeHead(404);
-                res.end("Not found");
+                sendStaticError(res, 404, "Not found");
             }
-        } else if (urlPath.startsWith("/assets/")) {
-            const resolved = resolve(distDir, normalize(urlPath.slice(1)));
-            if (!resolved.startsWith(resolve(distDir))) {
-                res.writeHead(403); res.end("Forbidden"); return;
-            }
-            serveStatic(res, resolved);
         } else {
             serveStatic(res, join(distDir, "index.html"));
         }

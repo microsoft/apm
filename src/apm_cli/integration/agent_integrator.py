@@ -13,25 +13,69 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from apm_cli.install.primitive_classification import (
+    AgentSourceClassification,
+    PrimitiveKind,
+    classify_agent_source_file,
+)
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.primitives.models import resolve_user_invocable
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_yaml_str
+from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
+# Kiro capability tags approved for agent 'tools' frontmatter.
+# Source: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+# Fail closed: any value not in this set blocks deployment of that agent.
+KIRO_AGENT_ALLOWED_TOOLS: frozenset[str] = frozenset(
+    {
+        "read",
+        "write",
+        "shell",
+        "web",
+        "subagent",
+        "knowledge",
+        "context",
+        "todo_list",
+        "@mcp",
+        "@builtin",
+        "*",
+    }
+)
+
 
 class AgentIntegrator(BaseIntegrator):
-    """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
+    """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, and .kiro/agents/."""
 
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
 
-    def find_agent_files(self, package_path: Path) -> list[Path]:
+    @staticmethod
+    def _warn_agent_classification(
+        classification: AgentSourceClassification,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        if classification.warning and diagnostics is not None:
+            diagnostics.warn(
+                message=classification.warning,
+                package=printable_ascii_text(package_name),
+            )
+
+    def find_agent_files(
+        self,
+        package_path: Path,
+        source_plan=None,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> list[Path]:
         """Find all agent files in a package.
 
         Searches in:
@@ -45,17 +89,29 @@ class AgentIntegrator(BaseIntegrator):
             List[Path]: List of absolute paths to agent files
         """
         files: list[Path] = []
-        # Flat search in package root
-        files += self.find_files_by_glob(package_path, "*.agent.md")
-        # Recursive search in .apm/agents/ (use ** glob for subdirectories)
+        # Flat search in package root. The extension is only the final
+        # fallback; declarations inside the file still route through the owner.
+        for candidate in self.find_files_by_glob(package_path, "*.agent.md"):
+            classification = classify_agent_source_file(candidate, package_path)
+            self._warn_agent_classification(classification, diagnostics, package_name)
+            if classification.kind is PrimitiveKind.AGENT:
+                files.append(candidate)
+        # Recursive search in .apm/agents/; the classification owner decides
+        # whether each file is an agent before target layout derives a name.
         apm_agents = package_path / ".apm" / "agents"
         if apm_agents.exists():
-            files += self.find_files_by_glob(apm_agents, "**/*.agent.md")
-            # Also pick up plain .md files; the directory name implies type
-            for f in self.find_files_by_glob(apm_agents, "**/*.md"):
-                if not f.name.endswith(".agent.md") and f not in files:
-                    files.append(f)
-        return files
+            candidates = [f for f in self.find_files_by_glob(apm_agents, "**/*") if f.is_file()]
+            authorized = set(self.filter_authorized_files(candidates, source_plan))
+            for candidate in candidates:
+                classification = classify_agent_source_file(candidate, apm_agents)
+                self._warn_agent_classification(classification, diagnostics, package_name)
+                if (
+                    classification.kind is PrimitiveKind.AGENT
+                    and candidate in authorized
+                    and candidate not in files
+                ):
+                    files.append(candidate)
+        return self.filter_authorized_files(files, source_plan)
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
     # have been REMOVED as part of T5 (skill-strategy.md).
@@ -91,6 +147,7 @@ class AgentIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         scope=None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -108,12 +165,19 @@ class AgentIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         self.init_link_resolver(package_info, project_root)
-        agent_files = self.find_agent_files(package_info.install_path)
+        agent_files = self.find_agent_files(
+            package_info.install_path,
+            source_plan,
+            diagnostics,
+            package_info.package.name,
+        )
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 
         agents_dir = target_root / mapping.subdir
-        agents_dir.mkdir(parents=True, exist_ok=True)
+        # Lazy mkdir: only create the dir when we actually need to write.
+        # This avoids creating .kiro/agents/ when every agent is invalid-tools.
+        agents_dir_created = False
 
         files_integrated = 0
         files_skipped = 0
@@ -122,20 +186,21 @@ class AgentIntegrator(BaseIntegrator):
         total_links_resolved = 0
 
         for source_file in agent_files:
-            target_filename = self.get_target_filename_for_target(
-                source_file,
-                package_info.package.name,
-                target,
-            )
-            target_path = agents_dir / target_filename
-            # Defense-in-depth: target_filename comes from
-            # get_target_filename_for_target which strips path separators,
-            # but assert containment under agents_dir so a future
-            # regression cannot smuggle a traversal sequence past the
-            # adopt branch (which fires *before* check_collision and
-            # would otherwise blindly trust the computed path). Mirrors
-            # the guard already in command_integrator and
-            # instruction_integrator.
+            # kiro_agent uses relative path from .apm/agents/ for identity.
+            if mapping.format_id == "kiro_agent":
+                target_relpath = self._kiro_agent_relpath(source_file, package_info.install_path)
+            else:
+                target_relpath = self.get_target_filename_for_target(
+                    source_file,
+                    package_info.package.name,
+                    target,
+                )
+            target_path = agents_dir / target_relpath
+            # Defense-in-depth: assert containment under agents_dir so a
+            # regression cannot smuggle a traversal sequence past the adopt
+            # branch (which fires *before* check_collision and would otherwise
+            # blindly trust the computed path). Mirrors the guard already in
+            # command_integrator and instruction_integrator.
             try:
                 ensure_path_within(target_path, agents_dir)
             except PathTraversalError as exc:
@@ -146,6 +211,54 @@ class AgentIntegrator(BaseIntegrator):
                     )
                 files_skipped += 1
                 continue
+
+            if mapping.format_id == "kiro_agent":
+                # req-tg-009: Preflight render+validate MUST run before any
+                # content-identity adoption fast-path or filesystem mutation.
+                # If validation fails, skip without writing or creating dirs.
+                rendered, ok = self._preflight_render_kiro_agent(
+                    source_file,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
+                if not ok:
+                    files_skipped += 1
+                    continue
+
+                # Compare rendered artifact (not raw source) against existing
+                # target so a pre-placed file with invalid tools cannot be
+                # adopted by matching source bytes.
+                rel_path = portable_relpath(target_path, project_root)
+                if target_path.exists() and not target_path.is_symlink():
+                    try:
+                        existing = target_path.read_bytes()
+                        rendered_bytes = normalize_crlf_to_lf(rendered).encode("utf-8")
+                        if existing == rendered_bytes:
+                            target_paths.append(target_path)
+                            files_adopted += 1
+                            continue
+                    except OSError:
+                        pass
+                if self.check_collision(
+                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
+                ):
+                    files_skipped += 1
+                    continue
+
+                # Safe to materialize: ensure parent dirs exist then write.
+                if not agents_dir_created:
+                    agents_dir.mkdir(parents=True, exist_ok=True)
+                    agents_dir_created = True
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                write_text_lf(target_path, rendered)
+                files_integrated += 1
+                target_paths.append(target_path)
+                continue
+
+            # Non-kiro path: eager mkdir (existing behavior preserved).
+            if not agents_dir_created:
+                agents_dir.mkdir(parents=True, exist_ok=True)
+                agents_dir_created = True
 
             rel_path = portable_relpath(target_path, project_root)
 
@@ -160,7 +273,12 @@ class AgentIntegrator(BaseIntegrator):
                 continue
 
             if mapping.format_id == "codex_agent":
-                self._write_codex_agent(source_file, target_path)
+                self._write_codex_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
                 links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
@@ -281,7 +399,10 @@ class AgentIntegrator(BaseIntegrator):
         if not isinstance(fm, dict):
             return
         for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
-            diagnostics.warn(message=message, package=package_name)
+            diagnostics.warn(
+                message=message,
+                package=printable_ascii_text(package_name),
+            )
 
     # ------------------------------------------------------------------
     # Codex agent transformer (MD -> TOML)
@@ -292,12 +413,151 @@ class AgentIntegrator(BaseIntegrator):
         re.DOTALL,
     )
 
+    # Bound the dropped-fields diagnostic to a fixed number of named keys so
+    # hostile/oversized frontmatter (many keys) cannot blow up a single CLI
+    # diagnostic line; the remainder is summarized by count instead of
+    # enumerated.
+    _MAX_DROPPED_FIELDS_SHOWN = 5
+    # Bound each individually-named key to a fixed display length so a
+    # single hostile/oversized key name cannot blow up a single CLI
+    # diagnostic line either; combined with _MAX_DROPPED_FIELDS_SHOWN this
+    # bounds the whole diagnostic's total length.
+    _MAX_DROPPED_FIELD_KEY_LEN = 60
+
+    # Native string fields Codex itself recognizes and whose declared value
+    # takes precedence over any APM default. Single source of truth for both
+    # the model-settings extraction loop and the dropped-fields exclusion set
+    # below, so adding a third recognized field only requires one edit here.
+    _CODEX_MODEL_FIELDS = ("model", "model_reasoning_effort")
+    # 'user-invocable' and its 'visibility' alias are recognized-but-lossy:
+    # they get their own dedicated diagnostic via _warn_user_invocable_dropped
+    # (with the actionable 'cannot be guaranteed' hint), so they must be
+    # excluded here to avoid a second, generic dropped-fields warning for the
+    # same key.
+    _CODEX_KNOWN_FIELDS = frozenset(
+        {"name", "description", "tools", "user-invocable", "visibility", *_CODEX_MODEL_FIELDS}
+    )
+
     @staticmethod
-    def _write_codex_agent(source: Path, target: Path) -> None:
+    def _display_dropped_field_key(field: object) -> str:
+        """Render one dropped frontmatter key name, bounded and ASCII-safe.
+
+        ``field`` stays ``object`` (not a narrower union) because the YAML
+        frontmatter loader (``load_yaml_str``) accepts the full YAML 1.1 key
+        domain, including ``datetime.date`` (bare ``2026-10-05:`` keys) and
+        ``bytes`` (``!!binary`` keys) -- neither representable by a small
+        str/int/float/bool/None union. ``str(field)`` below covers all of
+        them uniformly.
+
+        Sanitizes control/non-ASCII characters first, then truncates the
+        *displayed* key (never the full value) so a single oversized key
+        name cannot blow up the diagnostic line.
+        """
+        text = printable_ascii_text(str(field))
+        max_len = AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN
+        if len(text) > max_len:
+            text = text[:max_len] + "...(truncated)"
+        return text
+
+    @staticmethod
+    def _warn_codex_unverified_scope(
+        diagnostics: DiagnosticCollector | None,
+        source: Path,
+        package_name: str,
+        issue: str,
+        fix: str,
+    ) -> None:
+        """Warn that invalid Codex frontmatter prevents scope verification."""
+        if diagnostics is None:
+            return
+        diagnostics.warn(
+            message=(
+                f"Codex agent {printable_ascii_text(source.name)}: {issue}. "
+                "Tool restrictions could not be verified, so the agent may inherit broader "
+                f"tool access. Fix: {fix}."
+            ),
+            package=printable_ascii_text(package_name),
+        )
+
+    @staticmethod
+    def _warn_codex_tools_dropped(
+        diagnostics: DiagnosticCollector | None,
+        source: Path,
+        package_name: str,
+    ) -> None:
+        """Warn that APM cannot preserve Codex agent tool restrictions."""
+        if diagnostics is None:
+            return
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"Codex agent {printable_ascii_text(source.name)}: frontmatter field 'tools' "
+                "was dropped; the agent may inherit all project/session MCP servers."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "Fix: remove 'tools' if unrestricted access is intentional; "
+                "otherwise do not use the generated agent with Codex."
+            ),
+        )
+
+    @staticmethod
+    def _warn_user_invocable_dropped(
+        fm,
+        source: Path,
+        target_name: str,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Warn that a target renderer cannot carry programmatic-only status.
+
+        No-ops when diagnostics are unavailable, the frontmatter is not a
+        mapping, or the agent resolves as user-invocable (the default). The
+        single interpretation authority is resolve_user_invocable(), shared
+        with the parser, so the model and the integrator agree on meaning:
+        the source may have set 'user-invocable: false' directly or only the
+        'visibility: internal' alias.
+
+        The emitted diagnostic is a warning (lossy compilation), not an error:
+        the agent is still deployed, but this renderer cannot encode the
+        source's programmatic-only intent, so that semantic cannot be
+        guaranteed after the render. The APM source frontmatter remains the
+        authority; operators who must keep the agent out of a user-facing
+        picker should not generate/deploy it for this target, or should
+        prefer a target that preserves 'user-invocable'.
+        """
+        if diagnostics is None:
+            return
+        if not isinstance(fm, dict):
+            return
+        if resolve_user_invocable(fm):
+            return
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"{target_name} agent {printable_ascii_text(source.name)}: user-invocability "
+                "(resolved from 'user-invocable' or the 'visibility: internal' alias) cannot be "
+                "represented in this target format; programmatic-only semantics cannot be "
+                "guaranteed after this lossy render."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "The APM source agent remains the authority for user-invocability. Mitigation: "
+                "do not generate/deploy this agent for this target if it must stay out of a "
+                "user-facing agent picker, or prefer a target that preserves 'user-invocable'."
+            ),
+        )
+
+    @staticmethod
+    def _write_codex_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+    ) -> None:
         """Transform an ``.agent.md`` file to Codex ``.toml`` format.
 
-        Parses YAML frontmatter for ``name`` and ``description``, uses
-        the markdown body as ``developer_instructions``.
+        Preserves ``name``, ``description``, and native model settings;
+        uses the markdown body as ``developer_instructions``.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -310,23 +570,277 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        model_settings: dict[str, str] = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
             body = content[fm_match.end() :]
             try:
                 fm = load_yaml_str(fm_match.group(1)) or {}
-                name = fm.get("name", name)
-                description = fm.get("description", description)
-            except Exception:
-                pass
+                if isinstance(fm, dict):
+                    name = fm.get("name", name)
+                    description = fm.get("description", description)
+                    for field in AgentIntegrator._CODEX_MODEL_FIELDS:
+                        if field not in fm:
+                            continue
+                        if isinstance(fm[field], str):
+                            model_settings[field] = fm[field]
+                        elif diagnostics is not None:
+                            diagnostics.lossy_agent_compilation(
+                                message=(
+                                    f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                    f"field '{field}' must be a string and was dropped."
+                                ),
+                                package=printable_ascii_text(package_name),
+                                detail=(
+                                    f"Fix: set '{field}' to a string in the source agent, "
+                                    "then rerun 'apm install'."
+                                ),
+                            )
+                    # Collect only the raw dropped keys here (no formatting)
+                    # so hostile frontmatter with many keys does not force
+                    # rendering every key just to discard most of them below.
+                    dropped_field_names = [
+                        field for field in fm if field not in AgentIntegrator._CODEX_KNOWN_FIELDS
+                    ]
+                    if dropped_field_names and diagnostics is not None:
+                        shown_names = dropped_field_names[
+                            : AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN
+                        ]
+                        remaining = len(dropped_field_names) - len(shown_names)
+                        shown_fields = [
+                            f"'{AgentIntegrator._display_dropped_field_key(field)}'"
+                            for field in shown_names
+                        ]
+                        fields_text = ", ".join(shown_fields)
+                        if remaining > 0:
+                            fields_text += f" (and {remaining} more)"
+                        singular = len(dropped_field_names) == 1
+                        field_label = "field" if singular else "fields"
+                        dropped_verb = "was" if singular else "were"
+                        field_reference = "this field" if singular else "these fields"
+                        setting_reference = "its setting" if singular else "their settings"
+                        diagnostics.lossy_agent_compilation(
+                            message=(
+                                f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                f"{field_label} {fields_text} {dropped_verb} dropped; "
+                                "this metadata is not translated by APM for Codex."
+                            ),
+                            package=printable_ascii_text(package_name),
+                            detail=(
+                                f"Fix: remove {field_reference} if unnecessary; otherwise do not "
+                                f"rely on {setting_reference} in the generated Codex agent."
+                            ),
+                        )
+                else:
+                    AgentIntegrator._warn_codex_unverified_scope(
+                        diagnostics,
+                        source,
+                        package_name,
+                        "YAML frontmatter must be a mapping and was ignored",
+                        "fix the source agent frontmatter to a YAML mapping, "
+                        "then rerun 'apm install'",
+                    )
+                if isinstance(fm, dict) and "tools" in fm:
+                    AgentIntegrator._warn_codex_tools_dropped(
+                        diagnostics,
+                        source,
+                        package_name,
+                    )
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Codex", diagnostics, package_name
+                )
+            except yaml.YAMLError:
+                AgentIntegrator._warn_codex_unverified_scope(
+                    diagnostics,
+                    source,
+                    package_name,
+                    "invalid YAML frontmatter was ignored",
+                    "repair the frontmatter, then rerun 'apm install'",
+                )
 
         doc = {
             "name": name,
             "description": description,
+            **model_settings,
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))
+
+    # ------------------------------------------------------------------
+    # Kiro agent transformer (MD -> filtered MD)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _kiro_agent_relpath(source_file: Path, package_path: Path) -> str:
+        """Compute the relative target path for a Kiro agent file.
+
+        Preserves subdirectory structure from .apm/agents/ so identity
+        derives from the deployed path, not from a 'name' frontmatter
+        field (Kiro CLI v3 / IDE uses relative path as identity).
+
+        Sources under .apm/agents/ keep their relative subpath; root-level
+        sources are flattened to the filename only.
+
+        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        """
+        apm_agents_root = package_path / ".apm" / "agents"
+        try:
+            rel = source_file.relative_to(apm_agents_root)
+        except ValueError:
+            rel = Path(source_file.name)
+        parts = rel.parts
+        stem = parts[-1]
+        if stem.endswith(".agent.md"):
+            stem = stem[: -len(".agent.md")] + ".md"
+        elif not stem.endswith(".md"):
+            stem = stem + ".md"
+        if len(parts) > 1:
+            return str(Path(*parts[:-1]) / stem)
+        return stem
+
+    @staticmethod
+    def _preflight_render_kiro_agent(
+        source: Path,
+        *,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> tuple[str | None, bool]:
+        """Validate and render a Kiro agent file; return (rendered, ok).
+
+        This is the SINGLE OWNER of the Kiro render+validate decision.
+        It MUST be called before any filesystem mutation (adopt check,
+        directory creation, or write) so that req-tg-009 is upheld: the
+        fail-closed evaluation runs prior to any content-identity fast-path.
+
+        Returns (rendered_str, True) on success or (None, False) if the
+        source declares tools outside KIRO_AGENT_ALLOWED_TOOLS or has an
+        unparseable frontmatter. On failure an actionable diagnostic is
+        emitted via diagnostics.error -- the caller MUST skip all target
+        mutations without writing any bytes.
+
+        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
+
+        content = source.read_text(encoding="utf-8")
+        body = content
+        out_fm: dict = {}
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = load_yaml_str(fm_match.group(1)) or {}
+            except yaml.YAMLError:
+                fm = {}
+
+            if isinstance(fm, dict):
+                # Validate tools; fail closed on any incompatible value.
+                if "tools" in fm:
+                    tools_raw = fm["tools"]
+                    if tools_raw is None:
+                        tools_out = None
+                    elif isinstance(tools_raw, list):
+                        tools_strs = [str(t).strip() for t in tools_raw]
+                        incompatible = set(tools_strs) - KIRO_AGENT_ALLOWED_TOOLS
+                        if incompatible:
+                            if diagnostics is not None:
+                                names = ", ".join(sorted(incompatible))
+                                diagnostics.error(
+                                    message=(
+                                        f"Kiro agent {printable_ascii_text(source.name)}: "
+                                        f"unsupported tool(s) {names!a} -- "
+                                        "agent will not be deployed. "
+                                        "Remove or replace with Kiro-approved capability "
+                                        "tags (read, write, shell, web, subagent, knowledge, "
+                                        "context, todo_list, @mcp, @builtin, *). "
+                                        "Ref: https://kiro.dev/docs/custom-agents/"
+                                    ),
+                                    package=printable_ascii_text(package_name),
+                                )
+                            return None, False
+                        tools_out = tools_strs
+                    elif isinstance(tools_raw, str):
+                        tool = tools_raw.strip()
+                        if tool not in KIRO_AGENT_ALLOWED_TOOLS:
+                            if diagnostics is not None:
+                                diagnostics.error(
+                                    message=(
+                                        f"Kiro agent {printable_ascii_text(source.name)}: "
+                                        f"unsupported tool {tool!a} -- "
+                                        "agent will not be deployed. "
+                                        "Use a Kiro-approved capability tag. "
+                                        "Ref: https://kiro.dev/docs/custom-agents/"
+                                    ),
+                                    package=printable_ascii_text(package_name),
+                                )
+                            return None, False
+                        tools_out = [tool]
+                    else:
+                        if diagnostics is not None:
+                            diagnostics.error(
+                                message=(
+                                    f"Kiro agent {printable_ascii_text(source.name)}: "
+                                    "'tools' must be a list of capability tags -- "
+                                    "agent will not be deployed. "
+                                    "Fix: use a YAML list, e.g. 'tools: [read, write]'. "
+                                    "Ref: https://kiro.dev/docs/custom-agents/"
+                                ),
+                                package=printable_ascii_text(package_name),
+                            )
+                        return None, False
+
+                    if tools_out is not None:
+                        out_fm["tools"] = tools_out
+
+                # Emit approved fields in canonical order: description, model, tools.
+                out_fm_ordered: dict = {}
+                if "description" in fm and fm["description"] is not None:
+                    out_fm_ordered["description"] = fm["description"]
+                if "model" in fm and fm["model"] is not None:
+                    out_fm_ordered["model"] = fm["model"]
+                if "tools" in out_fm:
+                    out_fm_ordered["tools"] = out_fm["tools"]
+                out_fm = out_fm_ordered
+
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Kiro", diagnostics, package_name
+                )
+
+        if out_fm:
+            fm_text = yaml_to_str(out_fm)
+            rendered = f"---\n{fm_text}---\n{body}"
+        else:
+            rendered = body
+
+        return rendered, True
+
+    @staticmethod
+    def _write_kiro_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Write a pre-rendered Kiro agent to disk; fail closed on invalid tools.
+
+        Delegates render+validate to _preflight_render_kiro_agent (the single
+        owner). Writes only when validation passes. Callers in the integration
+        loop should prefer calling _preflight_render_kiro_agent directly so
+        the rendered content can be reused for the adopt comparison.
+
+        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        """
+        rendered, ok = AgentIntegrator._preflight_render_kiro_agent(
+            source, diagnostics=diagnostics, package_name=package_name
+        )
+        if not ok:
+            return False
+        write_text_lf(target, rendered)  # type: ignore[arg-type]
+        return True
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(
@@ -348,7 +862,11 @@ class AgentIntegrator(BaseIntegrator):
         copilot = KNOWN_TARGETS["copilot"]
 
         self.init_link_resolver(package_info, project_root)
-        agent_files = self.find_agent_files(package_info.install_path)
+        agent_files = self.find_agent_files(
+            package_info.install_path,
+            diagnostics=diagnostics,
+            package_name=package_info.package.name,
+        )
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 

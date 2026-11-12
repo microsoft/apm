@@ -110,6 +110,20 @@ class TestCheckServersNeedingInstallation:
         result = ops.check_servers_needing_installation(["copilot"], ["server-x"])
         assert "server-x" in result
 
+    def test_prevalidated_server_cache_avoids_registry_lookup(self) -> None:
+        ops = _make_ops()
+        ops._get_installed_server_ids = MagicMock(return_value=set())
+        ops.registry_client.find_server_by_reference = MagicMock()
+
+        result = ops.check_servers_needing_installation(
+            ["copilot"],
+            ["server-a"],
+            server_info_cache={"server-a": {"id": "uuid-a"}},
+        )
+
+        assert result == ["server-a"]
+        ops.registry_client.find_server_by_reference.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # MCPServerOperations._get_installed_server_ids
@@ -263,10 +277,11 @@ class TestValidateServersExist:
         monkeypatch.setenv("MCP_REGISTRY_ALLOW_HTTP", "1")
         ops = _make_ops("http://custom.test")
         ops.registry_client._is_custom_url = True
+        ops.registry_client.registry_source = "flag"
         ops.registry_client.find_server_by_reference = MagicMock(
             side_effect=requests.RequestException("timeout")
         )
-        with pytest.raises(RuntimeError, match="MCP_REGISTRY_URL"):
+        with pytest.raises(RuntimeError, match="--registry"):
             ops.validate_servers_exist(["server-a"])
 
     def test_empty_list_returns_empty(self) -> None:
@@ -344,6 +359,33 @@ class TestCollectRuntimeVariables:
         }
         result = ops.collect_runtime_variables(["server-a"], server_info_cache=cache)
         assert "MY_VAR" in result
+
+    def test_collects_variables_from_package_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("APM_E2E_TESTS", "1")
+        monkeypatch.setenv("PACKAGE_CONFIG", "/config/settings.json")
+        ops = _make_ops()
+        cache = {
+            "server-a": {
+                "packages": [
+                    {
+                        "package_arguments": [
+                            {
+                                "variables": {
+                                    "PACKAGE_CONFIG": {
+                                        "description": "package config",
+                                        "is_required": True,
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        result = ops.collect_runtime_variables(["server-a"], server_info_cache=cache)
+        assert result == {"PACKAGE_CONFIG": "/config/settings.json"}
 
     def test_uses_batch_fetch_when_no_cache(self) -> None:
         ops = _make_ops()
@@ -584,6 +626,46 @@ class TestPromptForEnvironmentVariables:
                 {"MY_PROMPT_VAR": {"description": "desc", "required": True}}
             )
         assert result.get("MY_PROMPT_VAR") == "user-value"
+
+    def test_interactive_secret_default_is_reported_without_value(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        for name in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "ACCESS_CODE",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        ops = _make_ops()
+        mock_prompt = MagicMock()
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", mock_prompt),
+            patch("apm_cli.registry.operations._rich_info") as info,
+        ):
+            result = ops._prompt_for_environment_variables(
+                {
+                    "ACCESS_CODE": {
+                        "description": "launcher access code",
+                        "required": True,
+                        "value": "must-not-be-logged",
+                        "secret": True,
+                    }
+                }
+            )
+
+        mock_prompt.assert_not_called()
+        info.assert_called_once_with(
+            "Using registry default for secret MCP variable 'ACCESS_CODE'."
+        )
+        assert result["ACCESS_CODE"] == "must-not-be-logged"
+        assert "must-not-be-logged" not in info.call_args.args[0]
 
     def test_click_fallback_when_no_rich(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("APM_E2E_TESTS", raising=False)

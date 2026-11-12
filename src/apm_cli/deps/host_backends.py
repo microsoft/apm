@@ -43,6 +43,7 @@ from ..core.host_providers import (
     host_backend_factory,
     register_host_backend,
 )
+from ..models.dependency.host_virtual import repository_path_segments
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
@@ -215,10 +216,10 @@ class _GitHubFamilyBase:
     def build_commits_api_url(self, dep_ref: DependencyReference, ref: str) -> str | None:
         # GitHub-family commits API: GET {api_base}/repos/{owner}/{repo}/commits/{ref}
         # api_base differs across github.com / *.ghe.com / GHES.
-        try:
-            owner, repo = dep_ref.repo_url.split("/", 1)
-        except ValueError:
+        parts = repository_path_segments(dep_ref.repo_url)
+        if len(parts) < 2:
             return None
+        owner, repo = parts[0], "/".join(parts[1:])
         # Treat already-resolved 40-char SHAs as a no-op -- caller should
         # short-circuit the network round-trip.
         if re.match(r"^[a-f0-9]{40}$", (ref or "").lower()):
@@ -309,15 +310,17 @@ class ADOBackend:
                 dep_ref.ado_repo,
                 token=None,
                 host=host,
+                port=getattr(dep_ref, "port", None),
             )
-        # Empty-string token => caller wants explicit "no credential in URL".
-        embed_token = token if token else None
+        # ADO PATs and bearer tokens are injected through AuthContext.git_env;
+        # never place either credential in argv or persisted remote URLs.
         return build_ado_https_clone_url(
             dep_ref.ado_organization,
             dep_ref.ado_project,
             dep_ref.ado_repo,
-            token=embed_token,
+            token=None,
             host=host,
+            port=getattr(dep_ref, "port", None),
         )
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
@@ -572,7 +575,7 @@ def backend_for(
             host=host,
             kind=provider.kind,
             has_public_repos=provider.has_public_repos,
-            api_base=provider.api_base(host.lower()),
+            api_base=provider.build_api_base(host.lower(), port),
             port=port,
             credential_purpose=provider.credential_purpose,
         )

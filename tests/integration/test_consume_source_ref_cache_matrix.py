@@ -26,10 +26,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.core.host_providers import classify_host_provider
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
@@ -55,6 +57,7 @@ _INSTALL_ARGS = (
     "--parallel-downloads",
     "0",
 )
+_FROZEN_INSTALL_ARGS = (*_INSTALL_ARGS, "--frozen")
 _LOCK_ARGS = (
     "lock",
     "--target",
@@ -89,6 +92,8 @@ class _MatrixRow:
     mode: str = "standard"
     transition_source: str | None = None
     transition_rewrite_urls: tuple[str, ...] = ()
+    expected_port: int | None = None
+    manifest_style: str = "object"
 
 
 _ROWS = (
@@ -173,6 +178,78 @@ _ROWS = (
         transition_source="git@gitlab.example.invalid:group/consume-matrix.git",
         transition_rewrite_urls=("git@gitlab.example.invalid:group/consume-matrix.git",),
     ),
+    _MatrixRow(
+        id="generic-https-default-port-persistence",
+        source="https://git.example.invalid:443/acme/consume-matrix.git",
+        rewrite_urls=(
+            "https://git.example.invalid:443/acme/consume-matrix.git",
+            "https://git.example.invalid/acme/consume-matrix.git",
+            "https://git.example.invalid/acme/consume-matrix",
+            "git@git.example.invalid:acme/consume-matrix.git",
+        ),
+        expected_host="git.example.invalid",
+        expected_kind="generic",
+        expected_repo="acme/consume-matrix",
+        ref_selector="first-sha",
+        mode="port-persistence",
+    ),
+    _MatrixRow(
+        id="generic-https-custom-port-persistence",
+        source="https://git.example.invalid:8443/acme/consume-matrix.git",
+        rewrite_urls=(
+            "https://git.example.invalid:8443/acme/consume-matrix.git",
+            "https://git.example.invalid:8443/acme/consume-matrix",
+        ),
+        expected_host="git.example.invalid",
+        expected_kind="generic",
+        expected_repo="acme/consume-matrix",
+        ref_selector="second-sha",
+        mode="port-persistence",
+        expected_port=8443,
+    ),
+)
+
+_GITLAB_DEEP_BOUNDARY_ROWS = (
+    _MatrixRow(
+        id="gitlab-deep-https-string",
+        source="https://gitlab.com/ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("https://gitlab.com/ai/platform/collections/consume-matrix.git",),
+        expected_host="gitlab.com",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        manifest_style="string",
+    ),
+    _MatrixRow(
+        id="gitlab-deep-scp-string",
+        source="git@gitlab.com:ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("git@gitlab.com:ai/platform/collections/consume-matrix.git",),
+        expected_host="gitlab.com",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        manifest_style="string",
+    ),
+    _MatrixRow(
+        id="gitlab-deep-https-object",
+        source="https://code.example.invalid/ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("https://code.example.invalid/ai/platform/collections/consume-matrix.git",),
+        expected_host="code.example.invalid",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        host_type="gitlab",
+    ),
+    _MatrixRow(
+        id="gitlab-deep-scp-object",
+        source="git@code.example.invalid:ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("git@code.example.invalid:ai/platform/collections/consume-matrix.git",),
+        expected_host="code.example.invalid",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        host_type="gitlab",
+    ),
 )
 
 
@@ -205,23 +282,31 @@ def _configure_rewrites(
     urls: tuple[str, ...],
     *,
     environment: dict[str, str],
+    include_home_config: bool = False,
 ) -> None:
+    # Generic-host preflight drops GIT_CONFIG_GLOBAL, while clone keeps it.
+    # Port rows therefore need rewrites in both isolated global locations.
+    home_gitconfig = Path(environment["HOME"]) / ".gitconfig"
     for url in urls:
-        subprocess.run(
-            (
-                "git",
-                "config",
-                "--global",
-                "--add",
-                f"url.{repository.file_url}.insteadOf",
-                url,
-            ),
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
-        )
+        config_locations = [("--global",)]
+        if include_home_config:
+            config_locations.append(("--file", str(home_gitconfig)))
+        for config_args in config_locations:
+            subprocess.run(
+                (
+                    "git",
+                    "config",
+                    *config_args,
+                    "--add",
+                    f"url.{repository.file_url}.insteadOf",
+                    url,
+                ),
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
 
 
 def _reference_for(
@@ -240,7 +325,9 @@ def _reference_for(
     raise AssertionError(f"Unknown ref selector: {row.ref_selector}")
 
 
-def _manifest_entry(row: _MatrixRow, source: str, reference: str) -> dict[str, str]:
+def _manifest_entry(row: _MatrixRow, source: str, reference: str) -> str | dict[str, str]:
+    if row.manifest_style == "string":
+        return f"{source}#{reference}"
     entry = {"git": source, "ref": reference}
     if row.host_type:
         entry["type"] = row.host_type
@@ -275,15 +362,19 @@ def _create_scenario(root: Path, row: _MatrixRow) -> _Scenario:
         repository,
         (*row.rewrite_urls, *row.transition_rewrite_urls),
         environment=environment,
+        include_home_config=row.mode == "port-persistence",
     )
     reference, expected_commit, expected_skill_bytes = _reference_for(
         row,
         first_commit,
         second_commit,
     )
+    dependencies = (
+        () if row.mode == "port-persistence" else (_manifest_entry(row, row.source, reference),)
+    )
     consumer = LocalPackageFactory(isolated.work_root).create(
         f"consumer-{row.id}",
-        dependencies=(_manifest_entry(row, row.source, reference),),
+        dependencies=dependencies,
         targets=("copilot",),
     )
     return _Scenario(
@@ -484,6 +575,103 @@ def test_immutable_source_ref_rows_resolve_deploy_audit_and_converge(
     record_property("scenario_seconds", round(time.monotonic() - started, 3))
 
 
+@pytest.mark.lifecycle_smoke
+@pytest.mark.parametrize("row", _GITLAB_DEEP_BOUNDARY_ROWS, ids=lambda row: row.id)
+def test_gitlab_deep_repository_boundary(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    record_property: Callable[[str, object], None],
+    row: _MatrixRow,
+) -> None:
+    """Deep GitLab paths pack, install, and replay frozen without state drift."""
+    started = time.monotonic()
+    scenario = _create_scenario(tmp_path / row.id, row)
+    _run_initial_contract(row, scenario, apm_binary_path=apm_binary_path)
+    lock_before = (scenario.project_root / "apm.lock.yaml").read_bytes()
+    deployed_before = (scenario.project_root / _SKILL_PATH).read_bytes()
+
+    pack_result = _runner(apm_binary_path).run(
+        ("pack", "--offline"),
+        scenario_id=f"{row.id}-pack",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(pack_result)
+    frozen_result = _runner(apm_binary_path).run(
+        _FROZEN_INSTALL_ARGS,
+        scenario_id=f"{row.id}-frozen",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(frozen_result)
+    _assert_lock_provenance(
+        row,
+        scenario,
+        expected_source=row.source,
+        expected_ref=scenario.initial_ref,
+        expected_commit=scenario.expected_commit,
+    )
+    _assert_deployment(scenario, expected_skill_bytes=scenario.expected_skill_bytes)
+    assert (scenario.project_root / "apm.lock.yaml").read_bytes() == lock_before
+    assert (scenario.project_root / _SKILL_PATH).read_bytes() == deployed_before
+    record_property("scenario_seconds", round(time.monotonic() - started, 3))
+
+
+@pytest.mark.lifecycle_smoke
+@pytest.mark.parametrize(
+    ("dependency", "expected_error"),
+    (
+        (
+            "https://github.com/org/repo.git/collections/security",
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            {"git": "git@github.com:org/repo/collections/security.git"},
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            "https://gitlab.com/ai/platform/collections/consume-matrix.git/collections/security",
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            "https://github.com/org/repo/%2563ollections/security",
+            "residual percent-encoding",
+        ),
+        (
+            "https://github.com/org/repo/%2Fcollections/security",
+            "must not decode to a path separator",
+        ),
+    ),
+)
+def test_embedded_primitive_tail_fails_before_git_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    dependency: str | dict[str, str],
+    expected_error: str,
+) -> None:
+    """Malformed explicit paths fail before lock, cache, or module writes."""
+    row = _GITLAB_DEEP_BOUNDARY_ROWS[0]
+    scenario = _create_scenario(tmp_path / "invalid-embedded-tail", row)
+    manifest_path = scenario.project_root / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"] = [dependency]
+    dump_yaml(manifest, manifest_path)
+
+    result = _runner(apm_binary_path).run(
+        _LOCK_ARGS,
+        scenario_id="gitlab-deep-repository-boundary-invalid",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+
+    assert result.returncode != 0
+    output = " ".join((result.stdout + result.stderr).split())
+    assert expected_error in output
+    assert not (scenario.project_root / "apm.lock.yaml").exists()
+    assert not (scenario.project_root / "apm_modules").exists()
+    assert list(scenario.isolated.cache_root.iterdir()) == []
+
+
 def test_warm_cache_only_audit_replays_after_origin_becomes_unavailable(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -590,7 +778,112 @@ def test_source_ref_transition_applies_once_and_invalid_twin_preserves_state(
     assert invalid.returncode == 1
     invalid_output = " ".join((invalid.stdout + invalid.stderr).split())
     assert "Failed to download dependency" in invalid_output
+    assert "existing installation remains active" in invalid_output
     assert "No install transaction changes were committed." in invalid_output
     assert (scenario.project_root / "apm.lock.yaml").read_bytes() == lock_bytes
     assert (scenario.project_root / _SKILL_PATH).read_bytes() == deployed_bytes
     record_property("scenario_seconds", round(time.monotonic() - started, 3))
+
+
+@pytest.mark.parametrize(
+    "row",
+    tuple(row for row in _ROWS if row.mode == "port-persistence"),
+    ids=lambda row: row.id,
+)
+def test_cli_manifest_port_rows_reparse_to_backend_url(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    record_property: Callable[[str, object], None],
+    row: _MatrixRow,
+) -> None:
+    """Public install writes a shorthand that re-parses to the same backend."""
+    started = time.monotonic()
+    scenario = _create_scenario(tmp_path / row.id, row)
+    source_with_ref = f"{row.source}#{scenario.initial_ref}"
+    first_install = _runner(apm_binary_path).run(
+        (*_INSTALL_ARGS, source_with_ref),
+        scenario_id=f"{row.id}-public-install",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(first_install)
+    _assert_deployment(
+        scenario,
+        expected_skill_bytes=scenario.expected_skill_bytes,
+    )
+
+    persisted = load_yaml(scenario.project_root / "apm.yml")["dependencies"]["apm"]
+    assert len(persisted) == 1
+    assert isinstance(persisted[0], str)
+    reparsed = DependencyReference.parse(persisted[0])
+    backend_url = urlparse(reparsed.to_clone_url())
+    assert (
+        backend_url.scheme,
+        backend_url.hostname,
+        backend_url.port,
+        backend_url.path,
+    ) == ("https", row.expected_host, row.expected_port, f"/{row.expected_repo}")
+    assert reparsed.reference == scenario.initial_ref
+
+    manifest_reparse = _runner(apm_binary_path).run(
+        _INSTALL_ARGS,
+        scenario_id=f"{row.id}-manifest-reparse",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(manifest_reparse)
+    locked = _locked_dependency(scenario.project_root)
+    assert locked["host"] == row.expected_host
+    assert locked["repo_url"] == row.expected_repo
+    assert locked.get("port") == row.expected_port
+    assert locked["resolved_ref"] == scenario.initial_ref
+    assert locked["resolved_commit"] == scenario.expected_commit.sha
+    assert _manifest_dependency(scenario.project_root) == persisted[0]
+    record_property("scenario_seconds", round(time.monotonic() - started, 3))
+
+
+def test_cli_custom_port_negative_twins_preserve_last_good_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Malformed and insecure twins fail without changing installed state."""
+    row = next(row for row in _ROWS if row.id == "generic-https-custom-port-persistence")
+    scenario = _create_scenario(tmp_path / row.id, row)
+    source_with_ref = f"{row.source}#{scenario.initial_ref}"
+    installed = _runner(apm_binary_path).run(
+        (*_INSTALL_ARGS, source_with_ref),
+        scenario_id=f"{row.id}-seed-last-good",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(installed)
+
+    invalid_sources = (
+        (
+            "malformed-port",
+            f"https://git.example.invalid:70000/acme/consume-matrix.git#{scenario.initial_ref}",
+            "Port out of range",
+        ),
+        (
+            "malformed-shorthand-port",
+            f"git.example.invalid:70000/acme/consume-matrix#{scenario.initial_ref}",
+            "Invalid shorthand port",
+        ),
+        (
+            "insecure-transport",
+            f"http://git.example.invalid:8080/acme/consume-matrix.git#{scenario.initial_ref}",
+            "--allow-insecure",
+        ),
+    )
+    for scenario_suffix, invalid_source, expected_message in invalid_sources:
+        last_good = ArtifactSnapshot.capture(scenario.project_root)
+        invalid = _runner(apm_binary_path).run(
+            (*_INSTALL_ARGS, invalid_source),
+            scenario_id=f"{row.id}-{scenario_suffix}",
+            cwd=scenario.project_root,
+            env=scenario.environment,
+        )
+        assert invalid.returncode == 1
+        output = " ".join((invalid.stdout + invalid.stderr).split())
+        assert expected_message in output
+        assert_unchanged(last_good, ArtifactSnapshot.capture(scenario.project_root))

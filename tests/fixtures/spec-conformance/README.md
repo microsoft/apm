@@ -14,11 +14,12 @@ they exercise in a header comment.
 | `lockfile/`                              | `apm.lock.yaml` fixtures including v1, v2, round-trip.      |
 | `policy/`                                | `apm-policy.yml` fixtures (valid + invalid).                |
 | `resolution/semver-dialect.json`         | Canonical semver-range -> tag-set table per req-rs-007.     |
+| `source-plan/req-sc-015.json`            | Authorized-source-plan fixture and symlink-exclusion oracle.|
 
 ## Binding to the spec
 
-- Each fixture file starts with a header comment listing the `req-XXX`
-  identifiers it exercises.
+- Each JSON fixture carries binding metadata in its `spec_anchor` field. For
+  example, `source-plan/req-sc-015.json` binds to `req-sc-015`.
 - `tests/fixtures/spec-conformance/resolution/semver-dialect.json` is the
   reference oracle for [req-rs-007](../../../docs/src/content/docs/specs/openapm-v0.1.md#req-rs-007)
   (semver dialect pin).

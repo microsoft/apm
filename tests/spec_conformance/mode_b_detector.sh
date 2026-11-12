@@ -73,8 +73,14 @@ fi
 # body or the requirements manifest, or adds a new pytest req marker,
 # orphan_check.py owns correctness. Pass.
 SPEC_TOUCHED="$(git diff --name-only "$MB"...HEAD -- "$SPEC_BODY" "$SPEC_MANIFEST" || true)"
+# `[^+]*` (not `[^+].*`): every marker in this suite sits at column 0, so the
+# added line is `+@pytest.mark.req(...)`. With `[^+].` the `@` is consumed as
+# the not-a-plus character and the pattern then demands a SECOND
+# `@pytest.mark.req(` later on the same line, which never appears -- only
+# indented markers matched, and this short-circuit never fired for the common
+# case. `[^+]*` still excludes the `+++ b/...` diff header.
 NEW_MARKERS="$(git diff "$MB"...HEAD -- 'tests/spec_conformance/**' \
-  | grep -E '^\+[^+].*@pytest\.mark\.req\(' || true)"
+  | grep -E '^\+[^+]*@pytest\.mark\.req\(' || true)"
 if [ -n "$SPEC_TOUCHED" ] || [ -n "$NEW_MARKERS" ]; then
   echo "[+] mode_b: spec-concurrent edit detected; orphan_check owns this PR"
   exit 0
@@ -89,14 +95,17 @@ if [ -z "$RAW_DIFF" ]; then
   exit 0
 fi
 
-ADDED="$(printf '%s\n' "$RAW_DIFF" \
-  | grep -E '^\+[^+]' \
-  | grep -vE '^\+\s*$' \
-  | grep -vE '^\+\s*(#|"""|'\'')' \
-  | grep -vE '^\+\s*(from |import )' \
-  | grep -vE '^\+\s*@' \
-  | grep -vE '^\+\s*[a-zA-Z_][a-zA-Z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_\[\], |\.]*\s*(=.*)?$' \
-  | wc -l | tr -d ' ')"
+ADDED="$(printf '%s\n' "$RAW_DIFF" | awk '
+  /^\+[^+]/ &&
+  !/^\+[[:space:]]*$/ &&
+  !/^\+[[:space:]]*(#|"""|'\'')/ &&
+  !/^\+[[:space:]]*(from |import )/ &&
+  !/^\+[[:space:]]*@/ &&
+  !/^\+[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*:[[:space:]]*[A-Za-z_][A-Za-z0-9_\[\], |.]*[[:space:]]*(=.*)?$/ {
+    count++
+  }
+  END { print count + 0 }
+')"
 
 if [ "$ADDED" -lt "$THRESHOLD" ]; then
   echo "[+] mode_b: ${ADDED} substantive added lines (< ${THRESHOLD}); OK"

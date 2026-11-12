@@ -19,12 +19,20 @@ See ``.apm/skills/wave-4-design.md`` section 4.3 for the flow.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from apm_cli.marketplace.builder import MarketplaceBuilder, ResolveResult
-from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS, MarketplaceOutputProfile
+from apm_cli.marketplace.builder import (
+    MarketplaceBuilder,
+    MetadataEnrichmentResult,
+    ResolveResult,
+)
+from apm_cli.marketplace.output_profiles import (
+    MARKETPLACE_OUTPUTS,
+    resolve_effective_output_path,
+)
 from apm_cli.marketplace.yml_schema import MarketplaceConfig
 from apm_cli.utils.paths import portable_relpath
 
@@ -49,8 +57,9 @@ class DriftOutputReport:
 
     format: str
     path: str
-    status: str  # "unchanged" | "missing" | "drift"
+    status: str  # "unchanged" | "missing" | "drift" | "uncertifiable"
     differences: tuple[DriftDifference, ...] = ()
+    metadata_warnings: tuple[str, ...] = ()
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -58,7 +67,18 @@ class DriftOutputReport:
             "path": self.path,
             "status": self.status,
             "differences": [d.to_json_dict() for d in self.differences],
+            "metadata_warnings": list(self.metadata_warnings),
         }
+
+    def error_messages(self) -> tuple[str, ...]:
+        """Return the bounded error messages for this output."""
+        if self.status == "missing":
+            return (f"{self.path}: missing on disk (would be created)",)
+        if self.status == "drift":
+            return (f"{self.path}: {len(self.differences)} differences vs. regenerated output",)
+        if self.status == "uncertifiable":
+            return (f"{self.path}: remote metadata unavailable; regeneration is uncertifiable",)
+        return ()
 
 
 @dataclass(frozen=True)
@@ -67,6 +87,7 @@ class DriftReport:
 
     ok: bool
     outputs: tuple[DriftOutputReport, ...] = field(default_factory=tuple)
+    metadata_enrichment: MetadataEnrichmentResult = field(default_factory=MetadataEnrichmentResult)
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -75,14 +96,7 @@ class DriftReport:
         }
 
     def error_messages(self) -> list[str]:
-        msgs: list[str] = []
-        for out in self.outputs:
-            if out.status == "missing":
-                msgs.append(f"{out.path}: missing on disk (would be created)")
-            elif out.status == "drift":
-                count = len(out.differences)
-                msgs.append(f"{out.path}: {count} differences vs. regenerated output")
-        return msgs
+        return [message for output in self.outputs for message in output.error_messages()]
 
 
 def _format_path_segment(parent: str, key: str) -> str:
@@ -134,22 +148,6 @@ def json_key_diff(old: Any, new: Any, *, prefix: str = "") -> list[DriftDifferen
     return diffs
 
 
-def _output_path_for_profile(
-    config: MarketplaceConfig, profile: MarketplaceOutputProfile, project_root: Path
-) -> Path:
-    """Return the on-disk path this profile writes to."""
-    # Prefer the explicit output_specs mapping if present, else fall back
-    # to the per-profile config attribute (claude.output / codex.output).
-    for spec in config.output_specs:
-        if spec.name == profile.name and spec.path:
-            return project_root / spec.path
-    cfg_obj = getattr(config, profile.config_attr, None)
-    output_attr = getattr(cfg_obj, "output", None) if cfg_obj is not None else None
-    if isinstance(output_attr, str) and output_attr:
-        return project_root / output_attr
-    return project_root / profile.default_output
-
-
 def _load_on_disk(path: Path) -> tuple[dict[str, Any] | None, bool]:
     """Return (parsed_json_or_none, exists)."""
     if not path.exists():
@@ -164,22 +162,32 @@ def check_marketplace_drift(
     builder: MarketplaceBuilder,
     config: MarketplaceConfig,
     project_root: Path,
+    output_overrides: Mapping[str, str | Path] | None = None,
+    *,
+    resolve_result: ResolveResult | None = None,
 ) -> DriftReport:
     """Run the drift gate using *builder* (must be dry-run) and compare
     its composed output for each configured profile against the on-disk
     artifact at the profile's resolved output path.
     """
-    resolve_result: ResolveResult = builder.resolve()
+    if resolve_result is None:
+        resolve_result = builder.resolve()
 
     # Honor the configured outputs list (claude / codex / ...).
     configured = tuple(config.outputs) if config.outputs else ("claude",)
     output_reports: list[DriftOutputReport] = []
+    metadata_enrichment = MetadataEnrichmentResult()
 
     for name in configured:
         profile = MARKETPLACE_OUTPUTS.get(name)
         if profile is None:  # pragma: no cover - schema rejects unknown names
             continue
-        out_path = _output_path_for_profile(config, profile, project_root)
+        out_path = resolve_effective_output_path(
+            config,
+            profile,
+            project_root,
+            output_overrides,
+        )
         rel_display = (
             portable_relpath(out_path, project_root)
             if out_path.is_relative_to(project_root)
@@ -187,6 +195,20 @@ def check_marketplace_drift(
         )
 
         remote_metadata = builder.remote_metadata_for_profile(profile, resolve_result.entries)
+        if remote_metadata is not None:
+            metadata_enrichment = remote_metadata
+        if remote_metadata is not None and not remote_metadata.certifiable:
+            # Do not compare two equally degraded documents. The builder owns
+            # whether the regenerated metadata may certify this output.
+            output_reports.append(
+                DriftOutputReport(
+                    format=profile.name,
+                    path=rel_display,
+                    status="uncertifiable",
+                    metadata_warnings=remote_metadata.warnings,
+                )
+            )
+            continue
         new_doc, _warnings, _diagnostics = builder.compose_output(
             profile, resolve_result.entries, remote_metadata=remote_metadata
         )
@@ -241,7 +263,11 @@ def check_marketplace_drift(
 
     output_reports.sort(key=lambda r: r.format)
     overall_ok = all(r.status == "unchanged" for r in output_reports)
-    return DriftReport(ok=overall_ok, outputs=tuple(output_reports))
+    return DriftReport(
+        ok=overall_ok,
+        outputs=tuple(output_reports),
+        metadata_enrichment=metadata_enrichment,
+    )
 
 
 def render_diff_lines(report: DriftOutputReport, limit: int = _MAX_DIFFS_RENDERED) -> list[str]:

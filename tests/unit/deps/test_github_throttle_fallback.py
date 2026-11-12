@@ -1,0 +1,447 @@
+"""Focused contracts for the virtual-file GitHub throttle fallback."""
+
+from __future__ import annotations
+
+import base64
+import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import requests
+
+from apm_cli.core.auth import AuthResolver
+from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.git_file_transport import GitFileFetchResult, GitFileTransportError
+from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
+from apm_cli.models.apm_package import DependencyReference
+
+_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.mark.parametrize("credential_accepted", (True, False))
+def test_private_file_throttle_then_distinct_git_auth_challenge(
+    tmp_path: Path, credential_accepted: bool
+) -> None:
+    """The composed downloader retries Git, not the exhausted anonymous API."""
+    manager = MagicMock(spec=GitHubTokenManager)
+    manager.setup_environment.return_value = {}
+    manager.get_token_for_purpose.return_value = None
+    manager.resolve_credential_from_gh_cli.return_value = "fixture-gh-token"
+    resolver = AuthResolver(token_manager=manager)
+    dep = _dep()
+    dep.reference = _SHA
+    attempts: list[dict[str, str]] = []
+    payload = b"---\napplyTo: '**'\ndescription: Private instruction\n---\n# Private\n"
+
+    def transport_factory(*_args: object, **kwargs: object) -> MagicMock:
+        env = kwargs["git_env"]
+        assert isinstance(env, dict)
+        attempts.append(env)
+        transport = MagicMock()
+        if len(attempts) == 1 or not credential_accepted:
+            transport.fetch_file_with_commit.side_effect = GitFileTransportError(
+                "git file fetch failed: fatal: Authentication failed"
+            )
+        else:
+            transport.fetch_file_with_commit.return_value = GitFileFetchResult(payload, _SHA)
+        return transport
+
+    def response(url: str, **kwargs: object) -> MagicMock:
+        from urllib.parse import urlparse
+
+        assert "Authorization" not in kwargs.get("headers", {})
+        if urlparse(url).hostname == "raw.githubusercontent.com":
+            return _response(404)
+        assert urlparse(url).hostname == "api.github.com"
+        return _response(403, {"X-RateLimit-Remaining": "0"})
+
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("requests.get", side_effect=response) as get,
+    ):
+        downloader = GitHubPackageDownloader(auth_resolver=resolver)
+        downloader._strategies._git_file_transport_factory = transport_factory
+        if credential_accepted:
+            package = downloader.download_virtual_file_package(dep, tmp_path / "package")
+            assert package.resolved_reference.resolved_commit == _SHA
+            assert (
+                tmp_path / "package/.apm/instructions/example.instructions.md"
+            ).read_bytes() == payload
+        else:
+            with pytest.raises(RuntimeError, match="sparse Git transport failed") as error:
+                downloader.download_virtual_file_package(dep, tmp_path / "package")
+            assert "GitHub API throttle" in str(error.value)
+            assert "Authentication failed" in str(error.value)
+            assert isinstance(error.value.__cause__, GitFileTransportError)
+            assert not (tmp_path / "package").exists()
+
+    assert get.call_count == 2
+    assert len(attempts) == 2
+    assert _git_config_entries(attempts[0])["http.extraheader"] == [""]
+    _assert_github_basic_header(
+        _git_config_entries(attempts[1])["http.extraheader"][-1], "fixture-gh-token"
+    )
+    manager.resolve_credential_from_gh_cli.assert_called_once_with("github.com")
+    manager.resolve_credential_from_git.assert_not_called()
+
+
+@pytest.mark.parametrize("failure_kind", ("wrapped-throttle", "implicit-throttle", "network"))
+def test_new_git_attempt_preserves_its_own_non_auth_failure_chain(
+    tmp_path: Path, failure_kind: str
+) -> None:
+    """A genuine Git-attempt throttle or network cause must still block auth."""
+    resolver = AuthResolver()
+    dep = _dep()
+    dep.reference = _SHA
+    throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+    cause = (
+        GitHubThrottleError(GitHubThrottle(403, "remaining-zero"), "github.com")
+        if failure_kind != "network"
+        else requests.exceptions.ConnectionError("could not resolve host")
+    )
+
+    def fail(_path: str) -> None:
+        try:
+            raise cause
+        except Exception:
+            if failure_kind == "implicit-throttle":
+                raise GitFileTransportError("Authentication failed") from None
+            raise GitFileTransportError("Authentication failed") from cause
+
+    transport = MagicMock()
+    transport.fetch_file_with_commit.side_effect = fail
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch.object(resolver, "resolve") as resolve,
+    ):
+        downloader = GitHubPackageDownloader(auth_resolver=resolver)
+        with patch.object(downloader, "download_raw_file", side_effect=throttle):
+            downloader._strategies._git_file_transport_factory = MagicMock(return_value=transport)
+            with pytest.raises(RuntimeError, match="sparse Git transport failed") as error:
+                downloader.download_virtual_file_package(dep, tmp_path / "package")
+
+    resolve.assert_not_called()
+    assert "GitHub API throttle" in str(error.value)
+    git_error = error.value.__cause__
+    assert isinstance(git_error, GitFileTransportError)
+    assert (git_error.__cause__ or git_error.__context__) is cause
+    transport.fetch_file_with_commit.assert_called_once_with(dep.virtual_path)
+
+
+def _assert_github_basic_header(value: str, token: str) -> None:
+    """Assert one canonical x-access-token Basic header."""
+    assert value.startswith("Authorization: Basic ")
+    encoded = value.removeprefix("Authorization: Basic ")
+    assert base64.b64decode(encoded).decode() == f"x-access-token:{token}"
+
+
+def _git_config_entries(env: dict[str, str]) -> dict[str, list[str]]:
+    """Return indexed Git config values grouped by normalized key."""
+    entries: dict[str, list[str]] = {}
+    for index in range(int(env.get("GIT_CONFIG_COUNT", "0"))):
+        key = env.get(f"GIT_CONFIG_KEY_{index}", "").lower()
+        entries.setdefault(key, []).append(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+    return entries
+
+
+def _response(status_code: int, headers: dict[str, str] | None = None) -> MagicMock:
+    """Build an HTTP response whose status check raises for failures."""
+    response = MagicMock()
+    response.status_code = status_code
+    response.headers = headers or {}
+    response.content = b""
+    response.raise_for_status.side_effect = (
+        requests.exceptions.HTTPError(response=response) if status_code >= 400 else None
+    )
+    return response
+
+
+def _host(token: str | None) -> MagicMock:
+    """Build the dependency-owned services needed by DownloadDelegate."""
+    host = MagicMock()
+    host.github_token = token
+    host.ado_token = None
+    host.artifactory_token = None
+    host.github_host = "github.com"
+    host.git_env = {"UNRELATED_DOWNLOADER_TOKEN": "must-not-be-used"}
+    host._build_noninteractive_git_env.return_value = {"NORMAL_GIT": "1"}
+    context = MagicMock()
+    context.token = token
+    context.auth_scheme = "basic"
+    context.git_env = {"GIT_TOKEN": token} if token else {}
+    context.host_info.kind = "github"
+    host._resolve_dep_auth_ctx.return_value = context
+    host._resolve_dep_token.return_value = token
+    host.auth_resolver.resolve_for_dep.return_value = context
+    host.auth_resolver.classify_host.return_value = MagicMock(
+        kind="github",
+        api_base="https://api.github.com",
+    )
+    host.auth_resolver.git_env_for_remote.side_effect = lambda ctx, _url: (
+        AuthResolver.git_env_for_context(ctx, base_env=ctx.git_env)
+    )
+    return host
+
+
+def _dep() -> DependencyReference:
+    """Build one GitHub virtual-file dependency."""
+    return DependencyReference(
+        repo_url="owner/repo",
+        host="github.com",
+        reference="main",
+        virtual_path="instructions/example.instructions.md",
+        is_virtual=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "headers"),
+    (
+        (429, {}),
+        (403, {"X-RateLimit-Remaining": "0"}),
+        (403, {"Retry-After": "60"}),
+    ),
+)
+def test_confirmed_throttle_is_typed_before_any_fallback(
+    status_code: int,
+    headers: dict[str, str],
+) -> None:
+    """Every positive classifier branch reaches the one explicit fallback gate."""
+    host = _host(token="private-token")
+    host._resilient_get.return_value = _response(status_code, headers)
+    delegate = DownloadDelegate(host)
+
+    with pytest.raises(GitHubThrottleError) as exc_info:
+        delegate.download_github_file(_dep(), "instructions/example.instructions.md", "main")
+
+    assert host._resilient_get.call_args.kwargs["retry_throttles"] is False
+    with patch.object(
+        delegate,
+        "_download_github_file_via_git",
+        return_value=GitFileFetchResult(b"content", _SHA),
+    ) as sparse_fetch:
+        result = delegate.download_github_file_via_throttle_fallback(
+            _dep(),
+            "instructions/example.instructions.md",
+            "main",
+            exc_info.value,
+        )
+
+    assert result == GitFileFetchResult(b"content", _SHA)
+    sparse_fetch.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("status_code", "headers"),
+    (
+        (401, {"X-RateLimit-Remaining": "0"}),
+        (403, {}),
+        (403, {"X-RateLimit-Remaining": "1"}),
+        (403, {"X-RateLimit-Remaining": "invalid"}),
+        (404, {"X-RateLimit-Remaining": "0"}),
+    ),
+)
+def test_auth_and_missing_responses_never_select_sparse_git(
+    status_code: int,
+    headers: dict[str, str],
+) -> None:
+    """Only a typed throttle can reach sparse Git; errors stay on their own path."""
+    host = _host(token="private-token")
+    host._resilient_get.return_value = _response(status_code, headers)
+    delegate = DownloadDelegate(host)
+
+    with (
+        patch.object(delegate, "download_github_file_via_throttle_fallback") as fallback,
+        pytest.raises(RuntimeError),
+    ):
+        delegate.download_github_file(_dep(), "instructions/example.instructions.md", "main")
+
+    fallback.assert_not_called()
+
+
+def test_throttle_on_default_branch_fallback_remains_typed() -> None:
+    """A throttled master fallback must still reach the sparse-Git decision gate."""
+    host = _host(token="private-token")
+    host._resilient_get.side_effect = [
+        _response(404),
+        _response(429),
+    ]
+    delegate = DownloadDelegate(host)
+
+    with pytest.raises(GitHubThrottleError):
+        delegate.download_github_file(_dep(), "instructions/example.instructions.md", "main")
+
+    assert host._resilient_get.call_count == 2
+    assert all(
+        call.kwargs["retry_throttles"] is False for call in host._resilient_get.call_args_list
+    )
+
+
+def test_private_fallback_uses_only_auth_resolver_git_environment() -> None:
+    """Private fallback has a token-free URL and the resolver-owned Git env."""
+    host = _host(token="private-token")
+    delegate = DownloadDelegate(host)
+    transport = MagicMock()
+    transport.fetch_file_with_commit.return_value = GitFileFetchResult(b"content", _SHA)
+
+    with (
+        patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=transport,
+        ) as transport_factory,
+        patch.object(
+            delegate, "build_repo_url", return_value="https://github.com/owner/repo.git"
+        ) as url,
+    ):
+        result = delegate.download_github_file_via_throttle_fallback(
+            _dep(),
+            "instructions/example.instructions.md",
+            "main",
+            GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com"),
+        )
+        build_url = transport_factory.call_args.kwargs["build_repo_url_fn"]
+        assert build_url("owner/repo", dep_ref=_dep()) == "https://github.com/owner/repo.git"
+
+    assert result.resolved_commit == _SHA
+    git_env = transport_factory.call_args.kwargs["git_env"]
+    entries = _git_config_entries(git_env)
+    assert entries["credential.helper"] == [""]
+    _assert_github_basic_header(entries["http.extraheader"][-1], "private-token")
+    assert "GIT_TOKEN" not in git_env
+    assert url.call_args.kwargs["token"] == ""
+
+
+def test_private_fallback_sets_header_after_retained_git_config() -> None:
+    """#2368: the auth header must not clobber retained GIT_CONFIG entries."""
+    host = _host(token="private-token")
+    host.auth_resolver.resolve_for_dep.return_value.git_env = {
+        "GIT_TOKEN": "private-token",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+    }
+    delegate = DownloadDelegate(host)
+    transport = MagicMock()
+    transport.fetch_file_with_commit.return_value = GitFileFetchResult(b"content", _SHA)
+
+    with (
+        patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=transport,
+        ) as transport_factory,
+        patch.object(delegate, "build_repo_url", return_value="https://github.com/owner/repo.git"),
+    ):
+        delegate.download_github_file_via_throttle_fallback(
+            _dep(),
+            "instructions/example.instructions.md",
+            "main",
+            GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com"),
+        )
+
+    git_env = transport_factory.call_args.kwargs["git_env"]
+    entries = _git_config_entries(git_env)
+    assert entries["safe.barerepository"] == ["explicit"]
+    assert entries["credential.helper"] == [""]
+    _assert_github_basic_header(entries["http.extraheader"][-1], "private-token")
+    assert "GIT_TOKEN" not in git_env
+
+
+def test_public_fallback_uses_normal_git_environment() -> None:
+    """Public fallback excludes downloader auth state and uses normal Git."""
+    host = _host(token=None)
+    delegate = DownloadDelegate(host)
+    transport = MagicMock()
+    transport.fetch_file_with_commit.return_value = GitFileFetchResult(b"content", _SHA)
+
+    with patch(
+        "apm_cli.deps.download_strategies.GitSparseFileTransport",
+        return_value=transport,
+    ) as transport_factory:
+        delegate.download_github_file_via_throttle_fallback(
+            _dep(),
+            "instructions/example.instructions.md",
+            "main",
+            GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com"),
+        )
+
+    host._build_noninteractive_git_env.assert_called_once_with()
+    assert transport_factory.call_args.kwargs["git_env"] == {"NORMAL_GIT": "1"}
+
+
+def test_sparse_transport_failure_reports_the_throttle_and_transport_error() -> None:
+    """The fallback never downgrades a confirmed throttle to generic inaccessible."""
+    delegate = DownloadDelegate(_host(token=None))
+    throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+    with patch.object(
+        delegate,
+        "_download_github_file_via_git",
+        side_effect=GitFileTransportError("git file fetch failed: https://***@github.com"),
+    ):
+        with pytest.raises(RuntimeError) as exc_info:
+            delegate.download_github_file_via_throttle_fallback(
+                _dep(),
+                "instructions/example.instructions.md",
+                "main",
+                throttle,
+            )
+
+    message = str(exc_info.value)
+    assert "GitHub API throttle" in message
+    assert "sparse Git transport failed" in message
+    assert "Retry after GitHub quota recovery" in message
+    assert "private-token" not in message
+
+
+def test_general_retry_caps_retry_after_delay() -> None:
+    """A shared retry cannot sleep longer than the pre-existing 60-second cap."""
+    delegate = DownloadDelegate(_host(token=None))
+    throttled = _response(429, {"Retry-After": "3600"})
+    recovered = _response(200)
+
+    with (
+        patch("requests.get", side_effect=[throttled, recovered]),
+        patch("time.sleep") as sleep,
+    ):
+        result = delegate.resilient_get("https://example.test", {}, max_retries=2)
+
+    assert result is recovered
+    sleep.assert_called_once_with(60)
+
+
+def test_auth_failure_stays_closed_when_unauthenticated_retry_throttles() -> None:
+    """A later 429 cannot rewrite the first authenticated authorization failure."""
+    host = _host(token="private-token")
+    host._resilient_get.side_effect = [
+        _response(403),
+        _response(429),
+    ]
+    delegate = DownloadDelegate(host)
+
+    with pytest.raises(RuntimeError, match="Authentication failed"):
+        delegate.download_github_file(_dep(), "instructions/example.instructions.md", "main")
+
+
+def test_insecure_http_throttle_never_selects_authorized_sparse_git() -> None:
+    """Explicit HTTP never receives an AuthResolver credential through fallback."""
+    delegate = DownloadDelegate(_host(token="private-token"))
+    dep = _dep()
+    dep.is_insecure = True
+    throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+    with (
+        patch.object(delegate, "_download_github_file_via_git") as sparse_fetch,
+        pytest.raises(RuntimeError, match="insecure HTTP dependencies") as exc_info,
+    ):
+        delegate.download_github_file_via_throttle_fallback(
+            dep,
+            "instructions/example.instructions.md",
+            "main",
+            throttle,
+        )
+
+    sparse_fetch.assert_not_called()
+    assert "private-token" not in str(exc_info.value)

@@ -14,7 +14,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.deps.git_file_transport import GitFileFetchResult
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference, GitReferenceType
 
 
@@ -115,6 +117,28 @@ class TestSingleFileShaResolution:
         rr = pkg_info.resolved_reference
         assert rr.resolved_commit == self.SHA
         assert rr.ref_type == GitReferenceType.COMMIT
+
+    def test_sparse_throttle_fallback_overrides_api_sha_with_fetch_head(
+        self, tmp_path: Path, downloader: GitHubPackageDownloader
+    ) -> None:
+        """The sparse fallback's observed SHA is the lock provenance anchor."""
+        dep = _make_virtual_file_dep()
+        throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+        with (
+            patch.object(downloader._refs, "resolve_commit_sha_for_ref", return_value=None),
+            patch.object(downloader._strategies, "download_github_file", side_effect=throttle),
+            patch.object(
+                downloader._strategies,
+                "download_github_file_via_throttle_fallback",
+                return_value=GitFileFetchResult(_file_content(), self.SHA),
+            ) as fallback,
+        ):
+            pkg_info = downloader.download_virtual_file_package(dep, tmp_path / "vpkg")
+
+        assert pkg_info.resolved_reference is not None
+        assert pkg_info.resolved_reference.resolved_commit == self.SHA
+        fallback.assert_called_once_with(dep, dep.virtual_path, "main", throttle)
 
 
 # ---------------------------------------------------------------------------

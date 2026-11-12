@@ -20,7 +20,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = [pytest.mark.integration, pytest.mark.component]
+pytestmark = [pytest.mark.integration, pytest.mark.component, pytest.mark.lifecycle_smoke]
 
 _REMOTE = "ssh://git@gitlab.example.invalid/acme/skill-repo.git"
 _REWRITE_URLS = (

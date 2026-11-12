@@ -250,13 +250,18 @@ class TestCacheInvalidation(unittest.TestCase):
     """Cache entries are invalidated on schema or chain mismatch."""
 
     def test_schema_version_mismatch_invalidates(self):
-        """Old cache with wrong schema_version returns None."""
+        """Old cache metadata is removed so legacy secrets do not remain."""
         policy = ApmPolicy(name="old-format")
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _setup_cache("test/.github", root, policy, schema_version="1")
-            entry = _read_cache_entry("test/.github", root)
+            repo_ref = "test/.github"
+            _setup_cache(repo_ref, root, policy, schema_version="5")
+            meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+
+            entry = _read_cache_entry(repo_ref, root)
+
             self.assertIsNone(entry, "Stale schema_version should invalidate cache")
+            self.assertFalse(meta_file.exists(), "Legacy metadata sidecar was not scrubbed")
 
     def test_current_schema_version_accepted(self):
         """Cache with correct schema_version is accepted."""
@@ -805,6 +810,19 @@ def test_policy_serializer_covers_every_dataclass_leaf() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("bin_deploy", "expected"),
+    [
+        (BinDeployPolicy(deny_all=True), {"deny_all": True, "deny": []}),
+        (BinDeployPolicy(deny=("legacy/tool",)), {"deny_all": False, "deny": ["legacy/tool"]}),
+    ],
+)
+def test_policy_serializer_preserves_sparse_bin_deploy_shapes(
+    bin_deploy: BinDeployPolicy, expected: dict[str, object]
+) -> None:
+    assert _policy_to_dict(ApmPolicy(bin_deploy=bin_deploy))["bin_deploy"] == expected
+
+
 class TestPolicyRoundTrip(unittest.TestCase):
     """_policy_to_dict -> YAML -> load_policy preserves semantics."""
 
@@ -1248,15 +1266,15 @@ def test_ado_chain_preserves_backend_for_explicit_and_same_org_parent(
         assert policy_path == "apm-policy.yml"
         key = (org, project, repo, host)
         observed.append(key)
-        if key == ("contoso", "_apm", "_apm", "dev.azure.com"):
+        if key == ("contoso", "apm", "apm-policy", "dev.azure.com"):
             return leaf_yaml, None
         assert key == expected_parent
         return parent_yaml, None
 
     with (
         patch(
-            "apm_cli.policy.discovery._extract_org_from_git_remote",
-            return_value=("contoso", "dev.azure.com"),
+            "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
+            return_value=("contoso", "dev.azure.com", None),
         ),
         patch("apm_cli.policy.discovery._fetch_ado_contents", side_effect=fetch_ado) as ado,
         patch(
@@ -1265,7 +1283,7 @@ def test_ado_chain_preserves_backend_for_explicit_and_same_org_parent(
         ) as github,
     ):
         cold = discover_policy_with_chain(tmp_path)
-        assert cold.source == "org:dev.azure.com/contoso/_apm/_apm"
+        assert cold.source == "org:dev.azure.com/contoso/apm/apm-policy"
         assert cold.policy is not None
         assert cold.policy.enforcement == "block"
         assert cold.policy.dependencies.require_pinned_constraint is True
@@ -1276,16 +1294,16 @@ def test_ado_chain_preserves_backend_for_explicit_and_same_org_parent(
         warm = discover_policy_with_chain(tmp_path)
 
     assert observed == [
-        ("contoso", "_apm", "_apm", "dev.azure.com"),
+        ("contoso", "apm", "apm-policy", "dev.azure.com"),
         expected_parent,
     ]
     assert warm.cached is True
     assert warm.policy == cold.policy
-    cache_entry = _read_cache_entry("dev.azure.com/contoso/_apm/_apm", tmp_path)
+    cache_entry = _read_cache_entry("dev.azure.com/contoso/apm/apm-policy", tmp_path)
     assert cache_entry is not None
     assert cache_entry.chain_refs == [
         "dev.azure.com/contoso/governance/policy",
-        "dev.azure.com/contoso/_apm/_apm",
+        "dev.azure.com/contoso/apm/apm-policy",
     ]
 
 

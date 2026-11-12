@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from apm_cli.core.auth import AuthResolver
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.scope import InstallScope
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.install.plan import UpdatePlan
     from apm_cli.install.transaction import InstallTransaction
     from apm_cli.models.apm_package import APMPackage
@@ -37,7 +38,8 @@ class InstallRequest:
     logger: InstallLogger | None = None
     scope: InstallScope | None = None
     auth_resolver: AuthResolver | None = None
-    target: str | None = None
+    target: str | list[str] | None = None
+    target_decision: EffectiveTargetDecision | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
     marketplace_provenance: dict[str, Any] | None = None
@@ -48,6 +50,8 @@ class InstallRequest:
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
+    trust_transitive_mcp: bool = False
+    trust_bin: bool | None = None
 
     # --frozen: refuse to install if lockfile is missing or stale relative
     # to apm.yml.  Enforced in InstallService.run() BEFORE delegating to

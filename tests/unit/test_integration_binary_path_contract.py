@@ -15,12 +15,32 @@ from tests.integration import (
 )
 from tests.integration.marketplace import conftest as marketplace_conftest
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SILENT_ADOPT_FILENAME = "test_silent_adopt_existing_files_e2e.py"
+
+
+def _silent_adopt_test_path() -> str:
+    """Resolve the classified silent-adopt E2E without duplicating its manifest path."""
+    matches = list((_REPO_ROOT / "tests" / "integration").glob(_SILENT_ADOPT_FILENAME))
+    assert len(matches) == 1
+    return matches[0].relative_to(_REPO_ROOT).as_posix()
+
 
 @pytest.fixture(autouse=True)
 def _clear_binary_resolution_cache() -> None:
     integration_conftest._resolve_apm_binary.cache_clear()
     yield
     integration_conftest._resolve_apm_binary.cache_clear()
+
+
+def test_engine_command_is_explicitly_independent_of_packaged_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boundary-fault contracts use the installed engine, never a frozen fallback."""
+    monkeypatch.setenv("APM_BINARY_PATH", "/deliberately/not/an/engine")
+    command = integration_conftest.apm_engine_command.__wrapped__()
+    assert command[0] == sys.executable
+    assert command[1:] == ("-m", "apm_cli.cli")
 
 
 def test_explicit_binary_path_is_authoritative(
@@ -131,7 +151,6 @@ def test_silent_adopt_consumer_rejects_invalid_explicit_binary(
         configured.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         configured.chmod(0o644)
         env["APM_BINARY_PATH"] = str(configured)
-    env["GITHUB_APM_PAT"] = "test-token"
     env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
 
     result = subprocess.run(
@@ -141,9 +160,9 @@ def test_silent_adopt_consumer_rejects_invalid_explicit_binary(
             "pytest",
             "--collect-only",
             "-q",
-            "tests/integration/test_silent_adopt_existing_files_e2e.py",
+            _silent_adopt_test_path(),
         ],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
         text=True,

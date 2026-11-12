@@ -13,6 +13,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         """Set up test fixtures."""
         # Mock the factory and adapter
         self.mock_adapter = Mock()
+        self.mock_adapter.written_mcp_hashes = {}
         self.mock_conflict_detector = Mock()
 
         with (
@@ -29,6 +30,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         # Setup mocks
         self.mock_conflict_detector.check_server_exists.return_value = False
         self.mock_adapter.configure_mcp_server.return_value = True
+        self.mock_adapter.written_mcp_hashes = {"github": "sha256:" + "a" * 64}
 
         # Install server
         summary = self.installer.install_servers(["github"])
@@ -38,9 +40,24 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(len(summary.skipped), 0)
         self.assertEqual(len(summary.failed), 0)
         self.assertEqual(summary.installed[0], "github")
+        self.assertEqual(summary.native_hashes, self.mock_adapter.written_mcp_hashes)
 
         # Verify adapter was called
         self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
+
+    def test_conflict_check_uses_cached_registry_info(self):
+        """The resolved (possibly custom-registry) entry is reused for conflict checks."""
+        info = {"name": "custom-server"}
+        self.mock_conflict_detector.check_server_exists.return_value = True
+
+        summary = self.installer.install_servers(
+            ["custom-server"], server_info_cache={"custom-server": info}
+        )
+
+        self.mock_conflict_detector.check_server_exists.assert_called_once_with(
+            "custom-server", server_info=info
+        )
+        self.assertEqual(len(summary.skipped), 1)
 
     def test_skip_existing_server(self):
         """Test skipping server that already exists."""
@@ -60,11 +77,24 @@ class TestSafeMCPInstaller(unittest.TestCase):
         # Verify adapter was not called
         self.mock_adapter.configure_mcp_server.assert_not_called()
 
+    def test_replace_existing_server_routes_through_adapter(self):
+        """Drift updates must overwrite instead of being conflict-skipped."""
+        self.mock_conflict_detector.check_server_exists.return_value = True
+        self.mock_adapter.configure_mcp_server.return_value = True
+
+        summary = self.installer.install_servers(["github"], replace_existing=True)
+
+        self.assertEqual(summary.installed, ["github"])
+        self.assertEqual(summary.skipped, [])
+        self.mock_conflict_detector.check_server_exists.assert_not_called()
+        self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
+
     def test_handle_configuration_failure(self):
         """Test handling server configuration failure."""
         # Setup mocks
         self.mock_conflict_detector.check_server_exists.return_value = False
         self.mock_adapter.configure_mcp_server.return_value = False
+        self.mock_adapter.written_mcp_hashes = {"github": "sha256:" + "a" * 64}
 
         # Install server
         summary = self.installer.install_servers(["github"])
@@ -75,6 +105,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(len(summary.failed), 1)
         self.assertEqual(summary.failed[0]["server"], "github")
         self.assertEqual(summary.failed[0]["reason"], "configuration failed")
+        self.assertEqual(summary.native_hashes, {})
 
     def test_handle_configuration_exception(self):
         """Test handling exception during server configuration."""

@@ -5,21 +5,33 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.core.errors import ConflictingTargetsError
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
-from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegrator
+from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
-from apm_cli.utils.diagnostics import DiagnosticCollector
+from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
 
-def _package_info(package_path: Path, name: str = "targeted-hooks") -> PackageInfo:
+def _package_info(
+    package_path: Path,
+    name: str = "targeted-hooks",
+    *,
+    target: str | None = None,
+    targets: list[str] | None = None,
+) -> PackageInfo:
     return PackageInfo(
-        package=APMPackage(name=name, version="1.0.0"),
+        package=APMPackage(
+            name=name,
+            version="1.0.0",
+            target=target,
+            targets=targets,
+        ),
         install_path=package_path,
     )
 
@@ -48,24 +60,40 @@ class _NoopSkillIntegrator:
 
     def integrate_package_skill(self, package_info, project_root: Path, **kwargs):
         self.seen_targets = [target.name for target in kwargs["targets"]]
-        return SimpleNamespace(
-            target_paths=[],
+        return SkillIntegrationResult(
             skill_created=False,
-            sub_skills_promoted=0,
-            bin_deployed=0,
-            bin_skipped_reason="",
+            skill_updated=False,
+            skill_skipped=True,
+            skill_path=None,
+            references_copied=0,
         )
 
 
 class _RecordingHookIntegrator:
-    def __init__(self) -> None:
+    def __init__(self, reconcile_result: dict | None = None) -> None:
         self.seen_targets: list[str] = []
         self.dep_targets_active_values: list[bool] = []
+        self.reconciled_targets: list[str] = []
+        self.reconcile_result = reconcile_result or {"files_removed": 0, "errors": 0}
 
     def integrate_hooks_for_target(self, target, package_info, project_root: Path, **kwargs):
         self.seen_targets.append(target.name)
         self.dep_targets_active_values.append(kwargs["dep_targets_active"])
         return IntegrationResult(0, 0, 0, [])
+
+    def reconcile_package_target_restriction(
+        self,
+        package_info,
+        project_root: Path,
+        excluded_targets,
+    ) -> dict:
+        self.reconciled_targets.extend(target.name for target in excluded_targets)
+        return self.reconcile_result
+
+
+class _RejectingInstructionIntegrator:
+    def preflight_instructions_for_targets(self, *_args, **_kwargs) -> None:
+        raise ValueError("malformed instruction frontmatter")
 
 
 def _bundle(hook_integrator) -> IntegratorBundle:
@@ -80,18 +108,80 @@ def _bundle(hook_integrator) -> IntegratorBundle:
     )
 
 
+def test_instruction_preflight_precedes_excluded_hook_reconciliation(tmp_path: Path) -> None:
+    """A rejected instruction cannot leave excluded-target hook mutations."""
+    hook_integrator = _RecordingHookIntegrator()
+    bundle = _bundle(hook_integrator)
+    bundle = replace(bundle, instruction=_RejectingInstructionIntegrator())
+    package_path = tmp_path / "pkg"
+    package_path.mkdir()
+
+    with pytest.raises(ValueError, match="malformed instruction frontmatter"):
+        integrate_package_primitives(
+            _package_info(package_path, target="copilot"),
+            tmp_path / "project",
+            targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
+            integrators=bundle,
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+            package_name="targeted-hooks",
+        )
+
+    assert hook_integrator.reconciled_targets == []
+
+
+def test_native_plugin_reconciles_excluded_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native plugin admission still removes excluded-target hook ownership."""
+    from apm_cli.copilot_plugins import capability
+    from apm_cli.install import native_plugin_admission
+
+    hook_integrator = _RecordingHookIntegrator()
+    monkeypatch.setattr(capability, "admits_native_plugin", lambda _package: True)
+    monkeypatch.setattr(
+        native_plugin_admission,
+        "finalize_native_plugin",
+        lambda result, *_args, **_kwargs: result,
+    )
+    package_path = tmp_path / "pkg"
+    package_path.mkdir()
+
+    integrate_package_primitives(
+        _package_info(package_path, target="copilot"),
+        tmp_path / "project",
+        targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
+        integrators=_bundle(hook_integrator),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+    )
+
+    assert hook_integrator.reconciled_targets == ["claude"]
+
+
 def _run_with_targets(
     tmp_path: Path,
     install_target_names: list[str],
     dep_target_subset: list[str] | None,
     hook_integrator: _RecordingHookIntegrator,
+    *,
+    package_target: str | None = None,
+    package_targets: list[str] | None = None,
 ) -> DiagnosticCollector:
     package_path = tmp_path / "pkg"
     package_path.mkdir()
     diagnostics = DiagnosticCollector()
 
     integrate_package_primitives(
-        _package_info(package_path),
+        _package_info(
+            package_path,
+            target=package_target,
+            targets=package_targets,
+        ),
         tmp_path / "project",
         targets=[_hook_only_target(name) for name in install_target_names],
         integrators=_bundle(hook_integrator),
@@ -145,6 +235,89 @@ def test_disjoint_targets_emits_diagnostic(tmp_path: Path) -> None:
     assert [d.detail for d in diagnostics._diagnostics] == ["active targets: [claude]"]
 
 
+@pytest.mark.parametrize("package_target", ["vscode", "agents"])
+def test_package_alias_restriction_routes_through_services_chokepoint(
+    tmp_path: Path,
+    package_target: str,
+) -> None:
+    """Copilot aliases reach Copilot but cannot leak into Claude."""
+    hook_integrator = _RecordingHookIntegrator()
+
+    _run_with_targets(
+        tmp_path,
+        ["copilot", "claude"],
+        None,
+        hook_integrator,
+        package_target=package_target,
+    )
+
+    assert hook_integrator.seen_targets == ["copilot"]
+    assert hook_integrator.reconciled_targets == ["claude"]
+
+
+def test_package_restriction_cannot_expand_consumer_dependency_targets(
+    tmp_path: Path,
+) -> None:
+    """A Claude package cannot override a consumer that authorizes only Cursor."""
+    hook_integrator = _RecordingHookIntegrator()
+
+    diagnostics = _run_with_targets(
+        tmp_path,
+        ["claude", "cursor"],
+        ["cursor"],
+        hook_integrator,
+        package_target="claude",
+    )
+
+    assert hook_integrator.seen_targets == []
+    assert hook_integrator.reconciled_targets == ["claude", "cursor"]
+    assert diagnostics.has_diagnostics
+
+
+def test_reconcile_failure_diagnostic_names_target_and_config(tmp_path: Path) -> None:
+    """A failed contraction tells users which target config needs attention."""
+    hook_integrator = _RecordingHookIntegrator(
+        {
+            "files_removed": 0,
+            "errors": 1,
+            "failed_targets": ["cursor"],
+            "failed_paths": [".cursor/hooks.json"],
+        }
+    )
+
+    diagnostics = _run_with_targets(
+        tmp_path,
+        ["claude", "cursor"],
+        None,
+        hook_integrator,
+        package_target="claude",
+    )
+
+    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
+    assert warning.message == "Could not fully reconcile hooks excluded by target restrictions"
+    assert warning.detail == (
+        "targets: [cursor]; configs: [.cursor/hooks.json]; run apm install again"
+    )
+
+
+def test_conflicting_package_targets_fail_before_service_dispatch(tmp_path: Path) -> None:
+    """A dependency with both target keys cannot degrade to universal routing."""
+    hook_integrator = _RecordingHookIntegrator()
+
+    with pytest.raises(ConflictingTargetsError):
+        _run_with_targets(
+            tmp_path,
+            ["claude", "cursor"],
+            None,
+            hook_integrator,
+            package_target="claude",
+            package_targets=["all"],
+        )
+
+    assert hook_integrator.seen_targets == []
+    assert hook_integrator.reconciled_targets == []
+
+
 def test_hooks_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> None:
     project = tmp_path / "project"
     (project / ".codex").mkdir(parents=True)
@@ -169,6 +342,230 @@ def test_hooks_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> N
     assert (project / ".codex" / "hooks.json").exists()
 
 
+# Every merge-based harness APM ships, so the routing regression below is
+# proven across the whole registry rather than a claude/codex special case.
+_MERGE_HARNESSES = sorted(_MERGE_HOOK_TARGETS)
+
+
+def _target_command_hook(command: str) -> dict:
+    """A minimal, schema-neutral hook whose command uniquely tags its file.
+
+    ``SessionStart`` and a trivial command survive event normalization across
+    every merge harness, so the command string is a reliable per-file marker
+    regardless of a target's casing/matcher conventions. The matcher is the
+    wildcard ``"*"`` rather than an arbitrary word: ``SessionStart`` is not a
+    tool-use event, so Cursor's native contract only has a verified
+    translation for wildcard/empty matchers on non-tool lifecycle events
+    (see ``_cursor_matcher``); a non-wildcard placeholder would be rejected
+    by Cursor's strict preflight while being semantically meaningless for
+    every other harness too, so the wildcard is the correct value here, not
+    a weakening of this test's actual regression (per-target file routing
+    isolation, asserted below).
+    """
+    return {
+        "hooks": {
+            "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": command}]}],
+        }
+    }
+
+
+def _deployed_commands(project: Path, target_name: str) -> list[str]:
+    """Return every hook command written to *target_name*'s merged config."""
+    target = KNOWN_TARGETS[target_name]
+    config = _MERGE_HOOK_TARGETS[target_name]
+    config_path = project / target.root_dir / config.config_filename
+    if not config_path.exists():
+        return []
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    commands: list[str] = []
+    for entries in data.get(config.event_container_key, {}).values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            # Most targets nest hooks under a matcher entry ({matcher, hooks});
+            # antigravity flattens to bare {type, command} entries. Handle both.
+            if "command" in entry:
+                commands.append(entry["command"])
+            for hook in entry.get("hooks", []):
+                if "command" in hook:
+                    commands.append(hook["command"])
+    return commands
+
+
+def _write_divergent_pair(package_path: Path, first: str, second: str) -> dict[str, str]:
+    """Ship one hook file per target with a unique command tag; return the map."""
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    tags = {first: f"echo {first}-only", second: f"echo {second}-only"}
+    for target_name, command in tags.items():
+        (hooks_dir / f"pkg-{target_name}-hooks.json").write_text(
+            json.dumps(_target_command_hook(command)), encoding="utf-8"
+        )
+    return tags
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (a, b)
+        for i, a in enumerate(_MERGE_HARNESSES)
+        for b in _MERGE_HARNESSES[i + 1 :]
+        # claude+cursor is intentionally excluded from this "any two harnesses
+        # diverge independently" matrix: Cursor's native/Claude-import
+        # coexistence preflight correctly refuses two per-target files that
+        # both declare the same event for this specific pair (same-event
+        # double-activation risk), unlike every other harness pair. That
+        # refusal is the PR's own feature and is covered directly by
+        # test_cursor_hook_native_contract.py's overlap tests, not by this
+        # generic routing-isolation matrix.
+        if {a, b} != {"claude", "cursor"}
+    ],
+)
+def test_divergent_hook_files_route_per_target_under_multi_dep_targets(
+    tmp_path: Path, first: str, second: str
+) -> None:
+    """`targets: [A, B]` must refine routing, not disable it -- for any A, B.
+
+    Regression for the dep-target gate that merged every per-target file into
+    every active target. Each divergent file must land only in its own harness;
+    the other harness's uniquely-tagged command must not leak in. Proven across
+    every pair of merge-based harnesses APM ships, not just claude/codex.
+    """
+    project = tmp_path / "project"
+    for name in (first, second):
+        (project / KNOWN_TARGETS[name].root_dir).mkdir(parents=True)
+    package_path = tmp_path / "pkg"
+    tags = _write_divergent_pair(package_path, first, second)
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target(first), _hook_only_target(second)],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=[first, second],
+    )
+
+    assert result["hooks"] == 2
+    first_cmds = _deployed_commands(project, first)
+    second_cmds = _deployed_commands(project, second)
+
+    # Each harness gets exactly its own file's command -- no leak, no dupes.
+    assert first_cmds == [tags[first]], f"{first} config: {first_cmds}"
+    assert second_cmds == [tags[second]], f"{second} config: {second_cmds}"
+    assert tags[second] not in first_cmds, f"{second} hook leaked into {first}"
+    assert tags[first] not in second_cmds, f"{first} hook leaked into {second}"
+
+
+@pytest.mark.parametrize(
+    ("active", "excluded"),
+    [(a, b) for i, a in enumerate(_MERGE_HARNESSES) for b in _MERGE_HARNESSES[i + 1 :]],
+)
+def test_divergent_hook_files_route_single_target_under_single_dep_target(
+    tmp_path: Path, active: str, excluded: str
+) -> None:
+    """`targets: [A]` installs only A's file even when B's file also ships."""
+    project = tmp_path / "project"
+    for name in (active, excluded):
+        (project / KNOWN_TARGETS[name].root_dir).mkdir(parents=True)
+    package_path = tmp_path / "pkg"
+    tags = _write_divergent_pair(package_path, active, excluded)
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target(active), _hook_only_target(excluded)],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=[active],
+    )
+
+    # Only the active harness is installed, and it receives only its own file.
+    assert result["hooks"] == 1
+    assert _deployed_commands(project, active) == [tags[active]]
+    assert _deployed_commands(project, excluded) == []
+
+
+def _write_divergent_files(package_path: Path, own: str, foreign: str) -> None:
+    """Ship one hook file for *own* and one for *foreign* by filename suffix."""
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    for target_name in (own, foreign):
+        (hooks_dir / f"pkg-{target_name}-hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": f"echo {target_name}"}],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+@pytest.mark.parametrize("foreign", [name for name in KNOWN_TARGETS if name != "copilot"])
+def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path, foreign: str) -> None:
+    """Copilot writes per-file JSON; a dep `targets:` list must not make it
+    absorb another target's per-file hook manifest."""
+    project = tmp_path / "project"
+    package_path = tmp_path / "pkg"
+    _write_divergent_files(package_path, own="copilot", foreign=foreign)
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target("copilot")],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=["copilot"],
+    )
+
+    assert result["hooks"] == 1
+    deployed = sorted(p.name for p in (project / ".github" / "hooks").glob("*.json"))
+    assert deployed and all("copilot" in name for name in deployed), deployed
+    assert not any(foreign in name for name in deployed), f"{foreign} file leaked into Copilot"
+
+
+def test_kiro_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
+    """Kiro writes one JSON per hook action; a dep `targets:` list must not make
+    it integrate another target's per-file hook manifest."""
+    project = tmp_path / "project"
+    (project / ".kiro").mkdir(parents=True)
+    package_path = tmp_path / "pkg"
+    _write_divergent_files(package_path, own="kiro", foreign="claude")
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target("kiro")],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=["kiro"],
+    )
+
+    assert result["hooks"] == 1
+    deployed = sorted(p.name for p in (project / ".kiro" / "hooks").rglob("*.json"))
+    assert deployed and all("kiro" in name for name in deployed), deployed
+    assert not any("claude" in name for name in deployed), "Claude file leaked into Kiro"
+
+
 def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> None:
     skill_integrator = _NoopSkillIntegrator()
     bundle = IntegratorBundle(
@@ -181,6 +578,7 @@ def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> 
         canvas=None,
     )
 
+    (tmp_path / "pkg").mkdir()
     integrate_package_primitives(
         _package_info(tmp_path / "pkg"),
         tmp_path / "project",

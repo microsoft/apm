@@ -8,10 +8,17 @@ Commands declare *intent* via ScanPolicy; the gate handles the rest.
 from __future__ import annotations
 
 import os
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from ..utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+    validate_path_segments,
+)
 from ..utils.paths import portable_relpath
 from .content_scanner import ContentScanner, ScanFinding
 
@@ -55,6 +62,7 @@ class ScanVerdict:
     critical_count: int = 0
     warning_count: int = 0
     files_scanned: int = 0
+    scanned_files: frozenset[str] = frozenset()
 
     @property
     def has_findings(self) -> bool:
@@ -80,30 +88,83 @@ class SecurityGate:
         *,
         policy: ScanPolicy = BLOCK_POLICY,
         force: bool = False,
+        path_filter=None,
+        paths: Collection[str] | None = None,
     ) -> ScanVerdict:
-        """Walk *root*, scan every regular file, return a verdict.
+        """Walk *root*, scan accepted regular files, and return a verdict.
 
         Symlinks are never followed (``followlinks=False``, ``is_symlink()``).
-        All files are scanned to produce a complete findings report.
+        When provided, *path_filter* receives a portable source-relative path
+        and selects the files included in the findings report.
+        When *paths* is provided, scan only those portable root-relative files
+        instead of walking *root*. Other callers retain the generic walk.
         """
         findings_by_file: dict[str, list[ScanFinding]] = {}
-        files_scanned = 0
+        scanned_files: set[str] = set()
+
+        if paths is not None:
+            candidates = (_explicit_scan_candidate(root, relative) for relative in sorted(paths))
+            return SecurityGate._scan_candidates(
+                candidates,
+                root,
+                findings_by_file,
+                scanned_files,
+                policy,
+                force,
+            )
 
         for dirpath, _dirs, filenames in os.walk(root, followlinks=False):
             for fname in filenames:
                 fpath = Path(dirpath) / fname
                 if fpath.is_symlink():
                     continue
-                files_scanned += 1
+                rel = portable_relpath(fpath, root)
+                if path_filter is not None and not path_filter(rel):
+                    continue
+                scanned_files.add(rel)
                 try:
                     file_findings = ContentScanner.scan_file(fpath)
                 except OSError:
                     continue
                 if file_findings:
-                    rel = portable_relpath(fpath, root)
                     findings_by_file[rel] = file_findings
 
-        return SecurityGate._build_verdict(findings_by_file, files_scanned, policy, force)
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            len(scanned_files),
+            policy,
+            force,
+            scanned_files=frozenset(scanned_files),
+        )
+
+    @staticmethod
+    def _scan_candidates(
+        candidates,
+        root: Path,
+        findings_by_file: dict[str, list[ScanFinding]],
+        scanned_files: set[str],
+        policy: ScanPolicy,
+        force: bool,
+    ) -> ScanVerdict:
+        """Scan explicit source paths without traversing unrelated directories."""
+        for fpath in candidates:
+            if fpath.is_symlink() or not fpath.is_file():
+                continue
+            rel = portable_relpath(fpath, root)
+            scanned_files.add(rel)
+            try:
+                file_findings = ContentScanner.scan_file(fpath)
+            except OSError:
+                continue
+            if file_findings:
+                findings_by_file[rel] = file_findings
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            len(scanned_files),
+            policy,
+            force,
+            scanned_files=frozenset(scanned_files),
+        )
 
     @staticmethod
     def scan_text(
@@ -111,19 +172,27 @@ class SecurityGate:
         filename: str,
         *,
         policy: ScanPolicy = BLOCK_POLICY,
+        force: bool = False,
     ) -> ScanVerdict:
         """Scan in-memory text (compiled output, generated files)."""
         file_findings = ContentScanner.scan_text(content, filename=filename)
         findings_by_file: dict[str, list[ScanFinding]] = {}
         if file_findings:
             findings_by_file[filename] = file_findings
-        return SecurityGate._build_verdict(findings_by_file, 1, policy, force=False)
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            1,
+            policy,
+            force=force,
+            scanned_files=frozenset({filename}),
+        )
 
     @staticmethod
     def scan_texts(
         contents: dict[str, str],
         *,
         policy: ScanPolicy = BLOCK_POLICY,
+        force: bool = False,
     ) -> ScanVerdict:
         """Scan a complete in-memory output batch with one policy decision."""
         findings_by_file: dict[str, list[ScanFinding]] = {}
@@ -135,7 +204,8 @@ class SecurityGate:
             findings_by_file,
             len(contents),
             policy,
-            force=False,
+            force=force,
+            scanned_files=frozenset(contents),
         )
 
     @staticmethod
@@ -145,6 +215,8 @@ class SecurityGate:
         *,
         package: str = "",
         force: bool = False,
+        force_action: str = "Deployed",
+        force_detail: str | None = None,
     ) -> None:
         """Record findings into a DiagnosticCollector with consistent messaging."""
         if not verdict.has_findings:
@@ -153,9 +225,10 @@ class SecurityGate:
         if verdict.has_critical and not verdict.should_block and force:
             # --force: deployed despite critical
             diagnostics.security(
-                message=("Deployed with --force despite critical hidden characters"),
+                message=(f"{force_action} with --force despite critical hidden characters"),
                 package=package,
-                detail=(
+                detail=force_detail
+                or (
                     f"{verdict.critical_count} critical finding(s) — "
                     "run 'apm audit --strip' to clean up"
                 ),
@@ -203,9 +276,10 @@ class SecurityGate:
         files_scanned: int,
         policy: ScanPolicy,
         force: bool,
+        scanned_files: frozenset[str] = frozenset(),
     ) -> ScanVerdict:
         if not findings_by_file:
-            return ScanVerdict(files_scanned=files_scanned)
+            return ScanVerdict(files_scanned=files_scanned, scanned_files=scanned_files)
 
         flat = [f for ff in findings_by_file.values() for f in ff]
         has_critical, counts = ContentScanner.classify(flat)
@@ -218,6 +292,7 @@ class SecurityGate:
             critical_count=counts.get("critical", 0),
             warning_count=counts.get("warning", 0),
             files_scanned=files_scanned,
+            scanned_files=scanned_files,
         )
 
 
@@ -231,12 +306,36 @@ def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
     return [c for c in contents if (Path(directory) / c).is_symlink()]
 
 
+def is_generated_python_artifact(path: Path) -> bool:
+    """Exclude cache trees and loose .pyc/.pyo files from copy and inventory."""
+    return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
+
+
+def is_python_bytecode_cache_path(path: Path) -> bool:
+    """Return whether *path* is bytecode stored under ``__pycache__``."""
+    return "__pycache__" in path.parts and path.suffix in {".pyc", ".pyo"}
+
+
+def _explicit_scan_candidate(root: Path, relative: str) -> Path:
+    """Return a contained explicit scan path with no symlinked components."""
+    path = Path(relative)
+    if not relative or path.is_absolute():
+        raise PathTraversalError(f"Explicit scan path must be root-relative: {relative!r}")
+    validate_path_segments(relative, context="explicit scan path", reject_empty=True)
+    candidate = root / path
+    if has_symlink_component(root, candidate):
+        raise PathTraversalError(f"Explicit scan path contains a symlink: {relative!r}")
+    ensure_path_within(candidate, root)
+    return candidate
+
+
 def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters non-content artifacts.
 
-    Excludes symlinks (security) and the ``.apm-pin`` cache marker, which
-    belongs exclusively in ``apm_modules/`` and must not leak into deploy
-    targets when skills are copied out.
+    Excludes symlinks (security), interpreter-generated Python bytecode, and
+    the ``.apm-pin`` cache marker, which belongs exclusively in
+    ``apm_modules/`` and must not leak into deploy targets when skills are
+    copied out.
     """
     # Local import keeps cache_pin as the single source of truth for the
     # marker filename. Module-level import is also safe (cache_pin has no
@@ -245,4 +344,10 @@ def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     # bootstrap.
     from apm_cli.install.cache_pin import MARKER_FILENAME
 
-    return [c for c in contents if (Path(directory) / c).is_symlink() or c == MARKER_FILENAME]
+    return [
+        c
+        for c in contents
+        if (Path(directory) / c).is_symlink()
+        or c == MARKER_FILENAME
+        or is_generated_python_artifact(Path(c))
+    ]

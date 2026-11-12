@@ -127,6 +127,9 @@ class TestUninstallDevDependencies:
         result = runner.invoke(cli, ["uninstall", "microsoft/apm-sample-package"])
 
         assert result.exit_code == 0, result.output
+        normalized_output = " ".join(result.output.split())
+        assert "MCP cleanup" not in normalized_output
+        assert "Uninstall complete" in normalized_output
         text = (tmp_path / "apm.yml").read_text(encoding="utf-8")
         assert "# project comment" in text
         assert "# dependency section comment" in text

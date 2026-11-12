@@ -7,7 +7,6 @@ following the Minimal Context Principle.
 
 import builtins
 import fnmatch
-import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -24,7 +23,14 @@ from ..output.models import (
 from ..primitives.models import Instruction
 from ..utils.exclude import matches_glob, should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
-from ..utils.patterns import has_top_level_comma, parse_apply_to
+from ..utils.patterns import (
+    has_top_level_comma,
+    literal_apply_to_top_level_roots,
+    parse_apply_to,
+)
+from .constants import decode_utf8_prefix, has_generated_marker_header
+from .inventory import CompileInventory
+from .root_context_protection import catalog_root_context_markers
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -45,6 +51,60 @@ DEFAULT_EXCLUDED_DIRNAMES = frozenset(
         "apm_modules",
     }
 )
+
+# Hidden roots owned by supported agent tools. Placement may examine these
+# trees when an applyTo pattern explicitly targets their non-hidden contents.
+PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
+    {
+        ".agents",
+        ".apm",
+        ".claude",
+        ".codex",
+        ".cursor",
+        ".gemini",
+        ".github",
+        ".kiro",
+        ".opencode",
+        ".windsurf",
+    }
+)
+
+
+def _has_text_outside_managed_section(content: str, start_marker: str, end_marker: str) -> bool:
+    """Return whether authored text surrounds a complete managed-section block."""
+    start = content.find(start_marker)
+    end = content.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+    if end < 0:
+        return False
+    return bool((content[:start] + content[end + len(end_marker) :]).strip())
+
+
+def _is_generated_context_output(
+    path: Path,
+    markers: tuple[str, ...] | None,
+    managed_section_markers: tuple[str, str] | None = None,
+) -> bool:
+    """Return whether ``path`` is a context file written by a prior ``apm compile``.
+
+    Only regular files with catalog context filenames are probed. Symlinks,
+    special files, unreadable or non-UTF-8 files, and managed-section files
+    with authored text outside the managed block count as authored.
+    """
+    if markers is None:
+        return False
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        with path.open("rb") as handle:
+            raw = handle.read() if managed_section_markers else handle.read(4096)
+        content = decode_utf8_prefix(raw)
+    except (OSError, UnicodeDecodeError):
+        return False
+    if managed_section_markers is not None and _has_text_outside_managed_section(
+        content, *managed_section_markers
+    ):
+        return False
+    return has_generated_marker_header(content, markers)
 
 
 @dataclass
@@ -116,12 +176,20 @@ class ContextOptimizer:
     LOW_DISTRIBUTION_THRESHOLD = 0.3
     HIGH_DISTRIBUTION_THRESHOLD = 0.7
 
-    def __init__(self, base_dir: str = ".", exclude_patterns: builtins.list[str] | None = None):
+    def __init__(
+        self,
+        base_dir: str = ".",
+        exclude_patterns: builtins.list[str] | None = None,
+        inventory: CompileInventory | None = None,
+        managed_section_markers: tuple[str, str] | None = None,
+    ):
         """Initialize the context optimizer.
 
         Args:
             base_dir (str): Base directory for optimization analysis.
             exclude_patterns (Optional[List[str]]): Glob patterns for directories to exclude.
+            managed_section_markers: Configured AGENTS.md managed-section
+                start/end markers, when managed-section mode is active.
         """
         try:
             self.base_dir = Path(base_dir).resolve()
@@ -133,11 +201,22 @@ class ContextOptimizer:
 
         # Performance optimization caches
         self._glob_cache: builtins.dict[str, builtins.list[str]] = {}
-        self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
+        self._glob_set_cache: builtins.dict[str, builtins.set[str]] = {}
+        self._rel_path_cache: builtins.dict[Path, tuple[str, bool]] = {}
         self._file_list_cache: builtins.list[Path] | None = None
+        self._placement_hidden_tool_trees: frozenset[str] = frozenset()
+        self._scan_top_level_roots: frozenset[str] | None = None
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
+        self._resolved_dir_cache: builtins.dict[Path, Path] = {}
         self._timing_enabled = False
         self._phase_timings: builtins.dict[str, float] = {}
+
+        # In-memory directory indexes populated by the canonical os.walk
+        # traversal in _analyze_project_structure.  These eliminate per-pattern
+        # and per-candidate Path.iterdir() filesystem calls in
+        # _find_matching_directories and _calculate_inheritance_pollution.
+        self._files_by_directory: builtins.dict[Path, builtins.list[Path]] = {}
+        self._children_by_directory: builtins.dict[Path, builtins.list[Path]] = {}
 
         # Data collection for output formatting
         self._optimization_decisions: builtins.list[OptimizationDecision] = []
@@ -147,6 +226,8 @@ class ContextOptimizer:
 
         # Configurable exclusion patterns (validated at init time)
         self._exclude_patterns = validate_exclude_patterns(exclude_patterns)
+        self._inventory = inventory
+        self._managed_section_markers = managed_section_markers
 
     def enable_timing(self, verbose: bool = False):
         """Enable performance timing instrumentation."""
@@ -188,30 +269,46 @@ class ContextOptimizer:
             self._glob_cache[pattern] = self._safe_recursive_glob(pattern)
         return self._glob_cache[pattern]
 
+    def _project_rel_path(self, path: Path) -> tuple[str, bool]:
+        cached = self._rel_path_cache.get(path)
+        if cached is None:
+            try:
+                cached = (path.resolve().relative_to(self.base_dir).as_posix(), True)
+            except (ValueError, OSError, RuntimeError):
+                cached = (portable_relpath(path, self.base_dir), False)
+            self._rel_path_cache[path] = cached
+        return cached
+
+    def _resolved_dir(self, path: Path) -> Path:
+        resolved = self._resolved_dir_cache.get(path)
+        if resolved is None:
+            resolved = self._resolved_dir_cache[path] = path.resolve()
+        return resolved
+
     def _safe_recursive_glob(self, pattern: str) -> builtins.list[str]:
         """Symlink-safe, exclusion-aware ``glob(recursive=True)`` replacement:
         match the cached project file list against ``pattern`` (POSIX rel paths).
         """
         results: builtins.list[str] = []
         for path in self._get_all_files():
-            rel = portable_relpath(path, self.base_dir)
+            rel = self._project_rel_path(path)[0]
             if matches_glob(rel, pattern):
                 results.append(rel)
         return results
 
     def _get_all_files(self) -> builtins.list[Path]:
-        """Get cached list of all files in project."""
+        """Get cached list of all files in project.
+
+        Routes through :meth:`_analyze_project_structure` when the cache is
+        empty so the single canonical walk builds both ``_file_list_cache``
+        and ``_directory_cache`` in one pass.  Callers that invoke this method
+        directly (before :meth:`optimize_instruction_placement`) are handled
+        correctly: the walk runs once and the result is reused.  Triggering
+        that walk clears and rebuilds ``_directory_cache`` and
+        ``_pattern_cache`` as part of the canonical analysis lifecycle.
+        """
         if self._file_list_cache is None:
-            self._file_list_cache = []
-            for root, dirs, files in os.walk(self.base_dir):
-                # Skip hidden and excluded directories for performance
-                # Sort to guarantee deterministic traversal order across filesystems
-                dirs[:] = sorted(
-                    d for d in dirs if not d.startswith(".") and d not in DEFAULT_EXCLUDED_DIRNAMES
-                )
-                for file in sorted(files):
-                    if not file.startswith("."):
-                        self._file_list_cache.append(Path(root) / file)
+            self._analyze_project_structure()
         return self._file_list_cache
 
     def optimize_instruction_placement(
@@ -242,6 +339,19 @@ class ContextOptimizer:
         self._optimization_decisions.clear()
         self._warnings.clear()
         self._errors.clear()
+        # Shared file discovery runs once per compile batch, so traverse the
+        # union of roots explicitly targeted by its instructions.
+        self._placement_hidden_tool_trees = self._targeted_hidden_tool_roots(instructions)
+        self._scan_top_level_roots = literal_apply_to_top_level_roots(
+            instruction.apply_to for instruction in instructions
+        )
+        self._file_list_cache = None
+        self._glob_cache.clear()
+        self._glob_set_cache.clear()
+        # Clear before the timed phase; analysis also clears so direct callers
+        # receive the same deterministic rebuild.
+        self._files_by_directory.clear()
+        self._children_by_directory.clear()
 
         # Phase 1: Analyze project structure
         self._time_phase("Project Analysis", self._analyze_project_structure)
@@ -264,7 +374,7 @@ class ContextOptimizer:
                             instruction=instruction,
                             pattern="(global)",
                             matching_directories=1,
-                            total_directories=len(self._directory_cache),
+                            total_directories=self._placement_directory_count(),
                             distribution_score=1.0,
                             strategy=PlacementStrategy.DISTRIBUTED,
                             placement_directories=[self.base_dir],
@@ -450,64 +560,74 @@ class ContextOptimizer:
         )
 
     def _analyze_project_structure(self) -> None:
-        """Analyze the project structure and cache results."""
+        """Project full accounting and scoped candidate files from one inventory."""
         self._directory_cache.clear()
-        self._pattern_cache.clear()  # Also clear pattern cache for deterministic behavior
+        self._pattern_cache.clear()
+        self._rel_path_cache.clear()
+        self._resolved_dir_cache.clear()
+        self._file_list_cache = []
+        self._files_by_directory.clear()
+        self._children_by_directory.clear()
 
-        # Track visited directories to prevent infinite loops
-        visited_dirs = set()
-
-        for root, dirs, files in os.walk(self.base_dir):
-            current_path = Path(root)
-
-            # Safety check for infinite loops
-            if current_path in visited_dirs:
-                continue
-            visited_dirs.add(current_path)
-
-            # Calculate depth for analysis
-            try:
-                relative_path = current_path.resolve().relative_to(self.base_dir.resolve())
-                depth = len(relative_path.parts)
-            except ValueError:
-                depth = 0
-
-            # Skip hidden directories and common ignore patterns
-            if any(part.startswith(".") for part in current_path.parts[len(self.base_dir.parts) :]):
+        inventory = self._inventory or CompileInventory.collect(self.base_dir)
+        self._inventory = inventory
+        selected_files = (
+            None
+            if self._scan_top_level_roots is None
+            else set(inventory.files_under(self._scan_top_level_roots))
+        )
+        generated_markers_by_name = catalog_root_context_markers()
+        for entry in inventory.directories:
+            current_path = entry.path
+            if not self._is_placement_path(current_path, entry.relative_path):
                 continue
 
-            # Default hardcoded exclusions  -- match on exact path components
-            if any(part in DEFAULT_EXCLUDED_DIRNAMES for part in relative_path.parts):
+            # Prior compile outputs are not authored content; counting them
+            # feeds placement its own output and breaks idempotency (#3506).
+            project_files = [
+                current_path / name
+                for name in entry.file_names
+                if not name.startswith(".")
+                and not _is_generated_context_output(
+                    current_path / name,
+                    generated_markers_by_name.get(name),
+                    self._managed_section_markers,
+                )
+            ]
+            self._children_by_directory[current_path] = [
+                current_path / name
+                for name in entry.child_names
+                if self._is_placement_path(current_path / name)
+            ]
+            if not project_files:
                 continue
 
-            # Apply configurable exclusion patterns
-            if self._should_exclude_path(current_path):
-                continue
-
-            # Prune subdirectories from os.walk to avoid descending into excluded paths
-            # This significantly improves performance by avoiding expensive traversal
-            # Note: Modifying dirs[:] (slice assignment) is the standard Python idiom
-            # to control which subdirectories os.walk will descend into
-            dirs[:] = [d for d in dirs if not self._should_exclude_subdir(current_path / d)]
-
-            # Analyze files in this directory
-            total_files = len([f for f in files if not f.startswith(".")])
-            if total_files == 0:
-                continue
-
-            analysis = DirectoryAnalysis(
-                directory=current_path, depth=depth, total_files=total_files
+            self._directory_cache[current_path] = DirectoryAnalysis(
+                directory=current_path,
+                depth=entry.depth,
+                total_files=len(project_files),
+                file_types={path.suffix for path in project_files},
             )
+            candidate_files = (
+                project_files
+                if selected_files is None
+                else [path for path in project_files if path in selected_files]
+            )
+            matching_files = [path for path in candidate_files if path.is_file()]
+            self._file_list_cache.extend(candidate_files)
+            if matching_files:
+                self._files_by_directory[current_path] = matching_files
 
-            # Analyze file types
-            for file in files:
-                if file.startswith("."):
-                    continue
-
-                file_path = current_path / file
-                analysis.file_types.add(file_path.suffix)
-
-            self._directory_cache[current_path] = analysis
+    def _is_placement_path(self, path: Path, relative_path: Path | None = None) -> bool:
+        """Return whether an inventory path participates in placement accounting."""
+        relative_path = relative_path or self._relative_path(path)
+        if relative_path is None:
+            return False
+        return not (
+            self._contains_unsupported_hidden_directory(path, relative_path)
+            or any(part in DEFAULT_EXCLUDED_DIRNAMES for part in relative_path.parts)
+            or self._should_exclude_path(path)
+        )
 
     def _should_exclude_subdir(self, path: Path) -> bool:
         """Check if a subdirectory should be pruned from os.walk traversal.
@@ -530,11 +650,61 @@ class ContextOptimizer:
         if dir_name in DEFAULT_EXCLUDED_DIRNAMES:
             return True
 
-        # Skip hidden directories
-        if dir_name.startswith("."):  # noqa: SIM103
-            return True
+        # Only roots named by this compile's applyTo expressions participate.
+        # Every other hidden directory remains excluded from placement traversal.
+        return dir_name.startswith(".") and not self._is_supported_hidden_tool_root(path)
 
-        return False
+    def _is_supported_hidden_tool_root(self, path: Path) -> bool:
+        """Return whether ``path`` is a top-level hidden root targeted this run."""
+        relative_path = self._relative_path(path)
+        if relative_path is None:
+            return False
+        return (
+            len(relative_path.parts) == 1
+            and relative_path.parts[0] in self._placement_hidden_tool_trees
+        )
+
+    def _contains_unsupported_hidden_directory(
+        self, path: Path, relative_path: Path | None = None
+    ) -> bool:
+        """Return whether ``path`` enters a hidden tree not targeted this run."""
+        relative_path = relative_path or self._relative_path(path)
+        if relative_path is None:
+            return True
+        return bool(
+            relative_path.parts
+            and (
+                (
+                    relative_path.parts[0].startswith(".")
+                    and relative_path.parts[0] not in self._placement_hidden_tool_trees
+                )
+                or any(part.startswith(".") for part in relative_path.parts[1:])
+            )
+        )
+
+    def _targeted_hidden_tool_roots(
+        self, instructions: builtins.list[Instruction]
+    ) -> frozenset[str]:
+        """Return supported top-level hidden roots named by applyTo patterns.
+
+        A pattern can name the root after a wildcard (for example,
+        ``**/.apm/**/*.md``), but traversal still admits only the top-level
+        root through :meth:`_is_supported_hidden_tool_root`.
+        """
+        targeted_roots: builtins.set[str] = set()
+        for instruction in instructions:
+            for pattern in parse_apply_to(instruction.apply_to):
+                targeted_roots.update(
+                    PLACEMENT_HIDDEN_TOOL_TREES.intersection(pattern.replace("\\", "/").split("/"))
+                )
+        return frozenset(targeted_roots)
+
+    def _relative_path(self, path: Path) -> Path | None:
+        """Return a lexical path for a directory discovered under ``base_dir``."""
+        try:
+            return path.relative_to(self.base_dir)
+        except ValueError:
+            return None
 
     def _should_exclude_path(self, path: Path) -> bool:
         """Check if a path matches any exclusion pattern.
@@ -546,6 +716,10 @@ class ContextOptimizer:
             True if path should be excluded, False otherwise
         """
         return should_exclude(path, self.base_dir, self._exclude_patterns)
+
+    def _placement_directory_count(self) -> int:
+        """Count every directory in historic placement accounting."""
+        return len(self._directory_cache)
 
     def _find_optimal_placements(
         self, instruction: Instruction, verbose: bool = False
@@ -614,7 +788,7 @@ class ContextOptimizer:
                 instruction=instruction,
                 pattern=pattern,
                 matching_directories=0,
-                total_directories=len(self._directory_cache),
+                total_directories=self._placement_directory_count(),
                 distribution_score=0.0,
                 strategy=PlacementStrategy.DISTRIBUTED,
                 placement_directories=[placement],
@@ -663,7 +837,7 @@ class ContextOptimizer:
             instruction=instruction,
             pattern=pattern,
             matching_directories=len(matching_directories),
-            total_directories=len(self._directory_cache),
+            total_directories=self._placement_directory_count(),
             distribution_score=distribution_score,
             strategy=strategy,
             placement_directories=placements,
@@ -702,7 +876,11 @@ class ContextOptimizer:
             # Skip if it's a wildcard
             if "*" not in first_part and first_part:
                 intended_dir = self.base_dir / first_part
-                if intended_dir.exists() and intended_dir.is_dir():
+                if (
+                    intended_dir.exists()
+                    and intended_dir.is_dir()
+                    and not self._should_exclude_subdir(intended_dir)
+                ):
                     return intended_dir
 
         return None
@@ -757,28 +935,22 @@ class ContextOptimizer:
         for expanded_pattern in expanded_patterns:
             # For patterns with **, use cached glob results
             if "**" in expanded_pattern:
-                try:
-                    # Resolve both paths to handle symlinks and path inconsistencies
-                    resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir.resolve())
+                rel_path, inside_project = self._project_rel_path(file_path)
 
+                # Files resolving outside the project never match recursive patterns.
+                if inside_project:
                     # Use cached glob results instead of repeated glob calls
                     matches = self._cached_glob(expanded_pattern)
-                    # Use cached Set[Path] to avoid recreating on every call
+                    # Use cached Set[str] to avoid recreating on every call
                     if expanded_pattern not in self._glob_set_cache:
-                        self._glob_set_cache[expanded_pattern] = {Path(match) for match in matches}
+                        self._glob_set_cache[expanded_pattern] = set(matches)
                     if rel_path in self._glob_set_cache[expanded_pattern]:
                         return True
-                except (ValueError, OSError):
-                    pass
             else:
                 # For non-recursive patterns, use fnmatch as before
-                try:
-                    rel_str = portable_relpath(file_path, self.base_dir)
-                    if fnmatch.fnmatch(rel_str, expanded_pattern):
-                        return True
-                except ValueError:
-                    pass
+                rel_str = self._project_rel_path(file_path)[0]
+                if fnmatch.fnmatch(rel_str, expanded_pattern):
+                    return True
 
                 # Only use filename match for patterns without directory structure
                 # This prevents "docs/**/*.md" from matching any "*.md" file anywhere
@@ -811,23 +983,18 @@ class ContextOptimizer:
 
         matching_dirs: builtins.set[Path] = set()
 
-        # Use the reliable approach for all patterns
+        # This lookup is entirely in memory; no filesystem error path remains.
         for directory, analysis in sorted(self._directory_cache.items()):
-            try:
-                files = [
-                    f for f in directory.iterdir() if f.is_file() and not f.name.startswith(".")
-                ]
+            files = self._files_by_directory.get(directory, [])
 
-                match_count = 0
-                for file_path in files:
-                    if self._file_matches_pattern(file_path, pattern):
-                        match_count += 1
-                        matching_dirs.add(directory)
+            match_count = 0
+            for file_path in files:
+                if self._file_matches_pattern(file_path, pattern):
+                    match_count += 1
+                    matching_dirs.add(directory)
 
-                if match_count > 0:
-                    analysis.pattern_matches[pattern] = match_count
-            except (OSError, PermissionError):
-                continue
+            if match_count > 0:
+                analysis.pattern_matches[pattern] = match_count
 
         self._pattern_cache[pattern] = matching_dirs
         return matching_dirs
@@ -844,28 +1011,25 @@ class ContextOptimizer:
         """
         pollution_score = 0.0
 
-        # Optimization: Only check direct children instead of all directories
-        # This prevents O(n2) complexity with unlimited depth analysis
-        try:
-            direct_children = [
-                child
-                for child in directory.iterdir()
-                if child.is_dir() and child in self._directory_cache
-            ]
+        # Use the in-memory children-by-directory index populated by the
+        # canonical os.walk, eliminating per-candidate iterdir() calls.
+        # Filter to children present in _directory_cache (i.e. have files).
+        direct_children = [
+            child
+            for child in self._children_by_directory.get(directory, [])
+            if child in self._directory_cache
+        ]
 
-            # Check only direct child directories for pollution
-            for child_dir in direct_children:
-                analysis = self._directory_cache[child_dir]
+        # Check only direct child directories for pollution
+        for child_dir in direct_children:
+            analysis = self._directory_cache[child_dir]
 
-                # If child has no matching files, this creates pollution
-                child_relevance = analysis.get_relevance_score(pattern)
-                if child_relevance == 0.0:
-                    pollution_score += 0.5  # Strong pollution penalty
-                elif child_relevance < 0.1:  # Weak relevance threshold
-                    pollution_score += 0.2  # Weak pollution penalty
-        except (OSError, PermissionError):
-            # Skip directories we can't read
-            pass
+            # If child has no matching files, this creates pollution
+            child_relevance = analysis.get_relevance_score(pattern)
+            if child_relevance == 0.0:
+                pollution_score += 0.5  # Strong pollution penalty
+            elif child_relevance < 0.1:  # Weak relevance threshold
+                pollution_score += 0.2  # Weak pollution penalty
 
         return pollution_score
 
@@ -878,9 +1042,8 @@ class ContextOptimizer:
         Returns:
             float: Distribution score accounting for spread and depth diversity.
         """
-        total_dirs_with_files = len(
-            [d for d in self._directory_cache.values() if d.total_files > 0]
-        )
+        # _directory_cache only holds directories with files.
+        total_dirs_with_files = len(self._directory_cache)
         if total_dirs_with_files == 0:
             return 0.0
 
@@ -891,7 +1054,8 @@ class ContextOptimizer:
         if not depths:
             return base_ratio
 
-        depth_variance = sum((d - sum(depths) / len(depths)) ** 2 for d in depths) / len(depths)
+        mean_depth = sum(depths) / len(depths)
+        depth_variance = sum((d - mean_depth) ** 2 for d in depths) / len(depths)
         diversity_factor = 1.0 + (depth_variance * self.DIVERSITY_FACTOR_BASE)
 
         return base_ratio * diversity_factor
@@ -916,10 +1080,10 @@ class ContextOptimizer:
         coverage_candidates = []
         for candidate in candidates:
             # Verify this placement can provide hierarchical coverage for ALL matching directories
-            covered_directories = self._calculate_hierarchical_coverage(
-                [candidate.directory], matching_directories
-            )
-            if covered_directories == matching_directories:
+            if all(
+                self._is_hierarchically_covered(target, candidate.directory)
+                for target in matching_directories
+            ):
                 # This candidate satisfies the mandatory coverage constraint
                 coverage_candidates.append(candidate)
 
@@ -1099,7 +1263,7 @@ class ContextOptimizer:
 
         # Convert to relative paths for easier analysis
         relative_dirs = [
-            d.resolve().relative_to(self.base_dir.resolve()) for d in matching_directories
+            self._resolved_dir(d).relative_to(self.base_dir) for d in matching_directories
         ]
 
         # Find the lowest common ancestor that covers all directories
@@ -1156,7 +1320,7 @@ class ContextOptimizer:
         """
         try:
             # Check if target is the same as placement or is a subdirectory of placement
-            target_dir.resolve().relative_to(placement_dir.resolve())
+            self._resolved_dir(target_dir).relative_to(self._resolved_dir(placement_dir))
             return True
         except ValueError:
             # target_dir is not under placement_dir
@@ -1299,7 +1463,7 @@ class ContextOptimizer:
 
         # Resolve working directory to handle path inconsistencies
         try:
-            resolved_working_dir = working_directory.resolve()
+            resolved_working_dir = self._resolved_dir(working_directory)
         except (OSError, ValueError):
             resolved_working_dir = working_directory.absolute()
 
@@ -1316,18 +1480,9 @@ class ContextOptimizer:
         # Only check direct files in this directory (not subdirectories for simplicity)
         matching_files = 0
 
-        try:
-            for file in os.listdir(resolved_working_dir):
-                if file.startswith("."):
-                    continue
-
-                file_path = resolved_working_dir / file
-                if file_path.is_file():
-                    if self._file_matches_pattern(file_path, pattern):
-                        matching_files += 1
-        except (OSError, PermissionError):
-            # Handle case where directory doesn't exist or can't be read
-            pass
+        for file_path in self._files_by_directory.get(resolved_working_dir, ()):
+            if self._file_matches_pattern(file_path, pattern):
+                matching_files += 1
 
         # Cache the result
         analysis.pattern_matches[pattern] = matching_files

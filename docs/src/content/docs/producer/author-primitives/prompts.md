@@ -5,8 +5,8 @@ description: Ship a parameterized, single-purpose AI workflow as a .prompt.md pr
 
 A prompt is a single-purpose, parameterized AI workflow. Write one
 Markdown file with frontmatter; `apm install` deploys it as a Copilot prompt,
-a Claude `/command`, a Cursor command, an OpenCode command, a Gemini
-TOML command, and a Windsurf workflow.
+a Claude `/command`, a Grok Build command, a Cursor command, an OpenCode
+command, a Gemini TOML command, and a Windsurf workflow.
 
 Use a prompt when the consumer invokes the workflow on demand
 ("review this PR", "draft a release note"). Use a
@@ -88,6 +88,7 @@ and `command_integrator.py`.
 |---|---|---|
 | copilot | `.github/prompts/<name>.prompt.md` | verbatim copy |
 | claude | `.claude/commands/<name>.md` | `/command`, inputs become `$arg` |
+| grok-build | `.grok/commands/<name>.md` | Grok command |
 | cursor | `.cursor/commands/<name>.md` | shared command transform |
 | opencode | `.opencode/commands/<name>.md` | shared command transform |
 | gemini | `.gemini/commands/<name>.toml` | TOML command |
@@ -96,6 +97,36 @@ and `command_integrator.py`.
 
 For the broader primitive-by-target reach map, see
 [Primitives and targets](../../../concepts/primitives-and-targets/).
+
+### Copilot harness limitation
+
+The `copilot` target writes `.github/prompts/<name>.prompt.md`. In VS Code,
+only **Local** harness sessions load prompt files; the **Copilot** harness
+does not, and Copilot CLI does not load them either. See
+[VS Code prompt files](https://code.visualstudio.com/docs/agent-customization/prompt-files)
+and
+[Convert prompt files to skills](https://code.visualstudio.com/docs/agent-customization/migrate-customizations#_convert-prompt-files-to-skills).
+
+To reach those harnesses, ship the workflow as a [skill](../skills/).
+Add `disable-model-invocation: true` where the host supports it so the
+skill stays on-demand, like a prompt:
+
+```markdown
+---
+name: review-pr
+description: Review a pull request against our coding standards.
+disable-model-invocation: true
+---
+
+# Review PR
+
+Fetch the diff, flag deviations from `.github/CONTRIBUTING.md`, and
+summarize blockers, suggestions, and nits.
+```
+
+APM copies the skill folder as-is, so the key reaches the host unchanged.
+APM still deploys `.apm/prompts/` to `.github/prompts/` for the `copilot`
+target; it does not convert prompts to skills.
 
 ## How a consumer invokes it
 
@@ -127,7 +158,7 @@ the parameter bound and invokes the harness. See
 
 - **Non-preserved frontmatter is dropped.** Keys like `author`,
   `mcp`, or `parameters` survive on Copilot (verbatim copy) but are
-  stripped on Claude/Cursor/OpenCode/Gemini/Windsurf. APM logs a
+  stripped on Claude/Cursor/OpenCode/Gemini/Grok Build/Windsurf. APM logs a
   diagnostic at install time. Keep authoritative metadata to the
   five preserved keys.
 - **Input names must match `[A-Za-z][\w-]{0,63}`.** Other entries

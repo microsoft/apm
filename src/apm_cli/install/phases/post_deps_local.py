@@ -27,8 +27,9 @@ behavior).
 
 from __future__ import annotations
 
-import builtins
 from typing import TYPE_CHECKING
+
+from apm_cli.core.scope import is_user_scope
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -56,55 +57,16 @@ def run(ctx: InstallContext) -> None:
     diagnostics = ctx.diagnostics
     logger = ctx.logger
 
-    # ------------------------------------------------------------------
-    # Stale cleanup: remove files deployed by previous local integration
-    # that are no longer produced.  Only run when integration completed
-    # without errors to avoid deleting files that failed to re-deploy.
-    # ------------------------------------------------------------------
     _local_had_errors = (
         diagnostics is not None and diagnostics.error_count > ctx.local_content_errors_before
     )
 
-    if ctx.old_local_deployed and not _local_had_errors:
-        from apm_cli.integration.base_integrator import BaseIntegrator
-        from apm_cli.integration.cleanup import remove_stale_deployed_files
-
-        _stale = builtins.set(ctx.old_local_deployed) - builtins.set(ctx.local_deployed_files)
-        if _stale:
-            # Get recorded hashes from the pre-install lockfile for
-            # content-hash provenance verification.
-            _prev_hashes: dict = {}
-            if ctx.existing_lockfile:
-                _prev_hashes = dict(ctx.existing_lockfile.local_deployed_file_hashes)
-
-            _cleanup_result = remove_stale_deployed_files(
-                _stale,
-                ctx.project_root,
-                dep_key="<local .apm/>",
-                targets=ctx.targets,
-                diagnostics=diagnostics,
-                recorded_hashes=_prev_hashes,
-            )
-            # Failed paths stay in lockfile so we retry next time.
-            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
-            DeploymentLedgerCodec.replace_context_local_files(
-                ctx,
-                [*ctx.local_deployed_files, *_cleanup_result.failed],
-            )
-            if _cleanup_result.deleted_targets:
-                BaseIntegrator.cleanup_empty_parents(
-                    _cleanup_result.deleted_targets, ctx.project_root
-                )
-            for _skipped in _cleanup_result.skipped_user_edit:
-                if logger:
-                    logger.cleanup_skipped_user_edit(_skipped, "<local .apm/>")
-            if logger:
-                logger.stale_cleanup("<local .apm/>", len(_cleanup_result.deleted))
-
     # ------------------------------------------------------------------
-    # Lockfile persistence: read-modify-write the lockfile to add
-    # local_deployed_files and per-file content hashes.
+    # Reconciliation and persistence: route stale local content through the
+    # same target-contraction owner that already repaired the dependency and
+    # local compatibility views in the lockfile phase. A separate cleanup pass
+    # using only the active targets can reject an inactive target's valid path
+    # as unmanaged and reintroduce the ghost that the canonical owner removed.
     # ------------------------------------------------------------------
     from apm_cli.deps.lockfile import LockFile as _LF
     from apm_cli.deps.lockfile import get_lockfile_path as _get_lfp
@@ -112,6 +74,9 @@ def run(ctx: InstallContext) -> None:
 
     _lock_path = _get_lfp(ctx.apm_dir)
     _persist_lock = _LF.read(_lock_path) or _LF()
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    _prior_ledger = DeploymentLedgerCodec.from_lockfile(_persist_lock)
     # Target-scoped union: preserve project-root files deployed by OTHER
     # targets (a prior install) rather than clobbering them. Symmetric with
     # the per-dependency reconciliation in phases/lockfile.py and with
@@ -121,7 +86,10 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.phases.targets import declared_target_profiles
 
     _current_files = sorted(ctx.local_deployed_files)
-    _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
+    _current_hashes = _hash_deployed(
+        ctx.local_deployed_files,
+        ctx.project_root,
+    )
     _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
@@ -132,7 +100,16 @@ def run(ctx: InstallContext) -> None:
                 f"Removed stale local lockfile path {path} (target not declared in apm.yml)"
             )
 
-    _files, _hashes = reconcile_deployed_block(
+    from apm_cli.integration.cleanup import CleanupResult
+
+    def _surface_local_cleanup(cleanup: CleanupResult) -> None:
+        if logger is None:
+            return
+        for skipped in cleanup.skipped_user_edit:
+            logger.cleanup_skipped_user_edit(skipped, "<local .apm/>")
+        logger.stale_cleanup("<local .apm/>", len(cleanup.deleted))
+
+    _files, _hashes, _ledger = reconcile_deployed_block(
         project_root=ctx.project_root,
         dep_key="<local .apm/>",
         current_files=_current_files,
@@ -143,10 +120,22 @@ def run(ctx: InstallContext) -> None:
         declared_targets=declared_target_profiles(ctx),
         diagnostics=ctx.diagnostics,
         on_ghost_drop=_log_local_ghost_drop,
+        on_cleanup=_surface_local_cleanup,
+        prior_ledger=_prior_ledger,
+        current_run_trusted=not _local_had_errors,
+        include_ledger=True,
+        user_scope=is_user_scope(getattr(ctx, "scope", None)),
     )
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
-    DeploymentLedgerCodec.replace_legacy_owner(_persist_lock, ".", sorted(_files), _hashes)
+    DeploymentLedgerCodec.replace_context_local_files(ctx, sorted(_files))
+    DeploymentLedgerCodec.replace_legacy_owner(
+        _persist_lock,
+        ".",
+        sorted(_files),
+        _hashes,
+        provenance=_ledger,
+        current_targets=ctx.targets or (),
+    )
     if logger and _ghost_count:
         noun = "entry" if _ghost_count == 1 else "entries"
         logger.info(f"Repaired {_ghost_count} inactive-target local lockfile {noun}")

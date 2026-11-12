@@ -28,11 +28,13 @@ Covers branches not hit by the existing test_github_downloader_validation.py:
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps import github_downloader_validation as gdv
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_downloader_validation import (
@@ -46,6 +48,7 @@ from apm_cli.deps.github_downloader_validation import (
     _ssh_attempt_allowed,
     validate_virtual_package_exists,
 )
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -62,6 +65,11 @@ def _make_downloader(token: str = "tok", host: str = "github.com") -> GitHubPack
     dep_ctx.token = token
     dep_ctx.auth_scheme = "basic"
     resolver.resolve_for_dep.return_value = dep_ctx
+    resolver.git_env_for_context.side_effect = lambda auth_ctx, *, base_env: {
+        **base_env,
+        **auth_ctx.git_env,
+    }
+    resolver._build_git_env.side_effect = AuthResolver._build_git_env
     resolver.classify_host.return_value = MagicMock(
         kind="github", api_base="https://api.github.com"
     )
@@ -157,6 +165,18 @@ class TestValidateVirtualFile:
             result = validate_virtual_package_exists(dl, dep)
 
         assert result is False
+
+    def test_virtual_file_probe_propagates_confirmed_throttle(self) -> None:
+        """A typed throttle is indeterminate, not a virtual-path false negative."""
+        dl = _make_downloader()
+        dep = _make_github_dep(is_file=True)
+        throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+        with patch.object(dl, "download_raw_file", side_effect=throttle):
+            with pytest.raises(GitHubThrottleError) as exc_info:
+                validate_virtual_package_exists(dl, dep)
+
+        assert exc_info.value is throttle
 
     def test_empty_vpath_rejected_before_probe(self) -> None:
         dl = _make_downloader()
@@ -257,6 +277,7 @@ class TestDirectoryExistsAtRef:
 
         resp = MagicMock()
         resp.status_code = 200
+        resp.json.return_value = []
         with patch.object(dl, "_resilient_get", return_value=resp):
             result = _directory_exists_at_ref(dl, dep, "skills/foo", "main", self._log)
 
@@ -312,6 +333,7 @@ class TestDirectoryExistsAtRef:
             captured_urls.append(url)
             resp = MagicMock()
             resp.status_code = 200
+            resp.json.return_value = []
             return resp
 
         with patch.object(dl, "_resilient_get", side_effect=_capture):
@@ -376,10 +398,11 @@ class TestBuildValidationAttempts:
         labels = [a.label for a in attempts]
         assert not any("header" in lab for lab in labels)
 
-    def test_ado_basic_uses_http_basic_header(self) -> None:
+    def test_ado_basic_delegates_header_format_to_auth_resolver(self) -> None:
         dl = _make_downloader()
         dl.auth_resolver.resolve_for_dep.return_value.token = "myPAT"
         dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.auth_resolver.git_env_for_remote.return_value = {"CANONICAL": "ado"}
         dep = self._make_dep()
         dep.is_azure_devops.return_value = True
         dep.host = "dev.azure.com"
@@ -398,17 +421,18 @@ class TestBuildValidationAttempts:
         assert len(auth_attempts) >= 1
         # Verify it's Base64 Basic, not a raw Bearer
         token_attempt = auth_attempts[0]
-        env_values = list(token_attempt.env.values())
-        # The GIT_CONFIG_VALUE should contain "Basic " not "Bearer "
-        header_values = [
-            v for v in env_values if isinstance(v, str) and ("Basic" in v or "Bearer" in v)
-        ]
-        assert any("Basic" in v for v in header_values)
+        assert token_attempt.env == {"CANONICAL": "ado"}
+        dl.auth_resolver.git_env_for_remote.assert_any_call(
+            dl.auth_resolver.resolve_for_dep.return_value,
+            "https://dev.azure.com/myorg/myproject/_git/myrepo",
+        )
 
-    def test_non_ado_with_token_uses_bearer_header(self) -> None:
+    def test_github_token_delegates_header_format_to_auth_resolver(self) -> None:
         dl = _make_downloader(token="ghp_token")
         dl.auth_resolver.resolve_for_dep.return_value.token = "ghp_token"
         dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.auth_resolver.git_env_for_remote.return_value = {"CANONICAL": "github"}
+        dl.auth_resolver.build_native_git_credential_env.return_value = {"NATIVE_HELPER": "github"}
         dep = self._make_dep()
         dep.is_azure_devops.return_value = False
         dl.auth_resolver.classify_host.return_value = MagicMock(kind="github")
@@ -416,9 +440,16 @@ class TestBuildValidationAttempts:
         attempts = _build_validation_attempts(dl, dep, lambda m: None)
         auth_attempts = [a for a in attempts if "header" in a.label.lower()]
         assert len(auth_attempts) >= 1
-        env_values = list(auth_attempts[0].env.values())
-        header_values = [v for v in env_values if isinstance(v, str) and ("Bearer" in v)]
-        assert any("Bearer" in v for v in header_values)
+        assert auth_attempts[0].env == {"CANONICAL": "github"}
+        dl.auth_resolver.git_env_for_remote.assert_any_call(
+            dl.auth_resolver.resolve_for_dep.return_value,
+            "https://github.com/owner/repo.git",
+        )
+        assert attempts[1].env == {"NATIVE_HELPER": "github"}
+        dl.auth_resolver.build_native_git_credential_env.assert_called_once_with(
+            dl.auth_resolver.classify_host.return_value,
+            "https://github.com/owner/repo.git",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -510,23 +541,23 @@ class TestPathExistsInTreeAtRef:
         return AttemptSpec("ssh", "git@github.com:owner/repo.git", {})
 
     def test_fetch_failure_returns_false(self, tmp_path: Path) -> None:
-        import git as git_mod
-
         dl = _make_downloader()
         dep = _make_github_dep()
         attempt = self._winning_attempt()
-
-        mock_git = MagicMock()
-        mock_git.fetch.side_effect = git_mod.exc.GitCommandError("fetch", 128, "err")
 
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                side_effect=[
+                    MagicMock(),
+                    MagicMock(),
+                    subprocess.CalledProcessError(128, ["git", "fetch"]),
+                ],
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
-            mock_git_mod.exc.GitCommandError = git_mod.exc.GitCommandError
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is False
@@ -536,17 +567,15 @@ class TestPathExistsInTreeAtRef:
         dep = _make_github_dep()
         attempt = self._winning_attempt()
 
-        mock_git = MagicMock()
-        mock_git.fetch.return_value = ""
-        mock_git.ls_tree.return_value = ""  # empty = path not found
-
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                return_value=MagicMock(stdout=""),
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is False
@@ -556,40 +585,38 @@ class TestPathExistsInTreeAtRef:
         dep = _make_github_dep()
         attempt = self._winning_attempt()
 
-        mock_git = MagicMock()
-        mock_git.fetch.return_value = ""
-        mock_git.ls_tree.return_value = "040000 tree abc123\tskills/foo\n"
-
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                return_value=MagicMock(stdout="040000 tree abc123\tskills/foo\n"),
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is True
 
     def test_ls_tree_exception_returns_false(self, tmp_path: Path) -> None:
-        import git as git_mod
-
         dl = _make_downloader()
         dep = _make_github_dep()
         attempt = self._winning_attempt()
-
-        mock_git = MagicMock()
-        mock_git.fetch.return_value = ""
-        mock_git.ls_tree.side_effect = git_mod.exc.GitCommandError("ls-tree", 128, "err")
 
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                side_effect=[
+                    MagicMock(),
+                    MagicMock(),
+                    MagicMock(),
+                    subprocess.CalledProcessError(128, ["git", "ls-tree"]),
+                ],
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
-            mock_git_mod.exc.GitCommandError = git_mod.exc.GitCommandError
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is False

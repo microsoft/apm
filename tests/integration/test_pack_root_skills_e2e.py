@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _run_apm(apm_binary_path: Path, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the installed APM CLI in a project directory."""
@@ -41,6 +43,7 @@ def test_pack_auto_includes_only_apm_authored_skills(tmp_path: Path, apm_binary_
     local_skill = project / "skills" / "work-in-progress"
     local_skill.mkdir(parents=True)
     (local_skill / "SKILL.md").write_text("# Work in progress\n", encoding="utf-8")
+    (project / "apm.lock.yaml").write_text("dependencies: []\n", encoding="utf-8")
 
     result = _run_apm(apm_binary_path, project, "pack")
 
@@ -54,6 +57,36 @@ def test_pack_auto_includes_only_apm_authored_skills(tmp_path: Path, apm_binary_
     assert "Skipping root-level skills/ because .apm/ is present." in output
     assert "Move publishable files to .apm/skills/" in output
     assert "remove skills/ to silence this warning." in output
+
+
+@pytest.mark.lifecycle_smoke
+def test_pack_empty_dependencies_creates_bundle_and_copilot_manifest(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An explicit empty dependencies block still produces package artifacts."""
+    project = tmp_path / "empty-dependencies"
+    skill = project / "skills" / "root-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: root-skill\ndescription: Root skill fixture\n---\n# Root skill\n",
+        encoding="utf-8",
+    )
+    (project / "apm.yml").write_text(
+        "name: empty-dependencies\n"
+        "version: 1.0.0\n"
+        "description: Empty dependencies pack fixture\n"
+        "target: copilot\n"
+        "dependencies: {}\n",
+        encoding="utf-8",
+    )
+    (project / "apm.lock.yaml").write_text("dependencies: []\n", encoding="utf-8")
+
+    result = _run_apm(apm_binary_path, project, "pack", "--format", "plugin", "--verbose")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    bundle = project / "build" / "empty-dependencies-1.0.0"
+    assert (bundle / "skills" / "root-skill" / "SKILL.md").is_file()
+    assert (project / ".github" / "plugin" / "plugin.json").is_file()
 
 
 def test_init_then_pack_preserves_native_claude_skill(
@@ -74,6 +107,7 @@ def test_init_then_pack_preserves_native_claude_skill(
     assert "Found plugin-native sources at the project root: skills/." in init_output
     assert "They remain included by apm pack." in init_output
 
+    (project / "apm.lock.yaml").write_text("dependencies: []\n", encoding="utf-8")
     pack_result = _run_apm(apm_binary_path, project, "pack")
 
     assert pack_result.returncode == 0, pack_result.stderr

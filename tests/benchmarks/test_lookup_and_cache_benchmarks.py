@@ -1,7 +1,7 @@
 """Performance benchmarks for optimised lookup and cache paths.
 
 Covers the fixes from the performance audit:
-- has_dependency() O(1) index lookup (was O(n) linear scan)
+- has_dependency() O(1) lookup index (was O(n) linear scan)
 - HttpCache._enforce_size_cap() fast-path (was unconditional full scan)
 - github_host env-var helper consolidation (was repeated parsing)
 
@@ -51,7 +51,7 @@ def _build_tree(n: int) -> DependencyTree:
 
 
 # ---------------------------------------------------------------------------
-# 1. has_dependency() -- O(1) via _repo_url_index
+# 1. has_dependency() -- O(1) via _repo_lookup_index
 # ---------------------------------------------------------------------------
 
 
@@ -94,7 +94,7 @@ class TestHasDependencyScaling:
         assert t < 1e-4, f"Negative lookup took {t:.6f}s"
 
     def test_index_consistency(self):
-        """_repo_url_index matches brute-force scan."""
+        """The repository lookup index matches brute-force scan."""
         tree = _build_tree(200)
         for node in tree.nodes.values():
             url = node.dependency_ref.repo_url

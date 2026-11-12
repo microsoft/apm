@@ -1,0 +1,421 @@
+"""Cross-platform Git and gh shims for installed-binary auth tests."""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+_GIT_SHIM = r"""#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import base64
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+_LOCALIZED_AUTH_FAILURE = "fatal: Autentikasi gagal untuk 'https://github.com/fixture/private.git/'\n"
+_BARE_PLATFORM_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"github_pat_[A-Za-z0-9_]{20,}|"
+    r"gh[oprsu]_[A-Za-z0-9_]{6,}|"
+    r"gl(?:agent|cbt|ft|pat|ptt|rt|soat)[-_][A-Za-z0-9_-]{6,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}|"
+    r"[A-Za-z0-9]{75}AZDO[A-Za-z0-9]{5}|"
+    r"[A-Za-z0-9]{52}"
+    r")(?![A-Za-z0-9_])"
+)
+
+
+def _config_entries():
+    try:
+        count = max(0, int(os.environ.get("GIT_CONFIG_COUNT", "0")))
+    except ValueError:
+        count = 0
+    return [
+        (
+            os.environ.get(f"GIT_CONFIG_KEY_{index}", ""),
+            os.environ.get(f"GIT_CONFIG_VALUE_{index}", ""),
+        )
+        for index in range(count)
+    ]
+
+
+def _append_event(event):
+    path = Path(os.environ["APM_TEST_GIT_SHIM_LOG"])
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def _credential_request():
+    body = sys.stdin.read()
+    fields = {}
+    for line in body.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            fields[key] = value
+    entries = _config_entries()
+    _append_event(
+        {
+            "event": "credential-fill",
+            "host": fields.get("host"),
+            "path": fields.get("path"),
+            "protocol": fields.get("protocol"),
+            "credential_interactive": [
+                value for key, value in entries if key.lower() == "credential.interactive"
+            ],
+        }
+    )
+    token = os.environ["APM_TEST_GIT_CREDENTIAL"]
+    sys.stdout.write(
+        "protocol=https\n"
+        f"host={fields.get('host', '')}\n"
+        "username=x-access-token\n"
+        f"password={token}\n\n"
+    )
+    return 0
+
+
+def _authorization_for_url(value):
+    parsed = urlsplit(value)
+    candidates = []
+    for key, _header in _config_entries():
+        normalized = key.lower()
+        if normalized == "http.extraheader":
+            candidates.append((0, normalized))
+            continue
+        if not normalized.startswith("http.") or not normalized.endswith(".extraheader"):
+            continue
+        scope = key[len("http.") : -len(".extraheader")]
+        parsed_scope = urlsplit(scope)
+        if (
+            parsed_scope.scheme.lower() != parsed.scheme.lower()
+            or parsed_scope.hostname != parsed.hostname
+            or parsed_scope.port != parsed.port
+            or not parsed.path.startswith(parsed_scope.path.rstrip("/") + "/")
+            and parsed.path.rstrip("/") != parsed_scope.path.rstrip("/")
+        ):
+            continue
+        candidates.append((len(scope), normalized))
+    if not candidates:
+        return None
+    selected_key = max(candidates)[1]
+    active = []
+    for key, header in _config_entries():
+        if key.lower() != selected_key:
+            continue
+        if header.strip():
+            active.append(header)
+        else:
+            active.clear()
+    return next(
+        (
+            header
+            for header in reversed(active)
+            if _is_active_credential_header(header)
+        ),
+        None,
+    )
+
+
+def _is_active_credential_header(value):
+    name, separator, credential = value.partition(":")
+    if not separator or not credential.strip():
+        return False
+    if _BARE_PLATFORM_TOKEN_RE.search(credential):
+        return True
+    if re.match(r"(?i)^\s*(?:basic|bearer|token)\s+\S+", credential):
+        return True
+    parts = {
+        part
+        for part in re.split(r"[^a-z0-9]+", name.strip().lower())
+        if part
+    }
+    return bool(
+        parts
+        & {
+            "auth",
+            "authorization",
+            "cookie",
+            "credential",
+            "key",
+            "password",
+            "secret",
+            "token",
+        }
+    )
+
+
+def _rewrite_url(value):
+    parsed = urlsplit(value)
+    if parsed.hostname != "github.com":
+        return value, None, None
+    repository_path = parsed.path.lstrip("/").removesuffix(".git")
+    mapping = json.loads(os.environ["APM_TEST_GIT_REMOTE_MAP"])
+    target = mapping.get(repository_path)
+    if target is None:
+        return value, None, None
+    local = urlsplit(target)
+    rewritten = urlunsplit(
+        (
+            local.scheme,
+            local.netloc,
+            local.path,
+            local.query,
+            local.fragment,
+        )
+    )
+    authorization = None
+    if parsed.username is not None:
+        raw = f"{parsed.username}:{parsed.password or ''}".encode("utf-8")
+        authorization = "Authorization: Basic " + base64.b64encode(raw).decode("ascii")
+    if authorization is None:
+        authorization = _authorization_for_url(value)
+    return rewritten, {
+        "host": parsed.hostname,
+        "path": repository_path,
+        "authenticated_url": parsed.username is not None,
+    }, ((rewritten, authorization) if authorization is not None else None)
+
+
+def _strip_dumb_http_incompatible_options(args):
+    stripped = []
+    skip_next = False
+    for value in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if value in {"--depth", "--filter", "--shallow-since", "--shallow-exclude"}:
+            skip_next = True
+            continue
+        if value.startswith(
+            ("--depth=", "--filter=", "--shallow-since=", "--shallow-exclude=")
+        ):
+            continue
+        stripped.append(value)
+    return stripped
+
+
+def _uses_non_c_git_message_locale():
+    locale = os.environ.get("LANGUAGE") or os.environ.get("LC_ALL") or ""
+    return not locale.startswith("C")
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:2] == ["credential", "fill"]:
+        return _credential_request()
+
+    if args[:1] == ["fetch"] and "origin" in args:
+        configured = subprocess.run(
+            [os.environ["APM_TEST_REAL_GIT"], "config", "--get", "remote.origin.url"],
+            env=os.environ, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        args = [configured if value == "origin" else value for value in args]
+
+    rewritten_args = []
+    remotes = []
+    authorizations = []
+    for value in args:
+        rewritten, remote, authorization = _rewrite_url(value)
+        rewritten_args.append(rewritten)
+        if remote is not None:
+            remotes.append(remote)
+        if authorization is not None:
+            authorizations.append(authorization)
+    rewritten_args = _strip_dumb_http_incompatible_options(rewritten_args)
+    if args[:2] == ["remote", "add"]:
+        # Keep the logical remote so later named fetches retain its auth scope.
+        rewritten_args = args
+        authorizations = []
+    for target, authorization in reversed(authorizations):
+        rewritten_args[:0] = ["-c", f"http.{target}.extraHeader={authorization}"]
+        rewritten_args[:0] = ["-c", f"http.{target}.extraHeader="]
+
+    entries = _config_entries()
+    _append_event(
+        {
+            "event": "git",
+            "command": args[0] if args else "",
+            "remotes": remotes,
+            "github_token_env": sorted(
+                name
+                for name in os.environ
+                if name in {"GH_TOKEN", "GITHUB_APM_PAT", "GITHUB_TOKEN"}
+                or name.startswith("GITHUB_APM_PAT_")
+            ),
+            "git_token_present": "GIT_TOKEN" in os.environ,
+            "auth_config_present": any(
+                "extraheader" in key.lower()
+                and _is_active_credential_header(value)
+                for key, value in entries
+            ),
+            "credential_helpers": [
+                value for key, value in entries if key.lower() == "credential.helper"
+            ],
+            "credential_interactive": [
+                value for key, value in entries if key.lower() == "credential.interactive"
+            ],
+            "lc_all": os.environ.get("LC_ALL"),
+            "language": os.environ.get("LANGUAGE"),
+        }
+    )
+    if not remotes:
+        return subprocess.run(
+            [os.environ["APM_TEST_REAL_GIT"], *rewritten_args],
+            env=os.environ,
+            check=False,
+        ).returncode
+
+    completed = subprocess.run(
+        [os.environ["APM_TEST_REAL_GIT"], *rewritten_args],
+        env=os.environ,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    sys.stdout.write(completed.stdout)
+    if completed.returncode and remotes and not authorizations and _uses_non_c_git_message_locale():
+        sys.stderr.write(_LOCALIZED_AUTH_FAILURE)
+    else:
+        sys.stderr.write(completed.stderr)
+    return completed.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+_GH_SHIM = r"""#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(os.environ["APM_TEST_GIT_SHIM_LOG"])
+with path.open("a", encoding="utf-8", newline="\n") as handle:
+    handle.write(
+        json.dumps(
+            {
+                "event": "gh",
+                "command": sys.argv[1:],
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+if sys.argv[1:] == ["auth", "token", "--hostname", "github.com"]:
+    credential = os.environ.get("APM_TEST_GH_CREDENTIAL")
+    if credential:
+        print(credential)
+        raise SystemExit(0)
+raise SystemExit(1)
+"""
+
+
+@dataclass(frozen=True)
+class GitCredentialShim:
+    """Paths and child environment for one credential-recording shim."""
+
+    root: Path
+    log_path: Path
+    environment: dict[str, str]
+
+    def events(self) -> tuple[dict[str, object], ...]:
+        """Read all recorded shim events."""
+        if not self.log_path.exists():
+            return ()
+        return tuple(
+            json.loads(line)
+            for line in self.log_path.read_text(encoding="utf-8").splitlines()
+            if line
+        )
+
+
+class GitCredentialShimFactory:
+    """Create a PATH-prepended Git/gh shim without replacing real Git."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def create(
+        self,
+        *,
+        base_env: dict[str, str],
+        real_git: Path,
+        remote_map: dict[str, str],
+        credential: str = "fixture-private-token",
+        gh_credential: str | None = None,
+    ) -> GitCredentialShim:
+        """Write shims and return their complete subprocess environment."""
+        self._root.mkdir(parents=True, exist_ok=False)
+        log_path = self._root / "events.jsonl"
+        git_script = self._root / "git-shim.py"
+        gh_script = self._root / "gh-shim.py"
+        git_script.write_text(_GIT_SHIM, encoding="ascii", newline="\n")
+        gh_script.write_text(_GH_SHIM, encoding="ascii", newline="\n")
+        git_script.chmod(git_script.stat().st_mode | stat.S_IXUSR)
+        gh_script.chmod(gh_script.stat().st_mode | stat.S_IXUSR)
+
+        if os.name == "nt":
+            self._write_windows_launcher("git", git_script)
+            self._write_windows_launcher("gh", gh_script)
+        else:
+            self._write_posix_launcher("git", git_script)
+            self._write_posix_launcher("gh", gh_script)
+
+        environment = dict(base_env)
+        environment["PATH"] = os.pathsep.join((str(self._root), environment.get("PATH", "")))
+        environment["APM_TEST_REAL_GIT"] = str(real_git)
+        environment["APM_TEST_GIT_REMOTE_MAP"] = json.dumps(
+            remote_map,
+            sort_keys=True,
+        )
+        environment["APM_TEST_GIT_CREDENTIAL"] = credential
+        environment.pop("APM_TEST_GH_CREDENTIAL", None)
+        if gh_credential is not None:
+            environment["APM_TEST_GH_CREDENTIAL"] = gh_credential
+        environment["APM_TEST_GIT_SHIM_LOG"] = str(log_path)
+        git_exec_path = subprocess.run(
+            (str(real_git), "--exec-path"),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
+        if git_exec_path:
+            environment["GIT_EXEC_PATH"] = git_exec_path
+        return GitCredentialShim(
+            root=self._root,
+            log_path=log_path,
+            environment=environment,
+        )
+
+    def _write_posix_launcher(self, name: str, script: Path) -> None:
+        launcher = self._root / name
+        launcher.write_text(
+            f"#!{sys.executable}\n"
+            "import runpy\n"
+            f"runpy.run_path({str(script)!r}, run_name='__main__')\n",
+            encoding="ascii",
+            newline="\n",
+        )
+        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+
+    def _write_windows_launcher(self, name: str, script: Path) -> None:
+        launcher = self._root / f"{name}.cmd"
+        launcher.write_text(
+            f'@"{sys.executable}" "{script}" %*\r\n',
+            encoding="ascii",
+            newline="",
+        )

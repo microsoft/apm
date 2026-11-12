@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,16 @@ def _write_pkg(root: Path, rel: str, version: str | None = "1.0.0") -> None:
     else:
         body = f'name: pkg\ndescription: "x"\nversion: "{version}"\n'
     (pkg_dir / "apm.yml").write_text(body, encoding="utf-8")
+
+
+def _write_plugin_pkg(root: Path, rel: str, version: str | None = "1.0.0") -> None:
+    """Write a local plugin collection's plugin.json at ``<root>/<rel>``."""
+    pkg_dir = root / rel
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, str] = {"name": "plugin"}
+    if version is not None:
+        manifest["version"] = version
+    (pkg_dir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _load(tmp_path: Path) -> VersionAlignmentReport:
@@ -156,6 +167,135 @@ class TestLockstepStrategy:
         report = _load(tmp_path)
         assert report.ok
         assert [r.path for r in report.packages] == ["plugins/a"]
+
+
+class TestLocalVersionSource:
+    """Local package versions use apm.yml before the plugin collection manifest."""
+
+    def test_plugin_only_package_uses_plugin_json_version(self, tmp_path: Path):
+        _write_plugin_pkg(tmp_path, "plugins/my-plugin", "1.2.3")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(
+                project_version="1.2.3",
+                market_version="1.2.3",
+                strategy="tag_pattern",
+                build_tag_pattern="{name}-v{version}",
+                packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}],
+            ),
+        )
+
+        report = _load(tmp_path)
+
+        assert report.ok
+        assert len(report.packages) == 1
+        assert report.packages[0].path == "plugins/my-plugin"
+        assert report.packages[0].version == "1.2.3"
+        assert report.packages[0].reason == "matches"
+
+    def test_apm_yml_version_takes_precedence_over_plugin_json(self, tmp_path: Path):
+        _write_pkg(tmp_path, "plugins/my-plugin", "1.2.3")
+        _write_plugin_pkg(tmp_path, "plugins/my-plugin", "9.9.9")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(
+                project_version="1.2.3",
+                market_version="1.2.3",
+                packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}],
+            ),
+        )
+
+        report = _load(tmp_path)
+
+        assert report.ok
+        assert report.packages[0].version == "1.2.3"
+
+    def test_invalid_apm_yml_does_not_fall_back_to_plugin_json(self, tmp_path: Path):
+        package_dir = tmp_path / "plugins" / "my-plugin"
+        package_dir.mkdir(parents=True)
+        (package_dir / "apm.yml").write_text("version: [1.2.3\n", encoding="utf-8")
+        _write_plugin_pkg(tmp_path, "plugins/my-plugin", "1.2.3")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_yaml"
+
+    def test_malformed_plugin_json_fails_closed(self, tmp_path: Path):
+        package_dir = tmp_path / "plugins" / "my-plugin"
+        package_dir.mkdir(parents=True)
+        (package_dir / "plugin.json").write_text("{not-json", encoding="utf-8")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_json"
+        assert report.error_messages() == [
+            "plugins/my-plugin: malformed JSON in plugin.json (failed to parse)"
+        ]
+
+    def test_plugin_without_version_fails_closed(self, tmp_path: Path):
+        _write_plugin_pkg(tmp_path, "plugins/my-plugin", None)
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "missing_plugin_version"
+
+    def test_plugin_version_with_control_characters_fails_closed(self, tmp_path: Path):
+        _write_plugin_pkg(tmp_path, "plugins/my-plugin", "1.2.3\n")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_version"
+        assert report.error_messages() == [
+            "plugins/my-plugin: invalid 'version' in plugin.json (must use printable ASCII)"
+        ]
+
+    def test_non_file_plugin_json_fails_closed(self, tmp_path: Path):
+        package_dir = tmp_path / "plugins" / "my-plugin"
+        package_dir.mkdir(parents=True)
+        (package_dir / "plugin.json").mkdir()
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_json"
+
+    def test_oversized_plugin_json_fails_closed(self, tmp_path: Path):
+        package_dir = tmp_path / "plugins" / "my-plugin"
+        package_dir.mkdir(parents=True)
+        (package_dir / "plugin.json").write_bytes(b" " * (1024 * 1024 + 1))
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_json"
 
 
 # ---------------------------------------------------------------------------

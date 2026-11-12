@@ -35,7 +35,7 @@ Scaffold:
 ```bash
 apm plugin init my-plugin --yes
 apm marketplace init --owner acme-org --name my-marketplace
-apm marketplace package add ./ --name my-plugin --version 0.1.0
+apm marketplace package add ./ --name my-plugin --version 0.1.0 --no-verify
 ```
 
 Resulting `apm.yml`:
@@ -97,14 +97,14 @@ marketplace:
 ```
 
 `apm pack` resolves every remote entry against `git ls-remote` and
-writes `marketplace.json` only. No bundle is produced because there
-is no `dependencies:` block.
+writes `marketplace.json` only. No bundle is produced because
+`dependencies:` is omitted.
 
 ## Monorepo-hybrid
 
 > **Advanced.** Most first-time authors should start with single-plugin or aggregator. Reach for hybrid when you're shipping your own plugin *and* curating others. [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config) is the live reference: 7 plugins under `plugins/`, one root `apm.yml`, releases via [microsoft/apm-action@v1](https://github.com/microsoft/apm-action) `mode: release`.
 
-One repo, many plugins under `packages/`, one marketplace at the root
+One repo, many plugins under `plugins/`, one marketplace at the root
 that lists them as local-path entries. Each plugin gets its own
 `apm.yml` so it can be compiled and tested in isolation.
 
@@ -113,7 +113,7 @@ Layout:
 ```text
 my-monorepo/
   apm.yml                          # marketplace + local-path packages
-  packages/
+  plugins/
     plugin-a/
       apm.yml                      # plugin-a's manifest
       .apm/
@@ -139,28 +139,41 @@ my-monorepo/
 > including after `apm init` writes `includes: auto`. Mixed layouts pack from
 > `.apm/` and warn about each skipped root source. `apm install` only discovers
 > instructions, commands, and prompts under `.apm/<type>/`, so authoring
-> `packages/plugin-a/instructions/style.instructions.md` instead of
-> `packages/plugin-a/.apm/instructions/style.instructions.md` can install
+> `plugins/plugin-a/instructions/style.instructions.md` instead of
+> `plugins/plugin-a/.apm/instructions/style.instructions.md` can install
 > incomplete. See [Pack a bundle -- source layout and install-time
 > discovery](../pack-a-bundle/#source-layout-and-install-time-discovery)
 > for the full per-primitive scan-path reference.
 
+`plugins/` is not an APM CLI repository requirement: a package `source:` can
+point to another directory. This walkthrough uses `plugins/` because
+`microsoft/apm-action` with `mode: release` autodetects aggregator members
+only at `plugins/<name>/apm.yml`.
+
 Scaffold:
 
 ```bash
-apm plugin init plugin-a --yes              # cd packages/plugin-a first
-apm plugin init plugin-b --yes              # cd packages/plugin-b first
-cd ../..
+# From the empty my-monorepo repository root
+mkdir -p plugins
+cd plugins
+apm plugin init plugin-a --yes
+apm plugin init plugin-b --yes
+cd ..
 apm marketplace init --owner acme-org --name acme-monorepo
-apm marketplace package add ./packages/plugin-a --name plugin-a
-apm marketplace package add ./packages/plugin-b --name plugin-b
+apm marketplace package remove example-package --yes
+apm marketplace package add ./plugins/plugin-a --name plugin-a --version 0.1.0 --no-verify
+apm marketplace package add ./plugins/plugin-b --name plugin-b --version 0.1.0 --no-verify
 ```
+
+`--version` avoids resolving a Git ref, while `--no-verify` skips remote
+reachability checks for the local sources. The scaffold starts every manifest
+at `0.1.0`, satisfying the lockstep strategy below.
 
 Resulting root `apm.yml`:
 
 ```yaml
 name: acme-monorepo
-version: 1.0.0
+version: 0.1.0
 description: Acme plugins shipped together
 
 marketplace:
@@ -173,17 +186,76 @@ marketplace:
     strategy: lockstep              # see versioning-strategies
   packages:
     - name: plugin-a
-      source: ./packages/plugin-a
-      version: 1.0.0
+      source: ./plugins/plugin-a
+      version: 0.1.0
     - name: plugin-b
-      source: ./packages/plugin-b
-      version: 1.0.0
+      source: ./plugins/plugin-b
+      version: 0.1.0
 ```
 
 Local-path entries skip remote resolution. Each plugin's own
 `apm.yml` controls its build; the root `apm.yml` controls the
 marketplace index. Pick a versioning strategy that matches how you
 tag releases -- see [Versioning strategies](../versioning-strategies/).
+
+### Make sibling dependencies follow the review branch
+
+For a bundle at `bundles/my-bundle/apm.yml` in `acme/ai-monorepo`,
+replace full Git coordinates for same-repository siblings:
+
+```yaml
+# Before: each sibling resolves its own ref
+dependencies:
+  apm:
+    - git: acme/ai-monorepo
+      path: plugins/plugin-a
+    - git: acme/ai-monorepo
+      path: plugins/plugin-b
+```
+
+A top-level `#ref` or `ref:` applies only to that dependency. Transitive
+dependencies with full `git:` coordinates resolve their own refs, using
+their repository's default branch when omitted, even in the same repository.
+
+Use `git: parent` to inherit the declaring package's repository and resolved
+ref instead:
+
+```yaml
+# After: siblings follow the bundle's ref
+dependencies:
+  apm:
+    - git: parent
+      path: plugins/plugin-a
+    - git: parent
+      path: plugins/plugin-b
+```
+
+`path:` starts at the **repository root**, not the bundle directory.
+`git: parent` works only inside a transitively resolved remote Git package,
+not the consumer project's root manifest or a local-path dependency.
+An explicit child `ref:` overrides inheritance. See the
+[manifest reference](../../reference/manifest-schema/#412-object-form)
+for accepted fields.
+
+Review the branch from a separate consumer project. These commands assume
+no default registry is configured:
+
+```bash
+# Review the bundle and its siblings from feature-x
+apm install acme/ai-monorepo/bundles/my-bundle#feature-x
+
+# After merging, install in a new consumer project from the default branch
+apm install acme/ai-monorepo/bundles/my-bundle
+```
+
+Keep the bundle's `apm.yml` unchanged between review and merge. The second
+command uses the repository's default branch, not necessarily `main`.
+The lockfile records expanded repository/path/ref coordinates and resolved
+commits, not `parent`, preserving reproducible installs.
+
+Inheritance stops at the repository boundary. Dependencies in another
+repository keep their own `git:` coordinates and need their own `ref:` to
+select a non-default branch.
 
 ## Shipping `bin/` executables (Claude Code only)
 
@@ -218,6 +290,10 @@ Claude Code skills target. Authoring rules:
   `executables.deny` policy (the legacy `bin_deploy` rule remains a
   deprecated alias) -- see the
   [policy schema](../../reference/policy-schema/#executables).
+- Consumers can pass `--trust-bin` on `apm install` to explicitly
+  consent (suppresses the trust-posture warning) or `--no-trust-bin`
+  to skip bin/ deployment for a single invocation. Without either
+  flag, bin/ deploys with a prominent warning.
 
 ## What to read next
 

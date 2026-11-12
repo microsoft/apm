@@ -112,7 +112,7 @@ def _run_pack(
             str(apm_binary_path),
             "pack",
             "--format",
-            "plugin",
+            "claude-plugin",
             "--output",
             output_name,
         ],

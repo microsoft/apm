@@ -19,8 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.install.errors import AuthenticationError
 from apm_cli.install.pipeline import _preflight_auth_check, _run_phase
+from apm_cli.models.dependency.materialization import MaterializationPathCollisionError
 
 # ---------------------------------------------------------------------------
 # Helpers shared across tests
@@ -43,6 +45,7 @@ def _make_dep(
     dep.ado_organization = "myorg"
     dep.ado_project = "myproject"
     dep.ado_repo = "myrepo"
+    dep.source_reference = dep
     return dep
 
 
@@ -394,7 +397,7 @@ class TestRunInstallPipelineExceptionContracts:
             mock_phase.side_effect = _phase_side
 
             with pytest.raises(AuthenticationError):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
     def test_generic_exception_wrapped_in_runtime_error(self) -> None:
         """Unexpected exceptions must be wrapped in RuntimeError."""
@@ -425,4 +428,31 @@ class TestRunInstallPipelineExceptionContracts:
             mock_phase.side_effect = _phase_side
 
             with pytest.raises(RuntimeError, match="Failed to resolve APM dependencies"):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
+
+    @pytest.mark.parametrize("error_type", [MaterializationPathCollisionError, CodexNativeError])
+    def test_materialization_collision_is_not_double_wrapped(
+        self, error_type: type[Exception]
+    ) -> None:
+        """Actionable materialization and native errors propagate unchanged."""
+        from apm_cli.install.pipeline import run_install_pipeline
+
+        pkg = self._make_pkg_with_deps()
+        collision = error_type("Found multiple package directories; inspect duplicates.")
+
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls,
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=None),
+            patch("apm_cli.core.scope.get_deploy_root", return_value=MagicMock()),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=None),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.install.pipeline._run_phase", side_effect=collision),
+            patch("apm_cli.utils.install_tui.InstallTui"),
+        ):
+            mock_lf_cls.read.return_value = None
+            with pytest.raises(error_type) as raised:
+                run_install_pipeline(pkg, target="claude")
+        assert raised.value is collision

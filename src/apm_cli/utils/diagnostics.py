@@ -21,6 +21,9 @@ from apm_cli.utils.console import (
 CATEGORY_COLLISION = "collision"
 CATEGORY_OVERWRITE = "overwrite"
 CATEGORY_WARNING = "warning"
+WARNING_AGENT_PLUGIN_TARGET_EXCLUDED = "agent_plugin_target_excluded"
+# Reserved for agent source semantics dropped during target-format translation.
+CATEGORY_AGENT_LOSSY_COMPILATION = "agent_lossy_compilation"
 CATEGORY_ERROR = "error"
 CATEGORY_SECURITY = "security"
 CATEGORY_POLICY = "policy"
@@ -40,10 +43,17 @@ _CATEGORY_ORDER = [
     CATEGORY_DRIFT,
     CATEGORY_COLLISION,
     CATEGORY_OVERWRITE,
+    CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
     CATEGORY_ERROR,
     CATEGORY_INFO,
 ]
+
+
+def printable_ascii_text(value: str) -> str:
+    """Replace non-printable or non-ASCII characters for safe diagnostics."""
+    ascii_only = value.encode("ascii", "replace").decode("ascii")
+    return "".join("?" if ord(char) < 0x20 or ord(char) == 0x7F else char for char in ascii_only)
 
 
 @dataclass(frozen=True)
@@ -54,7 +64,7 @@ class Diagnostic:
     category: str
     package: str = ""
     detail: str = ""
-    severity: str = ""  # e.g. "critical", "warning", "info" -- used by security category
+    severity: str = ""  # e.g. "critical", "warning", "info", or warning subtype
 
 
 class DiagnosticCollector:
@@ -97,13 +107,51 @@ class DiagnosticCollector:
                 )
             )
 
-    def warn(self, message: str, package: str = "", detail: str = "") -> None:
+    def warn(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+        severity: str = "",
+    ) -> None:
         """Record a general warning."""
         with self._lock:
             self._diagnostics.append(
                 Diagnostic(
                     message=message,
                     category=CATEGORY_WARNING,
+                    package=package,
+                    detail=detail,
+                    severity=severity,
+                )
+            )
+
+    def agent_plugin_target_excluded(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+    ) -> None:
+        """Record an Agent Plugin target exclusion warning."""
+        self.warn(
+            message,
+            package=package,
+            detail=detail,
+            severity=WARNING_AGENT_PLUGIN_TARGET_EXCLUDED,
+        )
+
+    def lossy_agent_compilation(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+    ) -> None:
+        """Record a warning that target conversion discarded agent semantics."""
+        with self._lock:
+            self._diagnostics.append(
+                Diagnostic(
+                    message=message,
+                    category=CATEGORY_AGENT_LOSSY_COMPILATION,
                     package=package,
                     detail=detail,
                 )
@@ -228,6 +276,15 @@ class DiagnosticCollector:
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_ERROR)
 
     @property
+    def agent_plugin_target_excluded_count(self) -> int:
+        """Return target-excluded Agent Plugin warning count."""
+        return sum(
+            1
+            for d in self._diagnostics
+            if d.category == CATEGORY_WARNING and d.severity == WARNING_AGENT_PLUGIN_TARGET_EXCLUDED
+        )
+
+    @property
     def security_count(self) -> int:
         """Return number of security findings."""
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_SECURITY)
@@ -307,6 +364,8 @@ class DiagnosticCollector:
                 self._render_collision_group(items)
             elif cat == CATEGORY_OVERWRITE:
                 self._render_overwrite_group(items)
+            elif cat == CATEGORY_AGENT_LOSSY_COMPILATION:
+                self._render_lossy_agent_compilation_group(items)
             elif cat == CATEGORY_WARNING:
                 self._render_warning_group(items)
             elif cat == CATEGORY_ERROR:
@@ -328,6 +387,8 @@ class DiagnosticCollector:
                 bold=True,
             )
             _rich_info("    Run 'apm audit' for full details")
+            for detail in dict.fromkeys(d.detail for d in critical if d.detail):
+                _rich_info(f"    {detail}")
             if self.verbose:
                 by_pkg = _group_by_package(critical)
                 for pkg, diags in by_pkg.items():
@@ -429,8 +490,24 @@ class DiagnosticCollector:
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
 
-    def _render_error_group(self, items: list[Diagnostic]) -> None:
+    def _render_lossy_agent_compilation_group(self, items: list[Diagnostic]) -> None:
+        """Render per-agent losses and deduplicate their shared remediation."""
         count = len(items)
+        noun = "warning" if count == 1 else "warnings"
+        _rich_warning(f"  [!] {count} lossy agent compilation {noun}")
+        for diagnostic in items:
+            package = f"[{diagnostic.package}] " if diagnostic.package else ""
+            _rich_echo(f"    +- {package}{diagnostic.message}", color="yellow")
+        fixes = tuple(dict.fromkeys(item.detail for item in items if item.detail))
+        for fix in fixes:
+            _rich_info(f"    {fix}")
+
+    def _render_error_group(self, items: list[Diagnostic]) -> None:
+        # One package can record several errors; count each attributed
+        # package once and each unattributed error on its own.
+        count = len({d.package for d in items if d.package}) + sum(
+            1 for d in items if not d.package
+        )
         noun = "package" if count == 1 else "packages"
         _rich_echo(f"  [x] {count} {noun} failed:", color="red")
         for d in items:

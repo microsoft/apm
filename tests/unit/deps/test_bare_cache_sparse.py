@@ -102,3 +102,61 @@ def test_nonexistent_sparse_subdir_fails_loud_or_empty(tmp_path: Path):
     assert not (consumer / "plugins").exists()
     assert not (consumer / "tools").exists()
     assert not (consumer / "docs").exists()
+
+
+def _build_repo_with_out_of_cone_symlink_target(tmp_path: Path) -> tuple[Path, str]:
+    """Repro shape for #2707: a symlink inside the cone, target outside it.
+
+    ``plugins/skill/ref.md`` stands in for a symlink whose target lives
+    in the sibling ``shared/`` dir, which the ``plugins`` cone excludes.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@e"], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
+
+    cone_dir = work / "plugins" / "skill"
+    cone_dir.mkdir(parents=True)
+    (cone_dir / "ref.md").write_text("stand-in for a symlink entry\n")
+
+    shared_dir = work / "shared"
+    shared_dir.mkdir()
+    (shared_dir / "ref.md").write_text("the real target content\n")
+
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-q", "-m", "test: init fixture repo"], check=True
+    )
+    sha = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    bare = tmp_path / "bare-symlink.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
+    return bare, sha
+
+
+def test_out_of_cone_link_resolves_without_widening(tmp_path: Path) -> None:
+    """#2707/#3457: an out-of-cone link target comes from Git objects."""
+    from tests.utils.git_link_fixture import (
+        EXPECTED_PKG,
+        bare_clone,
+        build_link_origin,
+        neutral_git_env,
+        tree_bytes,
+    )
+
+    origin, sha = build_link_origin(tmp_path)
+    bare = bare_clone(origin, tmp_path / "bare.git")
+    consumer = tmp_path / "consumer"
+
+    materialize_from_bare(
+        bare, consumer, ref=None, env=neutral_git_env(), known_sha=sha, sparse_paths=["pkg"]
+    )
+
+    assert tree_bytes(consumer / "pkg") == EXPECTED_PKG
+    assert not (consumer / "shared").exists()

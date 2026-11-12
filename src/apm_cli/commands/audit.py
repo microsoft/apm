@@ -17,10 +17,16 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import CommandLogger
+from ..core.deployment_ledger import (
+    DEPLOYMENT_OWNER_REMEDIATION,
+    DeploymentLedgerCodec,
+    DeploymentOwnerViolation,
+)
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..install.locking import serialized_lifecycle_when
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
-from ..security.file_scanner import scan_lockfile_packages
+from ..security.file_scanner import CoverageEntry, scan_project_result
 from ..utils.console import (
     STATUS_SYMBOLS,
     _get_console,
@@ -28,6 +34,7 @@ from ..utils.console import (
     _rich_error,
     _rich_success,
 )
+from ..utils.diagnostics import printable_ascii_text
 
 # -- Shared config --------------------------------------------------
 
@@ -70,6 +77,39 @@ def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None)
     # `error` set on the result): preserve the legacy wording so existing
     # consumers parsing the line keep working.
     return f"Policy fetch failed: {err_text or outcome}"
+
+
+def _is_explicit_policy_source(policy_source: str | None) -> bool:
+    """Return True when ``--policy`` names one concrete policy to enforce.
+
+    ``--policy org`` keeps auto-discovery semantics (#829 / #1159); every
+    other value (path, ``owner/repo``, https URL) is an explicit request
+    that must fail closed when it cannot be loaded (#3195).
+    """
+    return bool(policy_source) and policy_source != "org"
+
+
+def _explicit_policy_load_reason(policy_source: str, fetch_result) -> str:
+    """Explain why an explicit ``--policy`` source produced no policy."""
+    if fetch_result.error or fetch_result.fetch_error:
+        return fetch_result.error or fetch_result.fetch_error
+    if fetch_result.outcome == "absent" and not policy_source.startswith("https://"):
+        return f"no apm-policy.yml found in repository '{policy_source}'"
+    return fetch_result.outcome or "no policy was resolved"
+
+
+def _policy_enforcement_report(fetch_result) -> dict:
+    """Summarize whether the CI gate evaluated a policy (JSON / SARIF)."""
+    from ..policy.discovery import _redact_policy_ref
+
+    policy = fetch_result.policy if fetch_result is not None else None
+    if policy is None:
+        return {"enforced": False, "source": None, "enforcement": None}
+    return {
+        "enforced": policy.enforcement != "off",
+        "source": _redact_policy_ref(fetch_result.source) if fetch_result.source else None,
+        "enforcement": policy.enforcement,
+    }
 
 
 def _scan_single_file(file_path: Path, logger) -> tuple[dict[str, list[ScanFinding]], int]:
@@ -139,6 +179,8 @@ def _render_findings_table(
     verbose: bool = False,
 ) -> None:
     """Render a Rich table of scan findings."""
+    from ..security.audit_report import finding_location, relative_path_for_report
+
     console = _get_console()
 
     # Flatten into rows, sorted by severity (critical first)
@@ -161,8 +203,7 @@ def _render_findings_table(
     if console:
         try:
             from rich.table import Table
-
-            from ..security.audit_report import relative_path_for_report
+            from rich.text import Text
 
             table = Table(
                 title=title,
@@ -173,7 +214,7 @@ def _render_findings_table(
             if has_external:
                 table.add_column("Source", style="cyan", width=14)
             table.add_column("File", style="white")
-            table.add_column("Location", style="dim", width=10)
+            table.add_column("Location", style="dim")
             if has_external:
                 table.add_column("Category", style="bold white")
             else:
@@ -199,13 +240,13 @@ def _render_findings_table(
                 row_cells.extend(
                     [
                         relative_path_for_report(f.file),
-                        f"{f.line}:{f.column}",
+                        finding_location(f),
                         category_or_codepoint,
                         f.description,
                     ]
                 )
                 table.add_row(
-                    *row_cells,
+                    *(Text(printable_ascii_text(cell)) for cell in row_cells),
                     style=sev_styles.get(f.severity, "white"),
                 )
             console.print()
@@ -225,8 +266,10 @@ def _render_findings_table(
         source_part = f" [{_finding_source(f)}]" if has_external else ""
         detail = f.category if has_external else f.codepoint
         _rich_echo(
-            f"  {sev_label:<10}{source_part} {f.file} {f.line}:{f.column}  {detail}  "
-            f"{f.description}",
+            printable_ascii_text(
+                f"  {sev_label:<10}{source_part} {f.file} {finding_location(f)}  {detail}  "
+                f"{f.description}"
+            ),
             color=color,
         )
 
@@ -279,6 +322,8 @@ def _render_summary(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
     logger,
+    *,
+    coverage: tuple[CoverageEntry, ...] = (),
 ) -> None:
     """Render a summary panel with counts."""
     all_findings: list[ScanFinding] = []
@@ -290,6 +335,11 @@ def _render_summary(
     warning = counts.get("warning", 0)
     info = counts.get("info", 0)
     affected = len(findings_by_file)
+    remedy = (
+        "Review structured or external prompt fields manually; --strip does not rewrite native settings."
+        if any(not entry.strippable and entry.file in findings_by_file for entry in coverage)
+        else "  Review file contents, then run 'apm audit --strip' to remove hidden characters"
+    )
 
     _rich_echo("")
     if critical > 0:
@@ -297,20 +347,56 @@ def _render_summary(
             f"{critical} critical finding(s) in {affected} file(s) -- hidden characters detected"
         )
         logger.progress("  These characters may embed invisible instructions")
-        logger.progress("  Review file contents, then run 'apm audit --strip' to remove")
+        logger.progress(remedy)
     elif warning > 0:
         logger.warning(f"{warning} warning(s) in {affected} file(s) -- hidden characters detected")
-        logger.progress("  Run 'apm audit --strip' to remove hidden characters")
+        logger.progress(remedy)
     elif info > 0:
         logger.progress(
             f"{info} info-level finding(s) in "
             f"{affected} file(s) -- unusual characters (use --verbose to see)"
         )
-    else:
+    elif not any(entry.status == "incomplete" for entry in coverage):
         logger.success(f"{files_scanned} file(s) scanned -- no issues found")
 
     if info > 0 and (critical > 0 or warning > 0):
         logger.progress(f"  Plus {info} info-level finding(s) (use --verbose to see)")
+
+
+def _render_coverage(coverage: tuple[CoverageEntry, ...], logger: CommandLogger) -> None:
+    """Keep discovery visible without inventing ownership or unsafe-content findings."""
+    for entry in coverage:
+        label = printable_ascii_text(entry.file + entry.pointer)
+        if entry.status == "incomplete":
+            logger.error(
+                f"Incomplete coverage: {label}: {printable_ascii_text(entry.diagnostic or '')}. "
+                "Review the format or file access and rerun audit."
+            )
+        elif entry.kind == "hooks":
+            tracking = "recorded-file" if entry.tracked else "untracked"
+            logger.progress(
+                f"Discovered/{tracking}: {label} (prompt check: {entry.status}; "
+                "ownership and hash verification are separate)"
+            )
+
+
+def _render_owner_violations(
+    violations: tuple[DeploymentOwnerViolation, ...],
+    logger: CommandLogger,
+) -> None:
+    """Render invalid canonical owner references with one remediation."""
+    if not violations:
+        return
+    logger.error(f"{len(violations)} invalid deployment ownership record(s) in apm.lock.yaml")
+    for violation in violations:
+        invalid = ", ".join(violation.invalid_owners)
+        active = (
+            f"; active owner={violation.invalid_active_owner}"
+            if violation.invalid_active_owner is not None
+            else ""
+        )
+        logger.error_detail(f"  {violation.locator.key}: invalid owner(s)={invalid}{active}")
+    logger.error_detail(DEPLOYMENT_OWNER_REMEDIATION)
 
 
 def _apply_strip(
@@ -430,10 +516,13 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
     console = _get_console()
+    for check in ci_result.checks:
+        _render_coverage(check.coverage, CommandLogger("audit"))
 
     if console:
         try:
             from rich.table import Table
+            from rich.text import Text
 
             table = Table(
                 title=f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
@@ -450,7 +539,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                     if check.passed
                     else f"[red]{STATUS_SYMBOLS['cross']}[/red]"
                 )
-                table.add_row(status, check.name, check.message)
+                table.add_row(status, Text(check.name), Text(printable_ascii_text(check.message)))
 
             console.print()
             console.print(table)
@@ -465,7 +554,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                         bold=True,
                     )
                     for detail in check.details:
-                        _rich_echo(f"    - {detail}", color="dim")
+                        _rich_echo(f"    - {printable_ascii_text(detail)}", color="dim")
 
             console.print()
             summary = ci_result.to_json()["summary"]
@@ -490,10 +579,10 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     for check in ci_result.checks:
         symbol = STATUS_SYMBOLS["check"] if check.passed else STATUS_SYMBOLS["cross"]
         color = "green" if check.passed else "red"
-        _rich_echo(f"  {symbol} {check.name}: {check.message}", color=color)
+        _rich_echo(printable_ascii_text(f"  {symbol} {check.name}: {check.message}"), color=color)
         if not check.passed and check.details:
             for detail in check.details:
-                _rich_echo(f"      - {detail}", color="dim")
+                _rich_echo(f"      - {printable_ascii_text(detail)}", color="dim")
 
     _rich_echo("")
     summary = ci_result.to_json()["summary"]
@@ -529,8 +618,37 @@ def _audit_ci_gate(
 
     fail_fast = not no_fail_fast
 
+    prepared_replay = None
+    prepared_replay_error = None
+    if (cfg.project_root / "apm.yml").exists() and not (cfg.project_root / "apm_modules").exists():
+        from ..core.scope import get_workspace_deploy_root
+        from ..deps.lockfile import get_lockfile_path
+        from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
+
+        if get_lockfile_path(cfg.project_root).exists():
+            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve():
+                prepared_replay_error = (
+                    "installed package materialization is missing at "
+                    f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "
+                    "to restore it"
+                )
+            else:
+                try:
+                    prepared_replay = prepare_ci_audit_replay(
+                        cfg.project_root,
+                        verbose=cfg.verbose,
+                    )
+                except CiAuditReplayError as exc:
+                    prepared_replay_error = str(exc)
+
     # Always run baseline checks
-    ci_result = run_baseline_checks(cfg.project_root, fail_fast=fail_fast, ci_mode=True)
+    ci_result = run_baseline_checks(
+        cfg.project_root,
+        fail_fast=fail_fast,
+        ci_mode=True,
+        prepared_replay=prepared_replay,
+        prepared_replay_error=prepared_replay_error,
+    )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
@@ -553,6 +671,35 @@ def _audit_ci_gate(
         fetch_result = discover_policy_with_chain(cfg.project_root)
         auto_discovered = True
 
+    # An explicit --policy <source> names the exact policy the caller wants
+    # enforced, so failing to load it fails closed regardless of
+    # policy.fetch_failure_default (#3195). A stale-but-valid cached policy
+    # still resolves to a policy object and is enforced as usual.
+    if fetch_result is not None and _is_explicit_policy_source(policy_source):
+        from ..policy.discovery import _redact_policy_ref
+
+        display_source = _redact_policy_ref(policy_source)
+        if fetch_result.outcome == "disabled":
+            click.echo(
+                f"{STATUS_SYMBOLS['warning']} --policy {display_source} ignored: "
+                "APM_POLICY_DISABLE=1 disables policy enforcement; no policy checks ran",
+                err=True,
+            )
+            fetch_result = None
+        elif not fetch_result.found:
+            reason = _explicit_policy_load_reason(policy_source, fetch_result)
+            click.echo(
+                f"{STATUS_SYMBOLS['error']} Policy '{display_source}' could not be loaded: "
+                f"{reason}",
+                err=True,
+            )
+            click.echo(
+                "    --policy was passed explicitly, so the audit fails closed instead "
+                "of skipping enforcement. Fix the policy source above and re-run.",
+                err=True,
+            )
+            sys.exit(1)
+
     if fetch_result is not None:
         # Honour project-side fetch_failure_default for outcomes that
         # mean "no enforcement applied".  Pre-#1159, auto-discovery
@@ -562,13 +709,12 @@ def _audit_ci_gate(
         #
         #   * malformed / cache_miss_fetch_fail / garbage_response
         #     -> existing fetch-failure handling (warn unless block);
-        #     applies to BOTH explicit --policy and auto-discovery.
+        #     applies to auto-discovery and `--policy org`. Any other
+        #     explicit --policy already failed closed above (#3195).
         #   * absent / no_git_remote / empty   (auto-discovery only)
         #     -> were silently dropped pre-#1159; now surfaced as
         #        explicit warnings, and honour `block` for parity with
-        #        install.  Explicit --policy keeps the legacy fall-
-        #        through so an opt-in pointer at a baseline file does
-        #        not regress.
+        #        install.  `--policy org` keeps the legacy fall-through.
         #   * disabled   (auto-discovery only)
         #     -> emit a forensic `[i]` breadcrumb in --ci mode so
         #        audit logs explain WHY no policy ran.
@@ -648,12 +794,24 @@ def _audit_ci_gate(
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             if lockfile is not None:
-                drift_check, drift_findings = _check_drift(
-                    cfg.project_root,
-                    lockfile,
-                    cache_only=True,
-                    verbose=cfg.verbose,
-                )
+                if prepared_replay_error is not None:
+                    from ..policy.models import CheckResult
+
+                    drift_check = CheckResult(
+                        name="drift",
+                        passed=False,
+                        message=f"drift replay failed: {prepared_replay_error}",
+                        details=[prepared_replay_error],
+                    )
+                    drift_findings = []
+                else:
+                    drift_check, drift_findings = _check_drift(
+                        cfg.project_root,
+                        lockfile,
+                        cache_only=prepared_replay is None,
+                        verbose=cfg.verbose,
+                        prepared_replay=prepared_replay,
+                    )
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":
         # In structured output (json/sarif), --no-drift is implicit from
@@ -676,14 +834,19 @@ def _audit_ci_gate(
 
         from ..install.drift import render_drift_json, render_drift_sarif
 
+        policy_report = _policy_enforcement_report(fetch_result)
         if effective_format == "sarif":
             payload = ci_result.to_sarif()
             if drift_findings:
                 payload["runs"][0]["results"].extend(render_drift_sarif(drift_findings))
+            run = payload["runs"][0]
+            invocation = run.setdefault("invocations", [{}])[0]
+            invocation.setdefault("properties", {})["policy"] = policy_report
         else:
             payload = ci_result.to_json()
             if drift_findings or not no_drift:
                 payload["drift"] = render_drift_json(drift_findings)
+            payload["policy"] = policy_report
 
         output = _json.dumps(payload, indent=2)
         if cfg.output_path:
@@ -698,7 +861,7 @@ def _audit_ci_gate(
             from ..install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose))
+            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose, lockfile=lockfile))
 
     sys.exit(0 if ci_result.passed else 1)
 
@@ -826,6 +989,8 @@ def _audit_content_scan(
     """
     logger = cfg.logger
     project_root = cfg.project_root
+    coverage: tuple[CoverageEntry, ...] = ()
+    protected_files: frozenset[str] = frozenset()
 
     # Resolve effective format (auto-detect from extension when needed)
     effective_format = cfg.output_format
@@ -844,43 +1009,48 @@ def _audit_content_scan(
         # -- File mode: scan a single arbitrary file --
         findings_by_file, files_scanned = _scan_single_file(Path(file_path), logger)
         scan_paths = [Path(file_path)]
+        owner_violations: tuple[DeploymentOwnerViolation, ...] = ()
     else:
         scan_paths = [project_root]
         # -- Package mode: scan from lockfile --
         lockfile_path = get_lockfile_path(project_root)
-        if not lockfile_path.exists():
-            if not external:
-                logger.progress(
-                    "No apm.lock.yaml found -- nothing to scan. Use --file to scan a specific file."
-                )
-                sys.exit(0)
-            # External scanners are an independent source: proceed with an
-            # empty native result set so their findings still surface.
-            findings_by_file, files_scanned = {}, 0
-        else:
+        if effective_format == "text":
             if package:
                 logger.progress(f"Scanning package: {package}")
             else:
-                logger.start("Scanning all installed packages...")
+                logger.start("Scanning installed packages and deployed files...")
 
-            from apm_cli.deps.lockfile import LockfileFormatError
+        from apm_cli.deps.lockfile import LockfileFormatError
 
-            try:
-                findings_by_file, files_scanned = scan_lockfile_packages(
-                    project_root,
-                    package_filter=package,
+        try:
+            lockfile = LockFile.read(lockfile_path)
+            owner_violations = (
+                DeploymentLedgerCodec.owner_reference_violations(lockfile)
+                if lockfile is not None
+                else ()
+            )
+            scan = scan_project_result(
+                project_root,
+                package_filter=package,
+                lockfile=lockfile,
+                include_deployed_trees=package is None,
+            )
+            findings_by_file = scan.findings_by_file
+            files_scanned = len(scan.scanned_files)
+            coverage = scan.inventory
+            protected_files = scan.protected_files
+        except LockfileFormatError as exc:
+            logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
+            sys.exit(1)
+
+        if files_scanned == 0 and not coverage and not external and not owner_violations:
+            if package:
+                logger.warning(
+                    f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
                 )
-            except LockfileFormatError as exc:
-                logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
-                sys.exit(1)
-
-            if files_scanned == 0 and not external:
-                if package:
-                    logger.warning(
-                        f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
-                    )
-                else:
-                    logger.progress("No deployed files found in apm.lock.yaml")
+            elif effective_format == "text":
+                logger.progress("No recognized deployed primitives found -- nothing to scan")
+            if effective_format == "text":
                 sys.exit(0)
 
     # -- External scanners (opt-in, additive) -----------------------
@@ -899,13 +1069,33 @@ def _audit_content_scan(
 
     # -- Strip mode --
     if strip:
+        blocked = protected_files.intersection(findings_by_file)
+        if blocked or any(entry.status == "incomplete" for entry in coverage):
+            _render_coverage(coverage, logger)
+            for entry in coverage:
+                if entry.file in blocked and not entry.strippable:
+                    logger.error_detail(
+                        "Manual review required: "
+                        + printable_ascii_text(entry.file + entry.pointer)
+                    )
+            logger.error(
+                "Content was not modified: structured/shared or external prompt findings, or incomplete coverage, "
+                "require manual review. --strip does not rewrite native configuration."
+            )
+            sys.exit(1)
+        if owner_violations:
+            _render_owner_violations(owner_violations, logger)
+            logger.error_detail("Content was not modified while lockfile ownership is invalid.")
+            sys.exit(1)
         if not findings_by_file:
             logger.progress("Nothing to clean -- no hidden characters found")
             sys.exit(0)
         if dry_run:
             _preview_strip(findings_by_file, logger)
             sys.exit(0)
-        modified = _apply_strip(findings_by_file, project_root, logger)
+        from ..core.scope import get_workspace_deploy_root
+
+        modified = _apply_strip(findings_by_file, get_workspace_deploy_root(project_root), logger)
         if modified > 0:
             logger.success(f"Cleaned {modified} file(s)")
         else:
@@ -975,6 +1165,8 @@ def _audit_content_scan(
     else:
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
+    if owner_violations or any(entry.status == "incomplete" for entry in coverage):
+        exit_code = 1
 
     # Bare `apm audit` is advisory for drift by default: drift findings are
     # rendered (text/json/sarif) but DO NOT escalate the exit code. When
@@ -997,18 +1189,27 @@ def _audit_content_scan(
             sys.exit(1)
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
-        _render_summary(findings_by_file, files_scanned, logger)
+            _render_summary(findings_by_file, files_scanned, logger, coverage=coverage)
+        elif not owner_violations:
+            _render_summary(findings_by_file, files_scanned, logger, coverage=coverage)
+        _render_coverage(coverage, logger)
+        _render_owner_violations(owner_violations, logger)
         if not file_path:
             _render_canvas_note(cfg.project_root, package, logger)
         if drift_findings:
             from ..install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose))
+            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose, lockfile=lockfile))
     elif effective_format == "markdown":
         from ..security.audit_report import findings_to_markdown
 
-        md_report = findings_to_markdown(findings_by_file, files_scanned=files_scanned)
+        md_report = findings_to_markdown(
+            findings_by_file,
+            files_scanned=files_scanned,
+            owner_violations=owner_violations,
+            coverage=coverage,
+        )
         if cfg.output_path:
             Path(cfg.output_path).parent.mkdir(parents=True, exist_ok=True)
             Path(cfg.output_path).write_text(md_report, encoding="utf-8")
@@ -1024,12 +1225,19 @@ def _audit_content_scan(
         )
 
         if effective_format == "sarif":
-            report = findings_to_sarif(findings_by_file, files_scanned=files_scanned)
+            report = findings_to_sarif(
+                findings_by_file,
+                files_scanned=files_scanned,
+                owner_violations=owner_violations,
+                coverage=coverage,
+            )
         else:
             report = findings_to_json(
                 findings_by_file,
                 files_scanned=files_scanned,
                 exit_code=exit_code,
+                owner_violations=owner_violations,
+                coverage=coverage,
             )
 
         if cfg.output_path:
@@ -1171,6 +1379,7 @@ def _audit_content_scan(
     ),
 )
 @click.pass_context
+@serialized_lifecycle_when("strip", unless_argument="dry_run")
 def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,

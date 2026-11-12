@@ -1,24 +1,30 @@
 """Unit tests for --update auth pre-flight probe in pipeline.py (#1015)."""
 
+import os
 import subprocess  # noqa: F401
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
 from apm_cli.install.errors import AuthenticationError
 
 
-def _make_dep(host="dev.azure.com", repo_url="myorg/myproject/_git/myrepo"):
+def _make_dep(
+    host="dev.azure.com",
+    repo_url="myorg/myproject/_git/myrepo",
+    port=None,
+):
     dep = MagicMock()
     dep.host = host
     dep.repo_url = repo_url
-    dep.port = None
+    dep.port = port
     dep.is_azure_devops.return_value = True
     dep.explicit_scheme = None
     dep.is_insecure = False
     dep.ado_organization = "myorg"
     dep.ado_project = "myproject"
     dep.ado_repo = "myrepo"
+    dep.source_reference = dep
     return dep
 
 
@@ -115,7 +121,7 @@ class TestPreflightSkippedForGitHubDeps:
 
 
 class TestPreflightClustersDeduplicate:
-    """Multiple deps on the same (host, org) only probe once."""
+    """Multiple deps on the same (host, port, org) only probe once."""
 
     @patch("subprocess.run")
     def test_deduplication(self, mock_run):
@@ -131,6 +137,41 @@ class TestPreflightClustersDeduplicate:
         _preflight_auth_check(ctx, resolver, verbose=False)
         assert mock_run.call_count == 1
 
+    @patch("subprocess.run")
+    def test_same_host_and_org_on_distinct_ports_probe_twice(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        dep1 = _make_dep(
+            host="ado.example.test",
+            repo_url="DefaultCollection/projA/_git/repoA",
+            port=8443,
+        )
+        dep2 = _make_dep(
+            host="ado.example.test",
+            repo_url="DefaultCollection/projB/_git/repoB",
+            port=9443,
+        )
+        ctx = _make_ctx(deps=[dep1, dep2])
+        resolver = _make_resolver()
+        resolver.resolve_for_dep.side_effect = (
+            MagicMock(
+                token="pat",
+                auth_scheme="basic",
+                host_info=MagicMock(display_name="ado.example.test:8443"),
+            ),
+            MagicMock(
+                token="pat",
+                auth_scheme="basic",
+                host_info=MagicMock(display_name="ado.example.test:9443"),
+            ),
+        )
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        with patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False):
+            _preflight_auth_check(ctx, resolver, verbose=False)
+
+        assert mock_run.call_count == 2
+
 
 def _make_generic_dep(host="gitlab.internal.corp", repo_url="org/repo"):
     """Create a mock dep for a generic (non-GitHub, non-ADO) host."""
@@ -141,6 +182,7 @@ def _make_generic_dep(host="gitlab.internal.corp", repo_url="org/repo"):
     dep.is_azure_devops.return_value = False
     dep.explicit_scheme = None
     dep.is_insecure = False
+    dep.source_reference = dep
     return dep
 
 
@@ -148,20 +190,19 @@ class TestPreflightGenericHostAllowsCredentialHelpers:
     """Generic hosts (GHES, GitLab, etc.) must not block credential helpers (#1082)."""
 
     @patch("subprocess.run")
-    def test_generic_host_env_omits_credential_blocking_vars(self, mock_run):
-        """The probe env for generic hosts must not contain any of the vars
-        that block credential helpers: GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM,
-        or GIT_ASKPASS.
-
-        These vars prevent git from reading ~/.gitconfig (where credential
-        helpers are configured), which is the primary auth mechanism for
-        non-GitHub/non-ADO hosts.
-        """
+    def test_generic_host_env_snapshots_credential_helper(self, mock_run):
+        """The probe freezes a generic helper before isolating config files."""
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
         dep = _make_generic_dep(host="ghes.corp.example.com")
         ctx = _make_ctx(deps=[dep])
         resolver = _make_resolver(token="some-token")
+        resolver.git_env_for_remote.return_value = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": "fixture-helper",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
 
         from apm_cli.install.pipeline import _preflight_auth_check
 
@@ -169,9 +210,17 @@ class TestPreflightGenericHostAllowsCredentialHelpers:
 
         assert mock_run.call_count == 1
         call_env = mock_run.call_args[1]["env"]
-        assert "GIT_CONFIG_GLOBAL" not in call_env
-        assert "GIT_CONFIG_NOSYSTEM" not in call_env
+        assert call_env["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert call_env["GIT_CONFIG_NOSYSTEM"] == "1"
         assert "GIT_ASKPASS" not in call_env
+        entries = {
+            (
+                call_env.get(f"GIT_CONFIG_KEY_{index}", ""),
+                call_env.get(f"GIT_CONFIG_VALUE_{index}", ""),
+            )
+            for index in range(int(call_env.get("GIT_CONFIG_COUNT", "0")))
+        }
+        assert ("credential.helper", "fixture-helper") in entries
 
     @patch("subprocess.run")
     def test_generic_host_auth_failure_still_raises(self, mock_run):
@@ -194,18 +243,8 @@ class TestPreflightGenericHostAllowsCredentialHelpers:
         assert str(exc_info.value).startswith("Authentication failed for ghes.corp.example.com")
 
     @patch("subprocess.run")
-    def test_ado_host_omits_credential_blocking_env(self, mock_run):
-        """ADO hosts strip GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM / GIT_ASKPASS
-        from the preflight probe env so Git Credential Manager can answer
-        for Entra-cached ADO creds when bearer acquisition is unavailable
-        (microsoft/apm#1430 -- Windows az.cmd resolution failure, sandboxed
-        runs, proxy issues, etc.).
-
-        The actual clone path remains isolated -- it builds its own clean
-        env via GitAuthEnvBuilder.setup_environment(). This carve-out only
-        widens the preflight PROBE leg so GCM gets a chance to authenticate
-        before we surface a misleading "az not logged in" diagnostic.
-        """
+    def test_ado_host_keeps_managed_auth_isolated(self, mock_run):
+        """ADO preflight uses only the selected PAT or bearer environment."""
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
         dep = _make_dep(host="dev.azure.com", repo_url="myorg/myproject/_git/myrepo")
@@ -219,16 +258,16 @@ class TestPreflightGenericHostAllowsCredentialHelpers:
                 "GIT_CONFIG_GLOBAL": "/dev/null",
             },
         )
+        resolver.git_env_for_remote.return_value = resolver.resolve_for_dep.return_value.git_env
 
         from apm_cli.install.pipeline import _preflight_auth_check
 
         _preflight_auth_check(ctx, resolver, verbose=False)
 
         call_env = mock_run.call_args[1]["env"]
-        # Layer 2 of #1430 fix: ADO preflight no longer kills GCM.
-        assert "GIT_CONFIG_NOSYSTEM" not in call_env
-        assert "GIT_ASKPASS" not in call_env
-        assert "GIT_CONFIG_GLOBAL" not in call_env
+        assert call_env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert call_env["GIT_ASKPASS"] == "echo"
+        assert call_env["GIT_CONFIG_GLOBAL"] == os.devnull
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +351,10 @@ class TestAdoBearerFallback:
         assert resolver.execute_with_bearer_fallback.called
         # _build_git_env was used for bearer env (no leak of GIT_TOKEN).
         resolver._build_git_env.assert_called_with(
-            "dummy.jwt.token", scheme="bearer", host_kind="ado"
+            "dummy.jwt.token",
+            scheme="bearer",
+            host_kind="ado",
+            base_env=ANY,
         )
 
     @patch("subprocess.run")
@@ -381,6 +423,7 @@ def _make_ssh_dep(host="git.corp.internal", repo_url="org/repo", explicit_scheme
     dep.explicit_scheme = explicit_scheme
     dep.is_insecure = False
     dep.ssh_user = None
+    dep.source_reference = dep
     return dep
 
 

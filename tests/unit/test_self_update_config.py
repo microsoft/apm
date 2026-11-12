@@ -1,8 +1,43 @@
 """Tests for self-update config-backed installer preferences."""
 
+import os
+import sys
 from urllib.parse import urlparse
 
 from apm_cli.commands import self_update
+
+
+def test_unix_self_update_passes_running_identity_not_new_destination(monkeypatch, tmp_path):
+    """A frozen absolute invocation must remain identifiable outside PATH."""
+    binary = tmp_path / "custom/lib/apm/apm"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(binary))
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    monkeypatch.delenv("APM_INSTALL_DIR", raising=False)
+    monkeypatch.setenv("APM_SELF_UPDATE_SOURCE", "/untrusted/apm")
+
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
+
+    assert env["APM_SELF_UPDATE_SOURCE"] == str(binary)
+    assert "APM_INSTALL_DIR" not in env
+
+
+def test_unix_pip_self_update_passes_console_entrypoint(monkeypatch, tmp_path):
+    """The shell can refuse unmanaged Python launchers instead of shadowing them."""
+    entrypoint = tmp_path / "venv/bin/apm"
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(sys, "argv", [str(entrypoint), "self-update"])
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
+    assert env["APM_SELF_UPDATE_SOURCE"] == str(entrypoint)
 
 
 def test_update_installer_env_reads_non_secret_config(monkeypatch, tmp_path):
@@ -14,15 +49,16 @@ def test_update_installer_env_reads_non_secret_config(monkeypatch, tmp_path):
     monkeypatch.delenv("APM_SELF_UPDATE_CHANNEL", raising=False)
     monkeypatch.delenv("VERSION", raising=False)
 
-    env = self_update._build_self_update_installer_env("1.2.3rc1")
+    release = self_update._resolve_self_update_release("1.2.3rc1")
+    env = self_update._build_self_update_installer_env(release)
 
     assert env["APM_INSTALL_DIR"] == str(install_dir)
     assert env["APM_SELF_UPDATE_CHANNEL"] == "prerelease"
     assert env["VERSION"] == "v1.2.3rc1"
 
 
-def test_update_installer_env_preserves_invocation_env(monkeypatch, tmp_path):
-    """Invocation-scoped env vars outrank persisted self-update prefs."""
+def test_update_installer_env_normalizes_explicit_version(monkeypatch, tmp_path):
+    """The explicit release selection is normalized for the installer."""
     install_dir = tmp_path / "config-bin"
     monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: str(install_dir))
     monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "prerelease")
@@ -30,11 +66,26 @@ def test_update_installer_env_preserves_invocation_env(monkeypatch, tmp_path):
     monkeypatch.setenv("APM_SELF_UPDATE_CHANNEL", "stable")
     monkeypatch.setenv("VERSION", "v9.9.9")
 
-    env = self_update._build_self_update_installer_env("1.2.3rc1")
+    release = self_update._resolve_self_update_release(os.environ["VERSION"])
+    env = self_update._build_self_update_installer_env(release)
 
     assert env["APM_INSTALL_DIR"] == "/env/bin"
     assert env["APM_SELF_UPDATE_CHANNEL"] == "stable"
     assert env["VERSION"] == "v9.9.9"
+
+
+def test_stable_channel_sets_resolved_installer_version(monkeypatch):
+    """Stable release discovery must pin the same version for installation."""
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    monkeypatch.delenv("APM_SELF_UPDATE_CHANNEL", raising=False)
+    monkeypatch.delenv("VERSION", raising=False)
+
+    release = self_update._resolve_self_update_release("1.5.0")
+    env = self_update._build_self_update_installer_env(release)
+
+    assert env["APM_SELF_UPDATE_CHANNEL"] == "stable"
+    assert env["VERSION"] == "v1.5.0"
 
 
 def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
@@ -50,7 +101,7 @@ def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
                 {"tag_name": "v1.0.0", "prerelease": False},
             ]
 
-    def fake_get(url, headers, timeout):
+    def fake_get(url, headers, timeout, **kwargs):
         captured["url"] = url
         captured["headers"] = headers
         captured["timeout"] = str(timeout)

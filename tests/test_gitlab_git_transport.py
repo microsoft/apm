@@ -17,10 +17,13 @@ import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.deps.git_file_transport import GitFileTransportError
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.path_security import PathTraversalError
 
 # Patch cred helper so tests never call real git for token resolution.
@@ -45,6 +48,44 @@ def _mock_subprocess_success() -> Mock:
     m.stderr = ""
     m.stdout = ""
     return m
+
+
+def _create_local_git_source(
+    tmp_path: Path,
+    file_path: str,
+    content: bytes,
+) -> tuple[Path, dict[str, str], str]:
+    """Create one committed local Git source and return its path, env, and SHA."""
+    source = tmp_path / "source"
+    source.mkdir()
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "APM Test",
+        "GIT_AUTHOR_EMAIL": "apm-test@example.com",
+        "GIT_COMMITTER_NAME": "APM Test",
+        "GIT_COMMITTER_EMAIL": "apm-test@example.com",
+    }
+    subprocess.run(["git", "init"], cwd=source, env=env, check=True, capture_output=True)
+    path = source / file_path
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
+    subprocess.run(["git", "add", "."], cwd=source, env=env, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "fixture"],
+        cwd=source,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    resolved_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return source, env, resolved_commit
 
 
 class _FakeTemporaryDirectory:
@@ -72,6 +113,12 @@ def _mock_git_transport(*, return_value=None, side_effect=None) -> Mock:
 
 class TestFetchFileViaGitSparse:
     """Unit tests for the git_file_transport free function."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_git_object_links(self):
+        """Mocked Git carries no objects; test_git_file_transport_links covers links."""
+        with patch("apm_cli.deps.git_file_transport.GitSparseFileTransport._materialize_links"):
+            yield
 
     def test_path_traversal_in_string_rejected_before_git(self) -> None:
         """validate_path_segments() rejects path: containing .. sequences.
@@ -137,6 +184,46 @@ class TestFetchFileViaGitSparse:
         fetch_cmds = [c for c in all_cmds if "fetch" in c]
         assert fetch_cmds, "Expected at least one git fetch call"
         assert any("--filter=blob:none" in cmd for cmd in fetch_cmds)
+
+    @patch("apm_cli.deps.git_file_transport.subprocess.run")
+    def test_fetch_with_commit_uses_exact_fetch_head_sha(
+        self, mock_run: Mock, tmp_path: Path
+    ) -> None:
+        """Sparse Git fallback must preserve the exact fetched commit."""
+        from apm_cli.deps.git_file_transport import GitSparseFileTransport
+
+        expected_sha = "0123456789abcdef0123456789abcdef01234567"
+        work_parent = tmp_path / "fetch-with-sha"
+        work_parent.mkdir()
+        work_dir = work_parent / "work"
+        work_dir.mkdir()
+        (work_dir / "agents").mkdir()
+        (work_dir / "agents" / "spec.agent.md").write_bytes(b"# Agent")
+
+        def fake_run(cmd: list[str], **_kwargs) -> Mock:
+            result = _mock_subprocess_success()
+            result.stdout = expected_sha + "\n" if "rev-parse" in cmd else ""
+            return result
+
+        mock_run.side_effect = fake_run
+        with patch(
+            "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+            return_value=_FakeTemporaryDirectory(work_parent),
+        ):
+            with GitSparseFileTransport(
+                _make_gitlab_dep(),
+                "main",
+                build_repo_url_fn=lambda *a, **kw: "https://gitlab.example.com/g/r.git",
+                git_env={},
+            ) as transport:
+                result = transport.fetch_file_with_commit("agents/spec.agent.md")
+
+        assert result.content == b"# Agent"
+        assert result.resolved_commit == expected_sha
+        assert any(
+            call.args[0] == [get_git_executable(), "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
+            for call in mock_run.call_args_list
+        )
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_git_commands_not_rest_api(self, mock_run: Mock, tmp_path: Path) -> None:
@@ -248,11 +335,17 @@ class TestFetchFileViaGitSparse:
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_git_failure_raises_runtime_error(self, mock_run: Mock, tmp_path: Path) -> None:
-        """RuntimeError is raised when a git command fails."""
+        """Git failures redact URL and Authorization credentials."""
         from apm_cli.deps.git_file_transport import fetch_file_via_git_sparse
 
+        secret = "sparse-error-secret"
         mock_run.return_value = Mock(
-            returncode=128, stderr="fatal: not a git repository", stdout=""
+            returncode=128,
+            stderr=(
+                f"trace: Authorization: Basic {secret}\n"
+                f"fatal: denied https://{secret}@gitlab.example.com/g/r.git"
+            ),
+            stdout="",
         )
 
         work_parent = tmp_path / "fetch5"
@@ -263,7 +356,7 @@ class TestFetchFileViaGitSparse:
                 "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
                 return_value=_FakeTemporaryDirectory(work_parent),
             ),
-            pytest.raises(RuntimeError, match="git file fetch failed"),
+            pytest.raises(RuntimeError, match="git file fetch failed") as raised,
         ):
             fetch_file_via_git_sparse(
                 _make_gitlab_dep(),
@@ -272,6 +365,10 @@ class TestFetchFileViaGitSparse:
                 build_repo_url_fn=lambda *a, **kw: "https://gitlab.example.com/g/r.git",
                 git_env={},
             )
+
+        message = str(raised.value)
+        assert secret not in message
+        assert "Authorization: ******" in message
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_git_timeout_raises_transport_runtime_error(
@@ -458,27 +555,10 @@ class TestFetchFileViaGitSparse:
         if shutil.which("git") is None:
             pytest.skip("git executable not available")
 
-        source = tmp_path / "source"
-        source.mkdir()
-        env = {
-            **os.environ,
-            "GIT_AUTHOR_NAME": "APM Test",
-            "GIT_AUTHOR_EMAIL": "apm-test@example.com",
-            "GIT_COMMITTER_NAME": "APM Test",
-            "GIT_COMMITTER_EMAIL": "apm-test@example.com",
-        }
-        subprocess.run(["git", "init"], cwd=source, env=env, check=True, capture_output=True)
-        (source / "agents").mkdir()
-        (source / "agents" / "hello.agent.md").write_bytes(b"hello agent")
-        (source / "prompts").mkdir()
-        (source / "prompts" / "ignored.prompt.md").write_bytes(b"ignored")
-        subprocess.run(["git", "add", "."], cwd=source, env=env, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-m", "fixture"],
-            cwd=source,
-            env=env,
-            check=True,
-            capture_output=True,
+        source, env, _commit = _create_local_git_source(
+            tmp_path,
+            "agents/hello.agent.md",
+            b"hello agent",
         )
 
         content = fetch_file_via_git_sparse(
@@ -490,6 +570,45 @@ class TestFetchFileViaGitSparse:
         )
 
         assert content == b"hello agent"
+
+    def test_github_throttle_fallback_uses_real_sparse_transport_and_fetch_head(
+        self, tmp_path: Path
+    ) -> None:
+        """A virtual GitHub fallback uses real Git and returns the fetched commit."""
+        from apm_cli.deps.download_strategies import DownloadDelegate
+        from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
+
+        if shutil.which("git") is None:
+            pytest.skip("git executable not available")
+
+        source, env, expected_commit = _create_local_git_source(
+            tmp_path,
+            "instructions/guard.instructions.md",
+            b"---\napplyTo: '**'\n---\n# Guard\n",
+        )
+        auth_context = Mock(token=None, auth_scheme="basic", git_env={})
+        host = Mock()
+        host.auth_resolver.resolve_for_dep.return_value = auth_context
+        host._build_noninteractive_git_env.return_value = env
+        delegate = DownloadDelegate(host)
+        dep_ref = DependencyReference(
+            repo_url="owner/repo",
+            host="github.com",
+            reference="HEAD",
+            virtual_path="instructions/guard.instructions.md",
+            is_virtual=True,
+        )
+
+        with patch.object(delegate, "build_repo_url", return_value=str(source)):
+            fetched = delegate.download_github_file_via_throttle_fallback(
+                dep_ref,
+                dep_ref.virtual_path,
+                "HEAD",
+                GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com"),
+            )
+
+        assert fetched.content == b"---\napplyTo: '**'\n---\n# Guard\n"
+        assert fetched.resolved_commit == expected_commit
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +683,77 @@ class TestGitlabGitTransportIntegration:
         mock_git.return_value.fetch_file.assert_called_once()
         mock_api.assert_not_called()
 
+    def test_gitlab_path_pat_uses_header_and_tokenless_url(self) -> None:
+        """Path-scoped GitLab fetches keep PATs out of argv and local config."""
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+        token = "glpat-path-token"
+        dep_ref = _make_gitlab_dep("gitlab.com")
+        with (
+            patch.dict(os.environ, {"GITLAB_APM_PAT": token}, clear=True),
+            _CRED_FILL_PATCH,
+        ):
+            downloader = GitHubPackageDownloader()
+            with patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=_mock_git_transport(return_value=b"content"),
+            ) as transport:
+                downloader._download_github_file(
+                    dep_ref,
+                    "agents/spec.agent.md",
+                    "main",
+                )
+
+        kwargs = transport.call_args.kwargs
+        url = kwargs["build_repo_url_fn"](dep_ref.repo_url, dep_ref=dep_ref)
+        parsed = urlparse(url)
+        assert parsed.username is None
+        assert parsed.password is None
+        assert parsed.hostname == "gitlab.com"
+        assert "GIT_TOKEN" not in kwargs["git_env"]
+        assert any(
+            value.startswith("Authorization: Basic ")
+            for key, value in kwargs["git_env"].items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
+
+    def test_gitlab_explicit_http_suppresses_managed_credentials(self) -> None:
+        """A GitLab PAT never follows a path fetch onto plaintext HTTP."""
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+        dep_ref = DependencyReference(
+            repo_url="group/repo",
+            host="gitlab.com",
+            explicit_scheme="http",
+            is_insecure=True,
+        )
+        with (
+            patch.dict(os.environ, {"GITLAB_APM_PAT": "gitlab-secret"}, clear=True),
+            _CRED_FILL_PATCH,
+        ):
+            downloader = GitHubPackageDownloader()
+            with patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=_mock_git_transport(return_value=b"content"),
+            ) as transport:
+                downloader._download_github_file(
+                    dep_ref,
+                    "agents/spec.agent.md",
+                    "main",
+                )
+
+        kwargs = transport.call_args.kwargs
+        remote_url = kwargs["build_repo_url_fn"](dep_ref.repo_url, dep_ref=dep_ref)
+        assert urlparse(remote_url).scheme == "http"
+        git_env = kwargs["git_env"]
+        assert "GIT_TOKEN" not in git_env
+        assert "GITLAB_APM_PAT" not in git_env
+        count = int(git_env.get("GIT_CONFIG_COUNT", "0"))
+        assert all(
+            "extraheader" not in git_env.get(f"GIT_CONFIG_KEY_{index}", "").lower()
+            for index in range(count)
+        )
+
     def test_gitlab_pat_fallback_when_git_fails(self) -> None:
         """Thin GITLAB_PAT fallback: REST API called when git transport raises."""
         from urllib.parse import urlparse
@@ -587,7 +777,7 @@ class TestGitlabGitTransportIntegration:
                 patch(
                     "apm_cli.deps.download_strategies.GitSparseFileTransport",
                     return_value=_mock_git_transport(
-                        side_effect=RuntimeError("git transport failed")
+                        side_effect=GitFileTransportError("git transport failed")
                     ),
                 ),
                 patch.object(downloader, "_resilient_get", return_value=mock_response) as mock_api,
@@ -619,7 +809,9 @@ class TestGitlabGitTransportIntegration:
             with (
                 patch(
                     "apm_cli.deps.download_strategies.GitSparseFileTransport",
-                    return_value=_mock_git_transport(side_effect=RuntimeError("SSH auth failed")),
+                    return_value=_mock_git_transport(
+                        side_effect=GitFileTransportError("SSH auth failed")
+                    ),
                 ),
                 patch.object(downloader, "_resilient_get") as mock_api,
             ):

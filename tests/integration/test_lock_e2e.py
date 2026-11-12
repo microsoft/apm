@@ -8,6 +8,8 @@ Validates the end-to-end behaviour of ``apm lock``:
   exits 0.
 * ``apm lock`` with a local-path dependency writes the dependency entry
   to the lockfile without deploying any files.
+* After target contraction, ``apm lock`` keeps dropped deployed bytes plus
+  provenance in the lockfile, and a later ``apm install`` prunes them safely.
 * The lockfile is written to the project root and is idempotent
   (running again with unchanged deps overwrites with the same content).
 
@@ -22,6 +24,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from apm_cli.deps.lockfile import LockFile
 
 pytestmark = pytest.mark.requires_apm_binary
 
@@ -46,18 +50,30 @@ def _run_apm(
     )
 
 
-def _write_apm_yml(project_dir: Path, deps: list[str] | None = None) -> None:
+def _write_apm_yml(
+    project_dir: Path,
+    deps: list[str] | None = None,
+    *,
+    targets: list[str] | None = None,
+) -> None:
     config: dict = {
         "name": "lock-test-project",
         "version": "1.0.0",
         "dependencies": {"apm": deps or [], "mcp": []},
     }
+    if targets is not None:
+        config["targets"] = targets
     (project_dir / "apm.yml").write_text(
         yaml.dump(config, default_flow_style=False), encoding="utf-8"
     )
 
 
-def _make_local_package(pkg_dir: Path, name: str) -> None:
+def _make_local_package(
+    pkg_dir: Path,
+    name: str,
+    *,
+    instruction_name: str = "test-skill.instructions.md",
+) -> None:
     pkg_dir.mkdir(parents=True, exist_ok=True)
     (pkg_dir / "apm.yml").write_text(
         yaml.dump(
@@ -71,9 +87,21 @@ def _make_local_package(pkg_dir: Path, name: str) -> None:
     )
     instructions = pkg_dir / ".apm" / "instructions"
     instructions.mkdir(parents=True, exist_ok=True)
-    (instructions / "test.instructions.md").write_text(
+    (instructions / instruction_name).write_text(
         "---\napplyTo: '**'\n---\n# Test\n", encoding="utf-8"
     )
+
+
+def _read_single_locked_dependency(lockfile_path: Path) -> tuple[LockFile, object]:
+    lockfile = LockFile.read(lockfile_path)
+    assert lockfile is not None, f"Expected lockfile at {lockfile_path}"
+    deps = lockfile.get_package_dependencies()
+    assert len(deps) == 1, f"Expected exactly one dependency, got {deps!r}"
+    return lockfile, deps[0]
+
+
+def _deployment_values(lockfile: LockFile) -> set[str]:
+    return {record.locator.value for record in lockfile.deployment_ledger.records.values()}
 
 
 # ---------------------------------------------------------------------------
@@ -181,3 +209,70 @@ class TestLockLocalDep:
         second = (project / "apm.lock.yaml").read_text(encoding="utf-8")
 
         assert first == second, "apm lock must be idempotent -- same lockfile on second run"
+
+
+class TestLockTargetContraction:
+    def test_lock_preserves_bytes_and_provenance_until_install_prunes(
+        self, apm_binary_path: str, tmp_path: Path
+    ) -> None:
+        """`apm lock` must keep dropped deployed bytes plus provenance, and the
+        next normal install must prune them through the existing cleanup path."""
+        project = tmp_path / "project"
+        project.mkdir()
+        pkg_dir = tmp_path / "local-rules"
+        _make_local_package(
+            pkg_dir,
+            "local-rules",
+            instruction_name="local-rules.instructions.md",
+        )
+        _write_apm_yml(project, deps=[str(pkg_dir)], targets=["claude", "copilot"])
+
+        install = _run_apm(apm_binary_path, ["install"], project)
+        assert install.returncode == 0, (
+            f"apm install exited {install.returncode}\nstdout: {install.stdout}\nstderr: {install.stderr}"
+        )
+
+        copilot_rel = ".github/instructions/local-rules.instructions.md"
+        claude_rel = ".claude/rules/local-rules.md"
+        copilot_path = project / copilot_rel
+        claude_path = project / claude_rel
+        assert copilot_path.exists(), "copilot deployment missing after initial install"
+        assert claude_path.exists(), "claude deployment missing after initial install"
+
+        initial_lock, initial_dep = _read_single_locked_dependency(project / "apm.lock.yaml")
+        assert copilot_rel in initial_dep.deployed_files
+        assert claude_rel in initial_dep.deployed_files
+        dropped_hash = initial_dep.deployed_file_hashes[copilot_rel]
+        assert copilot_rel in _deployment_values(initial_lock)
+
+        manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+        manifest["targets"] = ["claude"]
+        (project / "apm.yml").write_text(
+            yaml.dump(manifest, default_flow_style=False),
+            encoding="utf-8",
+        )
+
+        lock = _run_apm(apm_binary_path, ["lock"], project)
+        assert lock.returncode == 0, (
+            f"apm lock exited {lock.returncode}\nstdout: {lock.stdout}\nstderr: {lock.stderr}"
+        )
+        assert copilot_path.exists(), "apm lock must not prune dropped deployed files"
+        assert claude_path.exists(), "active claude deployment should remain"
+
+        locked_lock, locked_dep = _read_single_locked_dependency(project / "apm.lock.yaml")
+        assert copilot_rel in locked_dep.deployed_files
+        assert locked_dep.deployed_file_hashes[copilot_rel] == dropped_hash
+        assert copilot_rel in _deployment_values(locked_lock)
+
+        reinstall = _run_apm(apm_binary_path, ["install"], project)
+        assert reinstall.returncode == 0, (
+            f"apm install exited {reinstall.returncode}\nstdout: {reinstall.stdout}\nstderr: {reinstall.stderr}"
+        )
+        assert not copilot_path.exists(), "normal install must prune the dropped copilot file"
+        assert claude_path.exists(), "normal install must keep the still-declared claude file"
+
+        pruned_lock, pruned_dep = _read_single_locked_dependency(project / "apm.lock.yaml")
+        assert copilot_rel not in pruned_dep.deployed_files
+        assert copilot_rel not in pruned_dep.deployed_file_hashes
+        assert copilot_rel not in _deployment_values(pruned_lock)
+        assert claude_rel in pruned_dep.deployed_files

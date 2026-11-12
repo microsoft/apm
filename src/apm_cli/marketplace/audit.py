@@ -25,7 +25,7 @@ from ..utils.yaml_io import load_yaml_str
 from .client import fetch_raw
 from .errors import MarketplaceError
 from .models import MarketplaceManifest, MarketplacePlugin, MarketplaceSource
-from .resolver import parse_marketplace_ref
+from .resolver import parse_marketplace_ref, resolve_local_plugin_path
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +217,8 @@ def fetch_plugin_apm_yml(
     plugin: MarketplacePlugin,
     marketplace_source: MarketplaceSource,
     auth_resolver: object | None = None,
+    *,
+    plugin_root: str = "",
 ) -> tuple[FetchStatus, dict | None, str]:
     """Fetch and parse a plugin's ``apm.yml`` at its pinned ref.
 
@@ -224,6 +226,34 @@ def fetch_plugin_apm_yml(
     raises -- every failure is reported through the status enum so that a
     single bad plugin cannot abort a whole-marketplace audit run.
     """
+    if marketplace_source.kind == "local" and isinstance(plugin.source, str):
+        try:
+            local_plugin_path = resolve_local_plugin_path(
+                plugin.source,
+                marketplace_source,
+                plugin_root=plugin_root,
+                relative_target="apm.yml",
+            )
+        except ValueError as exc:
+            return (
+                FetchStatus.UNSUPPORTED_SOURCE,
+                None,
+                f"local plugin source cannot be resolved: {exc}",
+            )
+        if not local_plugin_path.is_file():
+            return FetchStatus.NO_MANIFEST, None, f"no apm.yml at '{local_plugin_path}'"
+        try:
+            raw = local_plugin_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return FetchStatus.NETWORK_ERROR, None, f"failed to read local apm.yml: {exc}"
+        try:
+            data = load_yaml_str(raw)
+        except yaml.YAMLError as exc:
+            return FetchStatus.PARSE_ERROR, None, f"malformed YAML: {exc}"
+        if not isinstance(data, dict):
+            return FetchStatus.PARSE_ERROR, None, "apm.yml root is not a mapping"
+        return FetchStatus.OK, data, ""
+
     coords = _resolve_plugin_github_coords(plugin, marketplace_source.host)
     if coords is None:
         return (
@@ -268,6 +298,7 @@ def check_plugin(
     marketplace_source: MarketplaceSource,
     auth_resolver: object | None = None,
     *,
+    plugin_root: str = "",
     _fetcher: Callable | None = None,
 ) -> PluginDepReport:
     """Run audit checks against a single plugin.
@@ -275,8 +306,21 @@ def check_plugin(
     ``_fetcher`` is a test seam with the same signature as
     :func:`fetch_plugin_apm_yml`.
     """
-    fetcher = _fetcher or fetch_plugin_apm_yml
-    status, data, detail = fetcher(plugin, marketplace_source, auth_resolver)
+    if _fetcher is None and marketplace_source.kind == "local":
+        status, data, detail = fetch_plugin_apm_yml(
+            plugin,
+            marketplace_source,
+            auth_resolver,
+            plugin_root=plugin_root,
+        )
+    elif _fetcher is None:
+        status, data, detail = fetch_plugin_apm_yml(
+            plugin,
+            marketplace_source,
+            auth_resolver,
+        )
+    else:
+        status, data, detail = _fetcher(plugin, marketplace_source, auth_resolver)
     if status != FetchStatus.OK or data is None:
         return PluginDepReport(
             plugin_name=plugin.name,
@@ -323,6 +367,7 @@ def run_audit(
                     plugin,
                     marketplace_source,
                     auth_resolver,
+                    plugin_root=manifest.plugin_root,
                     _fetcher=_fetcher,
                 )
             )

@@ -52,6 +52,11 @@ class InstallScope(Enum):
     USER = "user"
 
 
+def is_user_scope(scope: object) -> bool:
+    """Return whether *scope* is the canonical user installation scope."""
+    return scope is InstallScope.USER
+
+
 # ---------------------------------------------------------------------------
 # Source-root override (managed by the ``--root`` flag handlers)
 # ---------------------------------------------------------------------------
@@ -127,6 +132,14 @@ def get_deploy_root(scope: InstallScope) -> Path:
     if scope is InstallScope.USER:
         return Path.home()
     return Path.cwd()
+
+
+def get_workspace_deploy_root(workspace_root: Path) -> Path:
+    """Return the live deployment root for an APM metadata workspace."""
+    workspace_root = workspace_root.resolve()
+    if workspace_root == get_apm_dir(InstallScope.USER).resolve():
+        return get_deploy_root(InstallScope.USER).resolve()
+    return workspace_root
 
 
 def get_apm_dir(scope: InstallScope) -> Path:

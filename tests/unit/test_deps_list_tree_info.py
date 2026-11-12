@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands.deps.cli import _deps_list_source_label
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
 def _force_rich_fallback():
@@ -225,17 +226,13 @@ class TestDepsListCommand(_DepsCmdBase):
             self._make_package(tmp, "safeorg", "saferepo")
             self._make_package(tmp, "insecureorg", "insecurerepo")
 
-            secure_dep = MagicMock()
-            secure_dep.get_unique_key.return_value = "safeorg/saferepo"
-            secure_dep.get_canonical_dependency_string.return_value = "safeorg/saferepo"
-            secure_dep.is_insecure = False
-            secure_dep.resolved_by = None
+            secure_dep = LockedDependency(
+                is_insecure=False, resolved_by=None, repo_url="safeorg/saferepo"
+            )
 
-            insecure_dep = MagicMock()
-            insecure_dep.get_unique_key.return_value = "insecureorg/insecurerepo"
-            insecure_dep.get_canonical_dependency_string.return_value = "insecureorg/insecurerepo"
-            insecure_dep.is_insecure = True
-            insecure_dep.resolved_by = None
+            insecure_dep = LockedDependency(
+                is_insecure=True, resolved_by=None, repo_url="insecureorg/insecurerepo"
+            )
 
             mock_lockfile = MagicMock()
             mock_lockfile.dependencies = {
@@ -265,11 +262,9 @@ class TestDepsListCommand(_DepsCmdBase):
         with self._chdir_tmp() as tmp:
             self._make_package(tmp, "childorg", "childrepo")
 
-            insecure_dep = MagicMock()
-            insecure_dep.get_unique_key.return_value = "childorg/childrepo"
-            insecure_dep.get_canonical_dependency_string.return_value = "childorg/childrepo"
-            insecure_dep.is_insecure = True
-            insecure_dep.resolved_by = "parentorg/parentrepo"
+            insecure_dep = LockedDependency(
+                is_insecure=True, resolved_by="parentorg/parentrepo", repo_url="childorg/childrepo"
+            )
 
             mock_lockfile = MagicMock()
             mock_lockfile.dependencies = {
@@ -297,11 +292,9 @@ class TestDepsListCommand(_DepsCmdBase):
         with self._chdir_tmp() as tmp:
             self._make_package(tmp, "safeorg", "saferepo")
 
-            secure_dep = MagicMock()
-            secure_dep.get_unique_key.return_value = "safeorg/saferepo"
-            secure_dep.get_canonical_dependency_string.return_value = "safeorg/saferepo"
-            secure_dep.is_insecure = False
-            secure_dep.resolved_by = None
+            secure_dep = LockedDependency(
+                is_insecure=False, resolved_by=None, repo_url="safeorg/saferepo"
+            )
 
             mock_lockfile = MagicMock()
             mock_lockfile.dependencies = {
@@ -459,18 +452,16 @@ class TestDepsTreeCommand(_DepsCmdBase):
             self._make_package(tmp, "lkorg", "lkrepo")
             (tmp / "apm.yml").write_text("name: myproj\n")
 
-            mock_dep = MagicMock()
-            mock_dep.depth = 1
-            mock_dep.resolved_by = None
-            mock_dep.repo_url = "lkorg/lkrepo"
-            mock_dep.version = "1.2.3"
-            mock_dep.resolved_commit = None
-            mock_dep.resolved_ref = None
-            mock_dep.get_unique_key.return_value = "lkorg/lkrepo"
+            mock_dep = LockedDependency(
+                depth=1,
+                resolved_by=None,
+                repo_url="lkorg/lkrepo",
+                version="1.2.3",
+                resolved_commit=None,
+                resolved_ref=None,
+            )
 
-            mock_lockfile = MagicMock()
-            mock_lockfile.get_all_dependencies.return_value = [mock_dep]
-            mock_lockfile.get_package_dependencies.return_value = [mock_dep]
+            mock_lockfile = LockFile(dependencies={mock_dep.get_unique_key(): mock_dep})
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True

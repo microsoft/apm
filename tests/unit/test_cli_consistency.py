@@ -11,7 +11,11 @@ from apm_cli.output.script_formatters import ScriptExecutionFormatter
 
 def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):
     """Yield (path_tuple, command) for every command reachable under group."""
-    for name, cmd in group.commands.items():
+    ctx = click.Context(group)
+    for name in group.list_commands(ctx):
+        cmd = group.get_command(ctx, name)
+        if cmd is None:
+            continue
         path = (*prefix, name)
         yield path, cmd
         if isinstance(cmd, click.Group):
@@ -165,6 +169,166 @@ def test_outdated_top_level_help_description_has_no_trailing_period():
     assert result.exit_code == 0
     assert "Show outdated locked dependencies." not in result.output
     assert "Show outdated locked dependencies" in result.output
+
+
+def test_deps_update_target_help_uses_current_catalog():
+    """Regression for #2451: deps update --target must list catalog-driven targets.
+
+    The help string was previously hardcoded and stale.  After the fix it is
+    generated from target_help_fragment('update'), so targets added to the
+    catalog are automatically reflected.  This test asserts that a sampling of
+    targets that were absent in the old static string now appear.
+    """
+    result = CliRunner().invoke(cli, ["deps", "update", "--help"])
+
+    assert result.exit_code == 0
+    help_text = result.output
+    # Targets absent from the old hardcoded string
+    assert "grok-build" in help_text
+    assert "agents" in help_text
+    # Deprecation note directing users to apm update
+    assert "apm update" in help_text
+
+
+def test_compile_target_all_exclusion_lists_explicit_only_targets():
+    """Compile help lists stable explicit-only targets excluded from ``all``."""
+    result = CliRunner().invoke(cli, ["compile", "--help"])
+
+    assert result.exit_code == 0
+    help_text = result.output
+    # Assert the full exclusion sentence (normalize whitespace from help-text wrapping)
+    normalized = " ".join(help_text.split())
+    assert (
+        "excludes agent-skills, antigravity, grok-bot, hermes, experimental targets, and intellij"
+        in normalized
+    )
+
+
+def test_mcp_install_help_lists_target_global_and_trust_transitive():
+    """Regression for #2451: mcp install --help must enumerate --target, --global,
+    and --trust-transitive-mcp in its forwarded-options block.
+    """
+    result = CliRunner().invoke(cli, ["mcp", "install", "--help"])
+
+    assert result.exit_code == 0
+    help_text = result.output
+    assert "--target" in help_text
+    assert "--global" in help_text
+    assert "--trust-transitive-mcp" in help_text
+
+
+def test_mcp_install_help_forwarded_options_complete():
+    """Regression trap for FU-3 / #3588: every install option that
+    ``apm mcp install`` forwards must appear in its help with the exact flag
+    spelling and help text that ``apm install`` declares, so the two surfaces
+    cannot drift.
+    """
+    from apm_cli.commands.install import install as install_command
+
+    forwarded_flags = [
+        "--transport",
+        "--url",
+        "--env",
+        "--header",
+        "--target",
+        "--registry",
+        "--mcp-version",
+        "--global",
+        "--trust-transitive-mcp",
+        "--dev",
+        "--dry-run",
+        "--force",
+        "--verbose",
+        "--no-policy",
+    ]
+    install_ctx = click.Context(install_command, info_name="install")
+    install_records = {}
+    for param in install_command.params:
+        for flag in getattr(param, "opts", ()):
+            install_records[flag] = param.get_help_record(install_ctx)
+
+    result = CliRunner().invoke(cli, ["mcp", "install", "--help"])
+
+    assert result.exit_code == 0
+    forwarded_section = result.output.split("Forwarded install options:", 1)
+    assert len(forwarded_section) == 2, "mcp install --help lost its forwarded section"
+    # Click may wrap long help at spaces or hyphens; compare whitespace-free.
+    normalized = "".join(forwarded_section[1].split())
+    for flag in forwarded_flags:
+        assert flag in install_records, f"apm install no longer declares {flag!r}"
+        flags_text, help_text = install_records[flag]
+        assert "".join(flags_text.split()) in normalized, (
+            f"mcp install --help is missing forwarded install option {flag!r}."
+        )
+        assert "".join(help_text.split()) in normalized, (
+            f"mcp install --help text for {flag!r} drifted from apm install."
+        )
+
+
+def test_deps_update_target_help_values_catalog_sorted():
+    """FU-5 regression trap: the target values in deps update --target help must
+    appear in the same alphabetical order as the catalog generates via
+    target_help_fragment('update'), keeping CLI help and docs sort order in sync.
+    """
+    result = CliRunner().invoke(cli, ["deps", "update", "--help"])
+    assert result.exit_code == 0
+    normalized = " ".join(result.output.split())
+
+    # Locate the Values: ... fragment in the help text and check ordering within it
+    values_start = normalized.find("Values:")
+    assert values_start != -1, "Expected 'Values:' in deps update --help --target section"
+    values_segment = normalized[values_start:]
+
+    # Verify key alphabetical ordering pairs within the values fragment.
+    # These are derived from the catalog's sorted output (target_help_fragment sorts
+    # accepted_target_values alphabetically); any catalog-order regression fails here.
+    ordering_pairs = [
+        ("claude", "codex"),
+        ("codex", "copilot"),
+        ("grok-build", "intellij"),
+        ("intellij", "kiro"),
+        ("kiro", "opencode"),
+        ("opencode", "vscode"),
+        ("vscode", "windsurf"),
+    ]
+    for earlier, later in ordering_pairs:
+        assert earlier in values_segment and later in values_segment, (
+            f"deps update --help missing one of: {earlier!r}, {later!r} in Values fragment"
+        )
+        assert values_segment.index(earlier) < values_segment.index(later), (
+            f"Sort order mismatch: '{earlier}' must precede '{later}' "
+            "(catalog-driven alphabetical order)."
+        )
+
+
+def test_install_compile_and_deps_exclusion_clause_matches_catalog():
+    """Regression: 'all' exclusion clause in install, compile, and deps help must match
+    target_all_exclusion_help(), not a hand-maintained static string.
+
+    Adding a new explicit-only or mcp-only target to the catalog must automatically
+    update both help strings; this test catches any desync.
+    """
+    from apm_cli.core.target_catalog import target_all_exclusion_help
+
+    expected_clause = target_all_exclusion_help()
+
+    install_result = CliRunner().invoke(cli, ["install", "--help"])
+    assert install_result.exit_code == 0
+    assert expected_clause in " ".join(install_result.output.split())
+
+    compile_result = CliRunner().invoke(cli, ["compile", "--help"])
+    assert compile_result.exit_code == 0
+    compile_normalized = " ".join(compile_result.output.split())
+    assert expected_clause in compile_normalized, (
+        f"compile --help exclusion clause mismatch; expected: {expected_clause!r}"
+    )
+
+    deps_result = CliRunner().invoke(cli, ["deps", "update", "--help"])
+    assert deps_result.exit_code == 0
+    deps_normalized = " ".join(deps_result.output.split())
+    assert expected_clause in deps_normalized, (
+        f"deps update --help exclusion clause mismatch; expected: {expected_clause!r}"
+    )
 
 
 def test_script_run_header_uses_running_status_symbol():

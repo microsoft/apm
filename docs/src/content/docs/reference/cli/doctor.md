@@ -29,7 +29,7 @@ seconds before timing out.
 | Authentication | APM's credential resolver finds a token for `github.com`. The resolver can use environment variables, the GitHub CLI, or a git credential helper. A missing token means unauthenticated rate limits apply. | No |
 | Marketplace config | The `marketplace:` block in `apm.yml`, or legacy `marketplace.yml`, can be parsed when present. | No |
 | Marketplace authoring | Configured output formats, duplicate package names, and version alignment are reported when marketplace config is present. | No |
-| Executable trust | In an APM project, reports local allows overridden by organization policy and points to `apm policy explain`. | No |
+| Executable trust | In an APM project, reports malformed executable-trust configuration under either `executables` or the deprecated `allowExecutables` key, naming the offending block in `apm.yml`. Local allows overridden by organization policy point to `apm policy explain`. | No |
 
 The GitHub CLI is a possible credential source; `apm doctor` does not require
 it or report its installation as a separate check.

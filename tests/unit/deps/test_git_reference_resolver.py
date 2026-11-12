@@ -13,8 +13,13 @@ with no automated signal.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import threading
 import types
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,8 +27,19 @@ from git.exc import GitCommandError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
+from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 from apm_cli.deps.git_reference_resolver import GitReferenceResolver
+from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.deps.transport_selection import (
+    NoOpInsteadOfResolver,
+    ProtocolPreference,
+    TransportSelector,
+)
 from apm_cli.models.dependency.reference import DependencyReference
+from tests.utils.git_credential_sentinel import (
+    credential_helper_trap_env,
+    exercise_credential_helper,
+)
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -91,6 +107,8 @@ def _ctx(
     host._resolve_dep_auth_ctx.return_value = auth_ctx
     host._build_noninteractive_git_env.return_value = {"GIT_TERMINAL_PROMPT": "0"}
     host._build_repo_url.return_value = "https://example.com/owner/repo.git"
+    host._transport_selector = TransportSelector(NoOpInsteadOfResolver())
+    host._protocol_pref = ProtocolPreference.NONE
     host._sanitize_git_error.side_effect = lambda s: s
     host._parse_artifactory_base_url.return_value = artifactory_base
     host._should_use_artifactory_proxy.return_value = is_artifactory_proxy
@@ -101,6 +119,41 @@ def _ctx(
     ]
     host._sort_remote_refs.side_effect = lambda refs: refs
     return host
+
+
+@contextmanager
+def _loopback_http_stub(
+    responses: list[tuple[int, dict[str, str], bytes]],
+) -> Iterator[tuple[types.SimpleNamespace, str]]:
+    """Serve deterministic HTTP responses from loopback."""
+    if not responses:
+        raise ValueError("responses must not be empty")
+
+    state = types.SimpleNamespace(hits=0)
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            index = min(state.hits, len(responses) - 1)
+            status, headers, body = responses[index]
+            state.hits += 1
+            self.send_response(status)
+            for name, value in headers.items():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield state, f"http://127.0.0.1:{server.server_port}/commit/main"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +223,59 @@ class TestResolveCommitShaForRef:
         # Use a generic-host dep -- generic backend returns None for commits API
         assert resolver.resolve_commit_sha_for_ref(_dep(host="git.example.com"), "main") is None
 
+    def test_best_effort_rate_limit_falls_through_without_retry_wait(self):
+        """The optional commits-API tier must not stall the git fallback."""
+        downloader = GitHubPackageDownloader()
+        dep = _dep(host="github.com", reference="main")
+        responses = [
+            (
+                403,
+                {"X-RateLimit-Remaining": "0", "Retry-After": "60"},
+                b"rate limited",
+            )
+        ]
+
+        with (
+            _loopback_http_stub(responses) as (server, api_url),
+            patch(
+                "apm_cli.deps.host_backends.backend_for",
+                return_value=types.SimpleNamespace(
+                    build_commits_api_url=lambda dep_ref, ref: api_url
+                ),
+            ),
+            patch.object(
+                downloader.auth_resolver,
+                "resolve",
+                return_value=types.SimpleNamespace(token=None),
+            ),
+            patch("apm_cli.deps.download_strategies.time.sleep") as sleep,
+        ):
+            result = downloader._refs.resolve_commit_sha_for_ref(dep, "main")
+
+        assert result is None
+        assert server.hits == 1
+        sleep.assert_not_called()
+
+    def test_primary_http_transient_rate_limit_still_retries(self):
+        """Primary HTTP work keeps the shared transient retry policy."""
+        downloader = GitHubPackageDownloader()
+        sha = b"deadbeef" + (b"0" * 32)
+        responses = [
+            (429, {"Retry-After": "0.01"}, b"rate limited"),
+            (200, {}, sha),
+        ]
+
+        with (
+            _loopback_http_stub(responses) as (server, api_url),
+            patch("apm_cli.deps.download_strategies.time.sleep") as sleep,
+        ):
+            response = downloader._resilient_get(api_url, {}, timeout=1)
+
+        assert response.status_code == 200
+        assert response.content == sha
+        assert server.hits == 2
+        sleep.assert_called_once_with(0.01)
+
 
 # ---------------------------------------------------------------------------
 # list_remote_refs
@@ -206,6 +312,36 @@ class TestListRemoteRefs:
             with pytest.raises(RuntimeError, match=r"Failed to list remote refs"):
                 resolver.list_remote_refs(_dep(host="github.com"))
 
+    def test_public_github_connectivity_error_does_not_render_auth_context(self):
+        """A non-auth ref failure stays a network diagnostic."""
+        host = _ctx()
+        host.auth_resolver.uses_public_github_anonymous_first.return_value = True
+        host.auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: (
+            operation(
+                None,
+                {"GIT_CONFIG_KEY_0": "credential.helper"},
+            )
+        )
+        host.auth_resolver.is_public_github_auth_failure.return_value = False
+        host._build_repo_url.return_value = "https://github.com/owner/repo.git"
+        dep = _dep(host="github.com")
+        dep.host_type = "gitlab"
+        with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
+            MockGit.return_value.ls_remote.side_effect = GitCommandError(
+                "ls-remote",
+                128,
+                b"fatal: could not resolve host: github.com",
+            )
+            resolver = GitReferenceResolver(host)
+            with pytest.raises(
+                RuntimeError,
+                match="network error, not an auth failure",
+            ):
+                resolver.list_remote_refs(dep)
+
+        host.auth_resolver.build_error_context.assert_not_called()
+        assert host.auth_resolver.try_with_fallback.call_args.kwargs["host_type"] == "gitlab"
+
     def test_ado_basic_with_token_uses_bearer_fallback(self):
         host = _ctx(token="ado_pat", auth_scheme="basic")
         # Wire bearer fallback to be invoked: primary fails with auth signal,
@@ -226,13 +362,109 @@ class TestListRemoteRefs:
         assert len(refs) == 2
         host.auth_resolver.execute_with_bearer_fallback.assert_called_once()
 
+    def test_tokenless_ado_ref_resolution_never_invokes_native_helper(
+        self,
+        tmp_path,
+    ) -> None:
+        """The ADO ref path uses AuthResolver's tokenless helper fence."""
+        base_env, marker = credential_helper_trap_env(tmp_path)
+        auth_resolver = AuthResolver()
+        context = AuthContext(
+            token=None,
+            source="none",
+            token_type="unknown",
+            host_info=HostInfo(
+                host="dev.azure.com",
+                kind="ado",
+                has_public_repos=False,
+                api_base="https://dev.azure.com",
+            ),
+            git_env={},
+        )
+        host = _ctx(token=None)
+        host.auth_resolver = auth_resolver
+        host.git_env = base_env
+        host._resolve_dep_auth_ctx.return_value = context
+        host._build_repo_url.return_value = "https://dev.azure.com/org/project/_git/repo"
+
+        def run_remote(_url: str, *, env: dict[str, str], **_kwargs):
+            exercise_credential_helper(
+                env,
+                host="dev.azure.com",
+                path="org/project/_git/repo",
+            )
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=self.SAMPLE,
+                stderr="",
+            )
+
+        with patch("apm_cli.utils.git_env.git_remote_refs", side_effect=run_remote):
+            refs = GitReferenceResolver(host).list_remote_refs(
+                _dep(
+                    host="dev.azure.com",
+                    repo_url="org/project/_git/repo",
+                    ado=True,
+                )
+            )
+
+        assert len(refs) == 2
+        assert not marker.exists()
+
     def test_unauthenticated_uses_noninteractive_env(self):
         host = _ctx(token=None)
+        dep = _dep(host="github.com")
         with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
             MockGit.return_value.ls_remote.return_value = self.SAMPLE
             resolver = GitReferenceResolver(host)
-            resolver.list_remote_refs(_dep(host="github.com"))
+            resolver.list_remote_refs(dep)
         host._build_noninteractive_git_env.assert_called_once()
+        host._build_repo_url.assert_any_call(
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token="",
+            auth_scheme="basic",
+        )
+        host._build_repo_url.assert_any_call(
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token="",
+        )
+
+    def test_ssh_preference_selects_ssh_without_token_auth(self):
+        host = _ctx(token="ghp_xxx")
+        host._protocol_pref = ProtocolPreference.SSH
+        host._build_noninteractive_git_env.return_value = {
+            "GIT_TOKEN": "ghp_xxx",
+            "GIT_HTTP_EXTRAHEADER": "Authorization: ******",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: ******",
+            "GIT_ASKPASS": "echo",
+        }
+        dep = _dep(host="github.com")
+        with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
+            MockGit.return_value.ls_remote.return_value = self.SAMPLE
+            resolver = GitReferenceResolver(host)
+            resolver.list_remote_refs(dep)
+
+        host._build_repo_url.assert_any_call(
+            "owner/repo",
+            use_ssh=True,
+            dep_ref=dep,
+            token=None,
+            auth_scheme="basic",
+        )
+        host._build_noninteractive_git_env.assert_called_once()
+        host.auth_resolver.execute_with_bearer_fallback.assert_not_called()
+        git_env = MockGit.return_value.ls_remote.call_args.kwargs["env"]
+        assert "GIT_TOKEN" not in git_env
+        assert "GIT_HTTP_EXTRAHEADER" not in git_env
+        assert "GIT_CONFIG_COUNT" not in git_env
+        assert "GIT_ASKPASS" not in git_env
 
     def test_error_message_sanitized(self):
         host = _ctx(token="ghp_xxx")

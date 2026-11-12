@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import _socket
 import inspect
 import os
 import subprocess
@@ -10,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.isolated_apm_environment import (
+    _NETWORK_GUARD,
+    IsolatedApmEnvironment,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SUBPROCESS_TIMEOUT_SECONDS = 10.0
@@ -24,6 +28,10 @@ _ROOT_ATTRIBUTES = (
     "work_root",
     "temp_root",
 )
+
+
+def test_generated_network_guard_is_syntactically_valid() -> None:
+    compile(_NETWORK_GUARD, "sitecustomize.py", "exec")
 
 
 def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
@@ -170,6 +178,51 @@ def test_create_rejects_reused_root(tmp_path: Path) -> None:
         IsolatedApmEnvironment.create(empty_root, base_env=os.environ)
 
 
+def test_native_git_lookup_cannot_use_system_credential_helper(tmp_path: Path) -> None:
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "scenario",
+        base_env=os.environ,
+    )
+    credentials = tmp_path / "ambient-credentials"
+    credentials.write_text(
+        "https://ambient-user:ambient-password@example.invalid\n",
+        encoding="ascii",
+    )
+    system_config = tmp_path / "system-gitconfig"
+    subprocess.run(
+        (
+            "git",
+            "config",
+            "--file",
+            str(system_config),
+            "credential.helper",
+            f"store --file={credentials}",
+        ),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+    environment = isolated.subprocess_env()
+    environment.pop("GIT_CONFIG_GLOBAL")
+    environment.pop("GIT_CONFIG_NOSYSTEM")
+    environment["GIT_CONFIG_SYSTEM"] = str(system_config)
+
+    result = subprocess.run(
+        ("git", "credential", "fill"),
+        input="protocol=https\nhost=example.invalid\n\n",
+        cwd=isolated.work_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
 def test_environment_does_not_mutate_parent_process(tmp_path: Path) -> None:
     fresh_process_root = tmp_path / "fresh-process"
     script = """\
@@ -242,7 +295,9 @@ if Path.cwd() != parent_cwd:
 
 def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
     remote_control_names = (
+        "ADO_HOST",
         "APM_ALLOW_PROTOCOL_FALLBACK",
+        "APM_ADO_HOSTS",
         "APM_GIT_CREDENTIAL_TIMEOUT",
         "APM_GITLAB_HOSTS",
         "APM_GIT_PROTOCOL",
@@ -276,6 +331,7 @@ def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
         "HOME",
         "USERPROFILE",
         "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
         "XDG_CACHE_HOME",
         "LOCALAPPDATA",
         "APM_HOME",
@@ -416,6 +472,7 @@ def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
         "HOME": str(isolated.home),
         "USERPROFILE": str(isolated.home),
         "XDG_CONFIG_HOME": str(isolated.root / "xdg-config"),
+        "XDG_DATA_HOME": str(isolated.root / "xdg-data"),
         "XDG_CACHE_HOME": str(isolated.root / "xdg-cache"),
         "LOCALAPPDATA": str(isolated.root / "local-app-data"),
         "APM_HOME": str(isolated.config_root),
@@ -691,7 +748,12 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         )
 
         assert result.returncode != 0
-        assert result.stderr.count("IP network disabled by test environment") == 1
+        if ".sendmsg(" in script and not hasattr(_socket.socket, "sendmsg"):
+            assert "AttributeError:" in result.stderr
+            assert "has no attribute 'sendmsg'" in result.stderr
+            assert "IP network disabled by test environment" not in result.stderr
+        else:
+            assert result.stderr.count("IP network disabled by test environment") == 1
 
 
 @pytest.mark.parametrize(

@@ -71,6 +71,7 @@ def _make_ctx(
     ctx.project_root.mkdir(parents=True, exist_ok=True)
     ctx.scope = scope
     ctx.target_override = target_override
+    ctx.target_decision = None
     ctx.apm_package = MagicMock()
     ctx.apm_package.target = None
     ctx.logger = MagicMock()
@@ -78,6 +79,24 @@ def _make_ctx(
     ctx.integrators = {}
     ctx.legacy_skill_paths = False
     return ctx
+
+
+def test_grok_cloud_disabled_flag_emits_enable_hint(
+    tmp_path: Path,
+    inject_config: Any,
+) -> None:
+    from apm_cli.install.phases.targets import _check_grok_cloud_flag_gate
+
+    inject_config({"experimental": {"grok_cloud": False}})
+    ctx = _make_ctx(tmp_path, target_override="grok-cloud")
+
+    _check_grok_cloud_flag_gate("grok-cloud", [], ctx)
+
+    ctx.logger.progress.assert_called_once_with(
+        "The 'grok-cloud' target requires an experimental flag. "
+        "Run: apm experimental enable grok-cloud",
+        symbol="info",
+    )
 
 
 def test_plural_targets_without_singular_does_not_keep_legacy_copilot_fallback(
@@ -105,19 +124,22 @@ def test_plural_targets_without_singular_does_not_keep_legacy_copilot_fallback(
 
 
 def test_run_conflicting_target_fields_exits_with_usage_code(tmp_path: Path) -> None:
-    """target + targets conflicts must stay on the targets-phase error path."""
+    """target + targets conflicts must stay on the targets-phase error path.
+
+    APMPackage.from_apm_yml raises ConflictingTargetsError at parse time for
+    manifests with both target: and targets:. Use SimpleNamespace to bypass that
+    and exercise the run() guard for packages entering via other construction routes.
+    """
+    from types import SimpleNamespace
+
     from apm_cli.install.phases.targets import run
-    from apm_cli.models.apm_package import APMPackage
 
     project = tmp_path / "project"
     project.mkdir()
-    (project / "apm.yml").write_text(
-        "name: demo\nversion: 0.1.0\ntarget: claude\ntargets:\n  - copilot\n",
-        encoding="utf-8",
-    )
+
     ctx = _make_ctx(tmp_path)
     ctx.project_root = project
-    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+    ctx.apm_package = SimpleNamespace(target="claude", targets=["copilot"])
 
     with pytest.raises(SystemExit) as exc_info:
         run(ctx)

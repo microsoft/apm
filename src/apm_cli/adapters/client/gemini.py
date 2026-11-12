@@ -31,7 +31,7 @@ import logging
 import os
 from pathlib import Path
 
-from ...core.docker_args import DockerArgsProcessor
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success
 from .copilot import CopilotClientAdapter
 
@@ -103,8 +103,11 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 "Creating %s for %s user configuration", config_path.parent, self.target_name
             )
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
+        atomic_write_text(
+            config_path,
+            json.dumps(current_config, indent=2),
+            new_file_mode=0o600,
+        )
         os.chmod(config_path, 0o600)
 
     def get_current_config(self):
@@ -149,6 +152,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args: dict = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(
@@ -235,12 +240,11 @@ class GeminiClientAdapter(CopilotClientAdapter):
             config["args"] = ["-y", package_name] + processed_rt + processed_pkg  # noqa: RUF005
         elif registry_name == "docker":
             config["command"] = "docker"
-            if processed_rt:
-                config["args"] = self._inject_env_vars_into_docker_args(processed_rt, resolved_env)
-            else:
-                config["args"] = DockerArgsProcessor.process_docker_args(
-                    ["run", "-i", "--rm", package_name], resolved_env
-                )
+            runtime_args = self._ensure_docker_run_args(processed_rt)
+            docker_args = self._inject_env_vars_into_docker_args(
+                self._ensure_docker_image_arg(runtime_args, package_name), resolved_env
+            )
+            config["args"] = docker_args + processed_pkg
         elif registry_name == "pypi":
             config["command"] = runtime_hint or "uvx"
             config["args"] = [package_name] + processed_rt + processed_pkg  # noqa: RUF005
@@ -293,12 +297,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry", symbol="error")
                 return False
 
-            if server_name:
-                config_key = server_name
-            elif "/" in server_url:
-                config_key = server_url.split("/")[-1]
-            else:
-                config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})

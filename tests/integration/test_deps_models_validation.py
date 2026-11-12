@@ -27,6 +27,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from apm_cli.deps.lockfile import LockedDependency
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -892,6 +894,49 @@ class TestTrySparseCheckout:
             ok = dl._try_sparse_checkout(dep, tmp_path / "clone", "skills/brand", "main")
         assert ok is False
 
+    def test_failure_debug_omits_git_executable_path(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        dl = _make_downloader()
+        dep = _make_dep_ref(
+            repo_url="https://git.example.com/owner/repo",
+            host="git.example.com",
+            reference="main",
+        )
+        dl.auth_resolver.uses_public_github_anonymous_first.return_value = False
+        dl.auth_resolver.resolve_for_remote.return_value = MagicMock()
+        dl.auth_resolver.git_env_for_remote.return_value = {}
+        failed = MagicMock(returncode=1, stderr="fatal: not found")
+        sensitive_path = "/credentials/secret/git"
+
+        with (
+            patch.dict(os.environ, {"APM_DEBUG": "1"}),
+            patch.object(dl, "_resolve_dep_auth_ctx", return_value=None),
+            patch.object(
+                dl,
+                "_build_repo_url",
+                return_value="https://git.example.com/owner/repo",
+            ),
+            patch(
+                "apm_cli.utils.git_env.init_git_remote_worktree",
+                return_value={},
+            ),
+            patch("apm_cli.deps.github_downloader.apply_sparse_cone"),
+            patch(
+                "apm_cli.deps.github_downloader.get_git_executable",
+                return_value=sensitive_path,
+            ),
+            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=failed),
+        ):
+            ok = dl._try_sparse_checkout(dep, tmp_path / "clone", "skills/brand", "main")
+
+        assert ok is False
+        stderr = capsys.readouterr().err
+        assert sensitive_path not in stderr
+        assert "Sparse-checkout fetch failed: fatal: not found" in stderr
+
     def test_exception_returns_false(self, tmp_path: Path) -> None:
         dl = _make_downloader()
         dep = _make_dep_ref(repo_url="owner/repo")
@@ -1098,24 +1143,33 @@ class TestRunInstallPipelineEarlyExits:
         pkg.get_mcp_dependencies.return_value = []
         return pkg
 
-    def test_returns_empty_when_no_deps_no_local_primitives(self, tmp_path: Path) -> None:
+    def test_returns_empty_when_no_deps_no_local_primitives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.pipeline import run_install_pipeline
+        from apm_cli.models.apm_package import APMPackage
         from apm_cli.models.results import InstallResult
 
-        pkg = self._make_minimal_apm_package()
-
-        with (
-            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
-            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path / ".apm"),
-            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
-            patch(
-                "apm_cli.install.phases.local_content._project_has_root_primitives",
-                return_value=False,
-            ),
-        ):
-            result = run_install_pipeline(pkg)
+        monkeypatch.chdir(tmp_path)
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text("name: empty-project\nversion: 1.0.0\n", encoding="utf-8")
+        pkg = APMPackage.from_apm_yml(manifest)
+        result = run_install_pipeline(pkg)
 
         assert isinstance(result, InstallResult)
+        assert result.exit_code == 0
+        assert result.installed_count == 0
+        assert result.package_types == {}
+        assert not (tmp_path / "apm.lock.yaml").exists()
+        locked = run_install_pipeline(pkg, lockfile_only=True)
+        assert locked.exit_code == 0
+        assert locked.installed_count == 0
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock is not None
+        assert lock.dependencies == {}
+        assert lock.mcp_servers == []
+        assert not (tmp_path / ".apm").exists()
 
     def test_plan_callback_cancel_returns_empty(self, tmp_path: Path) -> None:
         """plan_callback returning False must abort cleanly."""
@@ -1154,6 +1208,7 @@ class TestRunInstallPipelineEarlyExits:
                 pkg,
                 update_refs=False,
                 plan_callback=_cancel_callback,
+                target="copilot",
             )
         assert isinstance(result, InstallResult)
 
@@ -1440,9 +1495,7 @@ class TestDiffScratchAgainstProject:
             p.parent.mkdir(parents=True)
             p.write_bytes(content)
 
-        mock_lf = MagicMock()
-        mock_lf.dependencies = {}
-        mock_lf.local_deployed_files = []
+        mock_lf = self._make_lockfile({".apm/instructions/rules.instructions.md": "pkg"})
         findings = diff_scratch_against_project(scratch, project, mock_lf, targets=[])
         assert findings == []
 
@@ -1722,15 +1775,12 @@ class TestDriftDataClasses:
 class TestMaterializeInstallPath:
     """_materialize_install_path returns correct paths and raises on misses."""
 
-    def test_not_implemented_for_non_cache_only(self, tmp_path: Path) -> None:
-        from apm_cli.install.drift import _materialize_install_path
+    def test_non_cache_only_requires_downloader(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import CacheMissError, _materialize_install_path
 
-        lock_dep = MagicMock()
-        lock_dep.source = "github.com"
-        lock_dep.local_path = None
-        lock_dep.resolved_commit = "abc123"
+        lock_dep = LockedDependency(repo_url="owner/repo", resolved_commit="abc123")
 
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(CacheMissError, match="no downloader"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=False)
 
     def test_local_dep_returns_project_subpath(self, tmp_path: Path) -> None:
@@ -1741,12 +1791,9 @@ class TestMaterializeInstallPath:
         local_pkg.mkdir(parents=True)
         local_pkg_rel = "packages/my-tool"
 
-        lock_dep = MagicMock()
-        lock_dep.source = "local"
-        lock_dep.local_path = local_pkg_rel
-        lock_dep.repo_url = "_local/my-tool"
-        lock_dep.resolved_commit = None
-        lock_dep.resolved_by = None
+        lock_dep = LockedDependency(
+            repo_url="_local/my-tool", source="local", local_path=local_pkg_rel
+        )
 
         path = _materialize_install_path(
             lock_dep, project_root, tmp_path / "apm_modules", cache_only=True
@@ -1756,9 +1803,7 @@ class TestMaterializeInstallPath:
     def test_local_dep_missing_path_raises(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import CacheMissError, _materialize_install_path
 
-        lock_dep = MagicMock()
-        lock_dep.source = "local"
-        lock_dep.local_path = None
+        lock_dep = LockedDependency(repo_url="_local/my-tool", source="local")
 
         with pytest.raises(CacheMissError, match="no local_path"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=True)
@@ -1766,10 +1811,9 @@ class TestMaterializeInstallPath:
     def test_local_dep_nonexistent_dir_raises(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import CacheMissError, _materialize_install_path
 
-        lock_dep = MagicMock()
-        lock_dep.source = "local"
-        lock_dep.local_path = "nonexistent/path"
-        lock_dep.resolved_by = None
+        lock_dep = LockedDependency(
+            repo_url="_local/my-tool", source="local", local_path="nonexistent/path"
+        )
 
         with pytest.raises(CacheMissError, match="local source missing"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=True)
@@ -1777,14 +1821,7 @@ class TestMaterializeInstallPath:
     def test_remote_dep_no_resolved_commit_raises(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import CacheMissError, _materialize_install_path
 
-        lock_dep = MagicMock()
-        lock_dep.source = "github.com"
-        lock_dep.local_path = None
-        lock_dep.resolved_commit = None
-        lock_dep.repo_url = "owner/repo"
-
-        dep_ref = _make_dep_ref(repo_url="owner/repo")
-        lock_dep.to_dependency_ref.return_value = dep_ref
+        lock_dep = LockedDependency(repo_url="owner/repo")
 
         with pytest.raises(CacheMissError, match="no resolved_commit"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
@@ -1795,14 +1832,7 @@ class TestMaterializeInstallPath:
         apm_modules = tmp_path / "apm_modules"
         apm_modules.mkdir()
 
-        lock_dep = MagicMock()
-        lock_dep.source = "github.com"
-        lock_dep.local_path = None
-        lock_dep.resolved_commit = "abc123"
-        lock_dep.repo_url = "owner/repo"
-
-        dep_ref = _make_dep_ref(repo_url="owner/repo")
-        lock_dep.to_dependency_ref.return_value = dep_ref
+        lock_dep = LockedDependency(repo_url="owner/repo", resolved_commit="abc123")
 
         with pytest.raises(CacheMissError, match="cache miss"):
             _materialize_install_path(lock_dep, tmp_path, apm_modules, cache_only=True)

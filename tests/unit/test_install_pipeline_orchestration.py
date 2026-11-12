@@ -73,6 +73,7 @@ class TestRunInstallPipelineShortCircuit:
         pkg.get_apm_dependencies.return_value = deps or []
         pkg.get_dev_apm_dependencies.return_value = dev_deps or []
         pkg.get_mcp_dependencies.return_value = []
+        pkg.replace_rules = None
         return pkg
 
     def test_no_deps_no_local_returns_install_result(self, tmp_path):
@@ -137,7 +138,7 @@ class TestRunInstallPipelineShortCircuit:
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)
             mock_ctx.tui.start_phase = MagicMock()
 
-            result = run_install_pipeline(pkg, logger=logger)
+            result = run_install_pipeline(pkg, logger=logger, target="claude")
 
         assert isinstance(result, InstallResult)
         logger.nothing_to_install.assert_called_once()
@@ -183,7 +184,7 @@ class TestRunInstallPipelineDirectMcpDeps:
             patch("apm_cli.install.pipeline._run_phase", side_effect=_phase_runner),
         ):
             with pytest.raises(RuntimeError, match="stop after policy gate"):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
         assert seen_direct_mcp_deps == [prod_mcp, dev_mcp]
 
@@ -236,7 +237,7 @@ class TestRunInstallPipelinePlanCallback:
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)
             mock_ctx.tui.start_phase = MagicMock()
 
-            result = run_install_pipeline(pkg, plan_callback=plan_callback)
+            result = run_install_pipeline(pkg, plan_callback=plan_callback, target="claude")
 
         assert isinstance(result, InstallResult)
         plan_callback.assert_called_once()
@@ -307,7 +308,7 @@ class TestRunInstallPipelinePlanCallback:
             import contextlib as _cl
 
             with _cl.suppress(Exception):  # sub-phases may raise; callback should still fire
-                run_install_pipeline(pkg, plan_callback=plan_callback)
+                run_install_pipeline(pkg, plan_callback=plan_callback, target="claude")
 
         plan_callback.assert_called_once()
 
@@ -356,7 +357,7 @@ class TestRunInstallPipelineExceptionHandling:
             mock_ctx.tui.start_phase = MagicMock()
 
             with pytest.raises((RuntimeError, ValueError)):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
     def test_policy_violation_propagates(self, tmp_path):
         from apm_cli.install.errors import PolicyViolationError
@@ -389,7 +390,7 @@ class TestRunInstallPipelineExceptionHandling:
             mock_ctx.tui.start_phase = MagicMock()
 
             with pytest.raises(PolicyViolationError):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
 
 # ---------------------------------------------------------------------------

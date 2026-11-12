@@ -30,10 +30,17 @@ import sys
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..utils.path_security import ensure_path_within, validate_path_segments
+from ..utils.git_env import (
+    get_git_executable,
+    git_no_hooks_args,
+    git_no_templates_args,
+    redact_git_diagnostic,
+)
+from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -49,16 +56,18 @@ class GitFileTransportSecurityError(ValueError):
     """Security validation failure before invoking git transport."""
 
 
+@dataclass(frozen=True)
+class GitFileFetchResult:
+    """A sparse-file payload and the exact commit Git fetched for it."""
+
+    content: bytes
+    resolved_commit: str
+
+
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
-        print(f"[DEBUG] {message}", file=sys.stderr)
-
-
-def _redact_git_stderr(stderr: str) -> str:
-    """Redact auth-bearing HTTPS URL credentials from git stderr."""
-    cleaned = stderr.strip()
-    return re.sub(r"(https?://)[^/@\s]+@", r"\1***@", cleaned)
+        print(f"[DEBUG] {redact_git_diagnostic(message)}", file=sys.stderr)
 
 
 class GitSparseFileTransport:
@@ -116,6 +125,22 @@ class GitSparseFileTransport:
 
     def fetch_file(self, file_path: str) -> bytes:
         """Fetch one file from the transport's repository/ref."""
+        result = self._fetch_file(file_path, include_commit=False)
+        if not isinstance(result, bytes):
+            raise GitFileTransportError(
+                "git file fetch returned commit metadata for a bytes request"
+            )
+        return result
+
+    def fetch_file_with_commit(self, file_path: str) -> GitFileFetchResult:
+        """Fetch one file and return the exact commit selected by ``FETCH_HEAD``."""
+        result = self._fetch_file(file_path, include_commit=True)
+        if not isinstance(result, GitFileFetchResult):
+            raise GitFileTransportError("git file fetch omitted commit metadata")
+        return result
+
+    def _fetch_file(self, file_path: str, *, include_commit: bool) -> bytes | GitFileFetchResult:
+        """Materialize and read one containment-checked sparse file."""
         validate_path_segments(file_path, context="path")
         with self._state:
             if self._closed:
@@ -125,10 +150,11 @@ class GitSparseFileTransport:
         try:
             with self._lock:
                 self._ensure_checkout(file_path)
+                self._materialize_links(file_path)
                 target = self._work_dir / file_path
                 ensure_path_within(target, self._work_dir)
                 if not target.exists():
-                    raise RuntimeError(
+                    raise GitFileTransportError(
                         f"File '{file_path}' not found after git sparse checkout of "
                         f"{self._dep_ref.host}/{self._dep_ref.repo_url}@{self._ref}. "
                         "Verify the path exists at that ref "
@@ -138,7 +164,18 @@ class GitSparseFileTransport:
                 # The lock serializes sparse-checkout expansion and the
                 # containment/read pair so another checkout cannot race the
                 # target between ensure_path_within() and read_bytes().
-                return target.read_bytes()
+                content = target.read_bytes()
+                if not include_commit:
+                    return content
+                result = self._run(
+                    [get_git_executable(), "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
+                )
+                resolved_commit = result.stdout.strip()
+                if not re.fullmatch(r"[0-9a-f]{40}", resolved_commit, flags=re.IGNORECASE):
+                    raise GitFileTransportError(
+                        "git file fetch did not resolve FETCH_HEAD to a full commit SHA"
+                    )
+                return GitFileFetchResult(content=content, resolved_commit=resolved_commit.lower())
         finally:
             with self._state:
                 self._active_fetches -= 1
@@ -153,9 +190,21 @@ class GitSparseFileTransport:
                 self._dep_ref.repo_url,
                 dep_ref=self._dep_ref,
             )
-            self._run(["git", "init"])
-            self._run(["git", "remote", "add", "origin", self._auth_url])
-            self._run(["git", "sparse-checkout", "init", "--no-cone"])
+            self._run([get_git_executable(), "init", *git_no_templates_args()])
+            from ..utils.git_env import git_network_env
+
+            self._git_env = git_network_env(
+                self._auth_url,
+                self._git_env,
+                worktree=self._work_dir,
+            )
+            self._run([get_git_executable(), "remote", "add", "origin", self._auth_url])
+            self._git_env = git_network_env(
+                self._auth_url,
+                self._git_env,
+                worktree=self._work_dir,
+            )
+            self._run([get_git_executable(), "sparse-checkout", "init", "--no-cone"])
             with self._state:
                 requested_paths = tuple(self._requested_paths)
             self._set_sparse_paths(*requested_paths)
@@ -164,27 +213,66 @@ class GitSparseFileTransport:
                 f"host={self._dep_ref.host} repo={self._dep_ref.repo_url} "
                 f"ref={self._ref} paths={len(self._sparse_paths)}"
             )
-            self._run(["git", "fetch", "--filter=blob:none", "--depth=1", "origin", self._ref])
-            self._run(["git", "checkout", "FETCH_HEAD"])
+            self._run(
+                [
+                    get_git_executable(),
+                    "fetch",
+                    "--filter=blob:none",
+                    "--depth=1",
+                    "origin",
+                    self._ref,
+                ]
+            )
+            self._run([get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"])
             self._initialized = True
             return
 
         if file_path not in self._sparse_paths:
             self._set_sparse_paths(file_path)
-            self._run(["git", "checkout", "FETCH_HEAD"])
+            self._run([get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"])
+
+    def _materialize_links(self, file_path: str) -> None:
+        """Replace a tracked link at *file_path* with its Git-object content (#3457)."""
+        from ..utils.git_env import git_subprocess_env
+        from ..utils.git_sparse import materialize_tracked_symlinks
+
+        try:
+            materialize_tracked_symlinks(
+                get_git_executable(),
+                self._work_dir,
+                [file_path],
+                env=git_subprocess_env(self._git_env),
+                timeout=self._timeout,
+                extra_git_args=list(git_no_hooks_args()),
+            )
+        except (PathTraversalError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise GitFileTransportError(
+                f"git file fetch could not resolve '{file_path}': {exc}"
+            ) from exc
 
     def _set_sparse_paths(self, *file_paths: str) -> None:
         """Apply the accumulated file-level sparse paths."""
         self._sparse_paths.update(file_paths)
-        self._run(["git", "sparse-checkout", "set", "--no-cone", "--", *sorted(self._sparse_paths)])
+        self._run(
+            [
+                get_git_executable(),
+                "sparse-checkout",
+                "set",
+                "--no-cone",
+                "--",
+                *sorted(self._sparse_paths),
+            ]
+        )
 
-    def _run(self, cmd: list[str]) -> None:
+    def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
         """Run one git command and raise a sanitized error on failure."""
+        from ..utils.git_env import git_subprocess_env, redact_git_diagnostic
+
         try:
             result = subprocess.run(
                 cmd,
                 cwd=str(self._work_dir),
-                env=self._git_env,
+                env=git_subprocess_env(self._git_env),
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
@@ -192,10 +280,11 @@ class GitSparseFileTransport:
         except subprocess.TimeoutExpired as exc:
             raise GitFileTransportError(f"git file fetch timed out: {' '.join(cmd[:3])}") from exc
         if result.returncode != 0:
-            safe_stderr = _redact_git_stderr(result.stderr)
+            safe_stderr = redact_git_diagnostic(result.stderr.strip())
             raise GitFileTransportError(
                 f"git file fetch failed: {' '.join(cmd[:3])}: {safe_stderr}"
             )
+        return result
 
 
 def fetch_file_via_git_sparse(

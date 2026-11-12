@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import click
-import yaml
 
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
@@ -60,6 +59,8 @@ def _has_marketplace_block(apm_path: Path) -> bool:
     """Return True when *apm_path* has a populated ``marketplace:`` block."""
     if not apm_path.exists():
         return False
+    import yaml
+
     try:
         # Bounded loader so a hostile apm.yml cannot wedge this probe with a
         # merge/alias expansion bomb (fails closed as yaml.YAMLError).
@@ -79,11 +80,11 @@ def _parse_tags(raw: str | None) -> list[str] | None:
     return parts if parts else None
 
 
-def _verify_source(logger: CommandLogger, source: str) -> None:
+def _verify_source(logger: CommandLogger, source: str, *, host: str | None = None) -> None:
     """Run ``git ls-remote`` against *source* to verify reachability."""
     from ....marketplace.ref_resolver import RefResolver
 
-    resolver = RefResolver()
+    resolver = RefResolver(host=host)
     try:
         resolver.list_remote_refs(source)
     except GitLsRemoteError as exc:
@@ -105,6 +106,8 @@ def _resolve_ref(
     ref: str | None,
     version: str | None,
     no_verify: bool,
+    *,
+    host: str | None = None,
 ) -> str | None:
     """Resolve *ref* to a concrete SHA when it is mutable.
 
@@ -135,7 +138,7 @@ def _resolve_ref(
                 "'HEAD' is a mutable ref. Resolving to current SHA for safety.",
                 symbol="warning",
             )
-        resolver = RefResolver()
+        resolver = RefResolver(host=host)
         try:
             sha = resolver.resolve_ref_sha(source, "HEAD")
         except GitLsRemoteError as exc:

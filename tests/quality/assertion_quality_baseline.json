@@ -2,7 +2,6 @@
   "rules": {
     "AQ001_constant_assertion": {
       "tests/integration/test_integrators_end_to_end.py": 1,
-      "tests/integration/test_integrators_phase3.py": 1,
       "tests/red_team/http/test_header_injection.py": 1,
       "tests/unit/compilation/test_compile_cli_phase3.py": 1,
       "tests/unit/compilation/test_compile_cli_surface.py": 1

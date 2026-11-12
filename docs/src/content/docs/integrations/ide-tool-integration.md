@@ -1,6 +1,6 @@
 ---
 title: "IDE & tool integration"
-description: "How APM deploys primitives into VS Code, Claude Code, Cursor, Codex, Gemini, Antigravity, OpenCode, Windsurf, JetBrains and other AI coding clients."
+description: "How APM deploys primitives into VS Code, Claude Code, Cursor, Codex, Gemini, Grok Build, Antigravity, OpenCode, Windsurf, JetBrains and other AI coding clients."
 sidebar:
   order: 3
 ---
@@ -17,13 +17,14 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 |----------------------|--------------------------------------|----------------------------------------|
 | VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
 | Claude Code          | `.claude/`                           | Skills, agents, commands, MCP          |
+| Grok Build           | `.grok/`                             | Rules, agents, commands, skills        |
 | Cursor               | `.cursor/`                           | Rules, commands, MCP                   |
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
-| OpenCode             | `.opencode/`                         | Skills, MCP                            |
+| OpenCode             | `.opencode/`                         | Agents, commands, skills, compiled instructions, MCP |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
-| Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
+| Kiro                 | `.kiro/`                             | Steering + Agents + Skills + Hooks + MCP |
 | JetBrains Copilot    | user-scope config dir (global)       | MCP (user-scope path, `${env:VAR}` substitution); file primitives use the Copilot profile |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
@@ -67,6 +68,11 @@ mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 
 Not every target supports every primitive type. When a primitive can't land on a target, APM emits a warning at install time. Skim [Targets matrix](../../reference/targets-matrix/) to set expectations before adding a primitive.
 
+When APM rewrites a Claude project hook script path, it references
+`CLAUDE_PROJECT_DIR` at runtime rather than an absolute checkout path. The
+generated path remains portable across clones and works when Claude starts a
+hook outside the project directory.
+
 > **Deduplication**: When `.github/instructions/` already contains `.instructions.md` files (deployed by `apm install --target copilot`), `apm compile --target copilot` omits `AGENTS.md` entirely when its only content would be the duplicated instructions section. When `.claude/rules/` already contains `.md` files (deployed by `apm install --target claude`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` for the same reason. The context file is still generated when it carries non-instruction content such as a constitution. See [Copilot deduplication](../../producer/compile/#copilot-deduplication) for details.
 
 ## Common workflows
@@ -100,7 +106,10 @@ apm install --target agent-skills
 
 ## MCP server integration
 
-MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies.mcp:`) are wired into each target's MCP config on install:
+MCP servers declared by the root project under `dependencies.mcp:` or
+`devDependencies.mcp:` are wired into each target's MCP config on install.
+Dependency packages contribute only `dependencies.mcp`; their
+`devDependencies.mcp` entries stay in the package author's environment.
 
 - `.mcp.json` at the repo root when `.claude/` exists (Claude Code project scope)
 - `.cursor/mcp.json` (Cursor)
@@ -113,8 +122,8 @@ MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies
 - OS-specific `github-copilot/intellij/mcp.json` (JetBrains Copilot -- uses
   `"servers"` key, user-scope global path):
   - `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows)
-  - `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS)
-  - `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring `XDG_DATA_HOME`)
+  - `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS and Linux;
+    defaults to `~/.config/github-copilot/intellij/mcp.json`)
 
 For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../../consumer/install-mcp-servers/) and [`apm mcp`](../../reference/cli/mcp/).
 
@@ -123,13 +132,21 @@ For server installation patterns, registry resolution, and trust model, see [MCP
 [Kiro](https://kiro.dev) reads project configuration from `.kiro/`. APM maps
 instructions to `.kiro/steering/` and converts `applyTo:` scoping into Kiro
 steering frontmatter (`inclusion: fileMatch`); unscoped instructions become
-`inclusion: always`. Skills are copied verbatim to `.kiro/skills/`, hooks
-become one JSON file per hook action in `.kiro/hooks/`, and MCP servers are
-written to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for
-`--global`.
+`inclusion: always`. Agents are deployed to `.kiro/agents/<relative-stem>.md`
+for Kiro IDE/CLI v3; identity derives from the relative path. Only
+`description`, `model`, and `tools` are emitted -- `name` and unknown
+frontmatter fields are stripped. Tools are permission-bearing: APM fails
+closed if any value outside the Kiro-approved capability set is present
+(`read`, `write`, `shell`, `web`, `subagent`, `knowledge`, `context`,
+`todo_list`, `@mcp`, `@builtin`, `*`). Skills are copied verbatim to
+`.kiro/skills/`, hooks become one JSON file per hook action in `.kiro/hooks/`,
+and MCP servers are written to `.kiro/settings/mcp.json` or
+`~/.kiro/settings/mcp.json` for `--global`.
 
-This target covers the documented Kiro IDE layout. Kiro CLI configuration
-differences are tracked separately; see [the targets matrix](../../reference/targets-matrix/#kiro).
+This target covers the documented Kiro IDE/CLI v3 layout
+(ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/),
+[kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/), accessed 2026-08-03).
+See [the targets matrix](../../reference/targets-matrix/#kiro) for a full primitives list.
 
 ### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 
@@ -159,6 +176,13 @@ Notes and limits:
   `${env:VAR}` instead of writing matching host secrets into the config.
 - **Policy evaluation.** APM maps `intellij` to `copilot` for organization
   allow-lists, so a policy that allows `copilot` also covers IntelliJ installs.
+- **Older APM path migration (macOS and Linux only).** Re-running
+  `apm install` on a project created by an older APM release moves only
+  lockfile-owned server entries from the obsolete data location to the
+  canonical XDG config location. User-authored entries in both the obsolete and
+  canonical files are preserved. The Windows path is unchanged, so no migration
+  is needed there. If an MCP server installed before this fix is missing in
+  JetBrains, rerun `apm install --target intellij`.
 
 ## Per-tool reference pages
 

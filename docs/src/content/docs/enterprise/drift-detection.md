@@ -29,23 +29,39 @@ happens; see [security model](../security/).
 
 ### `apm audit --ci`
 
-The lockfile-consistency gate. Runs eight baseline checks in order and
+The lockfile-consistency gate. Runs nine baseline checks in order and
 exits non-zero on the first failure (or on any failure with
 `--no-fail-fast`):
 
 ```
-lockfile-exists -> ref-consistency -> deployed-files-present
--> no-orphaned-packages -> skill-subset-consistency
--> config-consistency -> content-integrity -> includes-consent
+lockfile-exists -> ref-consistency -> deployment-ledger-owners
+-> deployed-files-present -> no-orphaned-packages
+-> skill-subset-consistency -> config-consistency
+-> content-integrity -> includes-consent
 ```
 
 After the baseline passes, it replays the install in a scratch directory
-from the cache and diffs against the working tree to surface
-`unintegrated`, `modified`, and `orphaned` files. Pass `--no-drift` to
-skip the replay. When the install cache has not been warmed yet (fresh
-checkout before the first `apm install`), the drift check is skipped
-with an informational message rather than failing; run `apm install` to
-warm the cache and enable the check on the next run. With `--policy
+and diffs against the working tree to surface `unintegrated`, `modified`,
+`orphaned`, `unrecorded`, and `unmanaged-conflict` files. An unmanaged skill
+conflict is not managed drift: ordinary reinstall now refuses that selected
+plan before deployment. Rename the local skill or choose a valid existing
+skill/target selection first; audit does not adopt, overwrite, or delete it.
+Root-local primitives use the same
+source discovery scope as a normal install; the scratch directory is
+only the deployment destination. `unrecorded` means replay produced the
+same normalized bytes as the project but no exact or directory
+`deployed_files` claim covers the path; shared merge-hook targets are exempt
+from `unrecorded`. For their drift comparison, only APM-owned hook entries are
+considered; user-owned hooks do not create drift. The APM-owned sidecar is
+compared as JSON: object-key order and formatting are ignored, but all fields
+and list order remain significant. Changed content, malformed JSON, duplicate
+keys, and non-JSON constants (`NaN`, `Infinity`, `-Infinity`) report `modified`.
+Pass `--no-drift` to skip the replay.
+In bare `apm audit`, the replay remains cache-only and a fresh checkout
+without a warm cache yields an informational skip. In `apm audit --ci`, a
+cold cache instead triggers the lock-pinned scratch self-hydration owned by
+`install/audit_replay.py`; if it cannot be materialized, audit fails closed.
+With `--policy
 <source>` it also evaluates the discovered policy against the lockfile.
 Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
@@ -53,7 +69,9 @@ Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
 Scans every deployed primitive for hidden Unicode (zero-width characters,
 bidi overrides, tag characters) and runs the drift replay as advisory
-output. Exits 0 even when findings exist. Add `--strip` to remove hidden
+output. Drift alone is advisory by default; content findings and configured
+drift failures can return nonzero. See [exit codes](../../reference/cli/audit/#exit-codes).
+Add `--strip` to remove hidden
 characters in place; add `--file <path>` to scan a single file outside
 the lockfile.
 
@@ -70,8 +88,10 @@ apm outdated --global     # ~/.apm/ user-scope lockfile
 apm outdated -j 8         # 8 parallel remote checks
 ```
 
-`apm outdated` does not modify anything. It is the read-only view that
-tells you which floating refs have moved.
+`apm outdated` is read-only. It reports moved refs and newer registry releases,
+even for exact pins. Registry rows distinguish Current, constraint-bound Wanted,
+and published Latest. `apm update` still respects the declared constraint;
+[select an outside-constraint release explicitly](../../reference/cli/outdated/#registry-reporting).
 
 ### `apm view <package>`
 
@@ -102,31 +122,32 @@ the goal is detecting a developer who forgot to run `apm install` after
 editing `apm.yml`. The install step regenerates deployed files so the
 subsequent audit can compare them against the lockfile.
 
-That sequence has a blind spot: `apm install` overwrites every managed file
-with a clean copy before the audit runs. If a deployed file was modified on
-disk after the last install -- for example a hand-edit to
-`.github/instructions/` -- the install step restores the original bytes.
-The `content-integrity` check then compares the restored file against a
-matching hash and reports no finding.
+That sequence has a blind spot: `apm install` can restore managed output
+before the audit runs. For example, a hand-edit to `.github/instructions/`
+can be replaced with the original bytes, so `content-integrity` sees a
+matching hash rather than the pre-install change. Edited managed skill
+members behave differently: ordinary reinstall preserves their bytes and
+original deployment hashes; restoration requires explicit `--force`
+consent.
 
-To detect post-install modification, use `setup-only: true` on the action
-so it only provides the CLI without running `apm install`, then audit with
-`--no-drift`:
+For repos that commit their deployed files, use `setup-only: true` on the
+action so it only provides the CLI without running `apm install`, then run
+the full CI gate:
 
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
     setup-only: true
-- run: apm audit --ci --no-drift
+- run: apm audit --ci
 ```
 
-`--no-drift` skips the install-replay (which requires a warm cache that
-`setup-only` does not populate). The `content-integrity` check verifies
-SHA-256 hashes of every deployed file against `deployed_file_hashes` in
-`apm.lock.yaml` without needing to replay the install. Any content
-change to a deployed file since the last install is caught by this check
-(line-ending-only differences are normalized away per req-lk-012, so a
-CRLF/LF flip alone is not flagged).
+In setup-only CI, `apm audit --ci` now self-hydrates a lock-pinned scratch
+install when `apm_modules/` is absent, so drift and `config-consistency`
+still run without rewriting the checkout. The `content-integrity` check still
+verifies SHA-256 hashes of every deployed file against `deployed_file_hashes`
+in `apm.lock.yaml`. Repos that gitignore deployed outputs still need those
+files present on disk for `deployed-files-present`, so keep the full-install
+CI pattern for that case.
 
 See [Enforce in CI](../enforce-in-ci/#audit-only-ci-pattern) for the full
 recipe and a comparison table of the two patterns.

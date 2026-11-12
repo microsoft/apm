@@ -3,7 +3,7 @@
 Covers:
 * Normalization helpers (build-id strip, line endings, BOM).
 * Public dataclass immutability contracts.
-* Diff engine kinds (modified, unintegrated, orphaned, ignored).
+* Diff engine kinds (modified, unintegrated, orphaned, unrecorded, ignored).
 * Inline-diff size cap.
 * SARIF rule ID prefix.
 * CheckLogger phase markers go to stderr.
@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -21,12 +22,14 @@ from apm_cli.install.drift import (
     CheckLogger,
     DriftFinding,
     ReplayConfig,
+    _claimed_prefixes,
     _governed_root_dirs,
     _normalize_line_endings,
     _strip_bom,
     _strip_build_id,
     diff_scratch_against_project,
     render_drift_sarif,
+    render_drift_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -91,6 +94,17 @@ def _lockfile_with_tracked(paths: list[str]) -> LockFile:
     return lock
 
 
+def _lockfile_with_hashed_file(path: str) -> LockFile:
+    lock = LockFile()
+    dep = LockedDependency(
+        repo_url="example/pkg",
+        deployed_files=[path],
+        deployed_file_hashes={path: "0" * 64},
+    )
+    lock.add_dependency(dep)
+    return lock
+
+
 def _write(path, content: bytes = b"hello\n"):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -118,7 +132,10 @@ def test_diff_engine_modified_ignored_after_normalization(tmp_path):
         b"\xef\xbb\xbf<!-- Build ID: deadbeef -->\r\nline1\r\nline2\r\n",
     )
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    # Tracked: this test is about normalization, so the file must be recorded
+    # or the (separate) unrecorded membership finding fires instead.
+    lock = _lockfile_with_tracked([".apm/skills/x.md"])
+    findings = diff_scratch_against_project(scratch, project, lock, targets=[])
     assert findings == []
 
 
@@ -217,6 +234,285 @@ def test_diff_engine_ignores_untracked_governed_file(tmp_path):
     assert findings == []
 
 
+def test_diff_engine_unrecorded_kind(tmp_path):
+    """A file the replay deploys but the lockfile does not record is reported.
+
+    Regression for issue #2379: the manifest defines what
+    ``content-integrity`` hashes and Unicode-scans, so an unrecorded deployed
+    file is permanently exempt from both while it stays unrecorded.
+    """
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    same = b"deployed by apm, absent from the lockfile\n"
+    _write(scratch / ".apm" / "skills" / "beta.md", same)
+    _write(project / ".apm" / "skills" / "beta.md", same)
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert len(findings) == 1
+    assert findings[0].kind == "unrecorded"
+    assert findings[0].path == ".apm/skills/beta.md"
+
+
+def test_diff_engine_unrecorded_not_reported_when_claimed_by_directory_entry(tmp_path):
+    """A tracked DIRECTORY entry claims the files beneath it.
+
+    ``deployed_files`` may name a directory instead of each file under it
+    (``scan_lockfile_packages`` recurses into exactly that shape), so files it
+    covers are recorded and must not surface as unrecorded.
+    """
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    same = b"claimed via its parent directory\n"
+    _write(scratch / ".apm" / "skills" / "demo" / "SKILL.md", same)
+    _write(project / ".apm" / "skills" / "demo" / "SKILL.md", same)
+
+    lock = _lockfile_with_tracked([".apm/skills/demo"])
+    assert diff_scratch_against_project(scratch, project, lock, targets=[]) == []
+
+
+def test_claimed_prefixes_only_derived_from_directory_entries(tmp_path):
+    """A tracked FILE must not act as a directory prefix.
+
+    Otherwise a tracked ``a.md`` would claim everything under a directory
+    named ``a.md``, letting a deployed file escape the membership check on the
+    strength of its path alone.
+    """
+    tracked = {"": "malformed", ".apm/skills/a.md": "pkg", ".apm/skills/demo": "pkg"}
+    project_files = {".apm/skills/a.md": tmp_path / "a.md"}
+
+    assert _claimed_prefixes(tracked, {".apm/skills/a.md"}, project_files) == (".apm/skills/demo/",)
+
+
+def test_diff_engine_hashed_file_claim_never_covers_descendants(tmp_path):
+    """A recorded file cannot become a directory prefix after replacement."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".apm/skills/a.md/hidden.md"
+    _write(scratch / rel)
+    _write(project / rel)
+
+    lock = _lockfile_with_hashed_file(".apm/skills/a.md")
+    findings = diff_scratch_against_project(scratch, project, lock, targets=[])
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("unrecorded", rel)]
+
+
+def test_diff_engine_unrecorded_exempts_hook_merge_targets(tmp_path):
+    """Hook config files APM merges into are never claimed, so never unrecorded.
+
+    ``.claude/settings.json`` and its ``apm-hooks.json`` sidecar are shared
+    with the user: hook integration injects entries but the lockfile records
+    no ownership. Their content is still compared by the replay, so tampering
+    surfaces as ``modified``.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    same = b'{"hooks": {}}\n'
+    for rel in (".claude/settings.json", ".claude/apm-hooks.json"):
+        _write(scratch / rel, same)
+        _write(project / rel, same)
+
+    targets = [KNOWN_TARGETS["claude"]]
+    assert diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets) == []
+
+
+def test_diff_engine_ignores_user_hooks_in_shared_config(tmp_path):
+    """A user hook beside an APM hook is not shared-config drift."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    user_owned = {
+        "matcher": "Write",
+        "hooks": [{"type": "command", "command": "echo user-owned"}],
+    }
+    sidecar = {**managed, "_apm_source": "example/pkg"}
+    _write(
+        scratch / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [managed]}}).encode(),
+    )
+    _write(
+        project / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [managed, user_owned]}}).encode(),
+    )
+    sidecar_bytes = json.dumps({"PreToolUse": [sidecar]}).encode()
+    _write(scratch / ".claude" / "apm-hooks.json", sidecar_bytes)
+    _write(project / ".claude" / "apm-hooks.json", sidecar_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch,
+        project,
+        _empty_lockfile(),
+        targets=[KNOWN_TARGETS["claude"]],
+    )
+
+    assert findings == []
+
+
+def test_diff_engine_hook_merge_target_tampering_is_modified(tmp_path):
+    """Membership exemption cannot suppress APM-owned hook comparison."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/settings.json"
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    tampered = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo tampered"}],
+    }
+    sidecar = {**managed, "_apm_source": "example/pkg"}
+    _write(scratch / rel, json.dumps({"hooks": {"PreToolUse": [managed]}}).encode())
+    _write(project / rel, json.dumps({"hooks": {"PreToolUse": [tampered]}}).encode())
+    sidecar_bytes = json.dumps({"PreToolUse": [sidecar]}).encode()
+    _write(scratch / ".claude" / "apm-hooks.json", sidecar_bytes)
+    _write(project / ".claude" / "apm-hooks.json", sidecar_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch,
+        project,
+        _empty_lockfile(),
+        targets=[KNOWN_TARGETS["claude"]],
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
+
+
+@pytest.mark.parametrize(
+    ("project_bytes", "modified"),
+    [
+        (b'{"B":[], "A":[{"command":"one","timeout":1},{"command":"two"}]}', False),
+        (b'{"A":[{"timeout":1,"command":"one"},{"command":"two"}],"B":[]}', False),
+        (b'{"A":[{"command":"changed","timeout":1},{"command":"two"}],"B":[]}', True),
+        (b'{"A":[{"command":"one","timeout":true},{"command":"two"}],"B":[]}', True),
+        (b'{"A":[{"command":"two"},{"command":"one","timeout":1}],"B":[]}', True),
+        (b'{"A":[{"command":"one","timeout":1}],"B":[]}', True),
+        (b'{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[],"C":[]}', True),
+        (b'{"A":[],"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}', True),
+        (
+            b'{"A":[{"command":"discarded","command":"one","timeout":1},{"command":"two"}],"B":[]}',
+            True,
+        ),
+        (b"{invalid json", True),
+        (b"[]", True),
+        ('{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}'.encode("utf-16"), True),
+        ('{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}'.encode("utf-32"), True),
+    ],
+    ids=[
+        "event-key-order",
+        "entry-key-order",
+        "command",
+        "value-type",
+        "execution-order",
+        "removed-entry",
+        "added-event",
+        "duplicate-event",
+        "duplicate-field",
+        "invalid-json",
+        "non-object",
+        "utf-16",
+        "utf-32",
+    ],
+)
+def test_diff_engine_hook_sidecar_compares_json_content(tmp_path, project_bytes, modified):
+    """Only object ordering/formatting is irrelevant; all content is owned."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/apm-hooks.json"
+    _write(scratch / rel, b'{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}')
+    _write(project / rel, project_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == (
+        [("modified", rel)] if modified else []
+    )
+    assert (project / rel).read_bytes() == project_bytes
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_diff_engine_hook_sidecar_rejects_matching_non_json_constants(tmp_path, constant):
+    """Equal invalid JSON must not become clean drift through canonicalization."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/apm-hooks.json"
+    invalid_bytes = ('{"PreToolUse":[{"timeout":' + constant + "}]}").encode()
+    _write(scratch / rel, invalid_bytes)
+    _write(project / rel, invalid_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
+    assert constant in findings[0].inline_diff
+    assert (scratch / rel).read_bytes() == invalid_bytes
+    assert (project / rel).read_bytes() == invalid_bytes
+
+
+def test_diff_engine_reports_malformed_shared_hook_event_as_modified(tmp_path):
+    """A malformed native event remains drift rather than aborting audit."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/settings.json"
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    sidecar = {**managed, "_apm_source": "example/pkg"}
+    _write(scratch / rel, json.dumps({"hooks": {"PreToolUse": [managed]}}).encode())
+    _write(project / rel, b'{"hooks":{"PreToolUse":null}}')
+    sidecar_bytes = json.dumps({"PreToolUse": [sidecar]}).encode()
+    _write(scratch / ".claude" / "apm-hooks.json", sidecar_bytes)
+    _write(project / ".claude" / "apm-hooks.json", sidecar_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch,
+        project,
+        _empty_lockfile(),
+        targets=[KNOWN_TARGETS["claude"]],
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
+
+
+def test_diff_engine_unrecorded_yields_to_modified(tmp_path):
+    """Differing bytes report ``modified`` only -- never both kinds for one file."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    _write(scratch / ".apm" / "skills" / "beta.md", b"from source\n")
+    _write(project / ".apm" / "skills" / "beta.md", b"hand-edited\n")
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert [f.kind for f in findings] == ["modified"]
+
+
+def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
+    out = render_drift_text([DriftFinding(path=".claude/skills/x/SKILL.md", kind="unrecorded")])
+    assert "[x] Drift detected: 1 file(s)" in out
+    assert "unrecorded (1):" in out
+    assert ".claude/skills/x/SKILL.md" in out
+    assert "Run 'apm install' to re-sync deployed files" in out
+    assert "Commit the regenerated apm.lock.yaml" in out
+
+
 def test_diff_engine_100kb_inline_cap(tmp_path):
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
@@ -237,12 +533,16 @@ def test_diff_engine_100kb_inline_cap(tmp_path):
 
 
 def _target_with_skill_deploy_root(root_dir: str = ".github", deploy_root: str = ".agents"):
-    """Build a minimal TargetProfile-like stub for governed-root tests."""
-    from types import SimpleNamespace
+    """Use a real target profile for governed-root and collision routing."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
-    return SimpleNamespace(
+    target = KNOWN_TARGETS["copilot"]
+    return dataclasses.replace(
+        target,
         root_dir=root_dir,
-        primitives={"skills": SimpleNamespace(deploy_root=deploy_root)},
+        primitives={
+            "skills": dataclasses.replace(target.primitives["skills"], deploy_root=deploy_root)
+        },
     )
 
 
@@ -275,7 +575,7 @@ def test_diff_engine_walks_skill_deploy_root_detects_drift(tmp_path):
 
     findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
     assert len(findings) == 1
-    assert findings[0].kind == "modified"
+    assert findings[0].kind == "unmanaged-conflict"
     assert findings[0].path == rel
 
 
@@ -290,7 +590,9 @@ def test_diff_engine_skill_deploy_root_clean_when_identical(tmp_path):
     _write(project / rel, same)
     targets = [_target_with_skill_deploy_root()]
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([rel]), targets=targets
+    )
     assert findings == []
 
 
@@ -303,10 +605,13 @@ def test_render_sarif_rule_id_prefix():
     findings = [
         DriftFinding(path="a.md", kind="modified", package="pkg-a"),
         DriftFinding(path="b.md", kind="orphaned", package="pkg-b"),
+        DriftFinding(path="c.md", kind="unrecorded", package="pkg-c"),
     ]
     results = render_drift_sarif(findings)
     assert results[0]["ruleId"] == "apm/drift/modified"
     assert results[1]["ruleId"] == "apm/drift/orphaned"
+    assert results[2]["ruleId"] == "apm/drift/unrecorded"
+    assert results[2]["level"] == "error"
     assert results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "a.md"
     assert results[1]["properties"]["package"] == "pkg-b"
 
@@ -454,6 +759,7 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     def _bad_integrator(*args, **kwargs):
         # Simulate a leaky integrator that writes to project tree, not scratch.
         (project_root / ".apm" / "leaked.md").write_text("oops\n", encoding="utf-8")
+        return {"deployed_files": []}
 
     monkeypatch.setattr(
         "apm_cli.install.services.integrate_package_primitives",
@@ -472,6 +778,47 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
         run_replay(config, logger)
 
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(("user_scope", "expected"), [(False, ["."]), (True, [])])
+def test_run_replay_includes_root_apm_without_local_deployed_files(
+    monkeypatch, tmp_path, user_scope, expected
+):
+    """Project-scope replay integrates root .apm/ like install does (#3369).
+
+    Root hooks merge into shared configs and record no local_deployed_files,
+    so the lockfile synthesizes no self-entry. Replay must still integrate
+    the project's own .apm/ content, without rewriting the lockfile.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import ReplayConfig, run_replay
+
+    project_root = tmp_path / "proj"
+    (project_root / ".apm" / "hooks").mkdir(parents=True)
+    (project_root / "apm.yml").write_text("name: proj\ntargets: [claude]\n", encoding="utf-8")
+    lockfile_path = project_root / "apm.lock.yaml"
+    LockFile().write(lockfile_path)
+    lock_bytes = lockfile_path.read_bytes()
+
+    replayed: list[str] = []
+
+    def _record(*args, **kwargs):
+        replayed.append(kwargs["package_name"])
+        return {"deployed_files": []}
+
+    monkeypatch.setattr("apm_cli.install.services.integrate_package_primitives", _record)
+
+    run_replay(
+        ReplayConfig(
+            project_root=project_root,
+            lockfile_path=lockfile_path,
+            user_scope=user_scope,
+        ),
+        CheckLogger(verbose=False),
+    )
+
+    assert replayed == expected
+    assert lockfile_path.read_bytes() == lock_bytes
 
 
 def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
@@ -552,33 +899,36 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
 def test_run_replay_threads_locked_skill_subset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    user_scope: bool,
 ) -> None:
-    """Replay must preserve the locked skill subset through dependency reconstruction."""
+    """Replay preserves the skill subset and scope-specific deployment source root."""
     from apm_cli.install.drift import run_replay
 
     project_root = tmp_path / "proj"
     project_root.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: project_root)
+    scratch_root = tmp_path / "scratch"
     (project_root / "apm.yml").write_text(
         "name: test-project\ntarget: copilot\n",
         encoding="utf-8",
     )
 
     lock = LockFile()
-    lock.add_dependency(
-        LockedDependency(
-            repo_url="./skill-bundle",
-            source="local",
-            local_path="./skill-bundle",
-            resolved_commit=None,
-            skill_subset=[
-                "productivity/grill-me",
-                "productivity/grilling",
-            ],
-        )
+    dep = LockedDependency(
+        repo_url="./skill-bundle",
+        source="local",
+        local_path="./skill-bundle",
+        resolved_commit=None,
+        skill_subset=[
+            "productivity/grill-me",
+            "productivity/grilling",
+        ],
     )
+    lock.add_dependency(dep)
     (project_root / "skill-bundle").mkdir()
     lockfile_path = project_root / "apm.lock.yaml"
     lock.write(lockfile_path)
@@ -591,6 +941,7 @@ def test_run_replay_threads_locked_skill_subset(
             {
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
                 "skill_subset": kwargs.get("skill_subset"),
+                "deployment_package_root": package_info.deployment_package_root,
             }
         )
         return {"deployed_files": []}
@@ -606,6 +957,8 @@ def test_run_replay_threads_locked_skill_subset(
             lockfile_path=lockfile_path,
             targets=None,
             cache_only=True,
+            scratch_root=scratch_root,
+            user_scope=user_scope,
         ),
         CheckLogger(verbose=False),
     )
@@ -619,6 +972,11 @@ def test_run_replay_threads_locked_skill_subset(
             "skill_subset": (
                 "productivity/grill-me",
                 "productivity/grilling",
+            ),
+            "deployment_package_root": dep.to_dependency_ref().get_install_path(
+                scratch_root / ".apm" / "apm_modules"
+                if user_scope
+                else scratch_root / "apm_modules"
             ),
         }
     ]

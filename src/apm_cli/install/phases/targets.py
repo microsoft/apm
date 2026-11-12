@@ -118,10 +118,11 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
 
     Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
     canonical names to :class:`~apm_cli.integration.targets.TargetProfile`
-    instances scoped the same way ``ctx.targets`` is, and augments them with the
-    non-canonical gated/dynamic targets (see below). Returns ``None`` when the
-    manifest declares no targets (auto-detect or ``--target``-only consumers) --
-    the signal for lockfile reconciliation to fall back to legacy preserve-all.
+    instances scoped the same way ``ctx.targets`` is, and augments them with
+    non-canonical gated/dynamic target metadata without probing inactive roots
+    (see below). Returns ``None`` when the manifest declares no targets
+    (auto-detect or ``--target``-only consumers) -- the signal for lockfile
+    reconciliation to fall back to legacy preserve-all.
 
     Motivation (issue #2059): ``union_preserving`` must distinguish a target the
     consumer legitimately uses but did not install in THIS run (e.g. a
@@ -138,19 +139,17 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
         declared_target_profiles as profiles_for_project,
     )
 
-    try:
-        names = _read_yaml_targets(ctx)
-    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-        # Any resolution error (missing apm_package, conflicting keys already
-        # surfaced by the targets phase) -> unknown universe, preserve-all.
-        return None
-    if not names:
-        return None
     is_user = getattr(ctx, "scope", None) is InstallScope.USER
-    package_path = getattr(ctx.apm_package, "package_path", None)
+    apm_package = getattr(ctx, "apm_package", None)
+    package_path = getattr(apm_package, "package_path", None)
     if package_path is None:
         return None
-    return profiles_for_project(Path(package_path), user_scope=is_user)
+    return profiles_for_project(
+        Path(package_path),
+        user_scope=is_user,
+        active_targets=getattr(ctx, "targets", None),
+        diagnostics=getattr(ctx, "diagnostics", None),
+    )
 
 
 def _create_target_dirs(
@@ -172,6 +171,10 @@ def _create_target_dirs(
         if not _t.auto_create and not explicit:
             continue
         if _t.resolved_deploy_root is not None:
+            continue
+        if _t.skills_only:
+            # The skill integrator creates the root when it writes a skill, so
+            # an install that deploys nothing leaves no empty directory behind.
             continue
         _root = _t.root_dir
         _target_dir = project_root / _root
@@ -198,19 +201,20 @@ def _check_openclaw_flag_gate(
     ctx: InstallContext,
 ) -> None:
     """Emit an enable-hint when the user asks for openclaw but the flag is OFF."""
-    _check_experimental_target_hint(
-        explicit, targets, ctx, target_name="openclaw", flag_name="openclaw"
-    )
+    _check_experimental_target_hint(explicit, targets, ctx, target_name="openclaw")
 
 
-def _check_hermes_flag_gate(
+def _check_grok_cloud_flag_gate(
     explicit: str | list[str] | None,
     targets: list,
     ctx: InstallContext,
 ) -> None:
-    """Emit an enable-hint when the user asks for hermes but the flag is OFF."""
+    """Emit an enable hint when grok-cloud is requested while disabled."""
     _check_experimental_target_hint(
-        explicit, targets, ctx, target_name="hermes", flag_name="hermes"
+        explicit,
+        targets,
+        ctx,
+        target_name="grok-cloud",
     )
 
 
@@ -220,9 +224,8 @@ def _check_experimental_target_hint(
     ctx: InstallContext,
     *,
     target_name: str,
-    flag_name: str,
 ) -> None:
-    """Emit an enable-hint when *target_name* is requested but its flag is OFF.
+    """Emit an enable hint when *target_name* is requested but its flag is disabled.
 
     Shared by the simple experimental targets whose only gate is the
     experimental flag (no extra environment requirement).
@@ -236,19 +239,14 @@ def _check_experimental_target_hint(
     if not user_asked:
         return
 
-    resolved = any(t.name == target_name for t in targets)
-    if resolved:
-        return
+    from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    from apm_cli.core.experimental import is_enabled
-
-    if not is_enabled(flag_name):
-        if ctx.logger:
-            ctx.logger.progress(
-                f"The '{target_name}' target requires an experimental flag. "
-                f"Run: apm experimental enable {flag_name}",
-                symbol="info",
-            )
+    emit_disabled_experimental_target_hint(
+        target_name,
+        targets,
+        ctx.logger,
+        create_config=getattr(ctx, "create_config", True),
+    )
 
 
 def _gate_cowork_target(
@@ -274,16 +272,14 @@ def _gate_cowork_target(
     if user_asked_cowork:
         _cowork_resolved = any(t.name == "copilot-cowork" for t in targets)
         if not _cowork_resolved:
-            from apm_cli.core.experimental import is_enabled as _is_flag_on
+            from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-            if not _is_flag_on("copilot_cowork"):
-                if ctx.logger:
-                    ctx.logger.progress(
-                        "The 'copilot-cowork' target requires an experimental flag. "
-                        "Run: apm experimental enable copilot-cowork",
-                        symbol="info",
-                    )
-            else:
+            if not emit_disabled_experimental_target_hint(
+                "copilot-cowork",
+                targets,
+                ctx.logger,
+                create_config=getattr(ctx, "create_config", True),
+            ):
                 import sys as _sys
 
                 if _sys.platform.startswith("linux"):
@@ -339,16 +335,14 @@ def _gate_copilot_app_target(
     if _copilot_app_resolved:
         return
 
-    from apm_cli.core.experimental import is_enabled as _is_flag_on
+    from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    if not _is_flag_on("copilot_app"):
-        if ctx.logger:
-            ctx.logger.progress(
-                "The 'copilot-app' target requires an experimental flag. "
-                "Run: apm experimental enable copilot-app",
-                symbol="info",
-            )
-    else:
+    if not emit_disabled_experimental_target_hint(
+        "copilot-app",
+        targets,
+        ctx.logger,
+        create_config=getattr(ctx, "create_config", True),
+    ):
         _app_msg = (
             "GitHub Copilot desktop App not detected.\n"
             "Expected ~/.copilot/data.db but the file is missing.\n"
@@ -406,7 +400,6 @@ def _resolve_targets_by_scope(
 
     # Project scope: v2 resolution.
     from apm_cli.core.apm_yml import CANONICAL_TARGETS as _CANONICAL
-    from apm_cli.integration.targets import KNOWN_TARGETS
 
     _v2_flag: str | list[str] | None = None
     if ctx.target_override:
@@ -458,25 +451,17 @@ def _resolve_targets_by_scope(
     _provenance_msg = format_provenance(_resolved)
     _rich_info(_provenance_msg, symbol="info")
 
-    _v2_targets = []
-    for _tname in _resolved.targets:
-        _profile = KNOWN_TARGETS.get(_tname)
-        if _profile is None:
-            continue
-        _target_dir = ctx.project_root / _profile.root_dir
-        if not _target_dir.exists():
-            try:
-                _target_dir.mkdir(parents=True, exist_ok=True)
-            except PermissionError:
-                if ctx.logger:
-                    ctx.logger.error(
-                        f"Cannot create {_profile.root_dir}/ -- permission denied. "
-                        f"Check directory permissions or use a different --target."
-                    )
-                raise SystemExit(1) from None
-            if ctx.logger:
-                ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
-        _v2_targets.append(_profile)
+    from apm_cli.integration.targets import materialize_project_target_profiles
+
+    try:
+        _v2_targets = materialize_project_target_profiles(ctx.project_root, _resolved.targets)
+    except PermissionError as exc:
+        if ctx.logger:
+            ctx.logger.error(
+                f"Cannot create target directory -- permission denied: {exc}. "
+                "Check directory permissions or use a different --target."
+            )
+        raise SystemExit(1) from None
 
     _v2_names = {t.name for t in _v2_targets}
     _legacy_only = [t for t in targets if t.name not in _v2_names and t.name not in _CANONICAL]
@@ -512,22 +497,23 @@ def run(ctx: InstallContext) -> None:
     except _click.UsageError as exc:
         _raise_target_usage_error(ctx, exc)
 
-    default_target = None
-    if ctx.target_override is None and config_target is None:
-        from apm_cli.config import get_install_target
+    target_decision = ctx.target_decision
+    if target_decision is None:
+        from apm_cli.core.target_detection import resolve_effective_target_decision
 
-        default_target = get_install_target()
-        if default_target is not None:
-            # Treat configured default target exactly like an explicit selector
-            # for this invocation so downstream phases and policy checks see
-            # the same effective value. Record the provenance separately so the
-            # resolution output does not misattribute it to a CLI --target flag.
-            ctx.target_override = default_target
-            ctx.target_override_source = "apm config target"
+        target_decision = resolve_effective_target_decision(
+            ctx.project_root,
+            explicit_target=ctx.target_override,
+            manifest_target=config_target,
+            user_scope=ctx.scope is InstallScope.USER,
+            auto_detect=False,
+            create_config=getattr(ctx, "create_config", True),
+        )
+        ctx.target_decision = target_decision
+        ctx.target_override = target_decision.value
+        ctx.target_override_source = target_decision.source
 
-    # Resolve effective explicit target: CLI --target wins, then apm.yml,
-    # then user-scoped config default target.
-    _explicit = ctx.target_override or config_target or None
+    _explicit = target_decision.value
     if _explicit == "all":
         from apm_cli.core.target_catalog import expand_all
 
@@ -563,11 +549,11 @@ def run(ctx: InstallContext) -> None:
             ctx.logger.error(str(exc), symbol="cross")
         raise SystemExit(1) from exc
 
-    # Target gating: cowork, copilot-app, openclaw.
+    # Target gating: cowork, copilot-app, openclaw, grok-cloud.
     _gate_cowork_target(ctx, _targets, _explicit, _is_user)
     _gate_copilot_app_target(ctx, _targets, _explicit)
     _check_openclaw_flag_gate(_explicit, _targets, ctx)
-    _check_hermes_flag_gate(_explicit, _targets, ctx)
+    _check_grok_cloud_flag_gate(_explicit, _targets, ctx)
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.
     _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)
@@ -661,7 +647,7 @@ def run_targets_phase(ctx) -> None:
             continue
 
         target_dir = project_root / profile.root_dir
-        if not target_dir.exists():
+        if not target_dir.exists() and not profile.skills_only:
             target_dir.mkdir(parents=True, exist_ok=True)
 
         # NOTE: do NOT set resolved_deploy_root on static targets.

@@ -39,7 +39,11 @@ from typing import Any, Mapping  # noqa: UP035
 
 import yaml
 
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.path_security import (
+    PathTraversalError,
+    decode_url_path_segments,
+    validate_path_segments,
+)
 from .errors import MarketplaceYmlError
 from .output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
@@ -78,8 +82,8 @@ _SEMVER_RE = re.compile(
 # Source field accepts:
 #   - ``owner/repo`` (remote, default host)
 #   - ``host.tld/owner/repo`` (remote on a non-default host, shorthand)
-#   - ``https://host.tld/owner/repo`` (remote on a non-default host, full URL)
-#   - ``https://host.tld/owner/repo.git`` (same, with optional ``.git`` suffix)
+#   - ``https://host.tld/path/to/repo`` (remote full URL)
+#   - ``https://host.tld/path/to/repo.git`` (same, with optional ``.git`` suffix)
 #   - ``./...`` (local path within the same repo)
 #
 # Used by both yml_schema and yml_editor for source field validation.
@@ -95,23 +99,27 @@ _HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-
 # validate_path_segments(), which rejects empty, '.', and '..' path segments.
 _SEGMENT_PAT = r"[A-Za-z0-9._-]+"
 _OWNER_REPO_PAT = rf"{_SEGMENT_PAT}/{_SEGMENT_PAT}"
+_URL_SEGMENT_PAT = r"(?:[A-Za-z0-9._-]|%[0-9A-Fa-f]{2})+"
+_HTTPS_REPOSITORY_PAT = rf"{_URL_SEGMENT_PAT}(?:/{_URL_SEGMENT_PAT})+"
 _RELATIVE_SOURCE_PAT = rf"{_SEGMENT_PAT}(?:/{_SEGMENT_PAT})*"
+_SOURCE_BASE_SEGMENT_PAT = _URL_SEGMENT_PAT
+_SOURCE_BASE_PATH_PAT = rf"{_SOURCE_BASE_SEGMENT_PAT}(?:/{_SOURCE_BASE_SEGMENT_PAT})*"
 
 SOURCE_RE = re.compile(
     r"^(?:"
-    rf"https://{_HOST_PAT}/{_OWNER_REPO_PAT}(?:\.git)?"
+    rf"https://{_HOST_PAT}/{_HTTPS_REPOSITORY_PAT}(?:\.git)?"
     rf"|{_HOST_PAT}/{_OWNER_REPO_PAT}"
     rf"|{_OWNER_REPO_PAT}"
     r"|\./.*"
     r")$"
 )
 LOCAL_SOURCE_RE = re.compile(r"^\./")
-SOURCE_BASE_RE = re.compile(rf"^https://{_HOST_PAT}/{_RELATIVE_SOURCE_PAT}$")
+SOURCE_BASE_RE = re.compile(rf"^https://{_HOST_PAT}/{_SOURCE_BASE_PATH_PAT}$")
 _RELATIVE_SOURCE_RE = re.compile(rf"^{_RELATIVE_SOURCE_PAT}$")
 # Matches ``host.tld/owner/repo`` (3 segments, first is FQDN-ish).
 _HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
-# Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
-_HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
+# Matches ``https://host.tld/path/to/repo[.git]`` and captures host + repository path.
+_HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_HTTPS_REPOSITORY_PAT})(?:\.git)?$")
 
 
 def split_source_base(source_base: str) -> tuple[str, str]:
@@ -122,14 +130,14 @@ def split_source_base(source_base: str) -> tuple[str, str]:
 
 
 def split_host_from_source(source: str) -> tuple[str | None, str]:
-    """Split a host-qualified source into ``(host, owner/repo)``.
+    """Split a host-qualified source into ``(host, repository path)``.
 
     Accepts both shorthand (``host.tld/owner/repo``) and full HTTPS URL
-    (``https://host.tld/owner/repo[.git]``) forms.  Returns ``(None, source)``
+    (``https://host.tld/path/to/repo[.git]``) forms. Returns ``(None, source)``
     for the plain ``owner/repo`` shorthand or local ``./...`` paths.
 
-    A trailing ``.git`` suffix on the repo segment is stripped so the
-    returned ``owner/repo`` is normalized regardless of input form.
+    A trailing ``.git`` suffix on the final path segment is stripped so the
+    returned repository path is normalized regardless of input form.
     """
     m = _HTTPS_URL_SOURCE_RE.match(source)
     if m:
@@ -242,6 +250,7 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "metadata",
         "build",
         "codex",
+        "copilot",
         "packages",
         "versioning",
     }
@@ -258,6 +267,12 @@ _CLAUDE_KEYS = frozenset(
 )
 
 _CODEX_KEYS = frozenset(
+    {
+        "output",
+    }
+)
+
+_COPILOT_KEYS = frozenset(
     {
         "output",
     }
@@ -317,6 +332,13 @@ class MarketplaceCodexConfig:
 
 
 @dataclass(frozen=True)
+class MarketplaceCopilotConfig:
+    """Copilot-specific marketplace output configuration."""
+
+    output: str = MARKETPLACE_OUTPUTS["copilot"].default_output
+
+
+@dataclass(frozen=True)
 class PackageEntry:
     """A single entry in the ``packages`` list.
 
@@ -349,8 +371,8 @@ class PackageEntry:
     author: Mapping[str, str] | None = None
     license: str | None = None
     repository: str | None = None
-    # Marketplace category metadata. Emitted only by output formats that
-    # consume categories, currently Codex repo marketplace output.
+    # Marketplace category metadata. Emitted by both the Claude and Codex
+    # outputs when present; the Codex output additionally requires it.
     category: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
@@ -358,6 +380,8 @@ class PackageEntry:
     # ``host.tld/owner/repo``. ``None`` means use the default host
     # (``GITHUB_HOST`` env or ``github.com``).
     host: str | None = None
+    # Original full HTTPS source retained for encoded output presentation.
+    source_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -405,6 +429,7 @@ class MarketplaceConfig:
     outputs: tuple[str, ...] = ("claude",)
     claude: MarketplaceClaudeConfig = field(default_factory=MarketplaceClaudeConfig)
     codex: MarketplaceCodexConfig = field(default_factory=MarketplaceCodexConfig)
+    copilot: MarketplaceCopilotConfig = field(default_factory=MarketplaceCopilotConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
@@ -458,7 +483,7 @@ def _source_error(ctx: str, source: str, *, source_base: str | None) -> Marketpl
     forms = [
         "'<owner>/<repo>'",
         "'<host.tld>/<owner>/<repo>'",
-        "'https://<host.tld>/<owner>/<repo>[.git]'",
+        "'https://<host.tld>/<owner>/<repo>[.git]' (nested paths allowed)",
         "'./<path>'",
     ]
     if source_base is not None:
@@ -473,6 +498,12 @@ def validate_source_value(
     source_base: str | None = None,
 ) -> None:
     """Validate a package ``source`` field shape and path safety."""
+    if source.startswith("https://") and "%" in _urlparse.urlparse(source).path:
+        try:
+            decode_url_path_segments(_urlparse.urlparse(source).path, context=context)
+        except PathTraversalError as exc:
+            raise MarketplaceYmlError(str(exc)) from exc
+
     matches_existing_shape = bool(SOURCE_RE.match(source))
     if not matches_existing_shape:
         # The source matched no supported shape. If its first segment looks
@@ -495,6 +526,10 @@ def validate_source_value(
             raise _source_error(context, source, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     try:
+        if source.startswith("https://"):
+            parsed = _urlparse.urlparse(source)
+            decode_url_path_segments(parsed.path, context=context)
+            return
         # Local paths legitimately start with ``.`` (current dir) and
         # may have trailing-slash forms like ``./``.  Allow ``.`` here.
         validate_path_segments(source, context=context, allow_current_dir=is_local)
@@ -522,8 +557,8 @@ def parse_source_base(raw: Any) -> str | None:
     if not raw_source_base.startswith("https://"):
         raise MarketplaceYmlError("'sourceBase' must start with https://")
 
-    parsed = _urlparse.urlparse(raw_source_base)
-    source_base = raw_source_base.rstrip("/")
+    source_base = raw_source_base.removesuffix("/")
+    parsed = _urlparse.urlparse(source_base)
     if parsed.username or parsed.password or "@" in parsed.netloc:
         raise MarketplaceYmlError("'sourceBase' must not include userinfo")
     if ":" in parsed.netloc:
@@ -537,29 +572,27 @@ def parse_source_base(raw: Any) -> str | None:
     if source_base.endswith(".git"):
         raise MarketplaceYmlError("'sourceBase' must not end with .git")
 
-    path = parsed.path.lstrip("/")
-    if path.endswith("/"):
-        path = path[:-1]
-    if not path:
-        raise MarketplaceYmlError("'sourceBase' must include at least one path segment")
     try:
-        validate_path_segments(path, context="sourceBase", reject_empty=True)
+        decode_url_path_segments(parsed.path, context="sourceBase")
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
     if not SOURCE_BASE_RE.match(source_base):
         raise MarketplaceYmlError(
-            "'sourceBase' path segments may only contain letters, digits, dot, underscore, or hyphen"
+            "'sourceBase' path segments may only contain letters, digits, dot, underscore, hyphen, "
+            "or percent-encoded bytes"
         )
+
     return source_base
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
-    """Ensure *pattern* contains at least one recognised placeholder."""
-    if not any(ph in pattern for ph in _TAG_PLACEHOLDERS):
-        raise MarketplaceYmlError(
-            f"'{context}' must contain at least one of "
-            f"{', '.join(_TAG_PLACEHOLDERS)}, got '{pattern}'"
-        )
+    """Route producer tag-pattern validation through its canonical owner."""
+    from .tag_pattern import TagPatternError, validate_tag_pattern
+
+    try:
+        validate_tag_pattern(pattern, context=context)
+    except TagPatternError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
 
 
 def _check_unknown_keys(
@@ -670,6 +703,26 @@ def _parse_codex(raw: Any) -> MarketplaceCodexConfig:
         raise MarketplaceYmlError(str(exc)) from exc
 
     return MarketplaceCodexConfig(output=output)
+
+
+def _parse_copilot(raw: Any) -> MarketplaceCopilotConfig:
+    """Parse and validate the optional ``marketplace.copilot`` block."""
+    if raw is None:
+        return MarketplaceCopilotConfig()
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError("'copilot' must be a mapping")
+    _check_unknown_keys(raw, _COPILOT_KEYS, context="copilot")
+
+    output = raw.get("output", MARKETPLACE_OUTPUTS["copilot"].default_output)
+    if not isinstance(output, str) or not output.strip():
+        raise MarketplaceYmlError("'copilot.output' must be a non-empty string")
+    output = output.strip()
+    try:
+        validate_path_segments(output, context="copilot.output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+
+    return MarketplaceCopilotConfig(output=output)
 
 
 def _parse_outputs(
@@ -815,6 +868,7 @@ def _parse_package_entry(
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     # Detect host-prefixed source (e.g. ``host.tld/owner/repo``) and split
     # the host off so downstream consumers continue to see ``owner/repo``.
+    source_url = source if source.startswith("https://") else None
     host: str | None = None
     if not is_local:
         host, source = split_host_from_source(source)
@@ -945,8 +999,8 @@ def _parse_package_entry(
             raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
         repository = repository.strip()
 
-    # Optional marketplace category. Claude output strips this; Codex output
-    # requires and emits it.
+    # Optional marketplace category. Emitted by both the Claude and Codex
+    # outputs when set; the Codex output additionally requires it.
     category: str | None = None
     raw_category = raw.get("category")
     if raw_category is not None:
@@ -971,6 +1025,7 @@ def _parse_package_entry(
         category=category,
         is_local=is_local,
         host=host,
+        source_url=source_url,
     )
 
 
@@ -1232,11 +1287,15 @@ def _build_config(
     # -- codex output --
     codex = _parse_codex(marketplace_dict.get("codex"))
 
+    # -- copilot output --
+    copilot = _parse_copilot(marketplace_dict.get("copilot"))
+
     # -- Sibling-vs-map conflict detection (A1: sibling wins) --
     # Only fire when the user EXPLICITLY set a sibling block AND the map
     # also has an explicit path. Default/absent sibling is not a conflict.
     has_explicit_claude = marketplace_dict.get("claude") is not None
     has_explicit_codex = marketplace_dict.get("codex") is not None
+    has_explicit_copilot = marketplace_dict.get("copilot") is not None
 
     final_specs_list = list(output_specs)
     for i, spec in enumerate(final_specs_list):
@@ -1246,6 +1305,8 @@ def _build_config(
                 sibling_path = claude.output
             elif spec.name == "codex" and has_explicit_codex and codex.output != spec.path:
                 sibling_path = codex.output
+            elif spec.name == "copilot" and has_explicit_copilot and copilot.output != spec.path:
+                sibling_path = copilot.output
             if sibling_path is not None:
                 warnings_sink.append(
                     f"marketplace.outputs.{spec.name}.path ('{spec.path}') "
@@ -1310,6 +1371,7 @@ def _build_config(
         outputs=outputs,
         claude=claude,
         codex=codex,
+        copilot=copilot,
         metadata=metadata,
         build=build,
         source_base=source_base,

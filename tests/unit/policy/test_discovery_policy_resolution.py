@@ -27,6 +27,7 @@ import hashlib
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -292,25 +293,25 @@ class TestValidateExtendsHost:
     [
         (
             "org",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
-            ("contoso", "_apm", "_apm", "dev.azure.com"),
+            ("contoso", "apm", "apm-policy", "dev.azure.com"),
         ),
         (
             "governance/policy",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
             ("contoso", "governance", "policy", "dev.azure.com"),
         ),
         (
             "dev.azure.com/contoso/governance/policy",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
             ("contoso", "governance", "policy", "dev.azure.com"),
         ),
         (
             "contoso.visualstudio.com/governance/policy",
-            "org:contoso.visualstudio.com/contoso/_apm/_apm",
+            "org:contoso.visualstudio.com/contoso/apm/apm-policy",
             "contoso.visualstudio.com",
             ("contoso", "governance", "policy", "contoso.visualstudio.com"),
         ),
@@ -318,7 +319,7 @@ class TestValidateExtendsHost:
             "org",
             "org:contoso.visualstudio.com/contoso/team/policy",
             "contoso.visualstudio.com",
-            ("contoso", "_apm", "_apm", "contoso.visualstudio.com"),
+            ("contoso", "apm", "apm-policy", "contoso.visualstudio.com"),
         ),
     ],
 )
@@ -334,16 +335,16 @@ def test_resolve_ado_parent_ref_supported_forms(
 @pytest.mark.parametrize(
     ("parent_ref", "current_source", "leaf_host"),
     [
-        ("", "org:dev.azure.com/contoso/_apm/_apm", "dev.azure.com"),
-        ("governance", "org:dev.azure.com/contoso/_apm/_apm", "dev.azure.com"),
+        ("", "org:dev.azure.com/contoso/apm/apm-policy", "dev.azure.com"),
+        ("governance", "org:dev.azure.com/contoso/apm/apm-policy", "dev.azure.com"),
         (
             "dev.azure.com/contoso/governance",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
         ),
         (
             "github.example.com/contoso/policy",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
         ),
         ("org", "org:malformed", "dev.azure.com"),
@@ -516,6 +517,34 @@ class TestFetchFromUrl:
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.error is not None or result.fetch_error is not None
 
+    def test_authenticated_url_is_dispatched_raw_but_never_persisted_or_reported(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        raw_url = "https://alice:s3cr3t@policy.example.com/apm-policy.yml?sig=private-signature"
+        mock_resp = MagicMock(status_code=200, text=VALID_POLICY_YAML)
+
+        with patch("requests.get", return_value=mock_resp) as mock_get:
+            result = _fetch_from_url(raw_url, tmp_path, no_cache=True)
+
+        dispatched = urlparse(mock_get.call_args.args[0])
+        assert dispatched.username == "alice"
+        assert dispatched.password == "s3cr3t"
+        assert dispatched.query == "sig=private-signature"
+
+        reported = urlparse(result.source.removeprefix("url:"))
+        assert reported.username is None
+        assert reported.password is None
+        assert reported.query == ""
+        assert reported.hostname == "policy.example.com"
+        assert reported.path == "/apm-policy.yml"
+        assert "s3cr3t" not in result.source
+        assert "private-signature" not in result.source
+
+        entry = _read_cache_entry(raw_url, tmp_path)
+        assert entry is not None
+        assert entry.policy.name == "test-policy"
+
 
 # ---------------------------------------------------------------------------
 # _fetch_from_repo -- stale fallback / garbage (lines 850, 860)
@@ -668,18 +697,21 @@ class TestGetTokenForHost:
     def test_returns_github_token_env_for_github_host(self) -> None:
         with (
             patch(
-                "apm_cli.core.token_manager.GitHubTokenManager",
+                "apm_cli.core.auth.AuthResolver.resolve",
                 side_effect=Exception("unavailable"),
             ),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}),
+            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
         ):
             token = _get_token_for_host("github.com")
         assert token == "mytoken"
 
     def test_returns_none_for_non_github_host_on_failure(self) -> None:
-        with patch(
-            "apm_cli.core.token_manager.GitHubTokenManager",
-            side_effect=Exception("unavailable"),
+        with (
+            patch(
+                "apm_cli.core.auth.AuthResolver.resolve",
+                side_effect=Exception("unavailable"),
+            ),
+            patch.dict(os.environ, {}, clear=True),
         ):
             token = _get_token_for_host("dev.azure.com")
         assert token is None
@@ -687,16 +719,13 @@ class TestGetTokenForHost:
     def test_prefers_github_apm_pat(self) -> None:
         with (
             patch(
-                "apm_cli.core.token_manager.GitHubTokenManager",
+                "apm_cli.core.auth.AuthResolver.resolve",
                 side_effect=Exception("unavailable"),
             ),
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=False),
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
         ):
-            env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_TOKEN",)}
-            with patch.dict(os.environ, env, clear=True):
-                with patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}):
-                    token = _get_token_for_host("github.com")
-        assert token in ("apmtoken", None)  # depends on env ordering
+            token = _get_token_for_host("github.com")
+        assert token == "apmtoken"
 
 
 # ---------------------------------------------------------------------------
