@@ -35,6 +35,7 @@ def _isolate_user_root(tmp_path, monkeypatch):
     (home / ".apm").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("APM_HOME", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
     monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(home / ".apm"))
@@ -162,6 +163,16 @@ class TestScopeRejection:
         pkg = APMPackage.from_apm_yml(user_manifest)
         assert pkg.name == "me"
         assert "Unknown top-level" not in capsys.readouterr().out
+
+    def test_user_manifest_follows_apm_home(self, tmp_path, monkeypatch):
+        apm_home = tmp_path / "custom-apm-home"
+        apm_home.mkdir()
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        declared = {"marketplaces": [{"name": "acme", "source": "acme-org/m"}]}
+        validate_marketplaces_declaration(declared, apm_home / "apm.yml")
+        with pytest.raises(ValueError) as exc:
+            validate_marketplaces_declaration(declared, tmp_path / "home" / ".apm" / "apm.yml")
+        assert (apm_home / "apm.yml").as_posix() in str(exc.value)
 
     def test_user_manifest_shape_errors_surface_on_parse(self, user_manifest):
         _write_manifest(user_manifest, [{"name": "acme"}])

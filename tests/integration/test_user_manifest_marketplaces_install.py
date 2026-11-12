@@ -23,6 +23,7 @@ def user_root(tmp_path, monkeypatch):
     (home / ".apm").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("APM_HOME", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
     monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(home / ".apm"))
