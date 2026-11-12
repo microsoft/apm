@@ -12,6 +12,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration import hook_integrator as hook_integrator_module
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.hook_ownership import dependency_hook_source_marker, drop_source_entries
@@ -544,7 +545,12 @@ def test_hook_bundle_stale_sibling_removed_from_target_paths(tmp_path: Path) -> 
     assert stale_sibling in result.target_paths
     managed_files = {path.relative_to(project).as_posix() for path in result.target_paths}
 
-    sync_result = integrator.sync_integration(None, project, managed_files=managed_files)
+    sync_result = integrator.sync_integration(
+        None,
+        project,
+        managed_files=managed_files,
+        managed_file_hashes=compute_deployed_hashes(managed_files, project),
+    )
 
     assert sync_result["files_removed"] >= 4
     assert not stale_sibling.exists()

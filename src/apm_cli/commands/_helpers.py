@@ -24,7 +24,7 @@ from ..constants import (
 from ..core import project_name as _project_name
 from ..models.dependency.materialization import (
     CachedMaterializationPathReader,
-    find_case_equivalent_materialization_path,
+    installed_package_path,
 )
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
@@ -157,22 +157,9 @@ def _build_expected_install_paths(
     reader = CachedMaterializationPathReader()
 
     def expected_path(dependency):
-        desired = dependency.get_install_path(apm_modules_dir)
-        if (
-            preserve_installed_case
-            and dependency.alias is None
-            and dependency.has_case_insensitive_repo_identity
-        ):
-            existing = find_case_equivalent_materialization_path(
-                desired,
-                apm_modules_dir,
-                dependency=dependency,
-                reader=reader,
-                match_complete_path=True,
-            )
-            if existing is not None:
-                return existing
-        return desired
+        if preserve_installed_case:
+            return installed_package_path(dependency, apm_modules_dir, reader=reader)
+        return dependency.get_install_path(apm_modules_dir)
 
     expected = set()
     for dep in declared_deps:

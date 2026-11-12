@@ -248,8 +248,7 @@ def _materialize_install_path(
     """Resolve the on-disk path for a locked dep's package contents.
 
     Local package images are written under ``local_modules_dir`` (default
-    ``apm_modules_dir``); ``run_replay`` passes its scratch deployment root so
-    a cache-only audit never rewrites the live ``apm_modules`` copy.
+    ``apm_modules_dir``) so a cache-only audit never rewrites live ``apm_modules``.
 
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,

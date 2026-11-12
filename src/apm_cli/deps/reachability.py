@@ -49,6 +49,7 @@ from apm_cli.deps.path_anchoring import (
     resolve_local_dep_dir,
 )
 from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.dependency.materialization import installed_package_path
 from apm_cli.models.dependency.replacement import build_replacement_index, parse_replace_block
 
 if TYPE_CHECKING:
@@ -282,7 +283,7 @@ def compute_forward_reachable_keys(
             manifest_dir = real_dir
         else:
             try:
-                install_path = ref.get_install_path(apm_modules_dir)
+                install_path = installed_package_path(ref, apm_modules_dir)
             except ValueError as exc:
                 # Unresolved marketplace ref or an install path that
                 # escapes apm_modules_dir (PathTraversalError, a ValueError

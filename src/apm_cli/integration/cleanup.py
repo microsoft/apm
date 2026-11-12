@@ -444,7 +444,10 @@ def remove_stale_deployed_files(
         # APM cannot prove the file is unmodified (PermissionError, race,
         # etc.) we keep it rather than risk destroying user work.
         expected_hash = recorded_hashes.get(stale_path)
-        if hash_required and not expected_hash:
+        # Unlinking a managed final symlink removes no file content, so it
+        # needs no content-hash proof (callers opt in via allow_final_symlink).
+        final_link = allow_final_symlink and stale_target.is_symlink()
+        if hash_required and not expected_hash and not final_link:
             result.skipped_unmanaged.append(stale_path)
             diagnostics.warn(
                 (

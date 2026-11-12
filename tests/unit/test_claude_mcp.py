@@ -941,7 +941,12 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
         self.assertIn("keep", data["mcpServers"])
         self.assertNotIn("stale", data["mcpServers"])
 
-    def test_remove_stale_claude_project_skips_without_claude_dir(self):
+    def test_broadcast_remove_stale_skips_claude_project_without_claude_dir(self):
+        """Broadcast cleanup (no runtime) never writes a project that never opted in.
+
+        Runtime-scoped cleanup from the ownership ledger stays reachable after
+        ``.claude/`` is pruned (#3664); see tests/unit/install/test_mcp_ownership.py.
+        """
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         mcp = self.root / ".mcp.json"
@@ -949,7 +954,7 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
         mcp.write_text(raw, encoding="utf-8")
         MCPIntegrator.remove_stale(
             {"stale"},
-            runtime="claude",
+            runtime=None,
             project_root=self.root,
             scope=InstallScope.PROJECT,
         )
