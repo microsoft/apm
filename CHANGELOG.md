@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Internal `apm_cli.workflow` package and `apm_cli.deps.aggregator` (plus the `scan_workflows_for_dependencies` / `sync_workflow_dependencies` re-exports), which no command used; `apm run` and all CLI output are unchanged. (#3644)
 - The unpublished Dev Container Feature (`devcontainer/`) and its publish and nightly test workflows are gone; it was never released to GHCR. The installation guide now has a "Dev containers" section showing the installer and pip recipes. (#3642)
 
 ### Fixed
