@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
 - Packages with in-repo symbolic links now record the same `content_hash` on Windows as on Linux and macOS, so `apm install --frozen` verifies a lockfile generated on another platform. APM pins `core.symlinks=true` on its own Git commands, re-creates older cached checkouts, and fails with a diagnostic naming the package when the host cannot create symlinks (on Windows, enable Developer Mode). (#3545)
 - `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write (after link rendering) and are claimed in `apm.lock.yaml`, and record receipts, instead of failing as in 0.35.0. Lockfile hashes are not trusted; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
 
@@ -70,10 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt authoring, `copilot` target and packaged `apm-usage` docs now state that `.github/prompts/` files load only in VS Code Local harness sessions, not the Copilot harness or Copilot CLI, and show the skill alternative with `disable-model-invocation: true`; prompt deployment is unchanged. (#3550)
 - The devcontainer README no longer advertises the `ghcr.io/microsoft/apm/apm-cli` feature, which is not published to GHCR, and points to the supported ways to use APM in a dev container. (#3526)
 - The lockfile spec now shows `deployed_file_hashes` and `local_deployed_file_hashes` values in the `sha256:<hex>` form APM writes instead of bare hex. (#3519)
-
-### Fixed
-
-- `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
 
 ## [0.35.0] - 2026-10-22
 
