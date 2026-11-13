@@ -23,6 +23,29 @@ class NativeMcpConnectionState(Enum):
     CONFLICT = "conflict"
 
 
+def native_comparison_clients(
+    target_runtimes: list[str], *, project_root: Any, user_scope: bool
+) -> dict[str, Any]:
+    """Return the adapters whose existing native entries are compared by content.
+
+    Single owner of which runtimes preserve and report a differing same-name
+    connection (#3239) rather than treating a name match as configured (#3681).
+    """
+    from apm_cli.factory import ClientFactory
+
+    clients = {}
+    for runtime in target_runtimes:
+        try:
+            client = ClientFactory.create_client(
+                runtime, project_root=project_root, user_scope=user_scope
+            )
+        except ValueError:
+            continue  # unsupported runtimes are reported by the install itself
+        if client.compares_native_connections:
+            clients[runtime] = client
+    return clients
+
+
 def mcp_native_hash(native: dict) -> str:
     """Fingerprint a written native entry without retaining its resolved secrets."""
     encoded = json.dumps(native, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -43,6 +66,56 @@ def _native_config_key(
     return client.determine_config_key(name, None, info)
 
 
+def written_native_hash(
+    client: Any,
+    name: str,
+    *,
+    requested_info: dict | None,
+    existing_configs: Mapping[str, Any] | None = None,
+) -> str | None:
+    """Fingerprint the entry *client* just wrote for *name*, read back from its config.
+
+    Adapters that fingerprint their own render (Claude, Codex) record it in
+    ``written_mcp_hashes``; every other adapter is fingerprinted from the same
+    native view :func:`compare_native_mcp_connection` reads later. Both hash
+    ``client.managed_server_config(native)``, so an adapter overriding it keeps
+    fingerprint and comparison consistent.
+    """
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+
+    if name in client.written_mcp_hashes:
+        return client.written_mcp_hashes[name]
+    existing = (
+        MCPConflictDetector(client).get_existing_server_configs()
+        if existing_configs is None
+        else existing_configs
+    )
+    native = existing.get(_native_config_key(client, name, requested_info=requested_info))
+    return (
+        mcp_native_hash(client.managed_server_config(native)) if isinstance(native, dict) else None
+    )
+
+
+def retain_native_receipt(
+    native_hashes: dict[str, dict[str, str]] | None,
+    runtime: str,
+    client: Any,
+    name: str,
+    *,
+    requested_info: dict | None,
+) -> None:
+    """Keep a fingerprint for a managed entry that already matched, without writing.
+
+    A lock rebuilt without its deployment rows would otherwise lose the receipt
+    of an unchanged managed connection on the next install.
+    """
+    if native_hashes is None or name in native_hashes.get(runtime, {}):
+        return
+    fingerprint = written_native_hash(client, name, requested_info=requested_info)
+    if fingerprint is not None:
+        native_hashes.setdefault(runtime, {})[name] = fingerprint
+
+
 def compare_native_mcp_connection(
     client: Any,
     name: str,
@@ -56,8 +129,14 @@ def compare_native_mcp_connection(
     registry_request: bool = False,
     env_overrides: dict | None = None,
     runtime_vars: dict | None = None,
+    declaration_changed: bool = True,
 ) -> NativeMcpConnectionState:
-    """Compare a connection with its requested and previously recorded native shapes."""
+    """Compare a connection with its requested and previously recorded native shapes.
+
+    An APM-written entry whose declaration did not change is kept as written on
+    adapters that do not refresh environment-derived renders, so a different
+    credential source or resolved value never churns the native file.
+    """
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -126,7 +205,7 @@ def compare_native_mcp_connection(
         requested_native = comparison if matches_baseline else native
         matches_request = (
             isinstance(requested_native, dict)
-            and client.managed_server_config(requested_native) == requested
+            and client.json_identical(client.managed_server_config(requested_native), requested)
             if registry_request
             else client.matches_managed_server_config(requested_native, requested)
         )
@@ -136,11 +215,11 @@ def compare_native_mcp_connection(
                 if matches_baseline
                 else NativeMcpConnectionState.MATCHING_FOREIGN
             )
-    return (
-        NativeMcpConnectionState.UPDATE_MANAGED
-        if matches_baseline
-        else NativeMcpConnectionState.CONFLICT
-    )
+    if not matches_baseline:
+        return NativeMcpConnectionState.CONFLICT
+    if not declaration_changed and not client.refreshes_environment_renders:
+        return NativeMcpConnectionState.MATCHING_MANAGED
+    return NativeMcpConnectionState.UPDATE_MANAGED
 
 
 def project_mcp_cleanup_reachable(

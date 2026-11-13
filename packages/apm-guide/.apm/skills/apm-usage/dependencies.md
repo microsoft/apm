@@ -490,6 +490,10 @@ Virtual packages reference a subset of a repository.
 | File | Ends in `.prompt.md`, `.instructions.md`, or `.agent.md` | `owner/repo/prompts/review.prompt.md` |
 | Subdirectory | Shorthand path has no file extension, or an explicit `git`/`path` reference identifies a directory | `owner/repo/skills/security` |
 
+Install rejects declaring a repository (`owner/repo`) together with one of its
+own subdirectory packages (`owner/repo/skills/security`): the subdirectory
+package would be installed inside the repository package. Keep only one.
+
 Shorthand rejects unsupported file-like suffixes. Git-hosted marketplaces can
 preserve dotted directories such as `plugins/my-plugin-1.2.3` through explicit
 `git`/`path` coordinates; do not rewrite them as shorthand. Directory and

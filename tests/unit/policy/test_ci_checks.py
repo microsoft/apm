@@ -2265,12 +2265,14 @@ class TestManifestMissingWarning:
         assert check.passed is False
         assert not result.passed
 
-    def test_no_artifacts_ci_mode_still_passes(self, tmp_path: Path) -> None:
-        """Clean project with no APM artifacts passes even in CI mode."""
+    def test_no_manifest_ci_mode_fails_with_root_guidance(self, tmp_path: Path) -> None:
+        """In CI mode, no apm.yml fails instead of passing an empty audit (#3688)."""
         result = run_baseline_checks(tmp_path, ci_mode=True)
-        names = [c.name for c in result.checks]
-        assert "manifest-missing" not in names
-        assert result.passed
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+        assert "nothing was audited" in check.message
+        assert "project root that contains apm.yml" in check.message
 
 
 def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -> None:

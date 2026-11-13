@@ -450,7 +450,9 @@ class TestMcpEnvVarHeadersCursor:
         before = cursor_config.read_bytes()
         env["CURSOR_TOKEN"] = "current-cursor-sentinel"
         result = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
-        assert result.returncode == 0, result.stdout + result.stderr
+        # An unowned differing same-name entry is preserved and reported (#3681).
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "conflicts with the existing" in " ".join(result.stdout.split())
         assert cursor_config.read_bytes() == before
         document["mcpServers"]["repair-probe"]["headers"]["x-probe"] = "${env:CURSOR_TOKEN}"
         document["mcpServers"]["repair-probe"]["headers"]["Authorization"] = (
@@ -461,7 +463,7 @@ class TestMcpEnvVarHeadersCursor:
         repeated = runner.run(
             ("install", "--target", "cursor", "--no-policy"), cwd=project, env=env
         )
-        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+        assert repeated.returncode == 1, repeated.stdout + repeated.stderr
         assert cursor_config.read_bytes() == repaired
         stored = json.loads(repaired)
         assert stored["mcpServers"]["unrelated"] == unrelated
@@ -492,7 +494,8 @@ class TestMcpEnvVarHeadersCursor:
         cursor_config.write_text(json.dumps(stored), encoding="utf-8")
         restored = cursor_config.read_bytes()
         final = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
-        assert final.returncode == 0, final.stdout + final.stderr
+        # A user edit to the managed entry is preserved and reported, never overwritten.
+        assert final.returncode == 1, final.stdout + final.stderr
         assert cursor_config.read_bytes() == restored
         assert "current-cursor-sentinel" not in final.stdout + final.stderr
 

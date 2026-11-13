@@ -319,13 +319,18 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
     public_repository = repositories.create("public-package", source_tree=public_source.root)
     public_commit = repositories.commit(public_repository, message="seed public package")
     repositories.tag(public_repository, "v2.0.0", public_commit)
-    dependencies = [f"{_PRIVATE_OWNER}/private-package#{reference}"]
     if include_virtual:
-        dependencies.append(
-            f"{_PRIVATE_OWNER}/private-package/skills/private-subpackage#{reference}"
-        )
+        # Two sibling subdirectory packages of one private repository; the
+        # repository itself cannot also be declared (#3699).
+        dependencies = [
+            f"{_PRIVATE_OWNER}/private-package/skills/{name}#{reference}"
+            for name in ("private-package", "private-subpackage")
+        ]
     else:
-        dependencies.append(f"{_PUBLIC_OWNER}/public-package#^2.0.0")
+        dependencies = [
+            f"{_PRIVATE_OWNER}/private-package#{reference}",
+            f"{_PUBLIC_OWNER}/public-package#^2.0.0",
+        ]
     project = LocalPackageFactory(isolated.work_root).create(
         "private-consumer",
         dependencies=tuple(dependencies),
@@ -471,7 +476,9 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
 
         bare_cache = isolated.cache_root / "git" / "db_v1"
         bare_repositories = [path for path in bare_cache.iterdir() if path.is_dir()]
-        assert len(bare_repositories) >= 2
+        # Sibling subdirectory packages share one partial clone; the semver case
+        # adds a whole-repository private clone and the public package.
+        assert len(bare_repositories) >= (1 if include_virtual else 2)
         assert all(_PRIVATE_TOKEN not in path.name for path in bare_repositories)
         for bare_repository in bare_repositories:
             remote = subprocess.run(

@@ -14,6 +14,7 @@ from ...core.command_logger import CommandLogger
 from ...hook_contract import HookContractError
 from ...install.locking import serialized_lifecycle
 from ...models.apm_package import APMPackage
+from ...models.dependency.selection import manifest_declarations_of
 from ...utils.path_security import PathTraversalError
 from .engine import (
     IntegrationCleanupOutcome,
@@ -500,11 +501,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 
         # Read current apm.yml
-        from ...utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
+        from ...models.manifest_io import load_manifest_roundtrip
+        from ...utils.yaml_io import dump_yaml_roundtrip
 
         apm_yml_path = manifest_path
         try:
-            data = load_yaml_roundtrip(apm_yml_path) or {}
+            data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to read {apm_yml_path}: {e}")
             sys.exit(1)
@@ -545,9 +547,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             _dependency_public_label(package) for package in packages_to_remove
         )
         surviving_deps = list(current_deps)
+        for declaration in manifest_declarations_of(current_deps, packages_to_remove):
+            surviving_deps.remove(declaration)
         removed_keys = builtins.set()
         for package in packages_to_remove:
-            surviving_deps.remove(package)
             removed_keys.add(_parse_dependency_entry(package).get_unique_key())
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
@@ -583,7 +586,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Reload both, then revalidate without repeating success diagnostics so
         # those edits are preserved rather than overwritten by a stale snapshot.
         try:
-            data = load_yaml_roundtrip(apm_yml_path) or {}
+            data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to re-read {apm_yml_path} after pre-uninstall: {e}")
             sys.exit(1)
@@ -611,9 +614,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             packages_to_remove, lockfile, user_scope=scope is InstallScope.USER
         )
         surviving_deps = list(current_deps)
+        for declaration in manifest_declarations_of(current_deps, packages_to_remove):
+            surviving_deps.remove(declaration)
         removed_keys = builtins.set()
         for package in packages_to_remove:
-            surviving_deps.remove(package)
             removed_keys.add(_parse_dependency_entry(package).get_unique_key())
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
@@ -742,15 +746,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             return
 
         # Step 4: Remove from apm.yml
-        for package in packages_to_remove:
-            package_label = _dependency_public_label(package)
-            if package in dev_deps:
-                dev_deps.remove(package)
-                section = "devDependencies.apm"
-            elif package in prod_deps:
-                prod_deps.remove(package)
-                section = "dependencies.apm"
-            logger.progress(f"Removed {package_label} from {section} in apm.yml")
+        for section, declarations in (
+            ("dependencies.apm", prod_deps),
+            ("devDependencies.apm", dev_deps),
+        ):
+            for declaration in manifest_declarations_of(declarations, packages_to_remove):
+                declarations.remove(declaration)
+                package_label = _dependency_public_label(declaration)
+                logger.progress(f"Removed {package_label} from {section} in apm.yml")
         data["dependencies"]["apm"] = prod_deps
         data["devDependencies"]["apm"] = dev_deps
         # Drop empty devDependencies wrappers so the manifest stays clean

@@ -177,6 +177,8 @@ class IntelliJClientAdapter(CopilotClientAdapter):
     """MCP client adapter for GitHub Copilot inside JetBrains IDEs."""
 
     supports_user_scope: bool = True
+    # Non-JSON or JetBrains-managed config: no native content comparison yet.
+    compares_native_connections: bool = False
     _client_label: str = "JetBrains Copilot"
     target_name: str = "intellij"
     mcp_servers_key: str = "servers"

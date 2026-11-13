@@ -6,6 +6,7 @@ import hashlib
 import os
 import socket
 import sys
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -403,6 +404,67 @@ class TestExactPathOnly:
         assert "do not assume it is project-owned or safe to edit" in out
         assert "acme/skills" not in out
 
+    @pytest.mark.parametrize("absolute", [False, True])
+    def test_decomposed_query_matches_precomposed_record_on_same_file(self, project, absolute):
+        # macOS (Finder drag and drop) hands out NFD paths for NFC-named files.
+        rel = ".github/skills/caf\u00e9/r\u00e9sum\u00e9.md"
+        skill_hash = _write(project, rel, "x\n")
+        _write_lock(
+            project,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [_row(rel, ["acme/skills"], content_hash=skill_hash)],
+            },
+        )
+        decomposed = unicodedata.normalize("NFD", rel)
+        query = str(project.resolve() / decomposed) if absolute else decomposed
+        # True on normalization-insensitive filesystems (macOS APFS/HFS+), False on ext4.
+        same_file = (project / decomposed).exists()
+
+        result, out = _run("--file", query)
+
+        if same_file:
+            assert result.exit_code == 0, result.output
+            assert "Owner: acme/skills [active writer]" in out
+            assert "matches the recorded deployed hash" in out
+        else:
+            assert result.exit_code == 1, result.output
+            assert "acme/skills" not in out
+
+    @pytest.mark.parametrize("root_spelling", ["NFD", "NFC"])
+    def test_decomposed_query_under_decomposed_project_root(
+        self, tmp_path, monkeypatch, root_spelling
+    ):
+        # The project directory itself is stored decomposed (macOS keeps the
+        # spelling it was created with); records hold NFC members.
+        root = tmp_path / unicodedata.normalize("NFD", "caf\u00e9 proj")
+        root.mkdir()
+        monkeypatch.chdir(root)
+        _set_home(monkeypatch, tmp_path / "home")
+        rel = ".github/skills/r\u00e9sum\u00e9/SKILL.md"
+        skill_hash = _write(root, rel, "x\n")
+        _write_lock(
+            root,
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [_row(rel, ["acme/skills"], content_hash=skill_hash)],
+            },
+        )
+        typed_root = Path(unicodedata.normalize(root_spelling, str(Path.cwd())))
+        query = str(typed_root / unicodedata.normalize("NFD", rel))
+        # True on normalization-insensitive filesystems (macOS APFS/HFS+), False on ext4.
+        same_file = Path(query).exists()
+
+        result, out = _run("--file", query)
+
+        if same_file:
+            assert result.exit_code == 0, result.output
+            assert "Owner: acme/skills [active writer]" in out
+            assert "matches the recorded deployed hash" in out
+        else:
+            assert result.exit_code != 0, result.output
+            assert "acme/skills" not in out
+
     def test_canonical_row_from_other_scope_is_ignored(self, project):
         skill_hash = _write(project, SKILL, "x\n")
         _write_lock(
@@ -576,6 +638,29 @@ class TestUserScope:
         assert "Owner: acme/skills [active writer]" in out
         assert "matches the recorded deployed hash" in out
         assert _snapshot(tmp_path) == before
+
+    def test_global_reads_path_inferred_rows_written_by_user_install(self, tmp_path, monkeypatch):
+        # `apm install -g` persists rows whose scope is inferred from the path,
+        # so only `.copilot/` rows say `user`; `.claude/` rows say `project`.
+        home = tmp_path / "home"
+        _set_home(monkeypatch, home)
+        monkeypatch.chdir(tmp_path)
+        rel = ".claude/skills/alpha/SKILL.md"
+        skill_hash = _write(home, rel, "user\n")
+        _write_lock(
+            home / ".apm",
+            {
+                "dependencies": [_remote_dep()],
+                "deployments": [
+                    _row(rel, ["acme/skills"], content_hash=skill_hash, target="claude")
+                ],
+            },
+        )
+        result, out = _run("--file", str(home / rel), "-g")
+        assert result.exit_code == 0, result.output
+        assert f"{rel} (user scope" in out
+        assert "Owner: acme/skills [active writer]" in out
+        assert "matches the recorded deployed hash" in out
 
     def test_global_legacy_rows_keep_inferred_scope_compatibility(self, tmp_path, monkeypatch):
         home = tmp_path / "home"

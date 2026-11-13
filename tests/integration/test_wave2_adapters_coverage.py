@@ -2212,15 +2212,15 @@ class TestClaudeAdapterEdgeCases:
         assert "new" in data["mcpServers"]
 
     def test_update_config_handles_corrupted_json(self, tmp_path: Path) -> None:
-        """update_config recovers from corrupted .mcp.json."""
+        """update_config keeps an unparsable .mcp.json and reports the write failed."""
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         mcp_json = tmp_path / ".mcp.json"
         mcp_json.write_text("NOT JSON!!!")
         adapter = ClaudeClientAdapter(project_root=tmp_path)
         result = adapter.update_config({"server": {"command": "npx"}})
-        # Should still succeed by starting fresh
-        assert result is True
+        assert result is False
+        assert mcp_json.read_text() == "NOT JSON!!!"
 
     def test_get_current_config_handles_invalid_json(self, tmp_path: Path) -> None:
         """get_current_config returns empty mcpServers for corrupted JSON."""

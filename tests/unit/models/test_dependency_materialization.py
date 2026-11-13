@@ -13,6 +13,7 @@ from apm_cli.models.dependency.materialization import (
     CachedMaterializationPathReader,
     MaterializationPathCollisionError,
     find_case_equivalent_materialization_path,
+    nested_materialization_pairs,
     prepare_materialization_path,
 )
 from apm_cli.models.dependency.reference import DependencyReference
@@ -352,3 +353,16 @@ def test_installed_package_path_keeps_canonical_path_without_a_case_variant(
     assert installed_package_path(
         dependency, modules, reader=reader
     ) == dependency.get_install_path(modules)
+
+
+def test_repository_and_its_own_subdirectory_package_nest(tmp_path: Path) -> None:
+    """#3699: a whole repo and its subdirectory package cannot share apm_modules."""
+    repo = DependencyReference.parse("Acme/Mono")
+    child = DependencyReference.parse("acme/mono/packages/x")
+    sibling = DependencyReference.parse("acme/mono/packages/y")
+    other = DependencyReference.parse("acme/other")
+
+    pairs = nested_materialization_pairs([repo, child, sibling, other], tmp_path / "apm_modules")
+
+    assert pairs == [(repo, child), (repo, sibling)]
+    assert nested_materialization_pairs([child, sibling, other], tmp_path / "apm_modules") == []

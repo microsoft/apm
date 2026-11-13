@@ -814,6 +814,36 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
             "    current_deps.get_identity()\n    packages_to_remove = []",
         ),
     ),
+    CompoundMutation(
+        "uninstall-declarations-owner",
+        UNINSTALL_RULE,
+        "src/apm_cli/models/dependency/selection.py",
+        _replace("def manifest_declarations_of(", "def manifest_declarations_of_disabled("),
+    ),
+    CompoundMutation(
+        "uninstall-manifest-edit-delegation",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "manifest_declarations_of(declarations, packages_to_remove)",
+            "[package for package in packages_to_remove if package in declarations]",
+        ),
+    ),
+    CompoundMutation(
+        "install-cross-section-delegation",
+        UNINSTALL_RULE,
+        "src/apm_cli/install/package_resolution.py",
+        _replace(
+            "declared = manifest_declarations_of(other_deps, [package])",
+            "declared = [item for item in other_deps if item == package]",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-manifest-edit-single-section",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        append="\n\ndef _first_section(package, dev_deps):\n    return package in dev_deps\n",
+    ),
     *(
         CompoundMutation(
             f"replacement-owner-{method}",

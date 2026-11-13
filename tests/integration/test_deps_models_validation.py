@@ -1510,7 +1510,8 @@ class TestDiffScratchAgainstProject:
 
         mock_lf = MagicMock()
         mock_lf.dependencies = {}
-        mock_lf.local_deployed_files = []
+        # A claimed file is a managed edit; an unclaimed one is unmanaged (#3682).
+        mock_lf.local_deployed_files = [".apm/instructions/rules.instructions.md"]
         findings = diff_scratch_against_project(scratch, project, mock_lf, targets=[])
         kinds = [f.kind for f in findings]
         assert "modified" in kinds

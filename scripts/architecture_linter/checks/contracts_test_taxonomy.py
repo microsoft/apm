@@ -675,6 +675,21 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Dependency discovery must consume canonical materialization and lockfile paths",
             )
         )
+    # #3699: root declarations whose package directories nest are rejected by
+    # the materialization owner before any package is fetched.
+    resolver, errors = _facts_for(provider, "src/apm_cli/deps/apm_resolver.py", rule_id)
+    findings.extend(errors)
+    if not errors and (
+        not _present_re(materialization, re.compile(r"^def nested_materialization_pairs\("))
+        or not _present(resolver, "nested = nested_materialization_pairs(")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _MATERIALIZATION_OWNER,
+                "Nested root package directories must be rejected via nested_materialization_pairs",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )

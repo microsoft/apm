@@ -103,10 +103,8 @@ def test_cursor_rules_installed_lifecycle(
     if user_scope:
         assert not (project / ".cursor").exists()
     assert user_rule.read_text(encoding="utf-8") == _USER_RULE
-    # Existing rule-dir policy (apm#1662): a same-named rule is APM-owned.
-    collision_text = collision.read_text(encoding="utf-8")
-    assert "PKG" in collision_text
-    assert "USER_COLLISION" not in collision_text
+    # An unmanaged same-named rule is user-authored: skipped, never adopted.
+    assert collision.read_text(encoding="utf-8") == _USER_COLLISION
     assert lock()["dependencies"][0]["resolved_commit"] == first.sha
     records = {
         record["value"]: record for record in lock()["deployments"] if record["target"] == "cursor"
@@ -115,7 +113,7 @@ def test_cursor_rules_installed_lifecycle(
         "sha256:" + hashlib.sha256(style.read_bytes()).hexdigest()
     )
     assert len(records[".cursor/rules/style.mdc"]["owners"]) == 1
-    assert ".cursor/rules/collision.mdc" in records
+    assert ".cursor/rules/collision.mdc" not in records
     assert ".cursor/rules/personal.mdc" not in records
 
     before_repeat = snapshot()
@@ -162,8 +160,10 @@ def test_cursor_rules_installed_lifecycle(
         "content-integrity",
         "drift",
     }
+    # The preserved user collision shadows the package rule, so replay reports it.
     assert [(item["path"], item["kind"]) for item in drift["drift"]["drift"]] == [
-        (".cursor/rules/edited.mdc", "modified")
+        (".cursor/rules/collision.mdc", "unmanaged-conflict"),
+        (".cursor/rules/edited.mdc", "modified"),
     ]
     assert snapshot() == audit_before
 
@@ -179,7 +179,7 @@ def test_cursor_rules_installed_lifecycle(
     assert all((target_root.parent / value).exists() for value in claims if "://" not in value)
     assert not style.exists()
     assert not (rules / "always.mdc").exists()
-    assert not collision.exists()
+    assert collision.read_text(encoding="utf-8") == _USER_COLLISION
     assert not (target_root / "agents/reviewer.md").exists()
     assert user_rule.read_text(encoding="utf-8") == _USER_RULE
     assert edited.read_text(encoding="utf-8") == "USER_EDITED_MANAGED_RULE\n"
@@ -188,5 +188,10 @@ def test_cursor_rules_installed_lifecycle(
     run("uninstall", *scope, owner)
     assert saved_edit.read_text(encoding="utf-8") == "USER_EDITED_MANAGED_RULE\n"
     assert user_rule.read_text(encoding="utf-8") == _USER_RULE
-    assert sorted(path.name for path in rules.iterdir()) == ["personal.mdc", "saved-edit.mdc"]
+    assert collision.read_text(encoding="utf-8") == _USER_COLLISION
+    assert sorted(path.name for path in rules.iterdir()) == [
+        "collision.mdc",
+        "personal.mdc",
+        "saved-edit.mdc",
+    ]
     assert not (state_root / "apm.lock.yaml").exists()

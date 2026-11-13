@@ -271,10 +271,11 @@ def _install_registry_group(  # noqa: PLR0913
     number of servers newly configured or updated in this group.
     """
     # Lazy import: only available after MCPIntegrator finishes loading.
-    from apm_cli.factory import ClientFactory
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         compare_native_mcp_connection,
+        native_comparison_clients,
+        retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -283,11 +284,9 @@ def _install_registry_group(  # noqa: PLR0913
     native_conflicts: list[str] = []
     if written_connections is None:
         written_connections = set()
-    protected_clients = {
-        rt: ClientFactory.create_client(rt, project_root=project_root, user_scope=user_scope)
-        for rt in target_runtimes
-        if rt in {"claude", "codex"}
-    }
+    protected_clients = native_comparison_clients(
+        target_runtimes, project_root=project_root, user_scope=user_scope
+    )
     registry_server_cache: dict[str, dict] = prevalidated_servers or {}
 
     _announce_registry_endpoint(operations.registry_client, logger)
@@ -315,11 +314,10 @@ def _install_registry_group(  # noqa: PLR0913
             dep for dep in valid_servers if dep not in servers_to_install
         ]
 
-        # Detect config drift for "already configured" servers
-        if stored_mcp_configs and already_configured_candidates:
-            drifted_reg_deps = [
-                group_dep_map[n] for n in already_configured_candidates if n in group_dep_map
-            ]
+        # Detect declaration drift; native comparison needs it for every server.
+        drift_scope = valid_servers if protected_clients else already_configured_candidates
+        if stored_mcp_configs and drift_scope:
+            drifted_reg_deps = [group_dep_map[n] for n in drift_scope if n in group_dep_map]
             drifted = MCPIntegrator._detect_mcp_config_drift(
                 drifted_reg_deps,
                 stored_mcp_configs,
@@ -427,6 +425,7 @@ def _install_registry_group(  # noqa: PLR0913
                             managed_fields=managed_fields,
                             native_hash=(native_hashes or {}).get(rt, {}).get(dep),
                             registry_request=True,
+                            declaration_changed=is_update,
                             env_overrides=shared_env_vars,
                             runtime_vars=shared_runtime_vars,
                         )
@@ -456,6 +455,14 @@ def _install_registry_group(  # noqa: PLR0913
                             NativeMcpConnectionState.MATCHING_MANAGED,
                             NativeMcpConnectionState.MATCHING_FOREIGN,
                         }:
+                            if state is NativeMcpConnectionState.MATCHING_MANAGED:
+                                retain_native_receipt(
+                                    native_hashes,
+                                    rt,
+                                    client,
+                                    dep,
+                                    requested_info=server_info_cache.get(dep),
+                                )
                             logger.verbose_detail(f"{dep} already matches {rt}; no write")
                             continue
                         replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
@@ -1199,12 +1206,15 @@ def _resolve_target_runtimes(
         and target_decision is not None
         and target_decision.canonical_targets is not None
     ):
-        from apm_cli.integration.targets import materialize_project_target_profiles
+        from apm_cli.integration.targets import (
+            TargetRootObstructedError,
+            materialize_project_target_profiles,
+        )
 
         root = Path(project_root) if project_root is not None else Path.cwd()
         try:
             materialize_project_target_profiles(root, target_decision.canonical_targets)
-        except OSError as exc:
+        except (OSError, TargetRootObstructedError) as exc:
             raise RequiredIntegrationError(
                 f"Cannot prepare target configuration directory: {exc}. "
                 "Check directory permissions, then retry."
@@ -1292,6 +1302,8 @@ def _install_self_defined_deps(
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         compare_native_mcp_connection,
+        native_comparison_clients,
+        retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -1300,6 +1312,9 @@ def _install_self_defined_deps(
     native_conflicts: list[str] = []
     if written_connections is None:
         written_connections = set()
+    protected_clients = native_comparison_clients(
+        target_runtimes, project_root=project_root, user_scope=user_scope
+    )
     self_defined_names = [dep.name for dep in self_defined_deps]
     previously_owned = {
         rt: builtins.set(names) for rt, names in (managed_target_servers or {}).items()
@@ -1314,7 +1329,7 @@ def _install_self_defined_deps(
         project_root=project_root,
         user_scope=user_scope,
     )
-    if {"claude", "codex"}.intersection(target_runtimes):
+    if protected_clients:
         # Native content must be checked even when every requested name exists.
         self_defined_to_install = list(self_defined_names)
     already_configured_candidates_sd = [
@@ -1347,9 +1362,6 @@ def _install_self_defined_deps(
             for name in already_configured_self_defined:
                 logger.verbose_detail(f"{name} already configured, skipping")
 
-    from apm_cli.factory import ClientFactory
-
-    protected_clients = {}
     for dep in self_defined_deps:
         if dep.name not in self_defined_to_install:
             continue
@@ -1385,11 +1397,7 @@ def _install_self_defined_deps(
             replace_existing = is_update and (
                 managed_target_servers is None or dep.name in managed_target_servers.get(rt, set())
             )
-            if rt in {"claude", "codex"}:
-                if rt not in protected_clients:
-                    protected_clients[rt] = ClientFactory.create_client(
-                        rt, project_root=project_root, user_scope=user_scope
-                    )
+            if rt in protected_clients:
                 client = protected_clients[rt]
                 state = compare_native_mcp_connection(
                     client,
@@ -1400,6 +1408,7 @@ def _install_self_defined_deps(
                     and dep.name in managed_target_servers.get(rt, set()),
                     managed_fields=managed_fields,
                     native_hash=(native_hashes or {}).get(rt, {}).get(dep.name),
+                    declaration_changed=is_update,
                 )
                 if (
                     state
@@ -1437,6 +1446,10 @@ def _install_self_defined_deps(
                     NativeMcpConnectionState.MATCHING_MANAGED,
                     NativeMcpConnectionState.MATCHING_FOREIGN,
                 }:
+                    if state is NativeMcpConnectionState.MATCHING_MANAGED:
+                        retain_native_receipt(
+                            native_hashes, rt, client, dep.name, requested_info=synthetic_info
+                        )
                     logger.verbose_detail(f"{dep.name} already matches {rt}; no write")
                     continue
                 replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED

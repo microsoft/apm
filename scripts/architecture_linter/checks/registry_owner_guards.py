@@ -99,6 +99,7 @@ _INSTALL_PIPELINE = "src/apm_cli/install/pipeline.py"
 
 
 _INSTALL_SERVICE = "src/apm_cli/install/service_integration.py"
+_LOCAL_BUNDLE_HANDLER = "src/apm_cli/install/local_bundle_handler.py"
 
 
 _UPDATE_CMD = "src/apm_cli/commands/update.py"
@@ -120,6 +121,9 @@ _COMPILATION_PREFIX = "src/apm_cli/compilation/"
 
 
 # -- Version rendering / entrypoint delegation --
+
+_CLI_ENTRY = "src/apm_cli/cli.py"
+
 
 _VERSION_RENDERER = "src/apm_cli/version_output.py"
 
@@ -362,6 +366,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
         _INSTALL_PIPELINE,
         _INSTALL_SERVICE,
         _UPDATE_CMD,
+        _LOCAL_BUNDLE_HANDLER,
     )
     facts_by_path, failures = _read_required(provider, rule_id, paths)
     if failures:
@@ -373,6 +378,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
     pipeline = facts_by_path[_INSTALL_PIPELINE]
     service = facts_by_path[_INSTALL_SERVICE]
     update = facts_by_path[_UPDATE_CMD]
+    local_bundle = facts_by_path[_LOCAL_BUNDLE_HANDLER]
 
     if _count_regex_lines(owner, r"^def resolve_effective_target_decision\(") != 1:
         findings.append(
@@ -413,6 +419,14 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
                 rule_id,
                 _INSTALL_SERVICE,
                 "service integration must forward target_decision to package and MCP phases",
+            )
+        )
+    if not _has_fixed(local_bundle, "explicit = resolve_manifest_target_decision("):
+        findings.append(
+            violation(
+                rule_id,
+                _LOCAL_BUNDLE_HANDLER,
+                "local bundle install must resolve targets through the manifest target decision",
             )
         )
     if not _has_fixed(update, 'target_decision = getattr(result, "target_decision", None)'):
@@ -951,6 +965,39 @@ def _has_named_assignment(
     )
 
 
+def _check_process_interrupt_signals(provider: FactsProvider) -> Iterable[Violation]:
+    """SIGTERM handling must route through the CLI entry owner in ``cli.py``.
+
+    ``main`` installs ``_route_sigterm_to_interrupt`` so SIGTERM takes the
+    Ctrl+C rollback path; no other module installs a SIGTERM handler.
+    """
+    rule_id = "registry_delegation.process_interrupt_signals"
+    facts_by_path, failures = _read_required(provider, rule_id, (_CLI_ENTRY,))
+    if failures:
+        return failures
+    cli = facts_by_path[_CLI_ENTRY]
+    findings: list[Violation] = []
+    if _count_regex_lines(cli, r"^def _route_sigterm_to_interrupt\(") != 1:
+        findings.append(
+            violation(rule_id, _CLI_ENTRY, "_route_sigterm_to_interrupt must be defined once")
+        )
+    if _count_regex_lines(cli, r"^\s+_route_sigterm_to_interrupt\(\)") != 1:
+        findings.append(
+            violation(rule_id, _CLI_ENTRY, "main must call _route_sigterm_to_interrupt once")
+        )
+    findings.extend(
+        line_pattern_violations(
+            provider,
+            rule_id=rule_id,
+            paths=tuple(p for p in _python_paths(provider, under=_SRC) if p != _CLI_ENTRY),
+            pattern=r"signal\.signal\(\s*signal\.SIGTERM",
+            message="SIGTERM handlers must be installed only by cli.py (_route_sigterm_to_interrupt)",
+            exempt_marker=EXEMPT_MARKER,
+        )
+    )
+    return tuple(findings)
+
+
 def _check_version_rendering(provider: FactsProvider) -> Iterable[Violation]:
     """CLI version rendering must route through ``version_output.py``.
 
@@ -1136,6 +1183,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-apm-home-resolution",),
         description="APM-owned user metadata paths must share core/scope.py::get_apm_home.",
         check=_check_apm_home_resolution,
+    ),
+    Rule(
+        id="registry_delegation.process_interrupt_signals",
+        group=GROUP,
+        guard_ids=("registry-delegation-process-interrupt-signals",),
+        description="SIGTERM handling must route through the CLI entry owner in cli.py.",
+        check=_check_process_interrupt_signals,
     ),
 )
 

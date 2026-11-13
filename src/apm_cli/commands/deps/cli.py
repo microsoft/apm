@@ -17,8 +17,9 @@ from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
-from ...deps.lockfile import LockedDependency
+from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
+from ...models.manifest_io import DuplicateManifestKeyError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
@@ -307,7 +308,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
-    except PathTraversalError:
+    except (PathTraversalError, DuplicateManifestKeyError):
         raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
@@ -352,7 +353,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
-    except PathTraversalError:
+    except (PathTraversalError, LockfileConflictError):
         raise
     except Exception:
         pass  # Continue without lockfile if it can't be read
@@ -835,6 +836,8 @@ def _build_dep_tree(apm_dir):
                     result["children_map"] = children_map
                     result["unresolved"] = list(placement.unresolved)
                     return result
+    except LockfileConflictError:
+        raise
     except Exception:
         pass
 

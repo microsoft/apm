@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
+    _GUARD_CLEANUP_RELEASE,
     _GUARD_PROVENANCE,
     _GUARD_TARGET_CONTRACTION,
     check_base_integrator,
+    check_cleanup_ownership_release,
     check_provenance_state,
     check_target_file_contraction,
 )
@@ -47,9 +49,11 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     check_lock_parent_placement,
 )
 from scripts.architecture_linter.checks.install_lsp_plugin import (
+    GUARD_CONSUMER_MANIFEST_REWRITE,
     GUARD_EXECUTABLE_TRUST,
     GUARD_LSP_LIFECYCLE,
     GUARD_LSP_TARGET_CONTRACT,
+    check_consumer_manifest_rewrite,
     check_executable_trust_context,
     check_lsp_lifecycle,
     check_lsp_target_contract,
@@ -193,9 +197,19 @@ RULES: tuple[Rule, ...] = (
         check_base_integrator,
     ),
     _rule(
+        _GUARD_CLEANUP_RELEASE,
+        "Stale cleanup releases skill directories that hold only user content.",
+        check_cleanup_ownership_release,
+    ),
+    _rule(
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
+    ),
+    _rule(
+        GUARD_CONSUMER_MANIFEST_REWRITE,
+        "Consumer apm.yml rewrites route through the round-trip YAML pair.",
+        check_consumer_manifest_rewrite,
     ),
     _rule(
         GUARD_EXECUTABLE_TRUST,

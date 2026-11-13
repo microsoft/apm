@@ -234,6 +234,41 @@ _USER_ROOT_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
 )
 
+_MCP_INSTALL_FLOW = "src/apm_cli/integration/mcp_integrator_install.py"
+_MCP_OWNERSHIP = "src/apm_cli/install/mcp/ownership.py"
+_MCP_NATIVE_SELECTION = (
+    "protected_clients = native_comparison_clients(target_runtimes, "
+    "project_root=project_root, user_scope=user_scope)"
+)
+_MCP_NATIVE_COMPARISON_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (_MCP_INSTALL_FLOW, "_install_registry_group", (_MCP_NATIVE_SELECTION,)),
+    (_MCP_INSTALL_FLOW, "_install_self_defined_deps", (_MCP_NATIVE_SELECTION,)),
+    (
+        _MCP_OWNERSHIP,
+        "native_comparison_clients",
+        ("if client.compares_native_connections:\n    clients[runtime] = client",),
+    ),
+)
+_MCP_RUNTIME_NAME_GATE = r"""\{\s*["']claude["']\s*,\s*["']codex["']\s*\}"""
+
+_DRIFT_OWNER = "src/apm_cli/install/drift.py"
+_DRIFT_CLAIMS_OWNER = "src/apm_cli/install/drift_claims.py"
+_DRIFT_CLASSIFICATION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _DRIFT_OWNER,
+        "diff_scratch_against_project",
+        ("unmanaged = unmanaged_skill or claims.unclaimed(rel)",),
+    ),
+    (
+        _DRIFT_CLAIMS_OWNER,
+        "ReplayClaims.unclaimed",
+        (
+            "return not (rel in self.tracked or rel.startswith(self.prefixes) "
+            "or rel in self.shared)",
+        ),
+    ),
+)
+
 _NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         _INSTRUCTION_PROJECTION_OWNER,
@@ -249,6 +284,8 @@ _NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (
             "rendered_rules = self._prepare_rule_plan(instruction_files, deploy_dir, "
             "mapping.extension, fmt, prepared_instructions)",
+            "skip, adopted = self._check_adopt_or_skip(target_path, source_file, rel_path, "
+            "managed_files, force, diagnostics, target_paths, expected_content=new_content)",
         ),
     ),
     (
@@ -523,6 +560,37 @@ def _function_contract_violations(
                     path,
                     f"{qualname} must retain canonical routing: {statement!r}",
                 )
+
+
+def _check_mcp_native_comparison(provider: FactsProvider) -> Iterable[Violation]:
+    """Same-name MCP connections are compared through one adapter-driven owner (#3681)."""
+    rule_id = "install-deployment-mcp-native-comparison"
+    _, failures = _read_required(provider, rule_id, (_MCP_INSTALL_FLOW, _MCP_OWNERSHIP))
+    if failures:
+        return failures
+    findings = list(
+        _function_contract_violations(provider, rule_id, _MCP_NATIVE_COMPARISON_CONTRACTS)
+    )
+    findings.extend(
+        line_pattern_violations(
+            provider,
+            rule_id=rule_id,
+            paths=(_MCP_INSTALL_FLOW,),
+            pattern=_MCP_RUNTIME_NAME_GATE,
+            message="native MCP comparison must come from native_comparison_clients",
+            exempt_marker=EXEMPT_MARKER,
+        )
+    )
+    return findings
+
+
+def _check_drift_unmanaged_classification(provider: FactsProvider) -> Iterable[Violation]:
+    """Unclaimed differing files are unmanaged conflicts, never managed edits (#3682)."""
+    rule_id = "install-deployment-drift-claim-classification"
+    _, failures = _read_required(provider, rule_id, (_DRIFT_OWNER, _DRIFT_CLAIMS_OWNER))
+    if failures:
+        return failures
+    return list(_function_contract_violations(provider, rule_id, _DRIFT_CLASSIFICATION_CONTRACTS))
 
 
 def _check_native_instruction_projection(provider: FactsProvider) -> Iterable[Violation]:
@@ -852,6 +920,20 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("contracts-tooling-root-context-write-eligibility",),
         description="Project and user root mutations must retain canonical ownership protection.",
         check=_check_root_context_write_eligibility,
+    ),
+    Rule(
+        id="install-deployment-mcp-native-comparison",
+        group=GROUP,
+        guard_ids=("install-deployment-mcp-native-comparison",),
+        description="Same-name MCP connections must be compared through native_comparison_clients.",
+        check=_check_mcp_native_comparison,
+    ),
+    Rule(
+        id="install-deployment-drift-claim-classification",
+        group=GROUP,
+        guard_ids=("install-deployment-drift-claim-classification",),
+        description="Audit drift must classify unclaimed differing files as unmanaged-conflict.",
+        check=_check_drift_unmanaged_classification,
     ),
     Rule(
         id="hooks-integrations-native-instruction-projection",

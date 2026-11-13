@@ -175,7 +175,7 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
         return None
     from ..deps.lockfile import require_supported_lockfile_version
 
-    require_supported_lockfile_version(data)
+    data["lockfile_version"] = require_supported_lockfile_version(data)
     return data
 
 

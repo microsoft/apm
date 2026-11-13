@@ -262,10 +262,10 @@ def test_in_flight_parse_cannot_repoison_cache_after_invalidation(tmp_path):
 
     import apm_cli.utils.yaml_io as yaml_io_mod
 
-    real_load = yaml_io_mod.load_yaml
+    real_load = yaml_io_mod.load_yaml_str
 
-    def load_with_concurrent_rewrite(path):
-        data = real_load(path)
+    def load_with_concurrent_rewrite(text):
+        data = real_load(text)
         # Simulate a concurrent rewrite + invalidation landing while this
         # "thread" is still holding the pre-rewrite parse result.
         apm_yml.write_bytes(b"name: foo\nversion: 2c7ec5e\n")
@@ -273,7 +273,7 @@ def test_in_flight_parse_cannot_repoison_cache_after_invalidation(tmp_path):
         return data
 
     with patch(
-        "apm_cli.utils.yaml_io.load_yaml",
+        "apm_cli.utils.yaml_io.load_yaml_str",
         side_effect=load_with_concurrent_rewrite,
     ):
         stale = APMPackage.from_apm_yml(apm_yml)

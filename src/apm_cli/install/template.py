@@ -33,6 +33,7 @@ from apm_cli.install.sources import (
     DependencySource,
     Materialization,
 )
+from apm_cli.utils.file_ops import describe_path_obstruction
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -563,8 +564,9 @@ def _integrate_materialization(
         # Local packages key the diagnostic by local_path; cached/fresh
         # key by dep_key -- a behavioural detail preserved from legacy.
         package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
+        reason = describe_path_obstruction(e, Path(ctx.project_root)) or e
         diagnostics.error(
-            f"{source.INTEGRATE_ERROR_PREFIX}: {e}",
+            f"{source.INTEGRATE_ERROR_PREFIX}: {reason}",
             package=package_key,
         )
 

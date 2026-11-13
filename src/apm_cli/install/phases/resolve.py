@@ -436,9 +436,7 @@ def _resolve_dependencies(
     # which may restructure the whole graph).
     update_refs = _requires_remote_ref_resolution(ctx)
     update_keys = (
-        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps)
-        if update_refs and ctx.only_packages
-        else None
+        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps) if ctx.only_packages else None
     )
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")
