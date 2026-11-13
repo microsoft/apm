@@ -683,6 +683,8 @@ marketplace-integrations-codex-native-lifecycle
 marketplace-integrations-copilot-ownership
 marketplace-integrations-generated-bundle-lf-writers
 marketplace-integrations-hash-visible-lf-writers
+marketplace-integrations-json-envelope
+marketplace-integrations-json-projection
 marketplace-integrations-legacy-skill-membership
 marketplace-integrations-local-audit-resolution
 marketplace-integrations-locked-evidence

@@ -719,15 +719,19 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path (including a local `apm.yml` read as a live catalog), or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. Without `--path`, the catalog is discovered at `marketplace.json`, `.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json` (first wins). `--path` selects a repository-relative catalog JSON (for example one per audience, `catalogs/frontend/marketplace.json`), is saved in the registration, and must stay inside the repository; not for hosted `marketplace.json` URLs or a direct file. Separate catalogs are not access control. | `-n NAME`, `-r REF`, `--host HOST`, `--path PATH`, `--offline` (local `apm.yml` only) |
-| `apm marketplace list` | List registered marketplaces | -- |
-| `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs | `--offline` (local YAML only) |
+| `apm marketplace list` | List registered marketplaces; JSON exposes `name`, `source`, `ref`, `path` in a version-1 envelope. URL credentials, queries and fragments are removed; local sources use `~`, internal cache paths are `null` | `--format text\|json`, `-f` (default `text`) |
+| `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs. JSON rows expose `name`, `description`, `version`, `install` | `--offline` (local YAML only), `--format text\|json`, `-f` (default `text`) |
 | `apm marketplace update [NAME]` | Update marketplace index; reread live local `apm.yml` catalogs | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
 | `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
-| `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
+| `apm search QUERY@MARKETPLACE` | Search marketplace; `apm marketplace search` is an alias to the same implementation. JSON rows expose `name`, `description`, `install`; the existing limit is applied before case-insensitive name sorting | `--limit N`, `--format text\|json`, `-f` (default `text`) |
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
-| `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
+| `apm view PKG` | View installed package or marketplace plugin details. JSON is unavailable with `--file` or `FIELD=versions` | `-g`, `--format text\|json`, `-f` (default `text`) |
 | `apm install -g` (with `marketplaces:` in `$APM_HOME/apm.yml`) | Reconcile the user manifest `marketplaces:` list (`name`, `source`, optional `ref`) before installing: register, update, or remove entries it added. Manual `apm marketplace add` registrations always win. Discovery only. See dependencies.md. | `--dry-run` previews without fetching or writing |
+
+JSON successes use `{"schema_version":1,"data":...}` on stdout. Handled
+failures use `{"schema_version":1,"error":"<code>"}` on stderr and exit
+nonzero; Click parser usage errors retain their normal output.
 
 ## Marketplace authoring
 

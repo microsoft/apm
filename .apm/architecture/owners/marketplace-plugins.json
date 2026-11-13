@@ -2,6 +2,13 @@
   "version": 1,
   "owners": [
     {
+      "id": "marketplace-view-json-envelope",
+      "decision": "Versioned success and error envelopes and safe metadata/source/install-path projection for marketplace and view JSON output",
+      "owner": "core/json_envelope.py (success_envelope, error_envelope, safe_text, safe_source, safe_install_path); cache/paths.py owns side-effect-free cache_roots_for_display",
+      "selectors": ["src/apm_cli/core/json_envelope.py"],
+      "guards": ["marketplace-integrations-json-envelope", "marketplace-integrations-json-projection"]
+    },
+    {
       "id": "local-authoring-catalog",
       "decision": "Live local authoring catalog interpretation without generation",
       "owner": "marketplace/authoring_source.py coordinates yml_schema, MarketplaceBuilder and resolver path authority",
