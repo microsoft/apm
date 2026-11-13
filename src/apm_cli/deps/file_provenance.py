@@ -305,7 +305,7 @@ def _precomposed_spelling(path: Path) -> Path | None:
 
     Only NFD -> NFC is retried: install records precomposed (NFC) paths.
     """
-    relative = str(path.relative_to(path.anchor))
+    relative = path.relative_to(path.anchor).as_posix()
     precomposed = unicodedata.normalize("NFC", relative)
     if precomposed == relative:
         return None
