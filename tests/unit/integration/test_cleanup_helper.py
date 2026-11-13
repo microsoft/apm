@@ -573,6 +573,7 @@ def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkey
         (rules / f"old{i}.instructions.md").write_text("x")
         stale.append(f".github/instructions/old{i}.instructions.md")
     live = [f".github/instructions/new{i}.instructions.md" for i in range(300)]
+    recorded = {rel: compute_file_hash(project_root / rel) for rel in stale}
     calls = {"key": 0}
     real_key = paths._spelling_key
     monkeypatch.setattr(
@@ -585,6 +586,7 @@ def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkey
         dep_key="acme/pkg",
         targets=None,
         diagnostics=diagnostics,
+        recorded_hashes=recorded,
         live_paths=live,
     )
 

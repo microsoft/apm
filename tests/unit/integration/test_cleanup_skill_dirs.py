@@ -415,7 +415,7 @@ class TestDepartingOwnerReleasesUserContentDirectory:
     """Orphan cleanup releases a skill dir kept only for user content (#3677)."""
 
     def test_orphan_cleanup_releases_dir_holding_only_user_files(self, project_root, diagnostics):
-        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
         notes = _make_file(project_root, ".agents/skills/my-skill/my-notes.txt", "user notes\n")
 
         result = remove_stale_deployed_files(
@@ -424,6 +424,7 @@ class TestDepartingOwnerReleasesUserContentDirectory:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            recorded_hashes={".agents/skills/my-skill/SKILL.md": compute_file_hash(skill_md)},
             failed_path_retained=False,
         )
 
