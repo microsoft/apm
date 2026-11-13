@@ -1,18 +1,471 @@
 """Tests for the top-level ``apm view`` command (renamed from ``apm info``)."""
 
 import contextlib
+import json
 import os
 import sys
 import tempfile
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+
+
+def test_view_json_installed_optional_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Installed details expose null metadata and real counts, not display placeholders."""
+    monkeypatch.chdir(tmp_path)
+    package = tmp_path / "apm_modules" / "org" / "minimal"
+    package.mkdir(parents=True)
+    (package / "apm.yml").write_text("name: minimal\nversion: 1.0.0\n")
+    instructions = package / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "rules.instructions.md").write_text("Follow the rules.\n")
+
+    result = CliRunner().invoke(cli, ["view", "org/minimal", "--registry", "ignored", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "data": {
+            "name": "minimal",
+            "version": "1.0.0",
+            "description": None,
+            "author": None,
+            "source": None,
+            "ref": None,
+            "commit": None,
+            "install_path": str(package),
+            "context_files": {"instructions": 1, "agents": 0, "contexts": 0},
+            "workflows": 0,
+            "hooks": 0,
+        },
+    }
+    assert "\x1b" not in result.stdout
+    assert "--registry is only valid" in result.stderr
+
+
+def test_view_json_marketplace_details() -> None:
+    """Marketplace detail mode exposes its approved fields through the root CLI."""
+    from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+
+    plugin = MarketplacePlugin(
+        name="review",
+        source="org/review",
+        version="2.0.0",
+        description="Review changes",
+        tags=("quality", "python"),
+    )
+    with (
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name"),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=MarketplaceManifest(name="tools", plugins=(plugin,)),
+        ),
+        patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            return_value=("org/review#v2.0.0", None),
+        ),
+    ):
+        text = CliRunner().invoke(cli, ["view", "review@tools"])
+        explicit_text = CliRunner().invoke(cli, ["view", "review@tools", "-f", "text"])
+        result = CliRunner().invoke(cli, ["view", "review@tools", "--format", "json"])
+
+    assert text.exit_code == explicit_text.exit_code == 0
+    assert text.stdout == explicit_text.stdout
+    assert "Plugin: review" in text.stdout
+    assert "apm install review@tools" in text.stdout
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "data": {
+            "name": "review",
+            "marketplace": "tools",
+            "version": "2.0.0",
+            "description": "Review changes",
+            "source": "org/review",
+            "resolved": "org/review#v2.0.0",
+            "tags": ["quality", "python"],
+            "install": "review@tools",
+        },
+    }
+
+
+def test_view_json_missing_marketplace_details_and_notices() -> None:
+    """Unresolved optional values are null and owner notices stay off stdout."""
+    import click
+
+    from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+    from apm_cli.utils.console import _rich_info
+
+    def lookup(name: str) -> None:
+        click.echo("Registry notice")
+
+    def fetch(source: object) -> MarketplaceManifest:
+        click.echo("Fetch notice")
+        return MarketplaceManifest(name="tools", plugins=(MarketplacePlugin(name="review"),))
+
+    with (
+        patch(
+            "apm_cli.cli._check_and_notify_updates", side_effect=lambda: _rich_info("Update notice")
+        ),
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name", side_effect=lookup),
+        patch("apm_cli.marketplace.client.fetch_or_cache", side_effect=fetch),
+        patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=ValueError("not resolvable"),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "-fjson"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"] == {
+        "name": "review",
+        "marketplace": "tools",
+        "version": None,
+        "description": None,
+        "source": None,
+        "resolved": None,
+        "tags": [],
+        "install": "review@tools",
+    }
+    assert "Registry notice" in result.stderr
+    assert "Fetch notice" in result.stderr
+    assert "Update notice" in result.stderr
+    assert "\x1b" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "arguments", "code"),
+    [
+        ("absent", ["org/missing"], "modules_not_found"),
+        ("empty", ["org/missing"], "package_not_found"),
+        ("empty", ["../outside"], "package_not_found"),
+        ("malformed", ["org/broken"], "package_read_failed"),
+        ("empty", ["org/missing", "invalid"], "invalid_field"),
+    ],
+)
+def test_view_json_installed_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    arguments: list[str],
+    code: str,
+) -> None:
+    """Handled local failures are nonzero with a stable stderr error document."""
+    monkeypatch.chdir(tmp_path)
+    if mode != "absent":
+        (tmp_path / "apm_modules").mkdir()
+    if mode == "malformed":
+        package = tmp_path / "apm_modules" / "org" / "broken"
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text("name: [unclosed\n")
+
+    result = CliRunner().invoke(cli, ["view", *arguments, "--format=json"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr.splitlines()[-1]) == {"schema_version": 1, "error": code}
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        ("lookup", "marketplace_not_found"),
+        ("fetch", "marketplace_fetch_failed"),
+        ("plugin", "plugin_not_found"),
+    ],
+)
+def test_view_json_marketplace_errors(failure: str, code: str) -> None:
+    """Marketplace owner failures never leak raw exception text into the error code."""
+    from apm_cli.marketplace.errors import MarketplaceFetchError, MarketplaceNotFoundError
+    from apm_cli.marketplace.models import MarketplaceManifest
+
+    with (
+        patch(
+            "apm_cli.marketplace.registry.get_marketplace_by_name",
+            side_effect=MarketplaceNotFoundError("tools") if failure == "lookup" else None,
+        ),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=MarketplaceManifest(name="tools"),
+            side_effect=(
+                MarketplaceFetchError("tools", "private-reason") if failure == "fetch" else None
+            ),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "--format", "json"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr) == {"schema_version": 1, "error": code}
+    assert "private-reason" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--file", "missing.md", "--format", "json"],
+        ["org/repo", "versions", "-f", "json"],
+        ["review@tools", "versions", "--format=json"],
+        ["--format", "json"],
+        ["org/repo", "--format", "yaml"],
+        ["org/repo", "--format"],
+    ],
+)
+def test_view_json_usage_boundary(arguments: list[str]) -> None:
+    """Excluded detail modes and parser failures retain Click's usage-error boundary."""
+    result = CliRunner().invoke(cli, ["view", *arguments])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    if arguments[-1] != "--format":
+        assert "Usage:" in result.stderr
+    assert "Error:" in result.stderr
+    assert "schema_version" not in result.stderr
+
+
+@pytest.mark.parametrize("global_scope", [False, True])
+def test_view_json_installed_scope_and_lockfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, global_scope: bool
+) -> None:
+    """Both scopes use the same installed location and lock metadata as text mode."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    project.mkdir()
+    home.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("APM_HOME", str(home))
+    for root, name in ((project, "project-review"), (home, "global-review")):
+        package = root / "apm_modules" / "org" / "review"
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text(
+            f"name: {name}\nversion: 2.0.0\ndescription: Review changes\nauthor: Alice\n"
+        )
+        LockFile(
+            dependencies={
+                "org/review": LockedDependency(
+                    repo_url="org/review",
+                    resolved_ref=f"{name}-ref",
+                    resolved_commit="aabbccddeeff0011223344556677889900112233",
+                    source="registry",
+                )
+            }
+        ).write(root / "apm.lock.yaml")
+
+    args = ["view", "org/review", "--format", "json"]
+    if global_scope:
+        args.append("--global")
+    result = CliRunner().invoke(cli, args)
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    expected_name = "global-review" if global_scope else "project-review"
+    expected_root = home if global_scope else project
+    assert data["name"] == expected_name
+    assert data["ref"] == f"{expected_name}-ref"
+    assert data["commit"] == "aabbccddeeff0011223344556677889900112233"
+    assert data["source"] == "registry"
+    assert data["description"] == "Review changes"
+    assert data["author"] == "Alice"
+    assert data["install_path"] == str(expected_root / "apm_modules" / "org" / "review")
+
+
+@pytest.mark.parametrize("manifest", ["name: minimal\n", ""])
+def test_view_json_missing_installed_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: str
+) -> None:
+    """Incomplete manifests and skill-only installations use null missing metadata."""
+    monkeypatch.chdir(tmp_path)
+    package = tmp_path / "apm_modules" / "org" / "minimal"
+    package.mkdir(parents=True)
+    if manifest:
+        (package / "apm.yml").write_text(manifest)
+    else:
+        (package / "SKILL.md").write_text("# Minimal\n")
+
+    result = CliRunner().invoke(cli, ["view", "org/minimal", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    assert data["name"] == "minimal"
+    for field in ("version", "description", "author", "source", "ref", "commit"):
+        assert data[field] is None
+
+
+@pytest.mark.parametrize("structured_source", [False, True])
+def test_view_json_sanitizes_marketplace_strings(structured_source: bool) -> None:
+    """URL-bearing metadata is allowlisted and sanitized, including embedded URLs."""
+    from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+
+    url = "https://alice:PASSWORD@example.com/org/review?token=SECRET#PRIVATE"
+    source = {"type": "url", "url": url, "token": "EXTRA_SECRET"} if structured_source else url
+    plugin = MarketplacePlugin(
+        name="review",
+        source=source,
+        description=f"Read {url}",
+        tags=(url,),
+    )
+    with (
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name"),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=MarketplaceManifest(name="tools", plugins=(plugin,)),
+        ),
+        patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            return_value=(url, None),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    for value in (
+        data["source"].split()[-1],
+        data["description"].split()[-1],
+        data["resolved"],
+        data["tags"][0],
+    ):
+        parsed = urlparse(value)
+        assert parsed.hostname == "example.com"
+        assert parsed.path == "/org/review"
+        assert parsed.username is None
+        assert parsed.password is None
+        assert parsed.query == ""
+        assert parsed.fragment == ""
+    for secret in ("PASSWORD", "SECRET", "PRIVATE"):
+        assert secret not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"type": ["raw"], "url": {"token": "RAW_SECRET"}, "ref": ["RAW_SECRET"]},
+        "file://[",
+    ],
+)
+def test_view_json_unusable_optional_source_is_null(source: object) -> None:
+    """Malformed source fields are omitted safely rather than serialized as raw metadata."""
+    from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+
+    plugin = MarketplacePlugin(name="review", source=source)
+    with (
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name"),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=MarketplaceManifest(name="tools", plugins=(plugin,)),
+        ),
+        patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=ValueError("not resolvable"),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    assert data["source"] is None
+    assert data["resolved"] is None
+    assert "RAW_SECRET" not in result.stdout
+
+
+def test_view_json_omits_cache_locations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Internal source and resolved cache paths never appear in detail output."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+
+    monkeypatch.chdir(tmp_path)
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("APM_CACHE_DIR", str(cache))
+    cache_source = str(cache / "git" / "private-package")
+    plugin = MarketplacePlugin(name="review", source=cache_source)
+    with (
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name"),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=MarketplaceManifest(name="tools", plugins=(plugin,)),
+        ),
+        patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            return_value=(cache_source, None),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    assert data["source"] is None
+    assert data["resolved"] is None
+    assert cache_source not in result.stdout
+    package = tmp_path / "apm_modules" / "org" / "review"
+    package.mkdir(parents=True)
+    (package / "apm.yml").write_text("name: review\nversion: 1.0.0\n")
+    LockFile(
+        dependencies={"org/review": LockedDependency(repo_url="org/review", source=cache_source)}
+    ).write(tmp_path / "apm.lock.yaml")
+
+    installed = CliRunner().invoke(cli, ["view", "org/review", "-f", "json"])
+
+    assert installed.exit_code == 0, installed.output
+    data = json.loads(installed.stdout)["data"]
+    assert data["source"] is None
+    assert data["install_path"] == str(package)
+    assert cache_source not in installed.stdout
+
+
+def test_view_json_sanitizes_installed_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Installed details preserve literal metadata while scrubbing credential URLs."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    monkeypatch.chdir(tmp_path)
+    package = tmp_path / "apm_modules" / "org" / "review"
+    package.mkdir(parents=True)
+    url = "https://alice:PASSWORD@example.com/org/review?token=SECRET#PRIVATE"
+    (package / "apm.yml").write_text(
+        f'name: review\nversion: 1.0.0\ndescription: "Read {url}"\nauthor: unknown\n'
+    )
+    LockFile(
+        dependencies={"org/review": LockedDependency(repo_url="org/review", source=url)}
+    ).write(tmp_path / "apm.lock.yaml")
+    (package / "run.prompt.md").write_text("Run review.\n")
+    hooks = package / "hooks"
+    hooks.mkdir()
+    (hooks / "hooks.json").write_text("{}\n")
+    default_text = CliRunner().invoke(cli, ["view", "org/review"])
+    explicit_text = CliRunner().invoke(cli, ["view", "org/review", "--format", "text"])
+    result = CliRunner().invoke(cli, ["view", "org/review", "-f", "json"])
+
+    assert default_text.exit_code == explicit_text.exit_code == 0
+    assert default_text.stdout == explicit_text.stdout
+    assert "Package Info:" in default_text.stdout
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    for value in (data["source"], data["description"].split()[-1]):
+        parsed = urlparse(value)
+        assert parsed.hostname == "example.com"
+        assert parsed.path == "/org/review"
+        assert parsed.username is None
+        assert parsed.query == ""
+        assert parsed.fragment == ""
+    assert data["author"] == "unknown"
+    assert data["install_path"] == str(package)
+    assert data["workflows"] == 1
+    assert data["hooks"] == 1
+    for secret in ("PASSWORD", "SECRET", "PRIVATE"):
+        assert secret not in result.stdout
+
 
 # ------------------------------------------------------------------
 # Rich-fallback helper (same approach as test_deps_list_tree_info.py)
