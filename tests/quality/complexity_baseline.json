@@ -89,9 +89,6 @@
       ]
     },
     "src/apm_cli/commands/audit.py": {
-      "_audit_ci_gate": [
-        "PLR0915"
-      ],
       "_audit_content_scan": [
         "C901",
         "PLR0912",
@@ -135,6 +132,7 @@
     "src/apm_cli/commands/deps/cli.py": {
       "_resolve_scope_deps": [
         "C901",
+        "PLR0912",
         "PLR0915"
       ]
     },
@@ -179,11 +177,6 @@
     "src/apm_cli/commands/lifecycle.py": {
       "_validate_script_file": [
         "PLR0911"
-      ]
-    },
-    "src/apm_cli/commands/marketplace/__init__.py": {
-      "add": [
-        "PLR0915"
       ]
     },
     "src/apm_cli/commands/outdated.py": {
@@ -354,6 +347,11 @@
     },
     "src/apm_cli/install/deployment_plan.py": {
       "prepare_package_deployment": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/drift.py": {
+      "_materialize_install_path": [
         "PLR0913"
       ]
     },
