@@ -185,6 +185,12 @@ The [development guide](docs/src/content/docs/contributing/development-guide.md)
 contains environment setup, testing, linting, optional agent tooling, and
 merge-queue guidance. Required technical checks are unchanged by this policy.
 
+### Complexity ratchet
+
+New and changed functions must meet the Stage 2 complexity limits; existing
+violators are grandfathered in a shrink-only baseline. See the
+[complexity ratchet instructions](docs/src/content/docs/contributing/development-guide.md#complexity-ratchet).
+
 ### Running the bounded mutation pilot
 
 See the [mutation pilot instructions](docs/src/content/docs/contributing/development-guide.md#running-the-bounded-mutation-pilot),

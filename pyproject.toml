@@ -102,18 +102,18 @@ ignore = [
 ]
 
 [tool.ruff.lint.pylint]
-# High initial thresholds set just above current codebase maximums.
-# Prevents new code from exceeding the worst existing violations.
-# Tighten these over time via dedicated refactoring PRs.
-# Stage 1 thresholds (PR #1464, issue #1077).
-# Roadmap: Stage 2 targets max-complexity<=20, max-branches<=25 (McCabe standard).
+# Stage 1 absolute ceilings (PR #1464, issue #1077), enforced by `ruff check`.
+# Stage 2 limits (max-statements 120, max-args 12, max-branches 40,
+# max-returns 8, max-complexity 35) are enforced for new and changed code by
+# scripts/check_complexity_ratchet.py, with existing violators grandfathered
+# in the shrink-only tests/quality/complexity_baseline.json (issue #1076).
 max-statements = 200   # Stage 1 (was 275)
 max-args = 15          # Stage 1 (was 18)
 max-branches = 60      # Stage 1 (was 115)
 max-returns = 12       # Stage 1 (was 18)
 
 [tool.ruff.lint.mccabe]
-# Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
+# Stage 1 (was 100). Stage 2 (35) is enforced by the complexity ratchet.
 max-complexity = 50
 
 [tool.ruff.lint.isort]

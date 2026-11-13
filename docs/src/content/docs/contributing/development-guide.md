@@ -332,10 +332,41 @@ defines the complete enforced step list; mirror it before pushing or claiming
 green CI.
 
 Ruff lint and format are only part of that job. It also checks YAML I/O,
-file length, portable relative paths, duplication, auth-protocol boundaries,
-and architecture boundaries. Its Python scope includes the architecture-linter
+file length, portable relative paths, duplication, complexity, auth-protocol
+boundaries, and architecture boundaries. Its Python scope includes the architecture-linter
 scripts as well as `src/` and `tests/`. CI checks the PR merge result, so changes
 on `main` can introduce failures even when the branch alone passes.
+
+### Complexity ratchet
+
+New and changed functions must meet the Stage 2 limits: at most 120
+statements, 40 branches, McCabe complexity 35, 12 arguments and 8 returns.
+Functions that already exceeded them are listed in
+[`tests/quality/complexity_baseline.json`](https://github.com/microsoft/apm/blob/main/tests/quality/complexity_baseline.json),
+keyed by file and function qualname. The list can only shrink.
+
+```bash
+git fetch origin main
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --base-ref origin/main
+```
+
+The check fails when:
+
+- a function outside the baseline exceeds a limit (`# noqa` does not exempt it);
+- the baseline gains an entry compared with the base branch (needs `--base-ref`,
+  which CI always passes);
+- a listed function is now within limits but still in the baseline.
+
+Fix a new violation by splitting the function, not by editing the baseline.
+Renaming a grandfathered function, or moving it to another file or class,
+counts as new code. After you bring a grandfathered function within limits,
+prune its entry:
+
+```bash
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --update-baseline
+```
+
+`--update-baseline` only removes entries; it refuses to add new ones.
 
 ### Architecture guardrails
 
