@@ -1295,8 +1295,10 @@ class HookIntegrator(BaseIntegrator):
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
+        # Safe legacy leaf aliases retire with the canonical marker (#3665).
+        owned_markers = frozenset({source_marker, *legacy_source_markers})
         if config.target_key == "cursor":
-            drop_source_entries(json_config[container], {source_marker, *legacy_source_markers})
+            drop_source_entries(json_config[container], owned_markers)
 
         # Defaults never overwrite existing user fields.
         injected_keys: list[str] = []
@@ -1502,7 +1504,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
 
-        drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)
+        drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
         # Shared configs are cleaned by ownership, never file-level deletion.
         json_path.parent.mkdir(parents=True, exist_ok=True)
 

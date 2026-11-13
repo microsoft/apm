@@ -46,7 +46,9 @@ def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
 
 
 def drop_source_entries(
-    hooks: dict, markers: set[str], keep_events: frozenset[str] | set[str] = frozenset()
+    hooks: dict,
+    markers: frozenset[str] | set[str],
+    keep_events: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Remove entries owned by *markers* from every event outside *keep_events*.
 
