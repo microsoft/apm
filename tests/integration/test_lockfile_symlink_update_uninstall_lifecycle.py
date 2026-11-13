@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._lockfile_chain_kit import (
     Kit,
     build_kit,
@@ -69,6 +70,19 @@ def test_update_with_symlinked_lock_refuses_before_deploying(
     target, original = _symlink_lock(kit)
     publish_v110(kit)
     _assert_refused_without_writes(kit, args, target, original)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_target_only_update_with_symlinked_lock_refuses_before_deploying(
+    tmp_path, apm_binary_path
+) -> None:
+    """An unchanged dependency plan still rewrites the deployment ledger."""
+    kit = build_kit(tmp_path, apm_binary_path, targets=("copilot",))
+    target, original = _symlink_lock(kit)
+    manifest = load_yaml(kit.project / "apm.yml")
+    manifest["targets"] = ["copilot", "claude"]
+    dump_yaml(manifest, kit.project / "apm.yml")
+    _assert_refused_without_writes(kit, ("install", "--update", "--no-policy"), target, original)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
