@@ -656,6 +656,7 @@ install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-policy-disable-switch-owner
 install-deployment-policy-remote-origin-owner
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan

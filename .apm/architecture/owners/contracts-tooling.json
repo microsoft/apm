@@ -63,10 +63,13 @@
     },
     {
       "id": "cached-policy-shape",
-      "decision": "Cached policy shape",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)",
+      "decision": "Cached policy shape and the APM_POLICY_DISABLE switch reader",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
       "selectors": ["src/apm_cli/policy/discovery.py"],
-      "guards": ["contracts-tooling-cached-policy-shape"]
+      "guards": [
+        "contracts-tooling-cached-policy-shape",
+        "install-deployment-policy-disable-switch-owner"
+      ]
     },
     {
       "id": "policy-content-hash",

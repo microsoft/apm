@@ -975,6 +975,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective package-target authorization loses its single resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-disable-switch-owner",
+        rule_id="install-deployment-policy-disable-switch-owner",
+        path="src/apm_cli/commands/audit.py",
+        old="    if policy_disabled_by_env():\n        return False",
+        new='    if os.environ.get("APM_POLICY_DISABLE"):\n        return False',
+        intent="A command reads APM_POLICY_DISABLE directly instead of the single helper.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-remote-origin-owner",
         rule_id="install-deployment-policy-remote-origin-owner",
         path="src/apm_cli/policy/_remote.py",
