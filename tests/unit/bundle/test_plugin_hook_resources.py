@@ -486,12 +486,48 @@ def test_relative_hook_script_is_packed_like_install_resolves_it(tmp_path: Path)
     handlers = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))["hooks"][
         "PostToolUse"
     ][0]["hooks"]
-    # Existing files are packed and repointed; directories and missing files
-    # are left exactly as authored, matching install.
-    assert handlers[0]["command"] == "./hooks/scripts/fmt.sh && ./missing.sh"
+    # Existing files are packed and anchored on the installed plugin root;
+    # directories and missing files are left exactly as authored, matching install.
+    assert handlers[0]["command"] == (
+        '"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh" && ./missing.sh'
+    )
     assert handlers[1]["command"] == "cd ./src && make"
     assert (result.bundle_path / "hooks/scripts/fmt.sh").read_bytes() == script.read_bytes()
     assert "hooks/scripts/fmt.sh" in result.files
+
+
+@pytest.mark.parametrize(
+    ("authored", "packed"),
+    [
+        ("sh ./scripts/fmt.sh", 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"'),
+        ('sh "./scripts/fmt.sh"', 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"'),
+        ("sh './scripts/fmt.sh'", "sh ''\"${CLAUDE_PLUGIN_ROOT}\"'/hooks/scripts/fmt.sh'"),
+    ],
+)
+def test_relative_hook_script_is_anchored_on_plugin_root_preserving_quotes(
+    tmp_path: Path, authored: str, packed: str
+) -> None:
+    """Hooks run from the consumer's directory, so the packed path needs the plugin root."""
+    factory = LocalPackageFactory(tmp_path)
+    package = factory.create("quoted", version="1.0.0")
+    factory.add_hook(
+        package,
+        "fmt",
+        {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": authored}]}]}},
+    )
+    script = package.root / ".apm/hooks/scripts/fmt.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("echo fmt\n", encoding="utf-8")
+
+    result = export_plugin_bundle(package.root, package.root / "dist")
+
+    hooks = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    command = hooks["Stop"][0]["hooks"][0]["command"]
+    assert command == packed
+    assert shlex.split(command.replace("${CLAUDE_PLUGIN_ROOT}", "/plugin")) == [
+        "sh",
+        "/plugin/hooks/scripts/fmt.sh",
+    ]
 
 
 @pytest.mark.parametrize("link", ["scripts/alias.sh", "scripts"])

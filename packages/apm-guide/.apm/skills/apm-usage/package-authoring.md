@@ -155,8 +155,8 @@ Plugin-root command paths are rewritten to their packed locations, including
 `.apm/skills/...` to `skills/...` and `.apm/hooks/...` to `hooks/...`.
 References may resolve relative to the source hook descriptor when absent
 at the package root. A `./` script reference is packed the way `apm install`
-resolves it and repointed to its packed path (for example
-`./hooks/scripts/fmt.sh`). Sibling assets and Node module type are preserved.
+resolves it and anchored on the installed plugin root (for example
+`"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`); a symlinked script fails pack. Sibling assets and Node module type are preserved.
 Packing never executes scripts or translates hook semantics between hosts.
 Quoted filenames and selected directory references retain their meaning after
 relocation. Selected files must materialize each referenced directory; empty

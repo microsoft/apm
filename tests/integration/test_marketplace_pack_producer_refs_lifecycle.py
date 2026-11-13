@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -145,9 +146,25 @@ def test_pack_carries_relative_hook_script_like_install(
     assert packed_script.read_text() == "#!/bin/sh\necho fmt\n"
     packed = json.loads((bundle / "hooks.json").read_text())
     command = packed["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
-    assert command == "./hooks/scripts/fmt.sh --check", command
+    assert command == '"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh" --check', command
     bundle_files = load_yaml(bundle / "apm.lock.yaml")["pack"]["bundle_files"]
     assert "hooks/scripts/fmt.sh" in bundle_files
+
+    # The packed command runs from a separate consumer checkout, as a host would
+    # run it, with the plugin root pointing at the installed bundle.
+    packed_script.chmod(0o755)
+    consumer = world.isolated.work_root / "separate-consumer"
+    consumer.mkdir()
+    ran = subprocess.run(
+        ["sh", "-c", command],
+        cwd=consumer,
+        env={**world.env, "CLAUDE_PLUGIN_ROOT": str(bundle)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert (ran.returncode, ran.stdout) == (0, "fmt\n"), ran.stderr
 
 
 def _linked_producer(world: MarketplacePackWorld) -> Path:
