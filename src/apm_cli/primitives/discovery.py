@@ -362,12 +362,7 @@ def get_dependency_declaration_order(
         dependency_names.extend(lock.get_installed_paths(modules_root))
         # Local bundles stage primitives without adding a manifest dependency.
         # Only lockfile-proven staging roots count, never arbitrary directories.
-        local_slugs: set[str] = set()
-        for deployed in lock.local_deployed_files:
-            parts = Path(deployed).parts
-            if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
-                local_slugs.add(parts[1])
-        for slug in sorted(local_slugs):
+        for slug in lock.local_staging_slugs():
             ensure_path_within(modules_root / slug, modules_root)
             dependency_names.append(slug)
 

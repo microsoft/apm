@@ -272,14 +272,12 @@ class TestInstructionStaging:
             alias=None,
         )
 
-        deployed = result["deployed_files"]
-        # Exactly one file should land under apm_modules/ai/.apm/instructions/.
-        staged = [
-            f
-            for f in deployed
-            if f.replace("\\", "/") == "apm_modules/ai/.apm/instructions/style.md"
+        # Staged compile input is reported apart from deployment claims (#3705).
+        assert result["deployed_files"] == []
+        assert result["deployed_file_hashes"] == {}
+        assert [f.replace("\\", "/") for f in result["staged_files"]] == [
+            "apm_modules/ai/.apm/instructions/style.md"
         ]
-        assert staged, f"Instruction not staged; deployed={deployed}"
         assert (project / "apm_modules" / "ai" / ".apm" / "instructions" / "style.md").is_file()
         # And it must NOT have been copied verbatim under the target's root.
         assert not (project / target.root_dir / "instructions" / "style.md").exists()
@@ -798,7 +796,8 @@ class TestNestedInstructionStaging:
             alias=None,
         )
 
-        deployed = {f.replace("\\", "/") for f in result["deployed_files"]}
+        assert result["deployed_files"] == []
+        deployed = {f.replace("\\", "/") for f in result["staged_files"]}
         # Both nested entries land at distinct staged paths.
         assert "apm_modules/ai/.apm/instructions/a/x.md" in deployed
         assert "apm_modules/ai/.apm/instructions/b/x.md" in deployed

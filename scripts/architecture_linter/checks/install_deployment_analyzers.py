@@ -23,6 +23,12 @@ from scripts.architecture_linter.checks.install_base_integrator_and_contraction 
     check_provenance_state,
     check_target_file_contraction,
 )
+from scripts.architecture_linter.checks.install_bundle_compile_staging import (
+    GUARD as _GUARD_BUNDLE_STAGING,
+)
+from scripts.architecture_linter.checks.install_bundle_compile_staging import (
+    check_bundle_compile_staging,
+)
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
     check_codex_agent_link_resolution,
@@ -106,6 +112,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        _GUARD_BUNDLE_STAGING,
+        "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
+        check_bundle_compile_staging,
+    ),
     _rule(
         _GUARD_SINGLE_FILE,
         "Local and remote single-file dependencies share package materialization and admission.",

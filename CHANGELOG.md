@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install <bundle>` for Codex, Gemini or OpenCode no longer records the instructions it stages under `apm_modules/` as deployed files, so `apm audit --ci` passes after a clean bundle install. Staging is recorded in the new `local_staged_files` lockfile field, still feeds `apm compile`, and `apm prune` removes it; reinstalling the bundle migrates older lockfiles. (#3717)
+- `apm install <bundle> --target codex` skips the bundle's Markdown agents with one `[!]` warning per agent instead of writing them unchanged into `.codex/agents/*.toml`, which Codex cannot load. (#3717)
 - `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; a relative value resolves against the starting directory; target deployment destinations are unchanged, and state-changing commands still serialize across `APM_HOME` values. -- by @WilliamK112 (#3614, #3707)
 - `apm install` no longer rewrites a JSONC or trailing-comma MCP config (`.vscode/mcp.json`, `.github/mcp.json`, Gemini, Kiro, Claude) from scratch, which deleted user servers; it leaves the file unchanged, reports the server as not configured and exits 1. All JSON MCP configs are now written through the shared atomic, symlink-safe writer, and project MCP config files that are symbolic links are refused like user-scope ones. (#PRNUM)
 - Interrupting an APM command (Ctrl+C) now stops a running lifecycle script, such as `pre-compile`, before APM exits. (#PRNUM)

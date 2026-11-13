@@ -814,6 +814,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-compile-staging",
+        rule_id="install-deployment-bundle-compile-staging",
+        path="src/apm_cli/install/local_bundle_handler.py",
+        old='staged_instructions = result.get("staged_files", [])',
+        new=('staged_instructions = [f for f in deployed if "/.apm/instructions/" in f]'),
+        intent="Bundle install re-derives staged instructions from deployed claim paths.",
+    ),
+    MutationCase(
         guard_id="install-deployment-bundle-native-layout",
         rule_id="install-deployment-bundle-native-layout",
         path="src/apm_cli/install/local_bundle_paths.py",
