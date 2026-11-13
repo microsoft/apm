@@ -179,6 +179,27 @@ class TestSpecFileSyntax:
         collected_packages = _collect_submodule_packages(source)
         assert collected_packages.count("apm_cli.commands") == 1
 
+    def test_linux_bundle_excludes_host_libgcc_s(self):
+        """Regression guard: the build host's libgcc_s.so.1 must not be bundled.
+
+        aarch64 python-build-standalone libpython lists libgcc_s.so.1 as
+        NEEDED, so PyInstaller copied the ubuntu-24.04-arm runner's copy
+        (GLIBC_2.35) and broke the APM_MAX_GLIBC=2.28 floor (#3399).
+        """
+        tree = ast.parse(_SPEC_FILE.read_text(encoding="utf-8"), filename=str(_SPEC_FILE))
+        excluded: set[str] = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "_exclude_libs" for t in node.targets)
+                and isinstance(node.value, ast.Set)
+            ):
+                excluded.update(
+                    elt.value for elt in node.value.elts if isinstance(elt, ast.Constant)
+                )
+        assert excluded, "No _exclude_libs set found in build/apm.spec"
+        assert "libgcc_s.so.1" in excluded
+
 
 # ---------------------------------------------------------------------------
 # 2. should_use_upx()
