@@ -237,3 +237,32 @@ class TestUnpackDestinationContainment:
             unpack_bundle(bundle, output)
 
         assert not any(outside.iterdir())
+
+    def test_empty_directory_entry_does_not_merge_through_linked_destination(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, {".agents/skills/review/SKILL.md": "body\n"})
+        (bundle / ".agents/skills/review/refs").mkdir()
+        lockfile = LockFile.read(bundle / "apm.lock.yaml")
+        lockfile.dependencies.clear()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".agents/skills/review"],
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        output = tmp_path / "project"
+        (output / ".agents/skills/review").mkdir(parents=True)
+        try:
+            (output / ".agents/skills/review/refs").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+        before = outside.stat().st_mode
+
+        with pytest.raises(ValueError, match="symlinked path in the output directory"):
+            unpack_bundle(bundle, output)
+
+        assert outside.stat().st_mode == before
+        assert not (output / ".agents/skills/review/SKILL.md").exists()

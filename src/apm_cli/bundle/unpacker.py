@@ -290,7 +290,8 @@ def _validated_unpack_destinations(
     Bundle files land only under known integration directories of
     *output_dir*, never through a symlinked path component. Directory
     entries are checked file by file, since their copy merges into any
-    existing destination tree.
+    existing destination tree; nested directories (including empty ones)
+    are checked as well.
     """
     from ..integration.base_integrator import BaseIntegrator
     from ..integration.targets import get_integration_prefixes
@@ -316,8 +317,8 @@ def _validated_unpack_destinations(
             )
         src = source_dir / rel_path
         if src.is_dir() and not has_symlink_component(source_dir, src):
-            for walk_root, _dirs, files in os.walk(src):
-                for name in files:
+            for walk_root, dirs, files in os.walk(src):
+                for name in (*dirs, *files):
                     dest_file = dest / Path(walk_root).relative_to(src) / name
                     if has_symlink_component(output_dir, dest_file):
                         raise ValueError(
