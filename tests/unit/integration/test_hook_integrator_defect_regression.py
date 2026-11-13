@@ -858,3 +858,57 @@ def test_drop_source_entries_retires_only_undeclared_events_of_one_source() -> N
         "Notification": [sibling],
         "Empty": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("locked", "legacy_retired"),
+    [(("org-a/hooks",), True), (("org-a/hooks", "org-b/hooks"), False)],
+    ids=["unambiguous-leaf", "ambiguous-leaf"],
+)
+def test_undeclared_event_retires_safe_legacy_leaf_marker(
+    tmp_path: Path, locked: tuple[str, ...], legacy_retired: bool
+) -> None:
+    """#3665: an upgraded sidecar's leaf marker retires a dropped event only when safe."""
+    project = tmp_path / "project"
+    claude = project / ".claude"
+    claude.mkdir(parents=True)
+    install_path = project / "apm_modules" / "org-a" / "hooks"
+    hooks_dir = install_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    stop = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo stop"}]}]}}
+    (hooks_dir / "stop.json").write_text(json.dumps(stop), encoding="utf-8")
+    old_pre = {"matcher": "Bash", "hooks": [{"type": "command", "command": "sh old.sh"}]}
+    old_stop = {"matcher": "*", "hooks": [{"type": "command", "command": "echo stop"}]}
+    user = {"hooks": [{"type": "command", "command": "echo user"}]}
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [old_pre], "Stop": [old_stop, user]}}),
+        encoding="utf-8",
+    )
+    (claude / "apm-hooks.json").write_text(
+        json.dumps(
+            {
+                "PreToolUse": [{**old_pre, "_apm_source": "hooks"}],
+                "Stop": [{**old_stop, "_apm_source": "hooks"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock = LockFile()
+    for repo_url in locked:
+        lock.add_dependency(LockedDependency(repo_url=repo_url))
+    lock.write(project / "apm.lock.yaml")
+    package = PackageInfo(
+        package=APMPackage(name="hooks", version="1.0.0", source="org-a/hooks"),
+        install_path=install_path,
+        dependency_ref=DependencyReference.parse("org-a/hooks"),
+    )
+
+    HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["claude"], package, project)
+
+    hooks = json.loads((claude / "settings.json").read_text(encoding="utf-8"))["hooks"]
+    assert ("PreToolUse" not in hooks) is legacy_retired
+    stop_commands = [h["command"] for entry in hooks["Stop"] for h in entry["hooks"]]
+    assert "echo user" in stop_commands
+    assert stop_commands.count("echo stop") == (1 if legacy_retired else 2)
+    sidecar = json.loads((claude / "apm-hooks.json").read_text(encoding="utf-8"))
+    assert ("PreToolUse" in sidecar) is not legacy_retired

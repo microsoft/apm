@@ -2003,9 +2003,16 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "mutation_writes.neutral_hook_contract",
             "src/apm_cli/integration/hook_integrator.py",
-            "drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)",
+            "drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)",
             "json_config.setdefault(container, {})",
             id="merged-hooks-stop-retiring-undeclared-events-3665",
+        ),
+        pytest.param(
+            "mutation_writes.neutral_hook_contract",
+            "src/apm_cli/integration/hook_integrator.py",
+            "drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)",
+            "drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)",
+            id="merged-hooks-retire-without-legacy-leaf-markers",
         ),
         pytest.param(
             "install-deployment-mcp-ownership-migration",

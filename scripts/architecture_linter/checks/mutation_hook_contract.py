@@ -934,6 +934,18 @@ def _nhc_source_retirement(provider: FactsProvider, rule_id: str) -> tuple[Viola
                 "drop_source_entries",
             )
         )
+        findings.extend(
+            _require(
+                _count_fixed_lines(
+                    facts_by_path[_HOOK_INTEGRATOR],
+                    "drop_source_entries(json_config[container], owned_markers",
+                )
+                == 2,
+                rule_id,
+                _HOOK_INTEGRATOR,
+                "both retirement passes must include safe legacy source markers (owned_markers)",
+            )
+        )
     findings.extend(
         _duplicate_scan(
             provider,
