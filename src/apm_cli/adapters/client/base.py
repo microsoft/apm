@@ -406,9 +406,21 @@ class MCPClientAdapter(ABC):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
 
+    @staticmethod
+    def json_identical(left: object, right: object) -> bool:
+        """Compare native JSON values by type as well as value.
+
+        Python equality treats ``True == 1`` and ``1 == 1.0``; native configs
+        must not, or a changed JSON type would read as already configured.
+        """
+        try:
+            return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+        except (TypeError, ValueError):
+            return left == right
+
     def matches_managed_server_config(self, native: object, expected: dict) -> bool:
         """Compare the native connection with the adapter's rendered baseline."""
-        return native == expected
+        return self.json_identical(native, expected)
 
     def matches_legacy_managed_server_config(
         self, native: object, expected: dict, *, recorded_write: bool | None = None

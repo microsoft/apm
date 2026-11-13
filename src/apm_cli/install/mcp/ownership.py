@@ -179,7 +179,7 @@ def compare_native_mcp_connection(
         requested_native = comparison if matches_baseline else native
         matches_request = (
             isinstance(requested_native, dict)
-            and client.managed_server_config(requested_native) == requested
+            and client.json_identical(client.managed_server_config(requested_native), requested)
             if registry_request
             else client.matches_managed_server_config(requested_native, requested)
         )
