@@ -217,14 +217,17 @@ class PluginHookResources:
         Install copies an existing file named by a relative reference (hook
         directory first, then package root); the bundle must carry that file
         and point the reference at its packed location under the bundle root,
-        where the packed ``hooks.json`` lives. Non-file references are left
-        untouched, matching install.
+        where the packed ``hooks.json`` lives. The lexical path is validated,
+        so symlinked resources fail like plugin-root references. Non-file
+        references are left untouched, matching install.
         """
         edits: list[tuple[int, int, str]] = []
         for match in iter_relative_script_paths(command):
             relative = match.group(1)[2:].replace("\\", "/")
-            source = resolve_relative_hook_script(self.root, descriptor.parent, relative)
-            if source is None or not source.is_file():
+            source = resolve_relative_hook_script(
+                self.root, descriptor.parent, relative, lexical=True
+            )
+            if source is None or not (source.is_file() or source.is_symlink()):
                 continue
             output = self._add_resource(source)
             self._collect_bundle(source, descriptor)
