@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 import click
 
 from ...core.command_logger import CommandLogger
+from ...core.json_envelope import error_envelope, safe_source, safe_text, success_envelope
 from ...install.locking import serialized_lifecycle
 from ...marketplace.builder import BuildOptions, BuildReport, MarketplaceBuilder, ResolvedPackage
 from ...marketplace.errors import (
@@ -82,6 +83,7 @@ class MarketplaceGroup(click.Group):
         "add",
         "list",
         "browse",
+        "search",
         "update",
         "remove",
         "validate",
@@ -684,13 +686,40 @@ def _default_alias_from_url(url: str) -> str:
 
 @marketplace.command(name="list", help="List registered marketplaces")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def list_cmd(verbose):
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format (default: text)",
+)
+def list_cmd(verbose: bool, output_format: str = "text") -> None:
     """Show all registered marketplaces."""
     logger = CommandLogger("marketplace-list", verbose=verbose)
     try:
         from ...marketplace.registry import get_registered_marketplaces
 
         sources = get_registered_marketplaces()
+
+        if output_format == "json":
+            rows = [
+                {
+                    "name": safe_text(s.name),
+                    "source": safe_source(
+                        s.display_source if s.kind in {"github", "gitlab"} else s.url
+                    ),
+                    "ref": safe_text(s.ref),
+                    "path": safe_text(s.path),
+                }
+                for s in sources
+            ]
+            click.echo(
+                json.dumps(
+                    success_envelope(sorted(rows, key=lambda row: (row["name"] or "").casefold()))
+                )
+            )
+            return
 
         if not sources:
             logger.progress(
@@ -732,6 +761,9 @@ def list_cmd(verbose):
         )
 
     except Exception as e:
+        if output_format == "json":
+            click.echo(json.dumps(error_envelope("marketplace_list_failed")), err=True)
+            sys.exit(1)
         logger.error(f"Failed to list marketplaces: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
@@ -742,11 +774,19 @@ def list_cmd(verbose):
 @click.argument("name", required=True)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format (default: text)",
+)
+@click.option(
     "--offline",
     is_flag=True,
     help="Read local apm.yml without network (remote entries need commit SHAs)",
 )
-def browse(name, verbose, offline=False):
+def browse(name: str, verbose: bool, offline: bool = False, output_format: str = "text") -> None:
     """Show available plugins in a marketplace."""
     logger = CommandLogger("marketplace-browse", verbose=verbose)
     try:
@@ -757,6 +797,23 @@ def browse(name, verbose, offline=False):
         logger.start(f"Fetching plugins from '{name}'...", symbol="search")
 
         manifest = fetch_marketplace(source, force_refresh=True, offline=offline)
+
+        if output_format == "json":
+            rows = [
+                {
+                    "name": safe_text(p.name),
+                    "description": safe_text(p.description),
+                    "version": safe_text(p.version),
+                    "install": safe_text(f"{p.name}@{name}"),
+                }
+                for p in manifest.plugins
+            ]
+            click.echo(
+                json.dumps(
+                    success_envelope(sorted(rows, key=lambda row: (row["name"] or "").casefold()))
+                )
+            )
+            return
 
         if not manifest.plugins:
             logger.warning(f"Marketplace '{name}' has no plugins")
@@ -798,6 +855,14 @@ def browse(name, verbose, offline=False):
         )
 
     except Exception as e:
+        if output_format == "json":
+            code = (
+                "marketplace_not_found"
+                if isinstance(e, MarketplaceNotFoundError)
+                else "marketplace_fetch_failed"
+            )
+            click.echo(json.dumps(error_envelope(code)), err=True)
+            sys.exit(1)
         logger.error(f"Failed to browse marketplace: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
@@ -1196,7 +1261,15 @@ def _render_doctor_table(logger, checks):
 @click.argument("expression", required=True, metavar="QUERY@MARKETPLACE")
 @click.option("--limit", default=20, show_default=True, help="Max results to show")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def search(expression, limit, verbose):
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format (default: text)",
+)
+def search(expression: str, limit: int, verbose: bool, output_format: str = "text") -> None:
     """Search for plugins in a specific marketplace.
 
     Use QUERY@MARKETPLACE format, e.g.:  apm marketplace search security@skills
@@ -1207,6 +1280,9 @@ def search(expression, limit, verbose):
         from ...marketplace.registry import get_marketplace_by_name
 
         if "@" not in expression:
+            if output_format == "json":
+                click.echo(json.dumps(error_envelope("invalid_search_expression")), err=True)
+                sys.exit(1)
             logger.error(
                 f"Invalid format: '{expression}'. "
                 "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
@@ -1215,6 +1291,9 @@ def search(expression, limit, verbose):
 
         query, marketplace_name = expression.rsplit("@", 1)
         if not query or not marketplace_name:
+            if output_format == "json":
+                click.echo(json.dumps(error_envelope("invalid_search_expression")), err=True)
+                sys.exit(1)
             logger.error(
                 "Both QUERY and MARKETPLACE are required. "
                 "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
@@ -1224,6 +1303,9 @@ def search(expression, limit, verbose):
         try:
             source = get_marketplace_by_name(marketplace_name)
         except MarketplaceNotFoundError:
+            if output_format == "json":
+                click.echo(json.dumps(error_envelope("marketplace_not_found")), err=True)
+                sys.exit(1)
             logger.error(
                 f"Marketplace '{marketplace_name}' is not registered. "
                 "Use 'apm marketplace list' to see registered marketplaces."
@@ -1232,6 +1314,22 @@ def search(expression, limit, verbose):
 
         logger.start(f"Searching '{marketplace_name}' for '{query}'...", symbol="search")
         results = search_marketplace(query, source)[:limit]
+
+        if output_format == "json":
+            rows = [
+                {
+                    "name": safe_text(p.name),
+                    "description": safe_text(p.description),
+                    "install": safe_text(f"{p.name}@{marketplace_name}"),
+                }
+                for p in results
+            ]
+            click.echo(
+                json.dumps(
+                    success_envelope(sorted(rows, key=lambda row: (row["name"] or "").casefold()))
+                )
+            )
+            return
 
         if not results:
             logger.warning(
@@ -1281,9 +1379,15 @@ def search(expression, limit, verbose):
     except SystemExit:
         raise
     except Exception as e:
+        if output_format == "json":
+            click.echo(json.dumps(error_envelope("marketplace_search_failed")), err=True)
+            sys.exit(1)
         logger.error(f"Search failed: {e}")
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
+
+
+marketplace.add_command(search)
 
 
 from .audit import audit  # noqa: E402
