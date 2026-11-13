@@ -11,6 +11,7 @@ import os
 import shutil
 import stat
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -45,7 +46,13 @@ def test_ssh_non_github_dependency_never_tries_https(tmp_path: Path, apm_binary_
 
     def https_attempts() -> list[str]:
         text = log.read_text(encoding="utf-8") if log.exists() else ""
-        return [line for line in text.splitlines() if "https://gitlab.example.invalid" in line]
+        return [
+            token
+            for line in text.splitlines()
+            for token in line.split()
+            if (parsed := urlparse(token)).scheme in {"http", "https"}
+            and parsed.hostname == "gitlab.example.invalid"
+        ]
 
     world.manifest([_SSH])
     world.apm("install", NO_POLICY)
