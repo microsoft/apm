@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -300,17 +301,56 @@ def _record_provenance(
     )
 
 
-def _precomposed_spelling(path: Path) -> Path | None:
-    """Return the NFC spelling of *path* when the filesystem names it the same file.
+def _nfc(path: Path) -> Path:
+    return Path(unicodedata.normalize("NFC", str(path)))
 
-    Only NFD -> NFC is retried: install records precomposed (NFC) paths.
+
+def _precomposed_spelling(path: Path, roots: Iterable[Path]) -> Path | None:
+    """Return *path* respelled as ``<root>/<NFC member>`` when it names the same file.
+
+    Records hold precomposed (NFC) members relative to a deploy or target
+    root, while macOS hands out decomposed (NFD) paths. The root and the
+    query are compared in NFC so either may carry either spelling, but the
+    returned path keeps the root's own spelling so it still matches
+    :func:`_roots`. ``physical_alias`` confirms through the filesystem that
+    both spellings are one file. Only NFD -> NFC is retried.
     """
-    relative = path.relative_to(path.anchor).as_posix()
-    precomposed = unicodedata.normalize("NFC", relative)
-    if precomposed == relative:
-        return None
-    alias = physical_alias(relative, Path(path.anchor), (precomposed,))
-    return Path(path.anchor) / alias if alias is not None else None
+    query = _nfc(path)
+    for root in roots:
+        try:
+            member = query.relative_to(_nfc(root))
+        except ValueError:
+            continue
+        if not member.parts or ".." in member.parts:
+            continue
+        candidate = root / member
+        if candidate == path:
+            continue
+        anchor = Path(path.anchor)
+        alias = physical_alias(
+            path.relative_to(anchor).as_posix(),
+            anchor,
+            (candidate.relative_to(candidate.anchor).as_posix(),),
+        )
+        if alias is not None:
+            return candidate
+    return None
+
+
+def _retry_roots(ledger, deploy_root: Path, user_scope: bool) -> list[Path]:
+    """Return the deploy roots and every recorded target root, each in every spelling."""
+    roots = list(_roots(deploy_root))
+    for target in sorted(
+        {
+            record.locator.target
+            for record in ledger.records.values()
+            if record.locator.kind is LocatorKind.TARGET_RELATIVE
+        }
+    ):
+        root = _target_root(target, user_scope)
+        if root is not None:
+            roots.extend(_roots(root))
+    return list(dict.fromkeys(roots))
 
 
 def _match_records(
@@ -382,8 +422,12 @@ def lookup_file_provenance(
     project_match, matched = _match_records(
         absolute, ledger, deploy_root, user_scope, canonical, scope_value
     )
-    precomposed = _precomposed_spelling(absolute)
-    if not matched and precomposed is not None:
+    precomposed = (
+        None
+        if matched
+        else _precomposed_spelling(absolute, _retry_roots(ledger, deploy_root, user_scope))
+    )
+    if precomposed is not None:
         # macOS hands out decomposed (NFD) paths, for example from Finder
         # drag and drop; the filesystem confirmed both spellings are one file.
         retried_match, retried = _match_records(
