@@ -30,6 +30,8 @@ pytestmark = [
 ]
 
 _NO_POLICY = "--no-policy"
+_STAGED = "apm_modules/bundler/.apm/instructions/glob.instructions.md"
+_COMPILE_ONLY_TARGETS = ("codex", "gemini", "opencode")
 
 
 def _write(path: Path, text: str) -> None:
@@ -99,6 +101,48 @@ def _claims(project: Path) -> set[str]:
     }
 
 
+@pytest.mark.parametrize("target", _COMPILE_ONLY_TARGETS)
+def test_staged_instructions_are_compile_input_not_deployment_claims(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    world = _Bundle(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    project = world.consumer(target)
+
+    installed = world.apm(project, "install", str(bundle), "--target", target, _NO_POLICY)
+    assert "staged 1 instruction(s) for compile" in _output(installed)
+    assert (project / _STAGED).is_file()
+    assert (project / ".agents/skills/helper/SKILL.md").is_file()
+    claims = _claims(project)
+    assert ".agents/skills/helper/SKILL.md" in claims
+    assert not any(claim.startswith("apm_modules/") for claim in claims), sorted(claims)
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+    # Re-installing the same bundle converges: no lockfile churn.
+    lock = (project / "apm.lock.yaml").read_bytes()
+    world.apm(project, "install", str(bundle), "--target", target, _NO_POLICY)
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+
+    # The staged instruction still feeds compile (GEMINI.md imports AGENTS.md).
+    assert load_yaml(project / "apm.lock.yaml")["local_staged_files"] == [_STAGED]
+    world.apm(project, "compile")
+    assert "Always be global." in (project / "AGENTS.md").read_text(encoding="utf-8")
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+    # A declarative install keeps the staging record it does not own.
+    world.apm(project, "install", _NO_POLICY)
+    assert load_yaml(project / "apm.lock.yaml")["local_staged_files"] == [_STAGED]
+    assert (project / _STAGED).is_file()
+
+    # Prune clears the staging and its record; deployed bundle files stay claimed.
+    world.apm(project, "prune")
+    assert not (project / "apm_modules/bundler").exists()
+    assert (project / ".agents/skills/helper/SKILL.md").is_file()
+    assert "local_staged_files" not in load_yaml(project / "apm.lock.yaml")
+    assert ".agents/skills/helper/SKILL.md" in _claims(project)
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+
 def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -113,6 +157,7 @@ def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(
     assert "[!]" in installed.stdout + installed.stderr
     assert not (project / ".codex/agents").exists()
     assert not any(claim.startswith(".codex/") for claim in _claims(project))
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
 
     # Targets that deploy Markdown agents natively still receive them.
     other = world.consumer("opencode")

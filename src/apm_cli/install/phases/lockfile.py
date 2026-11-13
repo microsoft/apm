@@ -682,6 +682,7 @@ class LockfileBuilder:
                 provenance=DeploymentLedgerCodec.from_lockfile(self.ctx.existing_lockfile),
                 current_targets=self.ctx.targets or (),
             )
+            lockfile.local_staged_files = list(self.ctx.existing_lockfile.local_staged_files)
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(
                     self.ctx.existing_lockfile.dependencies["."]

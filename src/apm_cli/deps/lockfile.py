@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -247,6 +247,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "mcp_servers",
         "lsp_servers",
         "local_deployed_files",
+        "local_staged_files",
     )
     mapping_fields = (
         "mcp_configs",
@@ -1019,6 +1020,9 @@ class LockFile:
     lsp_config_provenance: dict[str, str] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
+    # Local bundle compile input under apm_modules/<slug>/.apm/ (#3705): proves
+    # a staging root for ``apm compile`` without being a deployment claim.
+    local_staged_files: list[str] = field(default_factory=list)
     deployment_ledger: DeploymentLedger = field(
         default_factory=lambda: DeploymentLedger(records={})
     )
@@ -1109,6 +1113,26 @@ class LockFile:
     def get_package_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
+
+    def local_staging_slugs(self) -> list[str]:
+        """Return bundle slugs whose ``apm_modules/<slug>/.apm/`` staging is lockfile-proven.
+
+        Lockfiles written before #3705 recorded staging in
+        ``local_deployed_files``; both views prove a root.
+        """
+        slugs: set[str] = set()
+        for staged in (*self.local_staged_files, *self.local_deployed_files):
+            parts = Path(staged).parts
+            if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
+                slugs.add(parts[1])
+        return sorted(slugs)
+
+    def retire_local_staging(self, slugs: Collection[str]) -> None:
+        """Forget staged compile input under removed ``apm_modules/<slug>`` roots."""
+        removed = {("apm_modules", slug) for slug in slugs}
+        self.local_staged_files = [
+            path for path in self.local_staged_files if Path(path).parts[:2] not in removed
+        ]
 
     def project_self_entry(self) -> LockedDependency:
         """Build the virtual self-entry for the project's own local content.
@@ -1256,6 +1280,8 @@ class LockFile:
                 data["local_deployed_file_hashes"] = dict(
                     sorted(self.local_deployed_file_hashes.items())
                 )
+            if self.local_staged_files:
+                data["local_staged_files"] = sorted(self.local_staged_files)
             if self.replacements is not None:
                 data["replacements"] = self.replacements
             from ..utils.yaml_io import yaml_to_str
@@ -1310,6 +1336,7 @@ class LockFile:
         lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        lock.local_staged_files = list(data.get("local_staged_files", []))
         # Root replacement rules (issue #3180).  ``None`` = no replacement
         # section in lockfile; ``[]`` = explicitly cleared replacement state.
         raw_replacements = data.get("replacements")
@@ -1573,9 +1600,11 @@ class LockFile:
             return False
         # Issue #887: include hash dict in equivalence so post-install
         # hash updates persist even when the file list is unchanged.
-        return sorted(self.local_deployed_files) == sorted(other.local_deployed_files) and dict(
-            self.local_deployed_file_hashes
-        ) == dict(other.local_deployed_file_hashes)
+        return (
+            sorted(self.local_deployed_files) == sorted(other.local_deployed_files)
+            and dict(self.local_deployed_file_hashes) == dict(other.local_deployed_file_hashes)
+            and sorted(self.local_staged_files) == sorted(other.local_staged_files)
+        )
 
     @classmethod
     def installed_paths_for_project(cls, project_root: Path) -> list[str]:

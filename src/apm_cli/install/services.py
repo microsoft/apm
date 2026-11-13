@@ -832,8 +832,10 @@ def integrate_local_bundle(
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
-        ``deployed_file_hashes`` (dict[str, str]), ``skipped`` (int), and
-        per-primitive counters (``skills``, ``agents``, ``commands``, ...).
+        ``deployed_file_hashes`` (dict[str, str]), ``staged_files`` /
+        ``staged_file_hashes`` (compile input under ``apm_modules/``, never a
+        deployment claim), ``skipped`` (int), and per-primitive counters
+        (``skills``, ``agents``, ``commands``, ...).
     """
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
@@ -891,6 +893,8 @@ def integrate_local_bundle(
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
+    staged_files: list[str] = []
+    staged_hashes: dict[str, str] = {}
     skipped = 0
 
     # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
@@ -1034,7 +1038,8 @@ def integrate_local_bundle(
                     skipped += 1
                 continue
             _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
-            if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
+            _staged = _first_seg == "instructions" and "instructions" not in target.primitives
+            if _staged:
                 _slug_str = str(slug)
                 if _slug_error := _bundle_slug_error(_slug_str):
                     if logger is not None:
@@ -1100,15 +1105,19 @@ def integrate_local_bundle(
             else:
                 desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
 
+            # Staged instructions are compile input, never deployment claims (#3705).
+            claims, claim_hashes = (
+                (staged_files, staged_hashes) if _staged else (deployed_files, deployed_hashes)
+            )
             if dry_run:
-                deployed_files.append(record)
+                claims.append(record)
                 # Normalize to "sha256:<hex>" so the dry-run lockfile preview
                 # matches the format written by ``compute_file_hash`` on the
                 # real deploy path.  ``desired_hash`` here is bare hex for
                 # the bytes this deploy path writes; without the prefix, downstream
                 # exact-match comparisons (e.g. ``cleanup.py`` provenance
                 # check) treat the file as user-edited and skip cleanup.
-                deployed_hashes[record] = f"sha256:{desired_hash}"
+                claim_hashes[record] = f"sha256:{desired_hash}"
                 if logger:
                     logger.verbose_detail(f"[dry-run] would deploy {record}")
                 continue
@@ -1140,19 +1149,21 @@ def integrate_local_bundle(
             # than trusting the source bundle's expected_hash.  Local bundle
             # text files may be LF-normalized during deploy, so the lockfile
             # must bind the actual on-disk bytes.
-            deployed_files.append(record)
+            claims.append(record)
             # Use ``compute_file_hash`` so the recorded value carries the
             # canonical ``sha256:<hex>`` prefix.  Matches the format written
             # by the regular install pipeline (``compute_deployed_hashes``)
             # so subsequent stale-cleanup provenance checks compare equal
             # instead of mis-classifying these files as user-edited.
-            deployed_hashes[record] = compute_file_hash(dest)
+            claim_hashes[record] = compute_file_hash(dest)
             if logger:
                 logger.verbose_detail(f"deployed {record}")
 
     return {
         "deployed_files": deployed_files,
         "deployed_file_hashes": deployed_hashes,
+        "staged_files": staged_files,
+        "staged_file_hashes": staged_hashes,
         "skipped": skipped,
         "skills": 0,
         "agents": 0,

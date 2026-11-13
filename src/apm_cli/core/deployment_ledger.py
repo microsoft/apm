@@ -876,13 +876,26 @@ class DeploymentLedgerCodec:
         lockfile: LockFile,
         files: list[str],
         hashes: dict[str, str],
+        *,
+        staged: Collection[str] = (),
     ) -> None:
-        """Persist imperative bundle files without making them replayable source."""
+        """Persist imperative bundle files without making them replayable source.
+
+        *staged* is compile input under ``apm_modules/<slug>/.apm/`` (#3705):
+        it is recorded in ``local_staged_files`` and never claimed, and prior
+        bundle claims on those paths (pre-#3705 lockfiles) are dropped.
+        """
         prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        retired_paths = prior_bundle_paths.intersection(staged)
+        prior_bundle_paths -= retired_paths
         for path in files:
             _require_local_bundle_hash(path, hashes.get(path))
-        merged_files = sorted(set(lockfile.local_deployed_files).union(files))
-        merged_hashes = dict(lockfile.local_deployed_file_hashes)
+        merged_files = sorted((set(lockfile.local_deployed_files) - retired_paths).union(files))
+        merged_hashes = {
+            path: digest
+            for path, digest in lockfile.local_deployed_file_hashes.items()
+            if path not in retired_paths
+        }
         merged_hashes.update(hashes)
         DeploymentLedgerCodec.replace_legacy_owner(
             lockfile,
@@ -895,6 +908,7 @@ class DeploymentLedgerCodec:
             lockfile,
             prior_bundle_paths.union(files),
         )
+        lockfile.local_staged_files = sorted(set(lockfile.local_staged_files).union(staged))
         DeploymentLedgerCodec.apply_to_lockfile(lockfile.deployment_ledger, lockfile)
 
     @staticmethod

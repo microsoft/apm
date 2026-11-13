@@ -87,6 +87,12 @@ Steps APM runs:
    so [drift detection](../drift-and-secure-by-default/) can audit the
    deployed files later.
 
+For Codex, Gemini and OpenCode, which have no native instructions folder,
+bundle instructions are staged under `apm_modules/<bundle>/.apm/instructions/`
+for `apm compile` to merge into `AGENTS.md`. Staged files are recorded in
+`local_staged_files`, not as deployed files, so `apm audit --ci` does not
+check them. `apm prune` removes the staging.
+
 `apm.yml` is never touched. Re-running the same command re-deploys (use
 `--force` to overwrite locally-edited files).
 If executable trust blocks bundle MCP, LSP, or canvas content, copy the exact
