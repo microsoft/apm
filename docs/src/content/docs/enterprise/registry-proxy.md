@@ -82,7 +82,9 @@ export PROXY_REGISTRY_ONLY=1                 # block direct VCS fallback
 
 Deprecated aliases `ARTIFACTORY_BASE_URL`, `ARTIFACTORY_APM_TOKEN`, and
 `ARTIFACTORY_ONLY` still work but emit `DeprecationWarning`. Migrate to
-the `PROXY_REGISTRY_*` names.
+the `PROXY_REGISTRY_*` names. `ARTIFACTORY_APM_TOKEN` is used only
+together with `PROXY_REGISTRY_URL` (or `ARTIFACTORY_BASE_URL`); without a
+proxy URL it is ignored and APM prints one warning.
 
 ### Bypass prevention
 

@@ -2719,3 +2719,39 @@ class TestRegistryConfigOriginScope:
         cfg = self._config()
         assert cfg.headers_for("https", "other.example.com") == {}
         assert cfg.headers_for("http", "art.example.com") == {}
+
+
+class TestRegistryTokenWithoutUrlWarning:
+    """A registry token without a registry URL is reported once and not used."""
+
+    def _from_env(self, env):
+        from apm_cli.deps import registry_proxy
+
+        registry_proxy._emitted_warnings.clear()
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("apm_cli.utils.console._rich_warning") as warn,
+        ):
+            first = registry_proxy.RegistryConfig.from_env()
+            second = registry_proxy.RegistryConfig.from_env()
+        registry_proxy._emitted_warnings.clear()
+        return first, second, warn
+
+    def test_token_without_url_warns_once(self):
+        first, second, warn = self._from_env({"ARTIFACTORY_APM_TOKEN": "tok"})
+        assert first is None and second is None
+        warn.assert_called_once_with(
+            "ARTIFACTORY_APM_TOKEN is ignored without PROXY_REGISTRY_URL; "
+            "set PROXY_REGISTRY_URL and PROXY_REGISTRY_TOKEN"
+        )
+
+    def test_no_warning_without_token_or_with_url(self):
+        _, _, warn = self._from_env({})
+        warn.assert_not_called()
+        env = {
+            "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
+            "ARTIFACTORY_APM_TOKEN": "tok",
+        }
+        first, _, warn = self._from_env(env)
+        assert first is not None
+        warn.assert_not_called()

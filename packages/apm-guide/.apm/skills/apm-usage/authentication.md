@@ -317,7 +317,8 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 
 `PROXY_REGISTRY_TOKEN` is sent only to the scheme and host of
 `PROXY_REGISTRY_URL`; explicit-FQDN dependencies on other hosts get no
-proxy token.
+proxy token. The deprecated `ARTIFACTORY_APM_TOKEN` is ignored (with one
+warning) when no proxy URL is configured.
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
 never contacts GitHub directly. The proxy has no tag listing, so semver

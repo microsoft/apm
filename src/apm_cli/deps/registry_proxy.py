@@ -135,6 +135,7 @@ class RegistryConfig:
                 url = art_url
 
         if not url:
+            _warn_token_without_registry_url()
             return None
 
         parsed = urlparse(url)
@@ -282,6 +283,25 @@ def is_enforce_only() -> bool:
 # ---------------------------------------------------------------------------
 # Private helpers for deprecated env var reading
 # ---------------------------------------------------------------------------
+
+
+_REGISTRY_URL_MISSING_WARNING = (
+    "ARTIFACTORY_APM_TOKEN is ignored without PROXY_REGISTRY_URL; "
+    "set PROXY_REGISTRY_URL and PROXY_REGISTRY_TOKEN"
+)
+_emitted_warnings: set[str] = set()
+
+
+def _warn_token_without_registry_url() -> None:
+    """Warn once per process that a registry token has no registry origin."""
+    if not os.environ.get("ARTIFACTORY_APM_TOKEN"):
+        return
+    if _REGISTRY_URL_MISSING_WARNING in _emitted_warnings:
+        return
+    _emitted_warnings.add(_REGISTRY_URL_MISSING_WARNING)
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(_REGISTRY_URL_MISSING_WARNING)
 
 
 def _read_deprecated_token() -> str | None:

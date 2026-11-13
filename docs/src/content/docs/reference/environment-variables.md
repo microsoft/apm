@@ -29,7 +29,7 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`, then path-scoped `git credential fill`. Azure DevOps Server uses the PAT then fill; it does not use `az`. |
 | `ADO_HOST` | Single on-prem Azure DevOps Server FQDN (e.g. `ado.company.com`). Registers the host as ADO-class for auth and API routing. | unset | Hostname only: no scheme, port, or path. Takes precedence over an overlapping `GITHUB_HOST`. |
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, all classified as ADO-class. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
-| `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Deprecated alias of `PROXY_REGISTRY_TOKEN`; sent only to the `PROXY_REGISTRY_URL` (or `ARTIFACTORY_BASE_URL`) origin. |
+| `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Deprecated alias of `PROXY_REGISTRY_TOKEN`; sent only to the `PROXY_REGISTRY_URL` (or `ARTIFACTORY_BASE_URL`) origin; ignored with a warning when no proxy URL is set. |
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
 
