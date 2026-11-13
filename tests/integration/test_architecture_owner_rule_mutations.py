@@ -702,6 +702,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="JetBrains MCP config-path owner no longer defines the single resolver.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-config-key-derivation",
+        rule_id="mutation_writes.mcp_config_key_derivation",
+        path="src/apm_cli/adapters/client/base.py",
+        old="def determine_config_key(",
+        new="def _derive_config_key(",
+        intent="MCPClientAdapter loses the canonical config-key derivation definition.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-declaration-scope",
         rule_id="mutation_writes.mcp_declaration_scope",
         path="src/apm_cli/integration/mcp_config_view.py",

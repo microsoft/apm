@@ -702,6 +702,7 @@ mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
 mutation_writes.jetbrains_mcp_path
+mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
