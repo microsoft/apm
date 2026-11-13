@@ -25,7 +25,8 @@ apm view --file PATH [-g]
 
 With `--file PATH`, `apm view` works the other way round: it starts from one deployed file and reports which package recorded it. See [`apm view --file PATH`](#apm-view---file-path).
 
-When `PACKAGE` matches the `NAME@MARKETPLACE` pattern, `apm view` resolves the plugin against the marketplace manifest and prints its entry (name, version, description, source, tags) instead of a Git repository view. This applies whether or not `versions` is passed.
+When `PACKAGE` matches the `NAME@MARKETPLACE` pattern, `apm view` resolves
+the marketplace plugin and prints its entry when no `FIELD` is supplied.
 
 See [`apm outdated`](../outdated/) to compare locked versions against remotes, and [`apm install`](../install/) to add a package to the manifest.
 
@@ -35,7 +36,51 @@ See [`apm outdated`](../outdated/) to compare locked versions against remotes, a
 
 Reads metadata from the installed copy. Exits non-zero if `apm_modules/` is missing or the package is not installed; on a missing package, prints the list of installed packages to help disambiguate.
 
-Output includes: name, version, description, author, source, install path, lockfile ref and commit (when available), context-file counts (skills, prompts, instructions), workflow count, and hook count.
+Output includes: name, version, description, author, source, install path, lockfile ref and commit (when available), context-file counts (instructions, agents, contexts), workflow count, and hook count.
+
+### JSON detail output
+
+Use `--format json` or `-f json` for installed-package details or marketplace
+plugin details. The default is `text`; it preserves the existing human-readable
+output. JSON success output is one version-1 document on stdout, with `data`
+as an object.
+
+For a marketplace plugin, `data` contains exactly `name`, `marketplace`,
+`version`, `description`, `source`, `resolved`, `tags`, and `install`:
+
+```json
+{"schema_version":1,"data":{"name":"review","marketplace":"skills","version":"1.0.0","description":null,"source":"acme/review","resolved":"acme/review#v1.0.0","tags":[],"install":"review@skills"}}
+```
+
+For an installed package, `data` contains exactly `name`, `version`,
+`description`, `author`, `source`, `ref`, `commit`, `install_path`,
+`context_files`, `workflows`, and `hooks`. `context_files` is an object with
+integer `instructions`, `agents`, and `contexts` counts; `workflows` and
+`hooks` are integers:
+
+```json
+{"schema_version":1,"data":{"name":"review","version":"1.0.0","description":null,"author":null,"source":"acme/review","ref":"v1.0.0","commit":"0123456789abcdef0123456789abcdef01234567","install_path":"/project/apm_modules/acme/review","context_files":{"instructions":1,"agents":0,"contexts":0},"workflows":0,"hooks":0}}
+```
+
+Missing scalar values are `null`; absent marketplace tags are `[]`.
+URL-bearing values in metadata have userinfo, query strings, and fragments
+removed. Local source paths use `~` for the home directory. APM-internal cache
+paths in structured fields are `null`; embedded paths in descriptions become
+`[internal-cache]`. `install_path` is the actual installed package location,
+not the download-cache path. The `-g` option uses the corresponding user-scope
+package and lockfile metadata.
+
+Handled failures write `{"schema_version":1,"error":"<code>"}` to stderr and
+exit nonzero. Marketplace detail codes are `marketplace_not_found`,
+`marketplace_fetch_failed`, and `plugin_not_found`; installed-package codes
+are `modules_not_found`, `package_not_found`, `package_read_failed`, and
+`invalid_field`. The error code is stable and does not contain raw exception
+text.
+
+JSON is not supported with `apm view --file PATH` or
+`apm view PACKAGE versions`. Explicitly requesting `--format json` for either
+mode is a usage error, not a JSON error document. Existing Click parser usage
+errors also remain unchanged and do not use the versioned JSON envelope.
 
 ### `apm view <package> versions`
 
@@ -81,6 +126,7 @@ Before editing an installed skill, run this command. If the owner is a dependenc
 | ------------------- | -------------------------------------------- |
 | `-g`, `--global`    | Inspect a package installed in user scope (`$APM_HOME/apm_modules/`, default `~/.apm/apm_modules/`). With `--file`, read the user-scope lockfile |
 | `--file PATH`       | Show the recorded owner(s) of one deployed file (read-only, exact path). Cannot be combined with `PACKAGE`, `FIELD` or `--registry` |
+| `--format`, `-f`    | Output format for package details: `text` (default) or `json`. JSON is unavailable with `--file` and `FIELD=versions` |
 | `--registry [NAME]` | List versions from a registry. Omit a value to use the lockfile entry or configured default; provide `NAME` to force a specific named registry. Only valid with the `versions` field. |
 
 ## Examples
