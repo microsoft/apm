@@ -310,11 +310,17 @@ def _display_marketplace_plugin(
         with redirect_stdout(sys.stderr) if output_format == "json" else nullcontext():
             manifest = fetch_or_cache(source)
     except MarketplaceAuthError as exc:
-        logger.error(str(exc))
-        sys.exit(1)
-    except (MarketplaceFetchError, ValueError) as exc:
         if output_format == "json":
             _json_error("marketplace_fetch_failed")
+        logger.error(str(exc))
+        sys.exit(1)
+    except Exception as exc:
+        # Malformed manifests can raise ValueError/AttributeError/etc. from the
+        # parser; JSON mode must always emit the documented error document.
+        if output_format == "json":
+            _json_error("marketplace_fetch_failed")
+        if not isinstance(exc, (MarketplaceFetchError, ValueError)):
+            raise
         logger.error(str(exc))
         if not isinstance(exc, ValueError):
             logger.progress("Check your network connection and try again.")
