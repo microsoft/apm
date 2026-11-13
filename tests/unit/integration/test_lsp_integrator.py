@@ -867,3 +867,381 @@ def test_skill_cleanup_preserves_reserved_claude_lsp_plugin(tmp_path: Path) -> N
     assert plugin.is_file()
     assert not orphan.exists()
     assert result == {"files_removed": 1, "errors": 0}
+
+
+# ===========================================================================
+# OpenCode target
+# ===========================================================================
+
+_OPENCODE_SCHEMA = "https://opencode.ai/config.json"
+
+
+def _gopls_dep(**kwargs) -> LSPDependency:
+    return LSPDependency(
+        name="gopls",
+        command="gopls",
+        extension_to_language=kwargs.pop("extension_to_language", {".go": "go"}),
+        **kwargs,
+    )
+
+
+class TestOpenCodeTarget:
+    def test_writes_project_opencode_json_with_schema(self, tmp_path):
+        count = LSPIntegrator.install(
+            [_gopls_dep(startup_timeout=60000)],
+            project_root=tmp_path,
+            target_runtimes=["opencode"],
+        )
+
+        assert count == 1
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert data == {
+            "$schema": _OPENCODE_SCHEMA,
+            "lsp": {"gopls": {"command": ["gopls"], "extensions": [".go"]}},
+        }
+        assert next(iter(data)) == "$schema"
+
+    def test_translation_command_args_extensions_env_initialization(self):
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        spec = _LSP_TARGET_SPECS["opencode"]
+        entry = {
+            "command": "srv",
+            "args": ["--stdio", "-v"],
+            "extensionToLanguage": {"py": "python", ".b": "b", ".a": "a"},
+            "env": {"K": "V"},
+            "initializationOptions": {"x": 1},
+            "startupTimeout": 1,
+            "shutdownTimeout": 2,
+            "restartOnCrash": True,
+            "maxRestarts": 3,
+            "workspaceFolder": "/w",
+            "settings": {"s": 1},
+            "transport": "stdio",
+        }
+        assert LSPIntegrator._entry_for_target(entry, spec) == {
+            "command": ["srv", "--stdio", "-v"],
+            "extensions": [".a", ".b", ".py"],
+            "env": {"K": "V"},
+            "initialization": {"x": 1},
+        }
+
+    def test_name_only_server_skipped_with_warning(self, tmp_path):
+        logger = MagicMock()
+        deps = [LSPDependency.from_string("gopls"), _make_dep("pyright")]
+
+        LSPIntegrator.install(
+            deps,
+            project_root=tmp_path,
+            target_runtimes=["opencode"],
+            logger=logger,
+        )
+
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert list(data["lsp"]) == ["pyright"]
+        assert any("gopls" in str(c) for c in logger.warning.call_args_list)
+        assert LSPIntegrator.expressible_server_names(deps, "opencode") == {"pyright"}
+
+    def test_only_name_only_servers_writes_nothing(self, tmp_path):
+        count = LSPIntegrator.install(
+            [LSPDependency.from_string("gopls")],
+            project_root=tmp_path,
+            target_runtimes=["opencode"],
+            fail_on_write_error=True,
+        )
+        assert count == 0
+        assert not (tmp_path / "opencode.json").exists()
+
+    def test_socket_transport_skipped_with_warning(self, tmp_path):
+        logger = MagicMock()
+        deps = [_gopls_dep(transport="socket"), _make_dep("pyright")]
+        count = LSPIntegrator.install(
+            deps,
+            project_root=tmp_path,
+            target_runtimes=["opencode", "copilot"],
+            logger=logger,
+        )
+
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert list(data["lsp"]) == ["pyright"]
+        assert "gopls" in json.loads((tmp_path / ".github" / "lsp.json").read_text())["lspServers"]
+        assert count >= 1
+        assert any("gopls" in str(c) for c in logger.warning.call_args_list)
+
+    @pytest.mark.parametrize("user_scope", [False, True])
+    def test_config_path_matches_mcp_adapter(self, tmp_path, monkeypatch, user_scope):
+        from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+        spec = _LSP_TARGET_SPECS["opencode"]
+        assert spec.path(tmp_path, user_scope=user_scope) == (
+            OpenCodeClientAdapter.config_path_for(tmp_path, user_scope)
+        )
+
+    def test_merge_preserves_existing_keys_and_schema(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text(
+            json.dumps({"$schema": "custom", "mcp": {"a": {"type": "local"}}, "theme": "dark"})
+        )
+
+        LSPIntegrator.install([_gopls_dep()], project_root=tmp_path, target_runtimes=["opencode"])
+
+        data = json.loads(path.read_text())
+        assert data["$schema"] == "custom"
+        assert data["mcp"] == {"a": {"type": "local"}}
+        assert data["theme"] == "dark"
+        assert data["lsp"]["gopls"]["command"] == ["gopls"]
+
+    def test_existing_file_without_schema_gets_none(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text(json.dumps({"mcp": {}}))
+        LSPIntegrator.install([_gopls_dep()], project_root=tmp_path, target_runtimes=["opencode"])
+        assert "$schema" not in json.loads(path.read_text())
+
+    def test_idempotent(self, tmp_path):
+        args = {"project_root": tmp_path, "target_runtimes": ["opencode"]}
+        assert LSPIntegrator.install([_gopls_dep()], **args) == 1
+        assert LSPIntegrator.install([_gopls_dep()], **args) == 0
+
+    def test_user_scope_path(self, tmp_path):
+        with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
+            count = LSPIntegrator.install(
+                [_gopls_dep()], user_scope=True, target_runtimes=["opencode"]
+            )
+        assert count == 1
+        path = tmp_path / ".config" / "opencode" / "opencode.json"
+        assert json.loads(path.read_text())["lsp"]["gopls"]["extensions"] == [".go"]
+
+    def test_remove_stale_keeps_mcp(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text(json.dumps({"mcp": {"m": {}}, "lsp": {"gopls": {}, "other": {}}}))
+        LSPIntegrator.remove_stale({"gopls"}, project_root=tmp_path, target_runtimes=["opencode"])
+        assert json.loads(path.read_text()) == {"mcp": {"m": {}}, "lsp": {"other": {}}}
+
+    def test_remove_stale_keeps_file_with_mcp_and_schema(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text(
+            json.dumps({"$schema": _OPENCODE_SCHEMA, "mcp": {"m": {}}, "lsp": {"a": {}}})
+        )
+        LSPIntegrator.remove_stale({"a"}, project_root=tmp_path, target_runtimes=["opencode"])
+        assert json.loads(path.read_text()) == {
+            "$schema": _OPENCODE_SCHEMA,
+            "mcp": {"m": {}},
+            "lsp": {},
+        }
+
+    def test_remove_stale_deletes_file_with_only_schema_and_lsp(self, tmp_path):
+        LSPIntegrator.install([_gopls_dep()], project_root=tmp_path, target_runtimes=["opencode"])
+        LSPIntegrator.remove_stale({"gopls"}, project_root=tmp_path, target_runtimes=["opencode"])
+        assert not (tmp_path / "opencode.json").exists()
+
+    def test_remove_stale_keeps_file_with_custom_schema(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text(json.dumps({"$schema": "custom"}))
+        LSPIntegrator.install([_gopls_dep()], project_root=tmp_path, target_runtimes=["opencode"])
+        LSPIntegrator.remove_stale({"gopls"}, project_root=tmp_path, target_runtimes=["opencode"])
+        assert json.loads(path.read_text()) == {"$schema": "custom", "lsp": {}}
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '{\n  // comment\n  "mcp": {"m": {"type": "local"}}\n}\n',
+            '{"mcp": {"m": {"type": "local"}},}\n',
+            '["not", "an", "object"]\n',
+            '{"mcp": {"m": {"type": "local"}}, "lsp": false}\n',
+        ],
+        ids=["comment", "trailing-comma", "non-object", "lsp-false"],
+    )
+    @pytest.mark.parametrize("force", [False, True], ids=["default", "force"])
+    def test_unsafe_existing_config_is_never_rewritten(self, tmp_path, content, force):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        path = tmp_path / "opencode.json"
+        path.write_text(content, encoding="utf-8")
+        diagnostics = MagicMock()
+
+        count = LSPIntegrator.install(
+            [_gopls_dep()],
+            project_root=tmp_path,
+            target_runtimes=["opencode"],
+            diagnostics=diagnostics,
+            force=force,
+        )
+        assert count == 0
+        assert path.read_text(encoding="utf-8") == content
+        assert any("opencode.json" in str(c) for c in diagnostics.warn.call_args_list)
+
+        with pytest.raises(RequiredIntegrationError, match=r"opencode\.json"):
+            LSPIntegrator.install(
+                [_gopls_dep()],
+                project_root=tmp_path,
+                target_runtimes=["opencode"],
+                fail_on_write_error=True,
+                force=force,
+            )
+        assert path.read_text(encoding="utf-8") == content
+
+    def test_blank_existing_config_is_treated_as_empty(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text("  \n", encoding="utf-8")
+        count = LSPIntegrator.install(
+            [_gopls_dep()],
+            project_root=tmp_path,
+            target_runtimes=["opencode"],
+            fail_on_write_error=True,
+        )
+        assert count == 1
+        assert json.loads(path.read_text())["lsp"]["gopls"]["command"] == ["gopls"]
+
+    def test_user_authored_same_name_server_is_not_overwritten(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        path = tmp_path / "opencode.json"
+        content = json.dumps(
+            {"mcp": {"m": {"type": "local"}}, "lsp": {"gopls": {"command": ["my-gopls"]}}}
+        )
+        path.write_text(content, encoding="utf-8")
+        args = {"project_root": tmp_path, "target_runtimes": ["opencode"]}
+
+        assert LSPIntegrator.install([_gopls_dep()], diagnostics=MagicMock(), **args) == 0
+        assert path.read_text(encoding="utf-8") == content
+        with pytest.raises(RequiredIntegrationError, match="not managed by APM"):
+            LSPIntegrator.install([_gopls_dep()], fail_on_write_error=True, **args)
+        assert path.read_text(encoding="utf-8") == content
+
+        assert LSPIntegrator.install([_gopls_dep()], force=True, **args) == 1
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["lsp"]["gopls"]["command"] == ["gopls"]
+        assert data["mcp"] == {"m": {"type": "local"}}
+
+    def test_identical_existing_server_is_accepted(self, tmp_path):
+        path = tmp_path / "opencode.json"
+        path.write_text(
+            json.dumps({"lsp": {"gopls": {"command": ["gopls"], "extensions": [".go"]}}}),
+            encoding="utf-8",
+        )
+        assert (
+            LSPIntegrator.install(
+                [_gopls_dep()],
+                project_root=tmp_path,
+                target_runtimes=["opencode"],
+                fail_on_write_error=True,
+            )
+            == 0
+        )
+
+    def test_managed_server_is_updated_without_force(self, tmp_path):
+        args = {"project_root": tmp_path, "target_runtimes": ["opencode"]}
+        LSPIntegrator.install([_gopls_dep()], **args)
+
+        count = LSPIntegrator.install(
+            [_gopls_dep(args=["serve"])],
+            fail_on_write_error=True,
+            managed_target_servers={"opencode": {"gopls"}},
+            **args,
+        )
+
+        assert count == 1
+        data = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
+        assert data["lsp"]["gopls"]["command"] == ["gopls", "serve"]
+
+    def test_interrupted_install_write_keeps_existing_config(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        path = tmp_path / "opencode.json"
+        content = json.dumps({"mcp": {"m": {"type": "local"}}, "theme": "dark"})
+        path.write_text(content, encoding="utf-8")
+
+        with (
+            patch(
+                "apm_cli.utils.atomic_io._replace_atomic_file",
+                side_effect=OSError("interrupted"),
+            ),
+            pytest.raises(RequiredIntegrationError, match="interrupted"),
+        ):
+            LSPIntegrator.install(
+                [_gopls_dep()],
+                project_root=tmp_path,
+                target_runtimes=["opencode"],
+                fail_on_write_error=True,
+            )
+
+        assert path.read_text(encoding="utf-8") == content
+        assert [p.name for p in tmp_path.iterdir()] == ["opencode.json"]
+
+    def test_interrupted_cleanup_write_keeps_existing_config(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        path = tmp_path / "opencode.json"
+        content = json.dumps({"mcp": {"m": {}}, "lsp": {"gopls": {}, "other": {}}})
+        path.write_text(content, encoding="utf-8")
+
+        with (
+            patch(
+                "apm_cli.utils.atomic_io._replace_atomic_file",
+                side_effect=OSError("interrupted"),
+            ),
+            pytest.raises(RequiredIntegrationError, match="interrupted"),
+        ):
+            LSPIntegrator.remove_stale(
+                {"gopls"},
+                project_root=tmp_path,
+                target_runtimes=["opencode"],
+                fail_on_write_error=True,
+            )
+
+        assert path.read_text(encoding="utf-8") == content
+        assert [p.name for p in tmp_path.iterdir()] == ["opencode.json"]
+
+    def test_resolve_explicit_runtime(self, tmp_path):
+        assert LSPIntegrator.resolve_target_runtimes(
+            project_root=tmp_path, runtime="opencode", explicit_target="opencode"
+        ) == ["opencode"]
+
+    def test_resolve_with_target_decision_is_ordered(self, tmp_path):
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+
+        decision = EffectiveTargetDecision(["claude", "copilot", "opencode"], "--target flag")
+        assert LSPIntegrator.resolve_target_runtimes(
+            project_root=tmp_path,
+            target_decision=decision,
+            explicit_target=["claude", "copilot", "opencode"],
+        ) == ["copilot", "claude", "opencode"]
+
+    def test_autodetect_from_opencode_dir(self, tmp_path):
+        (tmp_path / ".opencode").mkdir()
+        with patch("apm_cli.integration.lsp_integrator.find_runtime_binary", return_value=None):
+            targets = LSPIntegrator.resolve_target_runtimes(project_root=tmp_path)
+        assert targets == ["opencode"]
+
+    def test_coexists_with_mcp_adapter(self, tmp_path):
+        from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+
+        (tmp_path / ".opencode").mkdir()
+        adapter = OpenCodeClientAdapter(project_root=tmp_path)
+        adapter.update_config({"srv": {"command": "x", "args": []}})
+        LSPIntegrator.install([_gopls_dep()], project_root=tmp_path, target_runtimes=["opencode"])
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert "srv" in data["mcp"] and "gopls" in data["lsp"]
+
+        adapter.update_config({"srv2": {"command": "y", "args": []}})
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert {"srv", "srv2"} <= set(data["mcp"]) and "gopls" in data["lsp"]
+
+    def test_coexists_lsp_first_then_mcp(self, tmp_path):
+        from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+
+        (tmp_path / ".opencode").mkdir()
+        LSPIntegrator.install([_gopls_dep()], project_root=tmp_path, target_runtimes=["opencode"])
+        OpenCodeClientAdapter(project_root=tmp_path).update_config(
+            {"srv": {"command": "x", "args": []}}
+        )
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert "srv" in data["mcp"] and "gopls" in data["lsp"]
+
+    def test_target_choice_hint(self):
+        assert (
+            LSPIntegrator.target_choice_hint()
+            == "--target copilot, --target claude or --target opencode"
+        )

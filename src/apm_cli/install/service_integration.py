@@ -154,8 +154,10 @@ def run_service_integrations(
             existing_lock,
             mcp_servers=MCPIntegrator.get_server_names(prepared_mcp.dependencies),
             mcp_targets=mcp_targets or [],
-            lsp_servers=LSPIntegrator.get_server_names(prepared_lsp.dependencies),
-            lsp_targets=prepared_lsp.target_runtimes or [],
+            lsp_target_servers={
+                target: LSPIntegrator.expressible_server_names(prepared_lsp.dependencies, target)
+                for target in prepared_lsp.target_runtimes or []
+            },
             current_mcp=prepared_mcp.current_view,
             user_scope=ctx.scope is InstallScope.USER,
         )

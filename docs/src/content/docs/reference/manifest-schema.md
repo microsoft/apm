@@ -819,7 +819,7 @@ dependencies:
 
 ### 4.3. `dependencies.lsp` -- `list<LspDependency>`
 
-LSP (Language Server Protocol) server dependencies give supported runtimes real-time code intelligence -- diagnostics, go-to-definition, and type information. APM currently writes LSP config for Claude Code and GitHub Copilot CLI while keeping this manifest schema runtime-neutral.
+LSP (Language Server Protocol) server dependencies give supported runtimes real-time code intelligence -- diagnostics, go-to-definition, and type information. APM currently writes LSP config for Claude Code, GitHub Copilot CLI and OpenCode while keeping this manifest schema runtime-neutral.
 
 Each element MUST be one of two forms: **string** or **object**.
 
@@ -888,8 +888,12 @@ dependencies:
 Code uses the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json` at project scope or
 `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
-project scope or `~/.copilot/lsp-config.json` at user scope. See
-[Install LSP servers](../../consumer/install-lsp-servers/) for output formats
+project scope or `~/.copilot/lsp-config.json` at user scope. OpenCode uses the
+`lsp` key of `opencode.json` or `~/.config/opencode/opencode.json`; it skips
+`socket` servers and does not write `startupTimeout`, `shutdownTimeout`,
+`restartOnCrash`, `maxRestarts`, `workspaceFolder` or `settings` (see
+[OpenCode limitations](../../consumer/install-lsp-servers/#opencode-limitations)).
+See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats
 and lifecycle details.
 
 ---

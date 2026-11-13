@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --target opencode` now writes `dependencies.lsp` servers to the `lsp` key of `opencode.json` instead of failing. -- by @gideruette (#PRNUM)
 - `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; a relative value resolves against the starting directory; target deployment destinations are unchanged, and state-changing commands still serialize across `APM_HOME` values. -- by @WilliamK112 (#3614, #3707)
 - `apm install` no longer rewrites a JSONC or trailing-comma MCP config (`.vscode/mcp.json`, `.github/mcp.json`, Gemini, Kiro, Claude) from scratch, which deleted user servers; it leaves the file unchanged, reports the server as not configured and exits 1. All JSON MCP configs are now written through the shared atomic, symlink-safe writer, and project MCP config files that are symbolic links are refused like user-scope ones. (#PRNUM)
 - Interrupting an APM command (Ctrl+C) now stops a running lifecycle script, such as `pre-compile`, before APM exits. (#PRNUM)
