@@ -359,7 +359,11 @@ def remove_stale_deployed_files(
         :meth:`InstallLogger.orphan_cleanup`).
     """
     result = CleanupResult()
-    recorded_hashes = recorded_hashes or {}
+    # Callers may key hashes with native Windows separators; lookups are POSIX.
+    recorded_hashes = {
+        path.replace("\\", "/"): content_hash
+        for path, content_hash in (recorded_hashes or {}).items()
+    }
 
     # Materialise stale_paths so we can iterate twice: once for the main
     # file-deletion loop and once as a lookup set for the deferred
@@ -495,7 +499,7 @@ def remove_stale_deployed_files(
         # both are kept with a warning. Fails CLOSED on hash-read errors: if
         # APM cannot prove the file is unmodified (PermissionError, race,
         # etc.) we keep it rather than risk destroying user work.
-        expected_hash = recorded_hashes.get(stale_path)
+        expected_hash = recorded_hashes.get(stale_path.replace("\\", "/"))
         # Unlinking a managed final symlink removes no file content, so it
         # needs no content-hash proof (callers opt in via allow_final_symlink).
         final_link = allow_final_symlink and stale_target.is_symlink()

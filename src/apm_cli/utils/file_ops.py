@@ -71,7 +71,9 @@ def _is_transient_lock_error(exc: OSError) -> bool:
 
 
 # EEXIST matches only when a non-directory ancestor is found below the root.
-_OBSTRUCTION_ERRNOS = frozenset({errno.EISDIR, errno.ENOTDIR, errno.EEXIST})
+# ENOENT covers Windows, where a file standing in for a parent directory
+# surfaces as ERROR_PATH_NOT_FOUND instead of ENOTDIR.
+_OBSTRUCTION_ERRNOS = frozenset({errno.EISDIR, errno.ENOTDIR, errno.EEXIST, errno.ENOENT})
 
 
 def obstructed_path_message(path: Path, root: Path, *, blocker: str) -> str:
@@ -84,21 +86,35 @@ def obstructed_path_message(path: Path, root: Path, *, blocker: str) -> str:
     )
 
 
+def _is_directory_obstruction(error: OSError, path: Path, root: Path) -> bool:
+    if error.errno == errno.EISDIR:
+        return True
+    # Windows reports opening a directory as a file with EACCES, not EISDIR.
+    # Elsewhere EACCES on a directory is a genuine permission problem.
+    return (
+        sys.platform == "win32"
+        and error.errno == errno.EACCES
+        and root in path.parents
+        and path.is_dir()
+    )
+
+
 def describe_path_obstruction(error: BaseException, root: Path) -> str | None:
     """Return :func:`obstructed_path_message` when *error* is a path obstruction.
 
-    Covers a directory where a file is written (EISDIR) and a file where a
-    directory is needed (ENOTDIR/EEXIST, found by walking up to *root*).
-    Returns ``None`` for any other error so callers keep the original text.
+    Covers a directory where a file is written (EISDIR; EACCES on Windows)
+    and a file where a directory is needed (ENOTDIR/EEXIST; ENOENT on
+    Windows), found by walking up to *root*. Returns ``None`` for any other
+    error so callers keep the original text.
     """
-    if not isinstance(error, OSError) or error.errno not in _OBSTRUCTION_ERRNOS:
-        return None
-    if not error.filename:
+    if not isinstance(error, OSError) or not error.filename:
         return None
     path = Path(os.fsdecode(error.filename)).resolve()
     root = root.resolve()
-    if error.errno == errno.EISDIR:
+    if _is_directory_obstruction(error, path, root):
         return obstructed_path_message(path, root, blocker="directory")
+    if error.errno not in _OBSTRUCTION_ERRNOS:
+        return None
     for candidate in (path, *path.parents):
         if candidate == root or root not in candidate.parents:
             break

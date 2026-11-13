@@ -240,7 +240,7 @@ class TestGitHubDownloaderValidation:
 
 
 class TestBareCache:
-    """Test bare_cache functions with mocked git."""
+    """Test bare_cache transport planning and bare-repo materialization."""
 
     def test_bare_clone_with_fallback_executes_transport(self, tmp_path: Path) -> None:
         """bare_clone_with_fallback calls transport executor."""
@@ -262,27 +262,28 @@ class TestBareCache:
         mock_executor.assert_called_once()
 
     def test_materialize_from_bare_creates_checkout(self, tmp_path: Path) -> None:
-        """materialize_from_bare creates working tree from bare repo."""
-        # Create a minimal bare repo structure
-        bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
-        (bare_dir / "config").write_text("[core]\n\tbare = true\n")
+        """materialize_from_bare creates a link-materialized tree from a real bare repo."""
+        from tests.utils.git_link_fixture import (
+            EXPECTED_PKG,
+            bare_clone,
+            build_link_origin,
+            tree_bytes,
+        )
 
+        origin, sha = build_link_origin(tmp_path)
+        bare_dir = bare_clone(origin, tmp_path / "bare.git")
         target = tmp_path / "working"
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="abcd1234\n")
+        result = materialize_from_bare(
+            bare_dir,
+            target,
+            ref="main",
+            env={},
+            known_sha=sha,
+        )
 
-            result = materialize_from_bare(
-                bare_dir,
-                target,
-                ref="main",
-                env={},
-                known_sha="abcd1234",
-            )
-
-            # Should return the known SHA
-            assert result == "abcd1234"
+        assert result == sha
+        assert tree_bytes(target / "pkg") == EXPECTED_PKG
 
 
 class TestPackageValidator:

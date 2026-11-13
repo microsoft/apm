@@ -299,7 +299,8 @@ def test_managed_file_without_trusted_baseline_is_refused_before_writes(
     target = KNOWN_TARGETS["copilot"].skills_deploy_path(root) / "review/SKILL.md"
     target.parent.mkdir(parents=True)
     entry = target.relative_to(root).as_posix()
-    managed = {entry}
+    # Real lockfiles claim the skill directory too; materialization skips unclaimed ones.
+    managed = {entry, target.parent.relative_to(root).as_posix()}
     older = b"---\nname: review\ndescription: Review\n---\nOlder review.\n"
     target.write_bytes(older)
     locked = None
@@ -351,7 +352,29 @@ def test_identical_member_needs_a_baseline_unless_copy_keeps_it(
     entry = (skill / "SKILL.md").relative_to(root).as_posix()
     if extra:
         (skill / "guide.md").write_bytes(b"Locally edited guide removed upstream.\n")
-    conflicts = _session_conflicts(info, root, {entry}, baseline=None)
+    claims = {entry, skill.relative_to(root).as_posix()}
+    conflicts = _session_conflicts(info, root, claims, baseline=None)
     assert [conflict.path for conflict in conflicts if conflict.untrusted] == (
         [entry] if refused else []
     )
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("layout", ["native", "subskills"])
+def test_claimed_member_of_an_unclaimed_skill_directory_is_not_refused(
+    tmp_path: Path, layout: str
+) -> None:
+    """Bundle output in an unclaimed skill dir is skipped by materialization, not refused."""
+    info = _package(tmp_path, layout)
+    root = tmp_path / "consumer"
+    skill = KNOWN_TARGETS["copilot"].skills_deploy_path(root) / "review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"bundled")
+    entry = (skill / "SKILL.md").relative_to(root).as_posix()
+
+    assert _session_conflicts(info, root, {entry}, baseline=None) == ()
+    refused = _session_conflicts(
+        info, root, {entry, skill.relative_to(root).as_posix()}, baseline=None
+    )
+    assert [conflict.path for conflict in refused if conflict.untrusted] == [entry]
+    assert (skill / "SKILL.md").read_bytes() == b"bundled"
