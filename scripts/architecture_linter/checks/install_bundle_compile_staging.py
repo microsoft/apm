@@ -38,7 +38,7 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     SERVICES: (
         (
-            "(staged_files, staged_hashes) if _staged else (deployed_files, deployed_hashes)",
+            "claims = staged_files if _staged else deployed_files",
             "report staged output apart from deployed claims",
         ),
     ),

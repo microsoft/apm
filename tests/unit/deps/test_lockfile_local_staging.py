@@ -55,3 +55,17 @@ def test_staging_is_retired_with_its_pruned_root() -> None:
     lock.retire_local_staging(["bundler"])
     assert lock.local_staged_files == [other, "", "stray.md"]
     assert lock.local_staging_slugs() == ["other"]
+
+
+def test_staging_slugs_reject_unsafe_roots() -> None:
+    unsafe = [
+        "apm_modules/../.apm/instructions/x.md",
+        "apm_modules/./.apm/instructions/x.md",
+        "apm_modules//.apm/instructions/x.md",
+        "/abs/.apm/instructions/x.md",
+        "apm_modules/C:/.apm/instructions/x.md",
+        "apm_modules/a\\b/.apm/instructions/x.md",
+        "apm_modules/C:\\evil/.apm/instructions/x.md",
+    ]
+    lock = LockFile(local_staged_files=[*unsafe, _STAGED], local_deployed_files=unsafe)
+    assert lock.local_staging_slugs() == ["bundler"]

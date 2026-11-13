@@ -1124,7 +1124,10 @@ class LockFile:
         for staged in (*self.local_staged_files, *self.local_deployed_files):
             parts = Path(staged).parts
             if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
-                slugs.add(parts[1])
+                slug = parts[1]
+                # Defense in depth: discovery also confines roots to apm_modules.
+                if slug not in {"", ".", ".."} and not any(sep in slug for sep in "/\\:"):
+                    slugs.add(slug)
         return sorted(slugs)
 
     def retire_local_staging(self, slugs: Collection[str]) -> None:
