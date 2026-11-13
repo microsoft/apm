@@ -121,12 +121,17 @@ class TestMcpGroupHelp:
         runner = CliRunner()
         result = runner.invoke(mcp, ["install", "--help"])
         assert result.exit_code == 0
-        description, options = result.output.split("Options:", 1)
-        assert "Forwarded install options" in description
-        assert "--transport [stdio|http|sse|streamable-http]" in description
-        assert "--mcp-version VER" in description
-        assert "Common options" not in options
-        assert "--transport [stdio|http|sse|streamable-http]" not in options
+        # Forwarded options render as their own section after the alias's
+        # own "Options:" section, cloned from ``apm install`` (#3633).
+        own_part, forwarded = result.output.split("Forwarded install options:", 1)
+        description, own_options = own_part.split("Options:", 1)
+        assert "'--mcp NAME' is implied" in " ".join(description.split())
+        assert "--help" in own_options
+        assert "--transport [stdio|http|sse|streamable-http]" in forwarded
+        assert "--mcp-version TEXT" in forwarded
+        assert "Common options" not in result.output
+        assert "--transport" not in own_options
+        assert "--mcp-version" not in own_options
 
 
 class TestMcpSearch:

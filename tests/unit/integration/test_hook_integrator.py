@@ -2889,6 +2889,31 @@ class TestEndToEnd:
             temp_project / ".github" / "hooks" / "learning-output-style-hooks.json"
         ).exists()
 
+    @pytest.mark.windows_compat
+    def test_cleanup_matches_native_separator_hash_keys(self, temp_project):
+        """Windows-style managed paths and hash keys still prove and remove hook files."""
+        integrator = HookIntegrator()
+        pkg_dir = temp_project / "apm_modules" / "anthropics" / "ralph-loop"
+        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks" / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
+        (pkg_dir / "hooks" / "stop-hook.sh").write_text("#!/bin/bash")
+        result = integrator.integrate_package_hooks(
+            _make_package_info(pkg_dir, "ralph-loop"), temp_project
+        )
+        posix = {p.relative_to(temp_project).as_posix() for p in result.target_paths}
+        hashes = compute_deployed_hashes(posix, temp_project)
+        native = {path.replace("/", "\\") for path in posix}
+
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=native,
+            managed_file_hashes={path.replace("/", "\\"): hashes[path] for path in hashes},
+        )
+
+        assert stats["files_removed"] == len(posix) >= 2
+        assert not any((temp_project / path).exists() for path in posix)
+
 
 # ─── Deep copy safety test ───────────────────────────────────────────────────
 

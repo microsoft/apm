@@ -14,6 +14,7 @@ from apm_cli.integration.skill_adoption import (
     is_skill_dir_identical_to_source,
     skill_tree_baselines,
 )
+from apm_cli.integration.skill_support import skill_dir_has_content
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
@@ -201,6 +202,29 @@ def find_unmanaged_conflicts(
     replay_owners = integrator._replay_owners
     adopted: dict[tuple[Path, Path], dict[Path, str]] = {}
     unchanged: dict[tuple[Path, Path], bool] = {}
+    left_alone: dict[tuple[Path, Path], bool] = {}
+
+    def user_skill_dir(source_root: Path, destination: Path, target: TargetProfile) -> bool:
+        """Mirror materialization, which never writes into an unclaimed populated skill dir.
+
+        Members of such a directory (for example ``apm install <bundle>``
+        output) are skipped there, so they are not replacement refusals here.
+        """
+        key = (source_root, destination)
+        if key not in left_alone:
+            left_alone[key] = (
+                skill_dir_has_content(destination)
+                and BaseIntegrator.check_collision(
+                    destination,
+                    deployed_path_entry(destination, project_root, [target]),
+                    managed,
+                    False,
+                    diagnostics=DiagnosticCollector(),
+                )
+                and integrator._ownership_maps(project_root)[0].get(name) != owner
+                and not is_skill_dir_identical_to_source(source_root, destination)
+            )
+        return left_alone[key]
 
     def claimed(path: Path, destination: Path) -> bool:
         entry = deployed_path_entry(path, project_root, targets)
@@ -264,6 +288,8 @@ def find_unmanaged_conflicts(
                     if unmanaged and identical:
                         continue
                     if not unmanaged:
+                        if user_skill_dir(source_root, destination, target):
+                            continue
                         key = (source_root, destination)
                         if key not in adopted:
                             # Copies keep identical members only for a raw-identical sub-skill.

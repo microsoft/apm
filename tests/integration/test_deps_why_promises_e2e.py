@@ -388,7 +388,7 @@ def test_promise_h_help_text_documents_actual_flags_and_argument(runner):
     assert "--json" in json_line, f"flag spelling drift; line was: {json_line!r}"
     # The --global / -g flag listing is also a contract.
     global_line = next(
-        (line for line in out.splitlines() if "user-scope lockfile" in line),
+        (line for line in out.splitlines() if "lockfile in the APM user home" in line),
         "",
     )
     assert "--global" in global_line and "-g" in global_line
