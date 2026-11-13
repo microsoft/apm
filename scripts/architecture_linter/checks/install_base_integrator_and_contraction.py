@@ -191,10 +191,10 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _SPELLING_ALIAS_CALLERS = {
-    "src/apm_cli/integration/cleanup.py": "physical_alias(stale_path, project_root, live_paths)",
+    "src/apm_cli/integration/cleanup.py": "live_index.alias(stale_path, project_root)",
     "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
     "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
-    "src/apm_cli/deps/file_provenance.py": "physical_alias(relative, Path(path.anchor)",
+    "src/apm_cli/deps/file_provenance.py": "alias = physical_alias(",
 }
 
 
@@ -202,13 +202,15 @@ def _spelling_alias_findings(
     provider: FactsProvider, rule_id: str, owner: object
 ) -> list[Violation]:
     """Case/normalization-only spellings of a live deployed path must route through
-    ``apm_cli.utils.paths.physical_alias`` in collision checks and stale cleanup."""
+    the ``apm_cli.utils.paths`` spelling owner in collision checks and stale cleanup."""
     message = (
         "Case/normalization-only deployed-path aliases must route through "
-        "apm_cli.utils.paths.physical_alias"
+        "apm_cli.utils.paths (SpellingAliasIndex / stored_alias / physical_alias)"
     )
     failures: list[Violation] = []
-    if not _present(owner, "physical_alias(rel_key, target_path.parents["):
+    if not _present(
+        owner, "stored_alias(target_path.parents[len(rel_parts) - 1], rel_key, managed_files)"
+    ):
         failures.append(_summary(rule_id, _BASE_INTEGRATOR_OWNER, message))
     for path, needle in _SPELLING_ALIAS_CALLERS.items():
         facts, fail = _facts_for(provider, path, rule_id)

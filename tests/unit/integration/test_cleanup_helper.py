@@ -560,3 +560,33 @@ def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, 
     else:
         assert result.deleted == [".github/instructions/Guide.instructions.md"]
         assert result.aliased == []
+
+
+def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkeypatch):
+    """Existing stale files cost O(stale + live) spelling keys, not O(stale x live)."""
+    from apm_cli.utils import paths
+
+    rules = project_root / ".github" / "instructions"
+    rules.mkdir(parents=True)
+    stale = []
+    for i in range(30):
+        (rules / f"old{i}.instructions.md").write_text("x")
+        stale.append(f".github/instructions/old{i}.instructions.md")
+    live = [f".github/instructions/new{i}.instructions.md" for i in range(300)]
+    calls = {"key": 0}
+    real_key = paths._spelling_key
+    monkeypatch.setattr(
+        paths, "_spelling_key", lambda p: calls.__setitem__("key", calls["key"] + 1) or real_key(p)
+    )
+
+    result = remove_stale_deployed_files(
+        stale,
+        project_root,
+        dep_key="acme/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        live_paths=live,
+    )
+
+    assert sorted(result.deleted) == sorted(stale)
+    assert calls["key"] <= len(stale) + len(live)

@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from apm_cli.security.gate import is_python_bytecode_cache_path
-from apm_cli.utils.paths import physical_alias
+from apm_cli.utils.paths import SpellingAliasIndex
 
 from .base_integrator import BaseIntegrator
 
@@ -373,7 +373,7 @@ def remove_stale_deployed_files(
     # files (safe rmtree).
     _deferred_dirs: list[tuple[str, Path]] = []
     absent_targets: list[Path] = []
-    live_paths = tuple(live_paths)
+    live_index = SpellingAliasIndex(live_paths)
 
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
@@ -452,7 +452,7 @@ def remove_stale_deployed_files(
         # A case/normalization-only rename upstream makes the old and new
         # spellings one entry on macOS and Windows: adopt the live spelling
         # on disk instead of deleting the file this install just wrote.
-        live_alias = physical_alias(stale_path, project_root, live_paths)
+        live_alias = live_index.alias(stale_path, project_root)
         if live_alias is not None:
             try:
                 os.rename(stale_target, project_root / live_alias)

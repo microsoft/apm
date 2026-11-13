@@ -243,3 +243,43 @@ def test_case_only_spelling_of_managed_file_is_not_a_collision(tmp_path: Path) -
     assert BaseIntegrator.check_collision(
         target_dir / "user.agent.md", ".github/agents/user.agent.md", managed, force=False
     )
+
+
+def test_collision_check_does_not_scan_the_managed_inventory(tmp_path: Path, monkeypatch) -> None:
+    """An unmanaged existing destination costs no per-check inventory scan."""
+    from apm_cli.utils import paths
+
+    target_dir = tmp_path / ".github" / "agents"
+    target_dir.mkdir(parents=True)
+    (target_dir / "user.agent.md").write_text("mine")
+    managed = {f".github/agents/a{i}.agent.md" for i in range(5000)}
+    calls = {"key": 0}
+    real_key = paths._spelling_key
+    monkeypatch.setattr(
+        paths, "_spelling_key", lambda p: calls.__setitem__("key", calls["key"] + 1) or real_key(p)
+    )
+
+    for _ in range(20):
+        assert BaseIntegrator.check_collision(
+            target_dir / "user.agent.md", ".github/agents/user.agent.md", managed, force=False
+        )
+    assert calls["key"] < len(managed)
+
+
+def test_decomposed_stored_directory_still_resolves_to_managed_key(tmp_path: Path) -> None:
+    """HFS+ stores names decomposed; the precomposed managed key still owns the entry."""
+    import unicodedata
+
+    stored_dir = tmp_path / ".github" / unicodedata.normalize("NFD", "r\u00e9sum\u00e9")
+    stored_dir.mkdir(parents=True)
+    (stored_dir / "Guide.md").write_text("v1")
+    managed = {".github/r\u00e9sum\u00e9/Guide.md"}
+    target = tmp_path / ".github" / "r\u00e9sum\u00e9" / "guide.md"
+
+    collision = BaseIntegrator.check_collision(
+        target, ".github/r\u00e9sum\u00e9/guide.md", managed, force=False
+    )
+
+    # On case- and normalization-insensitive filesystems (macOS, Windows) the
+    # entry is the managed file; elsewhere the path does not exist at all.
+    assert collision is False

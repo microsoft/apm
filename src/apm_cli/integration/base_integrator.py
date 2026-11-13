@@ -19,7 +19,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
-from apm_cli.utils.paths import physical_alias
+from apm_cli.utils.paths import stored_alias
 
 
 def discover_primitives(*args: Any, **kwargs: Any) -> Any:
@@ -246,11 +246,12 @@ class BaseIntegrator:
             return False
         rel_parts = PurePosixPath(rel_key).parts
         if 0 < len(rel_parts) <= len(target_path.parts) and (
-            physical_alias(rel_key, target_path.parents[len(rel_parts) - 1], managed_files)
+            stored_alias(target_path.parents[len(rel_parts) - 1], rel_key, managed_files)
             is not None
         ):
             # A managed file renamed upstream only by case/normalization is
-            # still APM-owned on case-insensitive filesystems.
+            # still APM-owned on case-insensitive filesystems: its stored
+            # spelling is the managed key (set lookups, no inventory scan).
             return False
 
         if diagnostics is not None:

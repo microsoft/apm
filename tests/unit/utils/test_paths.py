@@ -250,3 +250,60 @@ class TestPhysicalAlias:
             assert result == "rules/guide.md"
         else:
             assert result is None
+
+
+class TestSpellingAliasIndex:
+    def test_lookup_cost_is_bounded_by_matching_bucket(self, tmp_path: Path, monkeypatch) -> None:
+        """Repeated lookups never rescan the inventory (O(bucket), not O(inventory))."""
+        from apm_cli.utils import paths
+
+        inventory = [f"rules/r{i}.md" for i in range(2000)]
+        index = paths.SpellingAliasIndex(inventory)
+        calls = {"key": 0, "samefile": 0}
+        real_key = paths._spelling_key
+        monkeypatch.setattr(
+            paths,
+            "_spelling_key",
+            lambda p: calls.__setitem__("key", calls["key"] + 1) or real_key(p),
+        )
+        monkeypatch.setattr(
+            paths.os.path,
+            "samefile",
+            lambda a, b: calls.__setitem__("samefile", calls["samefile"] + 1) or False,
+        )
+        for i in range(200):
+            assert index.alias(f"rules/other{i}.md", tmp_path) is None
+        assert calls == {"key": 200, "samefile": 0}
+
+    def test_alias_matches_physical_alias(self, tmp_path: Path) -> None:
+        from apm_cli.utils.paths import SpellingAliasIndex, physical_alias
+
+        (tmp_path / "rules").mkdir()
+        (tmp_path / "rules" / "Guide.md").write_text("g")
+        inventory = ["rules/guide.md", "rules/other.md"]
+        expected = physical_alias("rules/Guide.md", tmp_path, inventory)
+        assert SpellingAliasIndex(inventory).alias("rules/Guide.md", tmp_path) == expected
+
+
+class TestStoredSpelling:
+    def test_exact_and_missing_entries(self, tmp_path: Path) -> None:
+        from apm_cli.utils.paths import stored_spelling
+
+        (tmp_path / "a").mkdir()
+        (tmp_path / "a" / "Guide.md").write_text("g")
+        assert stored_spelling(tmp_path, "a/Guide.md") == "a/Guide.md"
+        assert stored_spelling(tmp_path, "a/missing.md") is None
+        assert stored_spelling(tmp_path, "a/other/x.md") is None
+
+    def test_case_variant_returns_stored_spelling_only_when_same_entry(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.utils.paths import stored_spelling
+
+        (tmp_path / "Agents").mkdir()
+        (tmp_path / "Agents" / "Helper.md").write_text("h")
+        result = stored_spelling(tmp_path, "agents/helper.md")
+        if _case_insensitive(tmp_path):
+            assert result == "Agents/Helper.md"
+        else:
+            assert result is None
