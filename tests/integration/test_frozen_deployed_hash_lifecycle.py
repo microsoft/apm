@@ -146,27 +146,56 @@ def test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths(
     scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env)
 
 
+@pytest.mark.parametrize("scope", ["project", "user"])
 def test_warm_frozen_with_kept_skill_edit_fails_closed(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, scope: str
 ) -> None:
+    """Project scope and ``-g`` share one deployed-hash verification (#3654)."""
     scenario = Scenario.create(tmp_path, apm_binary_path)
     sha, env = _published(scenario)
-    project = _project(scenario, sha, env, ["claude"])
-    skill = project / ".claude/skills/helper/SKILL.md"
+    if scope == "user":
+        cwd = scenario.isolated.work_root / "anywhere"
+        cwd.mkdir()
+        flags: tuple[str, ...] = ("-g",)
+        scenario.run(
+            "install",
+            "-g",
+            f"{_REMOTE}#{sha}",
+            "--target",
+            "claude",
+            "--no-policy",
+            cwd=cwd,
+            env=env,
+        )
+        deploy_root, lockfile = (
+            scenario.isolated.home,
+            scenario.isolated.config_root / "apm.lock.yaml",
+        )
+    else:
+        cwd = _project(scenario, sha, env, ["claude"])
+        flags = ()
+        deploy_root, lockfile = cwd, cwd / "apm.lock.yaml"
+    skill = deploy_root / ".claude/skills/helper/SKILL.md"
+    assert skill.is_file(), skill
     skill.write_bytes(b"Edited skill.\n")
-    lock_before = (project / "apm.lock.yaml").read_bytes()
+    lock_before = lockfile.read_bytes()
 
-    frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
+    frozen = scenario.run("install", *flags, "--frozen", "--no-policy", cwd=cwd, env=env, expect=1)
     text = output(frozen)
     assert ".claude/skills/helper/SKILL.md: expected sha256:" in text, text
     assert f"observed {compute_file_hash(skill)}" in text, text
     assert "apm export-patch" in text
     assert skill.read_bytes() == b"Edited skill.\n"
-    assert (project / "apm.lock.yaml").read_bytes() == lock_before
+    assert lockfile.read_bytes() == lock_before
 
-    audit = scenario.run("audit", "--ci", "--no-policy", cwd=project, env=env, expect=1)
-    assert ".claude/skills/helper/SKILL.md" in output(audit)
-
+    if scope == "project":
+        audit = scenario.run("audit", "--ci", "--no-policy", cwd=cwd, env=env, expect=1)
+        assert ".claude/skills/helper/SKILL.md" in output(audit)
+    # Install keeps edited skills, so the user resolves the edit, then repairs.
     skill.unlink()
-    scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env)
-    scenario.run("audit", "--ci", "--no-policy", cwd=project, env=env)
+    scenario.run("install", *flags, "--no-policy", cwd=cwd, env=env)
+    assert skill.is_file() and skill.read_bytes() != b"Edited skill.\n"
+    assert lockfile.read_bytes() == lock_before
+    scenario.run("install", *flags, "--frozen", "--no-policy", cwd=cwd, env=env)
+    if scope == "project":
+        scenario.run("audit", "--ci", "--no-policy", cwd=cwd, env=env)
