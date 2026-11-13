@@ -294,6 +294,9 @@ class MCPClientAdapter(ABC):
     # primitive-focused) and applies uniformly to MCP-only adapters
     # (e.g. ``VSCodeClientAdapter``) that have no ``KNOWN_TARGETS`` entry.
     mcp_servers_key: str = ""
+    # Native JSON configs keep the byte layout each harness has always had
+    # (only Claude Code ends its JSON configs with a newline).
+    json_config_trailing_newline: bool = False
 
     # Whether an existing native entry with the requested name is compared by
     # content before writing, so a differing user connection is preserved and
@@ -548,7 +551,7 @@ class MCPClientAdapter(ABC):
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(config, indent=2)
+        payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
         if shared:
             atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
             return

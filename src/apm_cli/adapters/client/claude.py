@@ -127,6 +127,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     _client_label: str = "Claude Code"
     target_name: str = "claude"
     mcp_servers_key: str = "mcpServers"
+    json_config_trailing_newline: bool = True
 
     _runtime_config_label: ClassVar[str] = "the project .mcp.json"
     _runtime_launch_command: ClassVar[str] = "claude"

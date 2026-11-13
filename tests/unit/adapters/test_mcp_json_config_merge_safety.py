@@ -137,3 +137,13 @@ def test_vscode_update_config_keeps_a_jsonc_file(tmp_path: Path) -> None:
 
     assert adapter.update_config({"servers": {"apm-srv": dict(_ENTRY)}}) is False
     assert config.read_bytes() == before
+
+
+def test_json_configs_preserve_native_byte_layout(tmp_path: Path) -> None:
+    (tmp_path / ".claude").mkdir()
+
+    assert ClaudeClientAdapter(project_root=tmp_path).update_config({"apm-srv": dict(_ENTRY)})
+    assert CopilotClientAdapter(project_root=tmp_path).update_config({"apm-srv": dict(_ENTRY)})
+
+    assert (tmp_path / ".mcp.json").read_bytes().endswith(b"}\n")
+    assert (tmp_path / ".github/mcp.json").read_bytes().endswith(b"}")
