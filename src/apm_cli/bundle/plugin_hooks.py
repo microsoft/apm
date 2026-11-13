@@ -18,8 +18,10 @@ from apm_cli.integration.hook_command_paths import (
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
     plugin_root_relative_path,
+    plugin_root_script_reference,
     relocated_plugin_root_reference,
     splice_references,
+    wrapping_quote,
 )
 from apm_cli.integration.hook_source_selection import (
     resolve_plugin_root_hook_script,
@@ -215,9 +217,9 @@ class PluginHookResources:
         """Pack ``./`` script references exactly as install resolves them.
 
         Install copies an existing file named by a relative reference (hook
-        directory first, then package root); the bundle must carry that file
-        and point the reference at its packed location under the bundle root,
-        where the packed ``hooks.json`` lives. The lexical path is validated,
+        directory first, then package root). The bundle carries that file and
+        anchors the reference on the installed plugin root, because hooks run
+        from the consumer's working directory. The lexical path is validated,
         so symlinked resources fail like plugin-root references. Non-file
         references are left untouched, matching install.
         """
@@ -231,7 +233,8 @@ class PluginHookResources:
                 continue
             output = self._add_resource(source)
             self._collect_bundle(source, descriptor)
-            edits.append((*match.span(1), f"./{output}"))
+            quote = wrapping_quote(command, match)
+            edits.append((*match.span(1), plugin_root_script_reference(output, quote)))
         return splice_references(command, edits)
 
     def validate_outputs(
