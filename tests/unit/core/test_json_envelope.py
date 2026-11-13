@@ -65,9 +65,7 @@ def test_safe_text_redacts_cache_root_prefixes_with_spaces(tmp_path: Path) -> No
         description = f"See {cache_dir}/checkout for details"
         result = safe_text(description)
 
-        # Verify the cache path is redacted and the surrounding text is preserved
-        assert "[internal-cache]" in result
-        assert "apm cache" not in result
+        assert result == "See [internal-cache] for details"
     finally:
         if old_cache_dir is None:
             os.environ.pop("APM_CACHE_DIR", None)

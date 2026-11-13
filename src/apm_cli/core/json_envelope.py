@@ -38,9 +38,9 @@ def safe_text(value: object) -> str | None:
             root_str = root.resolve().as_posix()
             if text == root_str or text.startswith(root_str + "/"):
                 return "[internal-cache]"
-            # Find and redact complete paths that start with this root
-            # Match paths that may contain spaces: root + "/" + anything until whitespace followed by lowercase word
-            root_pattern = re.escape(root_str) + r"(?:/[^\s<>\"]*(?:\s+[^\s<>\"]+)*)*"
+            # The root can contain spaces; only extend past it through
+            # contiguous path segments so following prose remains untouched.
+            root_pattern = re.escape(root_str) + r"(?:/[^\s<>\"']*)?"
             matches = list(re.finditer(root_pattern, text))
             for match in reversed(matches):
                 path_str = match.group()
