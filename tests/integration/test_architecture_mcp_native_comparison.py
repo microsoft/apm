@@ -8,7 +8,7 @@ from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).parents[2]
-RULE = "registry_delegation.mcp_native_comparison"
+RULE = "install-deployment-mcp-native-comparison"
 FLOW = "src/apm_cli/integration/mcp_integrator_install.py"
 OWNER = "src/apm_cli/install/mcp/ownership.py"
 

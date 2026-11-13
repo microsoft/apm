@@ -629,6 +629,7 @@ install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
 install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
+install-deployment-drift-claim-classification
 install-deployment-deployment-frame-projection
 install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
@@ -649,6 +650,7 @@ install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
 install-deployment-mcp-ownership-migration
+install-deployment-mcp-native-comparison
 install-deployment-mcp-registry-resolution
 install-deployment-orphan-selection
 install-deployment-outcome

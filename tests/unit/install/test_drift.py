@@ -22,7 +22,6 @@ from apm_cli.install.drift import (
     CheckLogger,
     DriftFinding,
     ReplayConfig,
-    _claimed_prefixes,
     _governed_root_dirs,
     _normalize_line_endings,
     _strip_bom,
@@ -288,7 +287,9 @@ def test_claimed_prefixes_only_derived_from_directory_entries(tmp_path):
     tracked = {"": "malformed", ".apm/skills/a.md": "pkg", ".apm/skills/demo": "pkg"}
     project_files = {".apm/skills/a.md": tmp_path / "a.md"}
 
-    assert _claimed_prefixes(tracked, {".apm/skills/a.md"}, project_files) == (".apm/skills/demo/",)
+    from apm_cli.install.drift_claims import claimed_prefixes
+
+    assert claimed_prefixes(tracked, {".apm/skills/a.md"}, project_files) == (".apm/skills/demo/",)
 
 
 def test_diff_engine_hashed_file_claim_never_covers_descendants(tmp_path):

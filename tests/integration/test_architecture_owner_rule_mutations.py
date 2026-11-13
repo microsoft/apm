@@ -846,6 +846,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm install --mcp strips user comments from apm.yml again.",
     ),
     MutationCase(
+        guard_id="install-deployment-drift-claim-classification",
+        rule_id="install-deployment-drift-claim-classification",
+        path="src/apm_cli/install/drift.py",
+        old="unmanaged = unmanaged_skill or claims.unclaimed(rel)",
+        new="unmanaged = unmanaged_skill",
+        intent="Audit reports an unclaimed differing file as a managed local edit.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
@@ -916,6 +924,15 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="snapshot = APMPackage.from_mapping(",
         new="snapshot = APMPackage.from_apm_yml(",
         intent="Acquired metadata reuses the process-lifetime manifest path cache.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-mcp-native-comparison",
+        rule_id="install-deployment-mcp-native-comparison",
+        path="src/apm_cli/integration/mcp_integrator_install.py",
+        old="    if protected_clients:\n        # Native content must be checked",
+        new='    if {"claude", "codex"}.intersection(target_runtimes):\n'
+        "        # Native content must be checked",
+        intent="Self-defined MCP comparison falls back to a per-runtime name gate.",
     ),
     MutationCase(
         guard_id="install-deployment-mcp-ownership-migration",

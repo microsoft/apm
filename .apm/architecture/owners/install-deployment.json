@@ -38,7 +38,10 @@
       "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
       "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints)",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
-      "guards": ["install-deployment-mcp-ownership-migration"]
+      "guards": [
+        "install-deployment-mcp-ownership-migration",
+        "install-deployment-mcp-native-comparison"
+      ]
     },
     {
       "id": "deployment-provenance-state",
@@ -205,6 +208,13 @@
       "owner": "deps/lock_parent_placement.py (place_legacy_lock_parents, installed_manifest_children)",
       "selectors": ["src/apm_cli/deps/lock_parent_placement.py"],
       "guards": ["install-deployment-lock-parent-placement"]
+    },
+    {
+      "id": "drift-claim-membership",
+      "decision": "Drift replay claim membership: unclaimed differing files are unmanaged conflicts, never managed local edits",
+      "owner": "install/drift_claims.py (ReplayClaims.unclaimed)",
+      "selectors": ["src/apm_cli/install/drift_claims.py"],
+      "guards": ["install-deployment-drift-claim-classification"]
     },
     {
       "id": "ci-audit-scratch-materialization",

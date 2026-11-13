@@ -252,18 +252,19 @@ _MCP_NATIVE_COMPARISON_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] =
 _MCP_RUNTIME_NAME_GATE = r"""\{\s*["']claude["']\s*,\s*["']codex["']\s*\}"""
 
 _DRIFT_OWNER = "src/apm_cli/install/drift.py"
+_DRIFT_CLAIMS_OWNER = "src/apm_cli/install/drift_claims.py"
 _DRIFT_CLASSIFICATION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         _DRIFT_OWNER,
         "diff_scratch_against_project",
-        ("unmanaged = unmanaged_skill or _unclaimed(rel)",),
+        ("unmanaged = unmanaged_skill or claims.unclaimed(rel)",),
     ),
     (
-        _DRIFT_OWNER,
-        "diff_scratch_against_project._unclaimed",
+        _DRIFT_CLAIMS_OWNER,
+        "ReplayClaims.unclaimed",
         (
-            "return not (rel in tracked or rel.startswith(claimed_prefixes) "
-            "or rel in merge_config_paths)",
+            "return not (rel in self.tracked or rel.startswith(self.prefixes) "
+            "or rel in self.shared)",
         ),
     ),
 )
@@ -563,7 +564,7 @@ def _function_contract_violations(
 
 def _check_mcp_native_comparison(provider: FactsProvider) -> Iterable[Violation]:
     """Same-name MCP connections are compared through one adapter-driven owner (#3681)."""
-    rule_id = "registry_delegation.mcp_native_comparison"
+    rule_id = "install-deployment-mcp-native-comparison"
     _, failures = _read_required(provider, rule_id, (_MCP_INSTALL_FLOW, _MCP_OWNERSHIP))
     if failures:
         return failures
@@ -585,8 +586,8 @@ def _check_mcp_native_comparison(provider: FactsProvider) -> Iterable[Violation]
 
 def _check_drift_unmanaged_classification(provider: FactsProvider) -> Iterable[Violation]:
     """Unclaimed differing files are unmanaged conflicts, never managed edits (#3682)."""
-    rule_id = "registry_delegation.drift_unmanaged_classification"
-    _, failures = _read_required(provider, rule_id, (_DRIFT_OWNER,))
+    rule_id = "install-deployment-drift-claim-classification"
+    _, failures = _read_required(provider, rule_id, (_DRIFT_OWNER, _DRIFT_CLAIMS_OWNER))
     if failures:
         return failures
     return list(_function_contract_violations(provider, rule_id, _DRIFT_CLASSIFICATION_CONTRACTS))
@@ -921,16 +922,16 @@ RULES: tuple[Rule, ...] = (
         check=_check_root_context_write_eligibility,
     ),
     Rule(
-        id="registry_delegation.mcp_native_comparison",
+        id="install-deployment-mcp-native-comparison",
         group=GROUP,
-        guard_ids=(),
+        guard_ids=("install-deployment-mcp-native-comparison",),
         description="Same-name MCP connections must be compared through native_comparison_clients.",
         check=_check_mcp_native_comparison,
     ),
     Rule(
-        id="registry_delegation.drift_unmanaged_classification",
+        id="install-deployment-drift-claim-classification",
         group=GROUP,
-        guard_ids=(),
+        guard_ids=("install-deployment-drift-claim-classification",),
         description="Audit drift must classify unclaimed differing files as unmanaged-conflict.",
         check=_check_drift_unmanaged_classification,
     ),
