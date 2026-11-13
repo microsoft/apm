@@ -557,6 +557,19 @@ class TestValidateLinkTargets:
         errors = validate_link_targets("[Heading](#heading)", base_dir)
         assert errors == []
 
+    @pytest.mark.parametrize("suffix", ["#template", "?view=full", "?view=full#template"])
+    def test_existing_file_with_suffix_no_errors(self, base_dir: Path, suffix: str) -> None:
+        (base_dir / "standards.md").write_text("content")
+        errors = validate_link_targets(f"[Standards](standards.md{suffix})", base_dir)
+        assert errors == []
+
+    @pytest.mark.parametrize("suffix", ["#template", "?view=full", "?view=full#template"])
+    def test_missing_file_with_suffix_reports_path_without_suffix(
+        self, base_dir: Path, suffix: str
+    ) -> None:
+        errors = validate_link_targets(f"[Standards](missing.md{suffix})", base_dir)
+        assert errors == ["Referenced file not found: missing.md (in link 'Standards')"]
+
 
 class TestResolvePath:
     def test_empty_string_returns_none(self, base_dir: Path) -> None:

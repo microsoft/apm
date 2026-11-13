@@ -616,13 +616,21 @@ def validate_link_targets(content: str, base_path: Path) -> builtins.list[str]:
         if path.startswith(("http://", "https://", "ftp://", "mailto:")) or path.startswith("#"):
             continue
 
+        # A markdown target may carry a ``#fragment``, ``?query``, or both.
+        # Those address part of the target; they are not part of the filename.
+        # Reuse the resolver's existing split so validation agrees with the
+        # rewriting path instead of looking for ``file.md#fragment``.
+        path_part, _suffix = UnifiedLinkResolver._split_link_target(path)
+        if not path_part:
+            continue
+
         # Resolve and check path
-        full_path = _resolve_path(path, base_path)
+        full_path = _resolve_path(path_part, base_path)
         if not full_path or not full_path.exists():
-            errors.append(f"Referenced file not found: {path} (in link '{text}')")
+            errors.append(f"Referenced file not found: {path_part} (in link '{text}')")
         elif not full_path.is_file() and not full_path.is_dir():
             errors.append(
-                f"Referenced path is neither a file nor directory: {path} (in link '{text}')"
+                f"Referenced path is neither a file nor directory: {path_part} (in link '{text}')"
             )
 
     return errors
