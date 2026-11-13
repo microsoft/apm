@@ -71,3 +71,19 @@ def test_safe_text_redacts_cache_root_prefixes_with_spaces(tmp_path: Path) -> No
             os.environ.pop("APM_CACHE_DIR", None)
         else:
             os.environ["APM_CACHE_DIR"] = old_cache_dir
+
+
+@pytest.mark.parametrize("scheme", ["file", "FILE", "File"])
+def test_file_uri_scheme_is_case_insensitive_for_cache_paths(
+    scheme: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Internal-cache file URIs must be hidden regardless of scheme case."""
+    from apm_cli.core.json_envelope import safe_source, safe_text
+
+    cache_dir = tmp_path / "apm-cache"
+    cache_dir.mkdir()
+    monkeypatch.setenv("APM_CACHE_DIR", str(cache_dir))
+    uri = f"{scheme}://{cache_dir.resolve().as_posix()}/checkout"
+
+    assert safe_source(uri) is None
+    assert safe_text(f"See {uri} now") == "See [internal-cache] now"

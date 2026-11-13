@@ -55,7 +55,11 @@ def safe_text(value: object) -> str | None:
 
     def clean(match: re.Match[str]) -> str:
         token = match.group()
-        if token.startswith(("/", "~/", "file://")) or re.match(r"^[A-Za-z]:[\\/]", token):
+        if (
+            token.startswith(("/", "~/"))
+            or token[:7].lower() == "file://"
+            or re.match(r"^[A-Za-z]:[\\/]", token)
+        ):
             return safe_source(token) or "[internal-cache]"
         if "://" not in token:
             # SSH URL: user:password@host:port or user@host:path
@@ -105,7 +109,7 @@ def safe_source(value: object) -> str | None:
     """Sanitize a source URL or show a safe local source with home abbreviation."""
     if not isinstance(value, str) or not value:
         return None
-    if value.startswith("file://"):
+    if value[:7].lower() == "file://":
         try:
             value = unquote(urlsplit(value).path)
         except ValueError:
