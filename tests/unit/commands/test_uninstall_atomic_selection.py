@@ -199,11 +199,12 @@ def test_ambiguous_alias_exits_nonzero_without_leaking_paths_or_writes(
     fire_scripts.assert_not_called()
 
 
-def test_windows_exact_ambiguity_reports_only_portable_alias(
+def test_windows_duplicate_declaration_reports_only_portable_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A duplicate exact Windows declaration is named without host path leakage."""
+    """A duplicate exact Windows declaration is removed whole (#3693) and named
+    without host path leakage."""
     project = tmp_path / "project"
     project.mkdir()
     declared_path = r"C:\Users\runner\Shared Package"
@@ -212,9 +213,10 @@ def test_windows_exact_ambiguity_reports_only_portable_alias(
 
     result = CliRunner().invoke(uninstall, [declared_path])
 
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
     assert "_local/Shared Package" in result.output
     assert declared_path not in result.output
+    assert declared_path not in (project / "apm.yml").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(

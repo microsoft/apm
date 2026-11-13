@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success
 from .copilot import CopilotClientAdapter
 
@@ -67,19 +65,11 @@ class KiroClientAdapter(CopilotClientAdapter):
             return None
 
         config_path = Path(self.get_config_path())
-        current_config = self.get_current_config()
-        if not isinstance(current_config.get(self.mcp_servers_key), dict):
-            current_config[self.mcp_servers_key] = {}
-        current_config[self.mcp_servers_key].update(config_updates)
-
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            config_path,
-            json.dumps(current_config, indent=2),
-            new_file_mode=0o600,
-        )
-        # Keep existing config files private after updates too.
-        os.chmod(config_path, 0o600)
+        current_config = self._parse_json_config_for_update(config_path)
+        if current_config is None:
+            return False
+        current_config.setdefault(self.mcp_servers_key, {}).update(config_updates)
+        self._write_json_config(config_path, current_config)
         return True
 
     @staticmethod
@@ -224,7 +214,8 @@ class KiroClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if not enabled:
                 server_config["disabled"] = True
-            self.update_config({config_key: server_config})
+            if self.update_config({config_key: server_config}) is False:
+                return False
 
             _rich_success(f"Configured MCP server '{config_key}' for Kiro", symbol="success")
             return True

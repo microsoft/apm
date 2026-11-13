@@ -59,7 +59,7 @@ parser. The supported forms:
 | GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
-| Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. |
+| Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. Do not also declare `owner/repo` itself: install rejects a repository declared together with its own subdirectory package. |
 | Virtual file | `owner/repo/prompts/review.prompt.md` | Install a single primitive file. |
 | HTTPS git URL | `https://gitlab.com/acme/repo.git` | Explicit URL, any host. |
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |

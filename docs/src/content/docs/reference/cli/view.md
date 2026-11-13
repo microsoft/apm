@@ -45,7 +45,7 @@ For git packages, output is a table with name, type (`tag` or `branch`), and sho
 
 ### `apm view --file PATH`
 
-Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`$APM_HOME/apm.lock.yaml`, default `~/.apm/apm.lock.yaml`, with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. Unlike [`apm find`](../find/), which lists package names (and optionally sources) from `deployed_files`, it reports the active writer, ref and commit, and the current file status, with exit codes for scripting.
+Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`$APM_HOME/apm.lock.yaml`, default `~/.apm/apm.lock.yaml`, with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. A decomposed (NFD) spelling of an accented path, as macOS tools often pass, matches only when the filesystem confirms it is the same file. Unlike [`apm find`](../find/), which lists package names (and optionally sources) from `deployed_files`, it reports the active writer, ref and commit, and the current file status, with exit codes for scripting.
 
 For each matching record it prints:
 

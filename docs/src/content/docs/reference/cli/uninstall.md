@@ -181,6 +181,10 @@ preserves the conflicting configuration, and tells you to repair the path or
 ownership conflict. Run `apm install` to reconcile project state, or
 `apm install --global` after a global uninstall.
 
+A package declared more than once -- in both `dependencies` and
+`devDependencies`, or under two spellings such as `owner/repo` and its HTTPS
+URL -- is one package: uninstall removes every declaration of it.
+
 `_local/<name>` is resolved from the manifest and lockfile metadata that produced
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an
 absolute path. If two declared local dependencies have the same portable key,

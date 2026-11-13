@@ -74,11 +74,14 @@ from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     apply_cli_skill_pin,
+    borrow_cross_section_declarations,
     cli_skill_subset,
     dependency_reference_to_yaml_entry,
+    dependency_sections,
     persist_dependency_list_if_changed,
     propagate_existing_registry_source,
     resolve_parsed_dependency_reference,
+    settle_cross_section_declarations,
     try_update_existing_dependency_entry,
     user_scope_rejection_reason,
 )
@@ -606,9 +609,9 @@ def _validate_and_add_packages_to_apm_yml(
 
     # Read current apm.yml
     try:
-        from ..utils.yaml_io import load_yaml_roundtrip
+        from ..models.manifest_io import load_manifest_roundtrip
 
-        data = load_yaml_roundtrip(apm_yml_path) or {}
+        data = load_manifest_roundtrip(apm_yml_path) or {}
     except Exception as e:
         (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)
@@ -617,16 +620,8 @@ def _validate_and_add_packages_to_apm_yml(
 
     _default_registry_for_cli = get_effective_default_registry(data, create_config=create_config)
 
-    # Ensure dependencies structure exists
-    dep_section = "devDependencies" if dev else "dependencies"
-    if dep_section not in data:
-        data[dep_section] = {}
-    if "apm" not in data[dep_section]:
-        data[dep_section]["apm"] = []
-
-    current_deps = data[dep_section]["apm"] or []
-
-    # Detect duplicates against existing deps
+    dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
+    cross_section = borrow_cross_section_declarations(packages, current_deps, other_deps, dev=dev)
     existing_identities = _check_package_conflicts(current_deps)
 
     # Validate and canonicalize all package references
@@ -653,6 +648,9 @@ def _validate_and_add_packages_to_apm_yml(
         updated_packages_out=updated_packages,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
+    )
+    dependencies_changed |= settle_cross_section_declarations(
+        cross_section, current_deps, other_deps, dry_run=dry_run, logger=logger
     )
 
     prospective_package = None

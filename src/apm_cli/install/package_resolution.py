@@ -9,7 +9,8 @@ tests that patch ``apm_cli.commands.install.DependencyReference`` and
 from __future__ import annotations
 
 import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from apm_cli.install import registry_wiring
@@ -529,3 +530,103 @@ def persist_dependency_list_if_changed(
         else:
             rich_error(f"Failed to write {apm_yml_filename}: {e}")
         sys_exit(1)
+
+
+def dependency_sections(data: Any, *, dev: bool) -> tuple[str, builtins.list, builtins.list]:
+    """Return the install target section, its APM list and the other section's list.
+
+    The target section is created when missing; the other section is only read.
+    An empty or null target list is returned detached: the persist helpers
+    reattach it with ``data[target]["apm"] = current_deps`` before writing.
+    """
+    target, other = (
+        ("devDependencies", "dependencies") if dev else ("dependencies", "devDependencies")
+    )
+    data.setdefault(target, {})
+    data[target].setdefault("apm", [])
+    other_section = data.get(other)
+    other_deps = other_section.get("apm") if isinstance(other_section, dict) else None
+    return target, data[target]["apm"] or [], other_deps or []
+
+
+@dataclass(frozen=True)
+class CrossSectionDeclarations:
+    """Requested packages already declared in the other dependency section."""
+
+    dev: bool
+    moved: tuple[str, ...] = ()
+    borrowed: tuple[tuple[int, str], ...] = ()
+
+
+def borrow_cross_section_declarations(
+    packages: Iterable[str],
+    current_deps: builtins.list,
+    other_deps: builtins.list,
+    *,
+    dev: bool,
+) -> CrossSectionDeclarations:
+    """Expose a requested package's existing declaration to validation (#3693).
+
+    Validation then applies its explicit-change rules to that declaration, so
+    omitted CLI options keep its ref, source, registry and selection fields.
+    npm semantics: ``install --dev X`` moves X's ``dependencies`` declaration
+    into ``devDependencies`` (one declaration per package); a plain
+    ``install X`` validates X's ``devDependencies`` declaration in place --
+    it is lent to *current_deps* and returned by
+    :func:`settle_cross_section_declarations`.
+    """
+    from apm_cli.models.dependency.selection import (
+        manifest_declarations_of,
+        parse_dependency_entry,
+    )
+
+    moved: builtins.list[str] = []
+    borrowed: builtins.list[tuple[int, str]] = []
+    for package in packages:
+        declared = manifest_declarations_of(other_deps, [package])
+        if not declared:
+            continue
+        identity = parse_dependency_entry(declared[0]).get_identity()
+        already_declared = manifest_declarations_of(current_deps, declared[:1])
+        if dev:
+            for declaration in declared:
+                other_deps.remove(declaration)
+            if not already_declared:
+                current_deps.append(declared[0])
+            moved.append(identity)
+        elif not already_declared:
+            index = next(i for i, entry in enumerate(other_deps) if entry is declared[0])
+            current_deps.append(declared[0])
+            borrowed.append((index, identity))
+    return CrossSectionDeclarations(dev, tuple(moved), tuple(borrowed))
+
+
+def settle_cross_section_declarations(
+    declarations: CrossSectionDeclarations,
+    current_deps: builtins.list,
+    other_deps: builtins.list,
+    *,
+    dry_run: bool = False,
+    logger: Any = None,
+) -> bool:
+    """Return lent declarations to their section and report moves.
+
+    A lent declaration that validation updated replaces the original at its
+    position. Returns whether apm.yml must be written for these sections.
+    """
+    from apm_cli.models.dependency.selection import manifest_declarations_of
+
+    changed = bool(declarations.moved)
+    for index, identity in declarations.borrowed:
+        # Exactly one match: the lent entry, possibly replaced by validation.
+        declaration = manifest_declarations_of(current_deps, [other_deps[index]])[0]
+        current_deps.remove(declaration)
+        if declaration != other_deps[index]:
+            other_deps[index] = declaration
+            changed = True
+        if logger:
+            logger.progress(f"{identity} is declared in devDependencies; kept it there")
+    action = "Would move" if dry_run else "Moved"
+    for identity in declarations.moved if logger else ():
+        logger.progress(f"{action} {identity} from dependencies to devDependencies")
+    return changed

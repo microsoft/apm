@@ -831,6 +831,12 @@ class TestSelfDefinedDeps:
                 "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation",
                 return_value=[],  # already configured
             ),
+            # Name-only "already configured" path of adapters that opt out of
+            # native content comparison (compares_native_connections = False).
+            patch(
+                "apm_cli.install.mcp.ownership.native_comparison_clients",
+                return_value={},
+            ),
             patch(
                 "apm_cli.integration.mcp_integrator.MCPIntegrator._detect_mcp_config_drift",
                 return_value=[],

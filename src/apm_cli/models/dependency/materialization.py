@@ -186,6 +186,33 @@ def build_materialization_path(
     return result
 
 
+def nested_materialization_pairs(
+    dependencies: Iterable[DependencyReference],
+    apm_modules_dir: Path,
+) -> list[tuple[DependencyReference, DependencyReference]]:
+    """Return ``(outer, inner)`` pairs whose package directories nest.
+
+    A package materialized inside another package's directory (a repository
+    and its own subdirectory package) is deleted with it and hidden from the
+    installed-package scan, so such declarations cannot coexist. Comparison is
+    case-folded because the directories nest on case-insensitive filesystems.
+    """
+    located: list[tuple[PurePosixPath, DependencyReference]] = []
+    for dependency in dependencies:
+        try:
+            path = build_materialization_path(dependency, apm_modules_dir)
+        except (ValueError, PathTraversalError):
+            continue
+        located.append((PurePosixPath(path.as_posix().casefold()), dependency))
+    # Quadratic over root declarations only (direct + dev); n stays small.
+    return [
+        (outer, inner)
+        for outer_path, outer in located
+        for inner_path, inner in located
+        if outer_path in inner_path.parents
+    ]
+
+
 def _relative_parts(desired: Path, apm_modules_dir: Path) -> tuple[str, ...]:
     """Validate and return *desired* components below ``apm_modules``."""
     ensure_path_within(desired, apm_modules_dir)

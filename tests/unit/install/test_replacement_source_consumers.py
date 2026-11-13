@@ -422,6 +422,28 @@ def test_replacement_does_not_inherit_upstream_executable_approval(
 
 
 @pytest.mark.parametrize(
+    ("source", "declared_key"),
+    [
+        ({"path": "../local"}, "../local"),
+        ({"git": "https://github.com/team/fork", "ref": "patched"}, "team/fork"),
+        (
+            {"git": "https://github.com/team/fork", "ref": "patched", "path": "pkgs/sub"},
+            "team/fork/pkgs/sub",
+        ),
+    ],
+)
+def test_replacement_consent_is_keyed_by_the_declared_source(
+    tmp_path: Path, source: dict, declared_key: str
+) -> None:
+    """Consent written for the ``with:`` source the consumer declared unlocks it."""
+    selected, _, _ = _locked(tmp_path, source)
+    package = SimpleNamespace(dependency_ref=selected)
+    approval = {declared_key: {"hooks": True, "bin": True, "mcp": True}}
+
+    assert check_executable_approval("mixedorg/mixedrepo", package, approval)[:3] == (True,) * 3
+
+
+@pytest.mark.parametrize(
     "source", [{"path": "../local"}, {"git": "https://github.com/team/fork", "ref": "patched"}]
 )
 def test_dependency_policy_evaluates_the_selected_source(tmp_path: Path, source: dict) -> None:

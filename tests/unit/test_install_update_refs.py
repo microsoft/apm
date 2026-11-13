@@ -11,6 +11,8 @@ Covers two code paths fixed in issue #548:
    short-circuit the download.  Only lockfile_match (SHA comparison) may skip.
 """
 
+from functools import partial
+
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency
@@ -554,6 +556,15 @@ class TestForceRefRecheck:
             )
             is True
         )
+
+    @pytest.mark.parametrize("update_refs", [True, False])
+    def test_targeted_run_rechecks_only_selected_local_deps(self, update_refs: bool) -> None:
+        """#3649: ``apm install PKG`` / ``apm update PKG`` must not re-read an
+        unselected local package, whose apm.yml may be mid-edit."""
+        dep = _recheck_dep(is_local=True, artifactory_prefix=None, ref_kind=None)
+        recheck = partial(should_force_ref_recheck, dep, None, update_refs=update_refs)
+        assert recheck(update_keys={"org/other"}) is False
+        assert recheck(update_keys={dep.get_unique_key()}) is True
 
     def test_artifactory_dep_never_force_resolved(self) -> None:
         """Artifactory-proxied deps are excluded regardless of ref_kind."""

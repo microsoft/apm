@@ -5,7 +5,7 @@ directory, then diffs the resulting tree against the working project to
 surface five kinds of divergence:
 
 * ``modified``     -- a tracked deployed file's content differs.
-* ``unmanaged-conflict`` -- a selected skill differs at an unowned destination.
+* ``unmanaged-conflict`` -- a replayed file differs at a destination no lockfile entry claims.
 * ``unintegrated`` -- a tracked deployed file is missing from the project.
 * ``orphaned``     -- a managed-directory file exists in the project but
   is not present in the scratch replay AND not tracked in the lockfile.
@@ -787,33 +787,6 @@ def _collect_tracked_files(lockfile: LockFile) -> dict[str, str]:
     return DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)
 
 
-def _claimed_prefixes(
-    tracked: dict[str, str],
-    hashed_files: set[str],
-    project_files: dict[str, Path],
-) -> tuple[str, ...]:
-    """Return ``dir/`` prefixes for the tracked entries that name directories.
-
-    A manifest entry may name a directory rather than each file beneath it
-    (``scan_lockfile_packages`` and ``_check_deployed_files_present`` both
-    accept that shape), so a file is claimed when a tracked *directory*
-    covers it.
-
-    Entries with a recorded hash are files even if the current project path was
-    replaced by a directory. Entries present in *project_files* are also files,
-    which preserves the same rule for legacy hashless lockfiles. A file claim
-    must never act as a prefix: otherwise replacing tracked ``a.md`` with an
-    ``a.md/`` directory would let every descendant dodge the membership check.
-    """
-    return tuple(
-        normalized + "/"
-        for path in tracked
-        if (normalized := path.rstrip("/"))
-        and normalized not in hashed_files
-        and normalized not in project_files
-    )
-
-
 def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     """Return every deployed path whose lock claim is explicitly file-shaped."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -836,7 +809,9 @@ def diff_scratch_against_project(
     Five kinds of findings are emitted:
 
     * ``modified``     -- file exists in both, normalized content differs.
-    * ``unmanaged-conflict`` -- a replayed skill differs from an unowned file.
+    * ``unmanaged-conflict`` -- a replayed file differs from (or is shadowed
+      by a case-only variant of) a file no lockfile entry claims: install
+      skipped a user-authored file, so it is never a managed local edit.
     * ``unintegrated`` -- file exists in scratch but not in project, and the
       path is part of the committed working tree when git tracking is known.
     * ``orphaned``     -- file exists in project + tracked in lockfile
@@ -864,26 +839,6 @@ def diff_scratch_against_project(
     governed = governed_roots if governed_roots is not None else _governed_root_dirs(targets)
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
-    from apm_cli.install.audit_target_roots import claims_for_root
-
-    tracked = claims_for_root(
-        _collect_tracked_files(lockfile),
-        project_root,
-        absolute_only=absolute_claims_only,
-        targets=tuple(targets),
-    )
-    claimed_prefixes = _claimed_prefixes(
-        tracked,
-        set(
-            claims_for_root(
-                {path: "" for path in _collect_hashed_files(lockfile)},
-                project_root,
-                absolute_only=absolute_claims_only,
-                targets=tuple(targets),
-            )
-        ),
-        project_files,
-    )
     # Hook merge targets are shared with the user and never claimed in
     # deployed_files, so they can never be "unrecorded". Their APM-owned slice
     # is compared through hook_ownership; sidecars compare all owned content
@@ -892,7 +847,18 @@ def diff_scratch_against_project(
 
     merge_config_specs = merge_hook_config_projection_specs(targets)
     merge_sidecar_paths = {sidecar_path for sidecar_path, _ in merge_config_specs.values()}
-    merge_config_paths = set(merge_config_specs) | merge_sidecar_paths
+    from apm_cli.install.drift_claims import ReplayClaims
+
+    claims = ReplayClaims.build(
+        _collect_tracked_files(lockfile),
+        _collect_hashed_files(lockfile),
+        project_root,
+        project_files,
+        targets=tuple(targets),
+        absolute_only=absolute_claims_only,
+        shared=set(merge_config_specs) | merge_sidecar_paths,
+    )
+    tracked = claims.tracked
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
@@ -942,6 +908,11 @@ def diff_scratch_against_project(
     for rel, scratch_path in sorted(scratch_files.items()):
         project_path = project_files.get(rel)
         if project_path is None:
+            # A case-only variant occupies the destination on a
+            # case-insensitive filesystem: install skipped it as user-authored.
+            if claims.unclaimed(rel) and (project_root / rel).is_file():
+                findings.append(DriftFinding(path=rel, kind="unmanaged-conflict", package=""))
+                continue
             if tracked_files is not None and rel not in tracked_files:
                 continue
             findings.append(
@@ -957,6 +928,7 @@ def diff_scratch_against_project(
                 project_path, rel, managed, False, diagnostics=collision_diagnostics
             )
         )
+        unmanaged = unmanaged_skill or claims.unclaimed(rel)
         try:
             s_bytes = _normalize(scratch_path.read_bytes())
             p_bytes = _normalize(project_path.read_bytes())
@@ -983,7 +955,7 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
+                    kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=f"(read error: {exc})",
                 )
@@ -996,12 +968,12 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
+                    kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
                 )
             )
-        elif not (rel in tracked or rel.startswith(claimed_prefixes) or rel in merge_config_paths):
+        elif claims.unclaimed(rel):
             # Content agrees, so nothing else in the audit will ever look at
             # this file again: no manifest entry means no hash baseline and no
             # Unicode scan. Reported only in the content-clean case -- when the
