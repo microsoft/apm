@@ -211,6 +211,22 @@ def test_view_json_marketplace_errors(failure: str, code: str) -> None:
     assert "private-reason" not in result.stderr
 
 
+def test_view_json_marketplace_parse_errors() -> None:
+    """JSON parse errors during marketplace fetch are converted to JSON error documents."""
+    with (
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name"),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            side_effect=ValueError("Invalid JSON in marketplace file: ..."),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "--format", "json"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr) == {"schema_version": 1, "error": "marketplace_fetch_failed"}
+
+
 @pytest.mark.parametrize(
     "arguments",
     [

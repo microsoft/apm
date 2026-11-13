@@ -312,11 +312,12 @@ def _display_marketplace_plugin(
     except MarketplaceAuthError as exc:
         logger.error(str(exc))
         sys.exit(1)
-    except MarketplaceFetchError as exc:
+    except (MarketplaceFetchError, ValueError) as exc:
         if output_format == "json":
             _json_error("marketplace_fetch_failed")
         logger.error(str(exc))
-        logger.progress("Check your network connection and try again.")
+        if not isinstance(exc, ValueError):
+            logger.progress("Check your network connection and try again.")
         sys.exit(1)
 
     plugin = manifest.find_plugin(plugin_name)
