@@ -318,3 +318,37 @@ def test_virtual_file_leaf_casing_remains_identity_significant(tmp_path: Path) -
             correct,
         ),
     ) == modules.joinpath(*correct.parts)
+
+
+def test_installed_package_path_finds_case_equivalent_install_on_case_sensitive_fs(
+    tmp_path: Path,
+) -> None:
+    """Read-only consumers resolve the spelling actually on disk (#3668)."""
+    from apm_cli.models.dependency.materialization import installed_package_path
+
+    modules = tmp_path / "apm_modules"
+    reader = CaseSensitiveMaterializationReader(modules, ["Microsoft/APM"])
+    dependency = DependencyReference.parse("microsoft/apm")
+
+    assert (
+        installed_package_path(dependency, modules, reader=reader) == modules / "Microsoft" / "APM"
+    )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ("gitlab.com/MixedOrg/Repo", "microsoft/apm"),
+)
+def test_installed_package_path_keeps_canonical_path_without_a_case_variant(
+    tmp_path: Path, raw: str
+) -> None:
+    """Case-sensitive hosts never casefold, and a missing install keeps the canonical path."""
+    from apm_cli.models.dependency.materialization import installed_package_path
+
+    modules = tmp_path / "apm_modules"
+    reader = CaseSensitiveMaterializationReader(modules, ["gitlab.com/mixedorg/repo"])
+    dependency = DependencyReference.parse(raw)
+
+    assert installed_package_path(
+        dependency, modules, reader=reader
+    ) == dependency.get_install_path(modules)

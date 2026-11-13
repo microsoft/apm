@@ -599,3 +599,28 @@ def test_dev_only_marks_keys_reached_solely_through_dev_refs(tmp_path):
     assert {both, devonly} <= result.reachable
     assert devonly in result.dev_only
     assert both not in result.dev_only
+
+
+def test_walk_reads_manifest_of_case_variant_install(tmp_path):
+    """#3668: a declared package installed under another GitHub casing is walked, not unverifiable."""
+    modules = tmp_path / "apm_modules"
+    parent = modules / "Acme" / "Parent"
+    parent.mkdir(parents=True)
+    (parent / "apm.yml").write_text(
+        "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n    - acme/child\n", encoding="utf-8"
+    )
+    (modules / "acme" / "child").mkdir(parents=True, exist_ok=True)
+    (modules / "acme" / "child" / "apm.yml").write_text(
+        "name: child\nversion: 1.0.0\n", encoding="utf-8"
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(LockedDependency(repo_url="acme/parent", resolved_commit="p1"))
+    lockfile.add_dependency(LockedDependency(repo_url="acme/child", resolved_commit="c1", depth=2))
+    child = _shared_key(lockfile, "acme/child")
+
+    result = compute_forward_reachable_keys(
+        lockfile, tmp_path, modules, [DependencyReference.parse("acme/parent")], frozenset({child})
+    )
+
+    assert result.complete is True
+    assert child in result.reachable
