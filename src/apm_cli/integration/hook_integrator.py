@@ -63,6 +63,7 @@ from apm_cli.integration.hook_ownership import (
     dependency_hook_sources,
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
+    read_merged_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -1262,13 +1263,7 @@ class HookIntegrator(BaseIntegrator):
 
         # Read existing JSON config
         json_path = target_dir / config.config_filename
-        json_config: dict = {}
-        if json_path.exists():
-            try:
-                with open(json_path, encoding="utf-8") as f:
-                    json_config = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                json_config = {}
+        json_config = read_merged_hook_config(json_path, project_root, user_scope=user_scope)
 
         # Load external ownership metadata before reconciling native entries.
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
