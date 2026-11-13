@@ -248,7 +248,7 @@ def _materialize_install_path(
     """Resolve the on-disk path for a locked dep's package contents.
 
     Local package images are written under ``local_modules_dir`` (default
-    ``apm_modules_dir``) so a cache-only audit never rewrites live ``apm_modules``.
+    ``apm_modules_dir``); replay passes an ungoverned scratch dir instead.
 
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,
@@ -664,7 +664,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             registry_resolver=registry_resolver,
                             registries=registries,
                             declared_transports=declared_transports,
-                            local_modules_dir=deployment_modules_dir,
+                            local_modules_dir=scratch_root / "apm_modules",
                         )
                         if declared_transports is not None:
                             declared_transports.record_package(install_path, lock_dep)
