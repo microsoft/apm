@@ -19,32 +19,22 @@ def confirm_update_plan(
 ) -> bool:
     """Gate an update before any download, deploy or cleanup side effect.
 
-    Runs the caller's plan confirmation (``apm update``) and refuses an
-    update whose resolved plan would rewrite an unwritable (symlinked)
-    lockfile while the transaction is still a no-op (#3532). Returns
-    ``False`` when the caller declined the plan.
+    Runs the caller's plan confirmation (``apm update``), then refuses an
+    unwritable (symlinked) lockfile while the transaction is still a no-op
+    (#3532). An update exists to rewrite the lockfile: even an unchanged
+    dependency plan can change the deployment ledger (for example new
+    targets), so the refusal does not depend on the plan. Returns ``False``
+    when the caller declined the plan.
     """
-    plan = None
     if plan_callback is not None:
         plan = build_resolved_update_plan(ctx, lockfile)
         if not plan_callback(plan):
             return False
     if not (ctx.update_refs and ctx.apm_dir) or ctx.frozen or ctx.dry_run or ctx.lockfile_only:
         return True
-    from apm_cli.deps.lockfile import (
-        LockfileSymlinkError,
-        ensure_lockfile_writable,
-        get_lockfile_path,
-        refuse_lockfile_before_mutation,
-    )
+    from apm_cli.deps.lockfile import get_lockfile_path, refuse_lockfile_before_mutation
 
-    lock_path = get_lockfile_path(ctx.apm_dir)
-    try:
-        ensure_lockfile_writable(lock_path)
-    except LockfileSymlinkError:
-        # Only an unwritable lockfile pays for the plan when no callback built it.
-        plan = plan if plan is not None else build_resolved_update_plan(ctx, lockfile)
-        refuse_lockfile_before_mutation(lockfile, lock_path, would_mutate=plan.has_changes)
+    refuse_lockfile_before_mutation(lockfile, get_lockfile_path(ctx.apm_dir), would_mutate=True)
     return True
 
 
