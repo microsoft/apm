@@ -19,7 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -30,6 +31,8 @@ pytestmark = [
 ]
 
 _NO_POLICY = "--no-policy"
+_AGENTS = ("rev", "lint")
+_SKIP_WARNING = "[!] Skipped packed bundle path"
 _STAGED = "apm_modules/bundler/.apm/instructions/glob.instructions.md"
 _COMPILE_ONLY_TARGETS = ("codex", "gemini", "opencode")
 
@@ -70,7 +73,7 @@ class _Bundle:
             producer / ".apm/instructions/glob.instructions.md",
             '---\ndescription: Global\napplyTo: "**"\n---\nAlways be global.\n',
         )
-        for name in ("rev", "lint"):
+        for name in _AGENTS:
             _write(
                 producer / f".apm/agents/{name}.agent.md",
                 f"---\nname: {name}\ndescription: Agent {name}\n---\nDo {name}.\n",
@@ -143,6 +146,44 @@ def test_staged_instructions_are_compile_input_not_deployment_claims(
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
 
 
+def _move_staging_into_claims(project: Path) -> None:
+    """Rewrite the lockfile into its pre-#3705 shape: staging as a bundle claim."""
+    lock = load_yaml(project / "apm.lock.yaml")
+    staged = lock.pop("local_staged_files")
+    template = next(
+        row for row in lock["deployments"] if row["value"] == ".agents/skills/helper/SKILL.md"
+    )
+    for path in staged:
+        digest = compute_file_hash(project / path)
+        lock["local_deployed_files"] = sorted({*lock["local_deployed_files"], path})
+        lock["local_deployed_file_hashes"][path] = digest
+        lock["deployments"].append({**template, "value": path, "content_hash": digest})
+    dump_yaml(lock, project / "apm.lock.yaml")
+
+
+def test_bundle_reinstall_migrates_pre_3705_staging_claims(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _Bundle(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    project = world.consumer("opencode")
+    install = ("install", str(bundle), "--target", "opencode", _NO_POLICY)
+    world.apm(project, *install)
+    _move_staging_into_claims(project)
+    assert _STAGED in _claims(project)
+    # The old shape reproduces #3705: audit verifies staging no target reads.
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+
+    world.apm(project, *install)
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert not any(claim.startswith("apm_modules/") for claim in _claims(project))
+    assert lock["local_staged_files"] == [_STAGED]
+    assert ".agents/skills/helper/SKILL.md" in _claims(project)
+    world.apm(project, "compile")
+    assert "Always be global." in (project / "AGENTS.md").read_text(encoding="utf-8")
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+
 def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -152,9 +193,11 @@ def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(
 
     installed = world.apm(project, "install", str(bundle), "--target", "codex", _NO_POLICY)
     text = _output(installed)
-    for name in ("rev", "lint"):
+    for name in _AGENTS:
         assert text.count(f"'agents/{name}.agent.md' for target codex") == 1, text
-    assert "[!]" in installed.stdout + installed.stderr
+    # Exactly one [!] skip warning per skipped agent, and nothing else skipped.
+    assert text.count(_SKIP_WARNING) == len(_AGENTS), text
+    assert f"({len(_AGENTS)} skipped)" in text, text
     assert not (project / ".codex/agents").exists()
     assert not any(claim.startswith(".codex/") for claim in _claims(project))
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
