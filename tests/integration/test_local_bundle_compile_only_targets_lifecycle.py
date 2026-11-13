@@ -1,0 +1,120 @@
+"""Local bundles installed for compile-only targets audit clean (#3705, #3706).
+
+Codex, Gemini and OpenCode have no native instructions primitive, so
+``apm install <bundle>`` stages the bundle's instructions under
+``apm_modules/<slug>/.apm/instructions/`` for ``apm compile``. Staging is
+compile input, not deployed output: it must never become a deployment claim
+that ``apm audit --ci`` then reports as missing or unresolved, and
+``apm prune`` still clears it.
+
+A bundle carries plugin-native Markdown agents. Local bundle install cannot
+render Codex TOML agents, so it skips them with one warning per agent instead
+of writing Markdown into ``.codex/agents/*.toml``.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from apm_cli.utils.yaml_io import load_yaml
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+]
+
+_NO_POLICY = "--no-policy"
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="ascii")
+
+
+def _output(result: CommandResult) -> str:
+    return " ".join((result.stdout + result.stderr).split())
+
+
+class _Bundle:
+    def __init__(self, tmp_path: Path, apm_binary_path: Path) -> None:
+        isolated = IsolatedApmEnvironment.create(tmp_path / "w", base_env=dict(os.environ))
+        self.env = isolated.subprocess_env()
+        self.root = isolated.work_root
+        self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=240)
+
+    def apm(self, cwd: Path, *args: str, expect: int | None = 0) -> CommandResult:
+        result = self.runner.run(args, cwd=cwd, env=self.env)
+        if expect is not None:
+            assert result.returncode == expect, (
+                f"apm {' '.join(args)} -> {result.returncode} (expected {expect})\n"
+                f"stdout={result.stdout}\nstderr={result.stderr}"
+            )
+        return result
+
+    def pack(self) -> Path:
+        producer = self.root / "bundler"
+        _write(
+            producer / "apm.yml",
+            "name: bundler\nversion: 1.0.0\ndescription: b\nlicense: MIT\n"
+            "dependencies:\n  apm: []\n",
+        )
+        _write(
+            producer / ".apm/instructions/glob.instructions.md",
+            '---\ndescription: Global\napplyTo: "**"\n---\nAlways be global.\n',
+        )
+        for name in ("rev", "lint"):
+            _write(
+                producer / f".apm/agents/{name}.agent.md",
+                f"---\nname: {name}\ndescription: Agent {name}\n---\nDo {name}.\n",
+            )
+        _write(
+            producer / ".apm/skills/helper/SKILL.md",
+            "---\nname: helper\ndescription: Helper skill\n---\nHelp.\n",
+        )
+        self.apm(producer, "install", _NO_POLICY, "--target", "claude")
+        self.apm(producer, "pack", "-o", str(self.root / "out"))
+        bundle = self.root / "out" / "bundler-1.0.0"
+        assert (bundle / "agents/rev.agent.md").is_file()
+        assert (bundle / "instructions/glob.instructions.md").is_file()
+        return bundle
+
+    def consumer(self, target: str) -> Path:
+        project = self.root / f"proj-{target}"
+        _write(project / "apm.yml", f"name: proj\nversion: 1.0.0\ntargets: [{target}]\n")
+        return project
+
+
+def _claims(project: Path) -> set[str]:
+    lock = load_yaml(project / "apm.lock.yaml") or {}
+    return {
+        *(lock.get("local_deployed_files") or []),
+        *(lock.get("local_deployed_file_hashes") or {}),
+        *(row.get("value") for row in lock.get("deployments") or []),
+    }
+
+
+def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _Bundle(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    project = world.consumer("codex")
+
+    installed = world.apm(project, "install", str(bundle), "--target", "codex", _NO_POLICY)
+    text = _output(installed)
+    for name in ("rev", "lint"):
+        assert text.count(f"'agents/{name}.agent.md' for target codex") == 1, text
+    assert "[!]" in installed.stdout + installed.stderr
+    assert not (project / ".codex/agents").exists()
+    assert not any(claim.startswith(".codex/") for claim in _claims(project))
+
+    # Targets that deploy Markdown agents natively still receive them.
+    other = world.consumer("opencode")
+    world.apm(other, "install", str(bundle), "--target", "opencode", _NO_POLICY)
+    assert (other / ".opencode/agents/rev.md").is_file()

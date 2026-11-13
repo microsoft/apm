@@ -128,6 +128,11 @@ proceeds with what it can deploy.
 A bundle packed with `pack.target: all` is target-agnostic and installs
 cleanly into any harness layout.
 
+Bundle files are copied, not re-rendered. Where a target needs a different
+file format, APM skips the file and prints one `[!]` warning per file
+naming it: Codex agents (`.codex/agents/*.toml`) and Gemini commands
+(`.gemini/commands/*.toml`). Install from source to get those primitives.
+
 ## Legacy `--format apm` bundles are rejected
 
 Bundles produced by the older `apm pack --format apm` carry an

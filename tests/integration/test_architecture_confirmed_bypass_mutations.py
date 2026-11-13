@@ -32,6 +32,13 @@ class BypassMutation:
 
 BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
     BypassMutation(
+        name="local-bundle-copies-markdown-into-codex-toml",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/local_bundle_paths.py",
+        old='frozenset({"gemini_command", "codex_agent"})',
+        new='frozenset({"gemini_command"})',
+    ),
+    BypassMutation(
         name="target-context-exemption",
         rule_id="registry_delegation.install_target_selection",
         path="src/apm_cli/commands/install.py",
