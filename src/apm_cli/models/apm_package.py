@@ -860,10 +860,12 @@ class APMPackage:
         # lock.
         generation_snapshot = _apm_yml_cache_generation
 
-        try:
-            from ..utils.yaml_io import load_yaml
+        from .manifest_io import load_manifest
 
-            data = load_yaml(apm_yml_path)
+        # A DuplicateManifestKeyError (ValueError) propagates as-is: its
+        # message already names the file, key and lines.
+        try:
+            data = load_manifest(apm_yml_path)
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML format in {apm_yml_path}: {e}")  # noqa: B904
 

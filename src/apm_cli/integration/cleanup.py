@@ -34,12 +34,14 @@ takes no logger.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from apm_cli.security.gate import is_python_bytecode_cache_path
+from apm_cli.utils.paths import SpellingAliasIndex
 
 from .base_integrator import BaseIntegrator
 
@@ -63,13 +65,28 @@ class CleanupResult:
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
+    released: list[str] = field(default_factory=list)
+    """Skill directories of a departing owner (orphan cleanup) kept on disk
+    because only user content remains in them. Every APM-owned member is
+    gone and the owner leaves the lockfile, so ownership is released rather
+    than retained. A still-declared owner keeps the directory claim so a
+    later install can remove the directory once the user content is gone."""
+
     deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
 
+    aliased: list[str] = field(default_factory=list)
+    """Stale spellings that name the same physical entry as a live path on a
+    case- or normalization-insensitive filesystem; renamed to the live
+    spelling instead of deleted, and no longer owned."""
+
     @property
     def retained(self) -> list[str]:
-        """Return unique paths that were deliberately left on disk."""
+        """Return unique paths that were deliberately left on disk.
+
+        Does not include ``released`` paths, whose ownership was dropped.
+        """
         return list(
             dict.fromkeys(
                 [
@@ -159,6 +176,9 @@ def _safe_remove_skill_directory(
     # matching hashes.  Recurse into subdirectories (skills can
     # contain scripts/, assets/, references/ subdirectories).
     blocking: list[str] = []
+    # True while every blocking entry is user content (untracked and never
+    # deployed); then nothing APM-owned remains and ownership is released.
+    user_content_only = True
     project_root = skill_dir
     # Walk up to reconstruct project_root from the rel_path
     rel_parts = Path(rel_path).parts
@@ -185,6 +205,7 @@ def _safe_remove_skill_directory(
             child_rel = child.relative_to(project_root).as_posix()
         except ValueError:
             blocking.append(str(child.name))
+            user_content_only = False
             continue
         expected_hash = recorded_hashes.get(child_rel)
         if expected_hash is None:
@@ -198,6 +219,7 @@ def _safe_remove_skill_directory(
             # Was in stale set but file still exists -- might have
             # been skipped (user-edit, failed unlink). Block removal.
             blocking.append(child_rel)
+            user_content_only = False
             continue
         # Verify hash matches.
         try:
@@ -206,10 +228,12 @@ def _safe_remove_skill_directory(
             actual_hash = compute_file_hash(child)
         except Exception:
             blocking.append(child_rel)
+            user_content_only = False
             continue
         _strip = _strip_sha256_prefix
         if _strip(actual_hash) != _strip(expected_hash):
             blocking.append(child_rel)
+            user_content_only = False
 
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
@@ -217,16 +241,22 @@ def _safe_remove_skill_directory(
         preview = blocking[:5]
         suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
         file_list = ", ".join(preview) + suffix
-        diagnostics.warn(
-            (
+        release = user_content_only and not failed_path_retained
+        if release:
+            message = (
+                f"Kept skill directory {rel_path} for {len(blocking)} file(s) not "
+                f"owned by APM: {file_list}. APM no longer manages it; "
+                "remove it manually if no longer needed."
+            )
+        else:
+            message = (
                 f"Skipped removing skill directory {rel_path}: "
                 f"{len(blocking)} file(s) not owned by APM or "
                 f"modified since deployment: {file_list}. "
                 "Remove manually if no longer needed."
-            ),
-            package=dep_key,
-        )
-        result.skipped_unmanaged.append(rel_path)
+            )
+        diagnostics.warn(message, package=dep_key)
+        (result.released if release else result.skipped_unmanaged).append(rel_path)
         return
 
     # All remaining files are APM-tracked with matching hashes -- safe
@@ -279,6 +309,7 @@ def remove_stale_deployed_files(
     user_scope: bool = False,
     allow_final_symlink: bool = False,
     receipt_retirements: list[Path] | None = None,
+    live_paths: Iterable[str] = (),
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -311,6 +342,9 @@ def remove_stale_deployed_files(
         receipt_retirements: Optional batch accumulator for confirmed physical
             removals or absence. The caller must retire it through the receipt
             owner in a finally block; omitted callers retire immediately.
+        live_paths: Paths still deployed after this run. A stale path that is
+            only another spelling of one of them on this filesystem is renamed
+            to the live spelling (``aliased``) instead of deleted.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -339,6 +373,7 @@ def remove_stale_deployed_files(
     # files (safe rmtree).
     _deferred_dirs: list[tuple[str, Path]] = []
     absent_targets: list[Path] = []
+    live_index = SpellingAliasIndex(live_paths)
 
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
@@ -412,6 +447,23 @@ def remove_stale_deployed_files(
         if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).
             absent_targets.append(stale_target)
+            continue
+
+        # A case/normalization-only rename upstream makes the old and new
+        # spellings one entry on macOS and Windows: adopt the live spelling
+        # on disk instead of deleting the file this install just wrote.
+        live_alias = live_index.alias(stale_path, project_root)
+        if live_alias is not None:
+            try:
+                os.rename(stale_target, project_root / live_alias)
+                result.aliased.append(stale_path)
+                absent_targets.append(stale_target)
+            except OSError as exc:
+                result.failed.append(stale_path)
+                diagnostics.warn(
+                    f"Could not rename {stale_path} to {live_alias}: {exc}.",
+                    package=dep_key,
+                )
             continue
 
         # Gate 2: directory handling. APM-managed primitives are

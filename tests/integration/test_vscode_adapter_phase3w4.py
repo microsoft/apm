@@ -106,7 +106,10 @@ class TestUpdateConfig:
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
         logger = MagicMock()
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "apm_cli.adapters.client.base.atomic_write_text",
+            side_effect=PermissionError("denied"),
+        ):
             result = adapter.update_config({"servers": {}}, logger=logger)
         assert result is False
         logger.error.assert_called_once()
@@ -114,7 +117,10 @@ class TestUpdateConfig:
     def test_write_error_no_logger_prints(self, tmp_path, capsys):
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "apm_cli.adapters.client.base.atomic_write_text",
+            side_effect=PermissionError("denied"),
+        ):
             result = adapter.update_config({"servers": {}})
         assert result is False
         captured = capsys.readouterr()
@@ -312,6 +318,7 @@ class TestConfigureMcpServer:
             ),
             encoding="utf-8",
         )
+        before = mcp_json.read_bytes()
         server_info = _context7_optional_env_server_info()
         logger = MagicMock()
 
@@ -345,7 +352,11 @@ class TestConfigureMcpServer:
         config = json.loads(mcp_json.read_text(encoding="utf-8"))
         server = config["servers"]["context7"]
 
-        assert configured == 1
+        # The existing entry already equals what VS Code would write (optional
+        # env kept), so it is left alone and unclaimed: no rewrite, no
+        # conflict (#3681).
+        assert configured == 0
+        assert mcp_json.read_bytes() == before
         assert server["env"] == {"CONTEXT7_API_KEY": "${env:CONTEXT7_API_KEY}"}
         assert config.get("inputs", []) == []
 

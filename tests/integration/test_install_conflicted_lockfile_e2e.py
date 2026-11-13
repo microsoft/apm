@@ -355,3 +355,26 @@ def test_best_effort_installed_paths_preserves_conflicted_bytes(conflicted_proje
 
     assert LockFile.installed_paths_for_project(conflicted_project) == []
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("args", [["deps", "list"], ["deps", "tree"], ["prune"]])
+def test_inventory_commands_name_the_conflicted_lockfile(
+    runner: CliRunner, conflicted_project: Path, args: list[str]
+) -> None:
+    """Inventory commands must not fall back to apm_modules or blame apm.yml."""
+    installed = conflicted_project / "apm_modules" / "example" / "x"
+    installed.mkdir(parents=True)
+    (installed / "apm.yml").write_text("name: x\nversion: 1.0.0\n", encoding="utf-8")
+    lockfile_path = conflicted_project / "apm.lock.yaml"
+    original = lockfile_path.read_bytes()
+
+    result = _invoke(runner, args, catch_exceptions=True)
+
+    output = _combined_output(result)
+    assert result.exit_code == 1, output
+    assert "contains unresolved git merge conflict markers" in output
+    assert "restore a known-good lockfile" in output
+    assert "apm.lock.yaml" in output
+    assert "parse apm.yml" not in output
+    assert lockfile_path.read_bytes() == original
+    assert installed.is_dir()

@@ -396,7 +396,11 @@ def load_yaml_roundtrip(path: str | Path) -> Any:
     round-trip mode so callers can mutate the returned object and write it back
     without stripping comments.
     """
-    text = Path(path).read_text(encoding="utf-8")
+    return load_yaml_roundtrip_str(Path(path).read_text(encoding="utf-8"))
+
+
+def load_yaml_roundtrip_str(text: str) -> Any:
+    """String-input twin of :func:`load_yaml_roundtrip` for callers holding the text."""
     _bounded_load(text)
     try:
         return _roundtrip_yaml().load(text)

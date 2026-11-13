@@ -28,10 +28,8 @@ Ref: https://geminicli.com/docs/reference/configuration/
 
 import json
 import logging
-import os
 from pathlib import Path
 
-from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success
 from .copilot import CopilotClientAdapter
 
@@ -91,7 +89,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
             return
 
         config_path = Path(self.get_config_path())
-        current_config = self.get_current_config()
+        current_config = self._parse_json_config_for_update(config_path)
+        if current_config is None:
+            return False
         if "mcpServers" not in current_config:
             current_config["mcpServers"] = {}
 
@@ -102,13 +102,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
             logger.debug(
                 "Creating %s for %s user configuration", config_path.parent, self.target_name
             )
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            config_path,
-            json.dumps(current_config, indent=2),
-            new_file_mode=0o600,
-        )
-        os.chmod(config_path, 0o600)
+        self._write_json_config(config_path, current_config)
+        return True
 
     def get_current_config(self):
         """Read the current ``settings.json`` contents for the active scope."""
@@ -300,7 +295,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
             config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            self.update_config({config_key: server_config})
+            if self.update_config({config_key: server_config}) is False:
+                return False
 
             _rich_success(
                 f"Configured MCP server '{config_key}' for {self.target_name}",

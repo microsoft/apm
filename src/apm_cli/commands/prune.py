@@ -13,7 +13,7 @@ from ..core.deployment_state import LocatorKind
 from ..core.scope import InstallScope
 
 # APM Dependencies
-from ..deps.lockfile import LockFile, get_lockfile_path
+from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
 from ..deps.reachability import retained_lock_keys
 from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
@@ -120,7 +120,7 @@ def prune(ctx, dry_run):
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
-        except MaterializationPathCollisionError as e:
+        except (MaterializationPathCollisionError, LockfileFormatError) as e:
             logger.error(str(e))
             sys.exit(1)
         except Exception as e:

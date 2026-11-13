@@ -120,6 +120,13 @@ def test_patch_filenames_stable_without_collisions():
     assert names == {"testorg/testpkg": "testorg__testpkg@main.patch"}
 
 
+def test_patch_filenames_disambiguates_case_only_collisions():
+    # macOS and Windows fold 'skills/PDF' and 'skills/pdf' patch names into
+    # one file, so the second write would silently replace the first.
+    names = patch_filenames({"org/mono/skills/PDF": "main", "org/mono/skills/pdf": "main"})
+    assert len({name.casefold() for name in names.values()}) == 2
+
+
 def test_patch_ref_prefers_registry_version_then_git_ref_then_commit():
     registry = LockedDependency(repo_url="org/pkg", source="registry", version="2.0.0")
     tagged = LockedDependency(repo_url="org/pkg", resolved_ref="v1.4.0", resolved_commit=_COMMIT)

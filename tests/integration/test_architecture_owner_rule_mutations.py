@@ -718,6 +718,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="MCP config view stops deriving scope from the aggregated declaration owner.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-json-config-write",
+        rule_id="mutation_writes.mcp_json_config_write",
+        path="src/apm_cli/adapters/client/vscode.py",
+        old="self._write_json_config(Path(config_path), new_config, shared=True)",
+        new='open(config_path, "w").write(json.dumps(new_config))',
+        intent="An adapter serializes MCP JSON straight to a file instead of the owner writer.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-omission-evidence",
         rule_id="mutation_writes.mcp_omission_evidence",
         path="src/apm_cli/integration/mcp_config_view.py",
@@ -822,12 +830,36 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-ownership-release",
+        rule_id="install-deployment-cleanup-ownership-release",
+        path="src/apm_cli/integration/cleanup.py",
+        old="release = user_content_only and not failed_path_retained",
+        new="release = user_content_only",
+        intent="A skill directory left only for user content pins its removed owner again.",
+    ),
+    MutationCase(
         guard_id="install-deployment-codex-agent-link-resolution",
         rule_id="install-deployment-codex-agent-link-resolution",
         path="src/apm_cli/integration/agent_integrator.py",
         old="resolve_links=self.resolve_links,",
         new="resolve_links=None,",
         intent="Codex agent conversion bypasses the shared link resolver again.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-consumer-manifest-rewrite",
+        rule_id="install-deployment-consumer-manifest-rewrite",
+        path="src/apm_cli/install/mcp/writer.py",
+        old="dump_yaml_roundtrip(data, apm_yml_path)",
+        new="dump_yaml(data, apm_yml_path)",
+        intent="apm install --mcp strips user comments from apm.yml again.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-drift-claim-classification",
+        rule_id="install-deployment-drift-claim-classification",
+        path="src/apm_cli/install/drift.py",
+        old="unmanaged = unmanaged_skill or claims.unclaimed(rel)",
+        new="unmanaged = unmanaged_skill",
+        intent="Audit reports an unclaimed differing file as a managed local edit.",
     ),
     MutationCase(
         guard_id="install-deployment-executable-trust-context",
@@ -900,6 +932,15 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="snapshot = APMPackage.from_mapping(",
         new="snapshot = APMPackage.from_apm_yml(",
         intent="Acquired metadata reuses the process-lifetime manifest path cache.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-mcp-native-comparison",
+        rule_id="install-deployment-mcp-native-comparison",
+        path="src/apm_cli/integration/mcp_integrator_install.py",
+        old="    if protected_clients:\n        # Native content must be checked",
+        new='    if {"claude", "codex"}.intersection(target_runtimes):\n'
+        "        # Native content must be checked",
+        intent="Self-defined MCP comparison falls back to a per-runtime name gate.",
     ),
     MutationCase(
         guard_id="install-deployment-mcp-ownership-migration",
@@ -1301,6 +1342,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '    return "[i]" if check.informational else "[+]"'
         ),
         intent="Doctor status icons hard-code glyphs instead of console STATUS_SYMBOLS.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-process-interrupt-signals",
+        rule_id="registry_delegation.process_interrupt_signals",
+        path="src/apm_cli/cli.py",
+        old="    _route_sigterm_to_interrupt()\n",
+        new="",
+        intent="The CLI entry stops routing SIGTERM to the interrupt rollback path.",
     ),
     MutationCase(
         guard_id="registry-delegation-runtime-descriptors",
@@ -1893,6 +1942,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="rendered_rules = self._prepare_rule_plan(",
         new="rendered_rules = self._local_rule_plan(",
         intent="Direct native installation forks the projection used by coverage.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-native-instruction-projection",
+        rule_id="hooks-integrations-native-instruction-projection",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="skip, adopted = self._check_adopt_or_skip(",
+        new="skip, adopted = self._local_collision_check(",
+        intent="Rendered rules bypass the shared adopt-or-skip collision owner.",
     ),
 )
 

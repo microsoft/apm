@@ -1382,7 +1382,7 @@ class AgentsCompiler:
             output_path=" | ".join(output_paths) if output_paths else "",
             content="\n\n---\n\n".join(content_parts) if content_parts else "",
             warnings=list(dict.fromkeys(merged_warnings)),
-            errors=merged_errors,
+            errors=list(dict.fromkeys(merged_errors)),
             stats=merged_stats,
             has_critical_security=any(r.has_critical_security for r in results),
         )

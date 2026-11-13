@@ -61,6 +61,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
+    @staticmethod
+    def determine_config_key(
+        server_url: str,
+        server_name: str | None,
+        server_info: dict | None = None,
+    ) -> str:
+        """VS Code keys every entry by its full declared reference, never a short name."""
+        return server_name or server_url
+
     def get_config_path(self, logger=None):
         """Get the path to the VSCode MCP configuration file in the repository.
 
@@ -93,15 +102,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
             new_config (dict): Complete configuration object to write.
 
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if successful, False otherwise. ``False`` without
+            writing when the existing file cannot be rewritten safely.
         """
         config_path = self.get_config_path(logger=logger)
+        if self._parse_json_config_for_update(Path(config_path)) is None:
+            return False
 
         try:
-            # Write the updated config
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(new_config, f, indent=2)
-
+            self._write_json_config(Path(config_path), new_config, shared=True)
             return True
         except Exception as e:
             if logger:
@@ -183,11 +192,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
             # Use provided server name or fallback to server_url
-            config_key = server_name or server_url
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Get current config before formatting so optional registry fields
             # that the user already edited can be preserved on reinstall.
-            current_config = self.get_current_config(logger=logger)
+            current_config = self._parse_json_config_for_update(
+                Path(self.get_config_path(logger=logger))
+            )
+            if current_config is None:
+                return False
             existing_servers = current_config.get("servers")
             if not isinstance(existing_servers, dict):
                 existing_servers = {}
@@ -245,6 +258,36 @@ class VSCodeClientAdapter(MCPClientAdapter):
             else:
                 print(f"Error configuring MCP server: {e}")
             return False
+
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
+        """Render the entry ``configure_mcp_server`` would write now.
+
+        Like the write path, keep optional registry fields the existing entry
+        already carries, so an unchanged entry never compares as different.
+        """
+        servers = self.get_current_config().get("servers")
+        existing = (
+            servers.get(self.determine_config_key(server_info.get("name", ""), None))
+            if isinstance(servers, dict)
+            else None
+        )
+        rendered = self._format_server_config(
+            server_info,
+            runtime_vars=runtime_vars or {},
+            env_overrides=env_overrides or {},
+            existing_server_config=existing,
+        )
+        if isinstance(rendered, tuple):
+            rendered = rendered[0]
+        if not isinstance(rendered, dict):
+            raise ValueError("Adapter did not produce a native MCP server mapping")
+        return rendered
 
     def _format_server_config(
         self,

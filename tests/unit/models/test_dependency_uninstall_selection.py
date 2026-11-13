@@ -8,6 +8,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.selection import (
     DependencySelectionStatus,
+    manifest_declarations_of,
     select_manifest_dependency,
 )
 
@@ -105,3 +106,19 @@ def test_windows_declared_path_accepts_portable_lock_alias() -> None:
 
     assert selection.status is DependencySelectionStatus.MATCHED
     assert selection.manifest_entry == declared_path
+
+
+def test_one_package_declared_twice_is_one_match() -> None:
+    """#3693: duplicate declarations of one identity never make uninstall ambiguous."""
+    declarations = ["acme/c", "https://github.com/acme/c.git", {"git": "acme/c"}, "acme/d"]
+
+    selection = select_manifest_dependency("acme/c", declarations, lockfile=None)
+
+    assert selection.status is DependencySelectionStatus.MATCHED
+    assert selection.manifest_entry == "acme/c"
+    assert selection.match_count == 3
+    assert manifest_declarations_of(declarations, ["git@github.com:acme/c.git"]) == declarations[:3]
+
+
+def test_declarations_of_distinct_local_packages_stay_separate() -> None:
+    assert manifest_declarations_of(["../one/pkg", "../two/pkg"], ["../two/pkg"]) == ["../two/pkg"]

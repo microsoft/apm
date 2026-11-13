@@ -41,6 +41,9 @@ _GUARD_TARGET_CONTRACTION = "install-deployment-target-file-contraction"
 _GUARD_BASE_INTEGRATOR = "install-deployment-base-integrator"
 
 
+_GUARD_CLEANUP_RELEASE = "install-deployment-cleanup-ownership-release"
+
+
 def _body_has_re(body: Sequence[str], pattern: re.Pattern[str]) -> bool:
     """Return whether any captured body line matches `pattern`."""
     return any(pattern.search(line) is not None for line in body)
@@ -183,7 +186,38 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
             )
         )
     failures.extend(_skill_completion_receipt_messages(provider, rule_id))
+    failures.extend(_spelling_alias_findings(provider, rule_id, owner))
     return tuple(failures)
+
+
+_SPELLING_ALIAS_CALLERS = {
+    "src/apm_cli/integration/cleanup.py": "live_index.alias(stale_path, project_root)",
+    "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
+    "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
+    "src/apm_cli/deps/file_provenance.py": "alias = physical_alias(",
+}
+
+
+def _spelling_alias_findings(
+    provider: FactsProvider, rule_id: str, owner: object
+) -> list[Violation]:
+    """Case/normalization-only spellings of a live deployed path must route through
+    the ``apm_cli.utils.paths`` spelling owner in collision checks and stale cleanup."""
+    message = (
+        "Case/normalization-only deployed-path aliases must route through "
+        "apm_cli.utils.paths (SpellingAliasIndex / stored_alias / physical_alias)"
+    )
+    failures: list[Violation] = []
+    if not _present(
+        owner, "stored_alias(target_path.parents[len(rel_parts) - 1], rel_key, managed_files)"
+    ):
+        failures.append(_summary(rule_id, _BASE_INTEGRATOR_OWNER, message))
+    for path, needle in _SPELLING_ALIAS_CALLERS.items():
+        facts, fail = _facts_for(provider, path, rule_id)
+        failures.extend(fail)
+        if not fail and not _present(facts, needle):
+            failures.append(_summary(rule_id, path, message))
+    return failures
 
 
 def _defines_function(facts: object, name: str) -> bool:
@@ -192,6 +226,38 @@ def _defines_function(facts: object, name: str) -> bool:
         definition.name == name and definition.kind in ("function", "async_function")
         for definition in getattr(facts, "definitions", ())
     )
+
+
+_CLEANUP_HELPER = "src/apm_cli/integration/cleanup.py"
+
+
+def check_cleanup_ownership_release(provider: FactsProvider) -> tuple[Violation, ...]:
+    """A departing owner's skill directory left only for user content is released.
+
+    ``_safe_remove_skill_directory`` files it under ``CleanupResult.released``
+    only for orphan cleanup (``failed_path_retained=False``), and
+    ``CleanupResult.retained`` never includes released paths, so a removed
+    dependency's row is not pinned by user files while a still-declared
+    owner keeps its directory claim.
+    """
+    rule_id = _GUARD_CLEANUP_RELEASE
+    facts, failures = _facts_for(provider, _CLEANUP_HELPER, rule_id)
+    if failures:
+        return tuple(failures)
+    findings: list[Violation] = []
+    if not _present(facts, "release = user_content_only and not failed_path_retained"):
+        findings.append(
+            _summary(
+                rule_id,
+                _CLEANUP_HELPER,
+                "Only a departing owner's user-content-only skill directory may be released",
+            )
+        )
+    if _present(facts, "*self.released"):
+        findings.append(
+            _summary(rule_id, _CLEANUP_HELPER, "CleanupResult.retained must not include released")
+        )
+    return tuple(findings)
 
 
 _CONTRACTION_MANIFEST = "src/apm_cli/install/manifest_reconcile.py"
@@ -1127,7 +1193,33 @@ def _legacy_scope_findings(provider: FactsProvider, rule_id: str) -> list[Violat
                 "Legacy user deployment scope must route through DeploymentLedgerCodec",
             )
         ]
-    return []
+    return _row_scope_findings(provider, rule_id)
+
+
+_RAW_ROW_SCOPE = re.compile(r"locator\.scope\s*(?:==|!=)")
+
+
+def _row_scope_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Deployment-row scope membership must route through DeploymentLedgerCodec."""
+    message = "Deployment row scope membership must route through DeploymentLedgerCodec"
+    provenance, provenance_fail = _facts_for(
+        provider, "src/apm_cli/deps/file_provenance.py", rule_id
+    )
+    if provenance_fail:
+        return list(provenance_fail)
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _DEPLOYMENT_LEDGER:
+            continue
+        facts = provider.file_facts(path)
+        if getattr(facts, "read_error", None) is not None:
+            continue
+        findings.extend(
+            _line_findings(facts, path, rule_id, _RAW_ROW_SCOPE, message, respect_exempt=True)
+        )
+    if not _present(provenance, "DeploymentLedgerCodec.locator_in_scope("):
+        findings.append(_summary(rule_id, _DEPLOYMENT_LEDGER, message))
+    return findings
 
 
 def _local_bundle_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:

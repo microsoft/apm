@@ -625,10 +625,13 @@ install-deployment-audit-replay
 install-deployment-bundle-compile-staging
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
+install-deployment-cleanup-ownership-release
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
+install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
+install-deployment-drift-claim-classification
 install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
@@ -647,6 +650,7 @@ install-deployment-manifest-inheritance-includes
 install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
+install-deployment-mcp-native-comparison
 install-deployment-mcp-ownership-migration
 install-deployment-mcp-registry-resolution
 install-deployment-orphan-selection
@@ -705,6 +709,7 @@ mutation_writes.hook_command_vocabulary
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope
+mutation_writes.mcp_json_config_write
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
 mutation_writes.mcp_passthrough_denylist
@@ -735,6 +740,7 @@ registry_delegation.manifest_schema_negotiation
 registry_delegation.native_locator_target_names
 registry_delegation.output_diagnostics
 registry_delegation.policy_ref_redaction
+registry_delegation.process_interrupt_signals
 registry_delegation.root_cli_output_mode
 registry_delegation.runtime_descriptors
 registry_delegation.target_vocabulary

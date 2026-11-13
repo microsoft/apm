@@ -70,6 +70,43 @@ def _is_transient_lock_error(exc: OSError) -> bool:
     return getattr(exc, "errno", None) == errno.EBUSY
 
 
+# EEXIST matches only when a non-directory ancestor is found below the root.
+_OBSTRUCTION_ERRNOS = frozenset({errno.EISDIR, errno.ENOTDIR, errno.EEXIST})
+
+
+def obstructed_path_message(path: Path, root: Path, *, blocker: str) -> str:
+    """Name a path whose existing *blocker* ("file"/"directory") stops a write."""
+    from .paths import portable_relpath
+
+    return (
+        f"{portable_relpath(path, root)} is a {blocker} that blocks an APM-managed "
+        "path. Move it aside, then run the command again."
+    )
+
+
+def describe_path_obstruction(error: BaseException, root: Path) -> str | None:
+    """Return :func:`obstructed_path_message` when *error* is a path obstruction.
+
+    Covers a directory where a file is written (EISDIR) and a file where a
+    directory is needed (ENOTDIR/EEXIST, found by walking up to *root*).
+    Returns ``None`` for any other error so callers keep the original text.
+    """
+    if not isinstance(error, OSError) or error.errno not in _OBSTRUCTION_ERRNOS:
+        return None
+    if not error.filename:
+        return None
+    path = Path(os.fsdecode(error.filename)).resolve()
+    root = root.resolve()
+    if error.errno == errno.EISDIR:
+        return obstructed_path_message(path, root, blocker="directory")
+    for candidate in (path, *path.parents):
+        if candidate == root or root not in candidate.parents:
+            break
+        if candidate.exists() and not candidate.is_dir():
+            return obstructed_path_message(candidate, root, blocker="file")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Retry core
 # ---------------------------------------------------------------------------

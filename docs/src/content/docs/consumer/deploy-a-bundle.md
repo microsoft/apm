@@ -126,8 +126,9 @@ For the full flag list see the [`apm install` reference](../../reference/cli/ins
 
 ## Targets
 
-Pass `--target` to scope the deploy. Without it APM auto-detects from the
-current project. If the bundle was packed for targets you are not
+Pass `--target` to scope the deploy. Without it APM uses the `targets:`
+declared in the project's `apm.yml` (then `apm config target`), and
+auto-detects only when neither is set. If the bundle was packed for targets you are not
 installing into, APM prints a warning naming the missing targets and
 proceeds with what it can deploy.
 

@@ -265,6 +265,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
                 user_scope=user_scope,
                 receipt_retirements=receipt_retirements,
+                live_paths=surviving_files | set(new_deployed),
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.
@@ -282,6 +283,10 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 if logger:
                     logger.cleanup_skipped_user_edit(_skipped, dep_key)
             if logger:
+                for _aliased in cleanup_result.aliased:
+                    logger.verbose_detail(
+                        f"Renamed {_aliased} to the new letter case from {dep_key}"
+                    )
                 logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
 
 

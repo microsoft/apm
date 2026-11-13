@@ -152,17 +152,18 @@ def patch_filename(dep_key: str, ref: str) -> str:
 def patch_filenames(refs_by_key: dict[str, str]) -> dict[str, str]:
     """Assign a unique ``<pkg>@<ref>.patch`` filename to every dependency key.
 
-    The sanitizer is many-to-one, so colliding keys get a short digest
-    suffix on the ``<pkg>`` segment; without this, one package's patch
-    would silently overwrite another's.
+    The sanitizer is many-to-one, and case-insensitive filesystems (macOS,
+    Windows) fold names differing only by case, so keys whose names collide
+    case-insensitively get a short digest suffix on the ``<pkg>`` segment;
+    without this, one package's patch would silently overwrite another's.
     """
     by_name: dict[str, list[str]] = {}
     for key, ref in refs_by_key.items():
-        by_name.setdefault(patch_filename(key, ref), []).append(key)
+        by_name.setdefault(patch_filename(key, ref).casefold(), []).append(key)
     result: dict[str, str] = {}
-    for name, keys in by_name.items():
+    for keys in by_name.values():
         if len(keys) == 1:
-            result[keys[0]] = name
+            result[keys[0]] = patch_filename(keys[0], refs_by_key[keys[0]])
             continue
         for key in keys:
             pkg, safe_ref = _patch_stem_parts(key, refs_by_key[key])

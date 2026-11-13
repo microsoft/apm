@@ -1180,6 +1180,58 @@ class TestValidConfigKeys:
         assert "ssh" in result
 
 
+class TestConfigKeyRegistry:
+    """The valid-key registry and the get/set/unset dispatch must agree."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_config(self, tmp_path, monkeypatch):
+        import apm_cli.config as conf
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(conf, "CONFIG_DIR", str(tmp_path / ".apm"))
+        monkeypatch.setattr(conf, "CONFIG_FILE", str(tmp_path / ".apm" / "config.json"))
+        conf._invalidate_config_cache()
+        yield
+        conf._invalidate_config_cache()
+
+    @staticmethod
+    def _concrete(name: str) -> str:
+        from apm_cli.security.external.registry import SUPPORTED_SCANNERS
+
+        placeholder = sorted(SUPPORTED_SCANNERS)[0] if name.startswith("external.") else "corp"
+        return name.replace("<name>", placeholder)
+
+    @pytest.mark.parametrize("operation", ["get", "set", "unset"])
+    def test_unknown_key_is_a_plain_user_error(self, operation):
+        args = [operation, "no-such-key"] + (["x"] if operation == "set" else [])
+        result = CliRunner().invoke(config, args)
+
+        assert result.exit_code == 1
+        assert "Unknown configuration key: 'no-such-key'" in result.output
+        assert "command routing" not in result.output
+        assert "github-auth-first" in result.output
+
+    def test_every_registered_key_is_dispatched(self):
+        from apm_cli.commands.config import _CONFIG_KEYS
+
+        runner = CliRunner()
+        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
+            for name, _flag, unsettable in _CONFIG_KEYS:
+                key = self._concrete(name)
+                operations = [["get", key], ["set", key, "true"]]
+                if unsettable:
+                    operations.append(["unset", key])
+                for args in operations:
+                    result = runner.invoke(config, args)
+                    assert "Unknown configuration key" not in result.output, (args, result.output)
+            rejected = runner.invoke(config, ["unset", "auto-integrate"])
+
+        assert "Unknown configuration key: 'auto-integrate'" in rejected.output
+        valid = rejected.output.split("Valid keys:", 1)[1]
+        assert "auto-integrate" not in valid
+        assert "registry.<name>.default" in valid
+
+
 # ---------------------------------------------------------------------------
 # Storage layer -- allow_protocol_fallback
 # ---------------------------------------------------------------------------

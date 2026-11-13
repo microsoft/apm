@@ -533,9 +533,9 @@ def _update_gitignore_for_apm_modules(logger=None):
 def _load_apm_config():
     """Load configuration from apm.yml."""
     if Path(APM_YML_FILENAME).exists():
-        from ..utils.yaml_io import load_yaml
+        from ..models.manifest_io import load_manifest
 
-        return load_yaml(APM_YML_FILENAME)
+        return load_manifest(APM_YML_FILENAME)
     return None
 
 

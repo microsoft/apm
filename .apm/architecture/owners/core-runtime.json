@@ -109,6 +109,13 @@
       "owner": "core/scope.py (get_apm_home)",
       "selectors": ["src/apm_cli/core/scope.py"],
       "guards": ["registry-delegation-apm-home-resolution"]
+    },
+    {
+      "id": "process-interrupt-signals",
+      "decision": "SIGTERM takes the same interrupt (Ctrl+C) path as SIGINT; a second SIGTERM terminates",
+      "owner": "cli.py (main, _route_sigterm_to_interrupt)",
+      "selectors": ["src/apm_cli/cli.py"],
+      "guards": ["registry-delegation-process-interrupt-signals"]
     }
   ]
 }

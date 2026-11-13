@@ -22,7 +22,10 @@ import yaml
 from ..core.deployment_state import DeploymentLedger
 from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
-from ..models.dependency.identity import normalize_package_repo_url
+from ..models.dependency.identity import (
+    is_case_insensitive_package_identity,
+    normalize_package_repo_url,
+)
 from ..models.dependency.object_fields import parse_alias_override
 from ..models.dependency.reference import (
     build_canonical_dependency_string,
@@ -51,8 +54,15 @@ def lockfile_parent_identity(
     dependency: DependencyReference | LockedDependency,
     replacements: Sequence[object] | None,
 ) -> str:
-    """Encode exact original parent keys for v3, retaining legacy repo-url parents."""
-    return dependency.get_unique_key() if replacements is not None else dependency.repo_url
+    """Encode exact original parent keys for v3, retaining legacy repo-url parents.
+
+    Legacy parents use the canonical repository identity, so a parent declared
+    with different casing (``Owner/Repo``) still names its locked entry. A lock
+    written before this rule self-heals on the next install that records it.
+    """
+    return (
+        dependency.get_unique_key() if replacements is not None else dependency.canonical_repo_url
+    )
 
 
 def _copy_extension_map(value: object) -> dict[str, Any]:
@@ -221,10 +231,16 @@ def has_conflict_markers(text: str) -> bool:
 
 
 def require_supported_lockfile_version(data: object) -> str:
-    """Return a supported declared version or fail closed."""
+    """Return a supported declared version or fail closed.
+
+    An unquoted integer (``lockfile_version: 1``, as left by hand edits or
+    YAML tools that drop quotes) denotes the same version as its string form.
+    """
     if not isinstance(data, dict):
         raise LockfileFormatError("Lockfile root must be a mapping")
     version = data.get("lockfile_version", "1")
+    if type(version) is int:
+        version = str(version)
     if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
         supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
         raise UnsupportedLockfileVersionError(
@@ -239,8 +255,8 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         raise LockfileFormatError("Lockfile root must be a mapping")
     data = dict(data)
     # Pre-versioned lockfiles are a supported legacy v1 migration input.
-    # Explicit unknown/newer versions still fail closed below.
-    require_supported_lockfile_version(data)
+    # Explicit unknown/newer versions still fail closed here.
+    data["lockfile_version"] = require_supported_lockfile_version(data)
     list_fields = (
         "dependencies",
         "deployments",
@@ -483,6 +499,11 @@ class LockedDependency:
         self.materialization_repo_url = (
             materialization_repo_url if materialization_repo_url != canonical_repo_url else None
         )
+
+    @property
+    def canonical_repo_url(self) -> str:
+        """Return the repository identity; ``__post_init__`` already canonicalised it."""
+        return self.repo_url
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -1323,6 +1344,24 @@ class LockFile:
         data = _validate_lockfile_container(loaded)
         return cls._from_validated_data(data)
 
+    def _canonicalize_legacy_parents(self) -> None:
+        """Point a mixed-case legacy ``resolved_by`` at its locked parent's identity.
+
+        Locks written before parents were recorded canonically (#3698) may name
+        a case-insensitive parent ``Owner/Repo`` while its entry is ``owner/repo``.
+        """
+        known = {dep.repo_url for dep in self.dependencies.values()}
+        canonical = {
+            dep.repo_url.casefold(): dep.repo_url
+            for dep in self.dependencies.values()
+            if is_case_insensitive_package_identity(
+                host=dep.host, source=dep.source, registry_prefix=dep.registry_prefix
+            )
+        }
+        for dep in self.dependencies.values():
+            if dep.resolved_by and dep.resolved_by not in known:
+                dep.resolved_by = canonical.get(dep.resolved_by.casefold(), dep.resolved_by)
+
     @classmethod
     def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
         """Construct a lockfile from an already validated YAML mapping."""
@@ -1364,6 +1403,8 @@ class LockFile:
         if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
             raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
         lock._validate_replacement_evidence()
+        if lock.replacements is None:
+            lock._canonicalize_legacy_parents()
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.

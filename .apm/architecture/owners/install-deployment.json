@@ -43,9 +43,12 @@
     {
       "id": "legacy-mcp-ownership-key-migration",
       "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
-      "owner": "install/mcp/ownership.py",
+      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints)",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
-      "guards": ["install-deployment-mcp-ownership-migration"]
+      "guards": [
+        "install-deployment-mcp-ownership-migration",
+        "install-deployment-mcp-native-comparison"
+      ]
     },
     {
       "id": "deployment-provenance-state",
@@ -166,13 +169,15 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; see integrators.instructions.md)",
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
+        "src/apm_cli/integration/cleanup.py",
         "src/apm_cli/install/services.py"
       ],
       "guards": [
         "install-deployment-base-integrator",
+        "install-deployment-cleanup-ownership-release",
         "install-deployment-codex-agent-link-resolution"
       ]
     },
@@ -210,6 +215,13 @@
       "owner": "deps/lock_parent_placement.py (place_legacy_lock_parents, installed_manifest_children)",
       "selectors": ["src/apm_cli/deps/lock_parent_placement.py"],
       "guards": ["install-deployment-lock-parent-placement"]
+    },
+    {
+      "id": "drift-claim-membership",
+      "decision": "Drift replay claim membership: unclaimed differing files are unmanaged conflicts, never managed local edits",
+      "owner": "install/drift_claims.py (ReplayClaims.unclaimed)",
+      "selectors": ["src/apm_cli/install/drift_claims.py"],
+      "guards": ["install-deployment-drift-claim-classification"]
     },
     {
       "id": "ci-audit-scratch-materialization",
@@ -252,6 +264,13 @@
         "src/apm_cli/commands/uninstall/engine.py"
       ],
       "guards": ["install-deployment-skills-root-derivation"]
+    },
+    {
+      "id": "consumer-manifest-rewrite",
+      "decision": "apm.yml reads reject duplicate top-level keys; rewrites preserve user comments, aliases and layout",
+      "owner": "models/manifest_io.py (load_manifest, load_manifest_roundtrip) for apm.yml reads: APMPackage.from_apm_yml, project executable trust, apm run config and every rewrite; utils/yaml_io.py dump_yaml_roundtrip for install, uninstall, approve/deny and install --mcp rewrites",
+      "selectors": ["src/apm_cli/install/mcp/writer.py", "src/apm_cli/models/manifest_io.py"],
+      "guards": ["install-deployment-consumer-manifest-rewrite"]
     }
   ]
 }

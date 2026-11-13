@@ -173,13 +173,12 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         self.assertIn("keep", data["mcpServers"])
         self.assertIn("new", data["mcpServers"])
 
-    def test_update_config_tolerates_malformed_project_mcp_json(self):
-        """Corrupted .mcp.json must not abort install; treat as empty + rewrite."""
+    def test_update_config_keeps_malformed_project_mcp_json(self):
+        """An unparsable .mcp.json is kept byte-identical and the write is refused."""
         self.mcp_path.write_text("{not valid json", encoding="utf-8")
         ok = self.adapter.update_config({"srv": {"command": "x"}})
-        self.assertTrue(ok)
-        data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
-        self.assertIn("srv", data["mcpServers"])
+        self.assertFalse(ok)
+        self.assertEqual(self.mcp_path.read_text(encoding="utf-8"), "{not valid json")
 
     def test_self_defined_skill_command_rewritten_to_claude_skills(self):
         """Skill-shipped MCP launchers declare their command using the
@@ -670,13 +669,12 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
         leftovers = list(self.home.glob(".claude.json.*")) + list(self.home.glob("apm-atomic-*"))
         self.assertEqual(leftovers, [])
 
-    def test_update_config_tolerates_malformed_user_claude_json(self):
-        """Corrupted ~/.claude.json must not abort install; treat as empty + rewrite."""
+    def test_update_config_keeps_malformed_user_claude_json(self):
+        """An unparsable ~/.claude.json is kept byte-identical and the write is refused."""
         self.claude_json.write_text("{not valid json", encoding="utf-8")
         ok = self.adapter.update_config({"srv": {"command": "x"}})
-        self.assertTrue(ok)
-        data = json.loads(self.claude_json.read_text(encoding="utf-8"))
-        self.assertIn("srv", data["mcpServers"])
+        self.assertFalse(ok)
+        self.assertEqual(self.claude_json.read_text(encoding="utf-8"), "{not valid json")
 
     def test_configure_mcp_server_returns_false_when_update_fails(self):
         """If update_config returns False, configure_mcp_server must surface the failure."""

@@ -663,3 +663,37 @@ def test_remove_stale_cleans_recorded_claude_server_without_claude_dir(
     )
     servers = json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
     assert ("managed" in servers) is (runtime is None)
+
+
+def test_native_comparison_covers_json_adapters_and_skips_opt_outs(tmp_path):
+    """#3681: every JSON adapter compares native content; opt-outs and unknowns are skipped."""
+    from apm_cli.install.mcp.ownership import native_comparison_clients
+
+    runtimes = [
+        "claude",
+        "codex",
+        "copilot",
+        "cursor",
+        "gemini",
+        "kiro",
+        "opencode",
+        "vscode",
+        "windsurf",
+        "antigravity",
+        "hermes",
+        "intellij",
+        "not-a-runtime",
+    ]
+    clients = native_comparison_clients(runtimes, project_root=tmp_path, user_scope=False)
+
+    assert set(clients) == set(runtimes) - {"hermes", "intellij", "not-a-runtime"}
+
+
+def test_native_comparison_distinguishes_json_types():
+    """True vs 1 (and 1 vs 1.0) are different native values, never "already configured"."""
+    from apm_cli.adapters.client.base import MCPClientAdapter
+
+    assert MCPClientAdapter.json_identical({"enabled": True}, {"enabled": True})
+    assert not MCPClientAdapter.json_identical({"enabled": True}, {"enabled": 1})
+    assert not MCPClientAdapter.json_identical({"timeout": 1}, {"timeout": 1.0})
+    assert MCPClientAdapter.json_identical({"a": 1, "b": 2}, {"b": 2, "a": 1})

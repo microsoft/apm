@@ -643,6 +643,13 @@ class TestDeduplicateMCPDeps:
         assert result[0]["url"] == "https://root-url"
 
 
+# Name-only "already configured" characterisation for adapters that opt out of
+# native content comparison (compares_native_connections = False).
+_NAME_ONLY_RUNTIMES = patch(
+    "apm_cli.install.mcp.ownership.native_comparison_clients", new=lambda *_a, **_k: {}
+)
+
+
 # ---------------------------------------------------------------------------
 # _install_mcp_dependencies
 # ---------------------------------------------------------------------------
@@ -659,6 +666,7 @@ class TestInstallMCPDependencies:
 
         assert count == 0
 
+    @_NAME_ONLY_RUNTIMES
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     @patch("apm_cli.registry.operations.MCPServerOperations")
@@ -680,6 +688,7 @@ class TestInstallMCPDependencies:
         assert count == 1
         mock_install_runtime.assert_called_once()
 
+    @_NAME_ONLY_RUNTIMES
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.registry.operations.MCPServerOperations")
     def test_mixed_registry_servers_show_already_configured_and_count_only_new(
@@ -824,6 +833,7 @@ class TestCheckSelfDefinedServersNeeding:
 # ---------------------------------------------------------------------------
 @pytest.mark.usefixtures("_bypass_target_gate")
 class TestInstallSelfDefinedSkipLogic:
+    @_NAME_ONLY_RUNTIMES
     @patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
     )
@@ -872,6 +882,7 @@ class TestInstallSelfDefinedSkipLogic:
         assert count == 1
         assert mock_install_runtime.call_count == 1
 
+    @_NAME_ONLY_RUNTIMES
     @patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
     )
@@ -1104,6 +1115,7 @@ class TestDiffAwareSelfDefinedInstall:
         assert count == 1
         mock_install_runtime.assert_called_once()
 
+    @_NAME_ONLY_RUNTIMES
     @patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
     )
@@ -1178,6 +1190,7 @@ class TestDiffAwareSelfDefinedInstall:
         )
         assert "updated" in printed_lines
 
+    @_NAME_ONLY_RUNTIMES
     @patch("apm_cli.core.null_logger._rich_success")
     @patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"

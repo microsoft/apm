@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
-from ...utils.atomic_io import atomic_write_text
+from ...utils.atomic_io import atomic_write_text, umask_file_mode
 from ...utils.console import _rich_error, _rich_warning
 from ...utils.path_security import has_symlink_component
 
@@ -264,6 +264,16 @@ def _stringify_env_literal(value):
     return str(value)
 
 
+_SYMLINKED_MCP_CONFIG = (
+    "Skipped {path}: APM does not write MCP config through symlinks. "
+    "Replace the symlink or configure this server manually."
+)
+
+
+def _warn_symlinked_mcp_config(config_path: Path) -> None:
+    _rich_warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
+
+
 class MCPClientAdapter(ABC):
     """Base adapter for MCP clients."""
 
@@ -284,6 +294,21 @@ class MCPClientAdapter(ABC):
     # primitive-focused) and applies uniformly to MCP-only adapters
     # (e.g. ``VSCodeClientAdapter``) that have no ``KNOWN_TARGETS`` entry.
     mcp_servers_key: str = ""
+    # Native JSON configs keep the byte layout each harness has always had
+    # (only Claude Code ends its JSON configs with a newline).
+    json_config_trailing_newline: bool = False
+
+    # Whether an existing native entry with the requested name is compared by
+    # content before writing, so a differing user connection is preserved and
+    # reported as a conflict instead of "already configured" (#3239, #3681).
+    # Consumed only through ``install.mcp.ownership.native_comparison_clients``.
+    compares_native_connections: bool = True
+
+    # Whether an unchanged declaration still rewrites an APM-written entry whose
+    # render now differs only through the install environment (credential
+    # source precedence, resolved values). Claude and Codex reconcile those; the
+    # other adapters keep their written entry until the declaration changes.
+    refreshes_environment_renders: bool = False
 
     @staticmethod
     def _merge_extra(config: dict, server_info: dict) -> dict:
@@ -387,20 +412,37 @@ class MCPClientAdapter(ABC):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
 
+    @staticmethod
+    def json_identical(left: object, right: object) -> bool:
+        """Compare native JSON values by type as well as value.
+
+        Python equality treats ``True == 1`` and ``1 == 1.0``; native configs
+        must not, or a changed JSON type would read as already configured.
+        """
+        try:
+            return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+        except (TypeError, ValueError):
+            return left == right
+
     def matches_managed_server_config(self, native: object, expected: dict) -> bool:
         """Compare the native connection with the adapter's rendered baseline."""
-        return native == expected
+        return self.json_identical(native, expected)
 
     def matches_legacy_managed_server_config(
         self, native: object, expected: dict, *, recorded_write: bool | None = None
     ) -> bool:
-        """Recognize a verified write from an older formatter; never a current match.
+        """Recognize an earlier APM write of a connection the lockfile claims.
 
         ``recorded_write`` is ``True`` or ``False`` when the lockfile holds a
         fingerprint of the earlier write that does or does not match *native*,
-        and ``None`` when no fingerprint was recorded.
+        and ``None`` when no fingerprint was recorded. The fingerprint is the
+        proof, even when the entry no longer renders identically (for example a
+        resolved env value that changed since). Without one, only an entry equal
+        to the current render is accepted.
         """
-        return False
+        if recorded_write is not None:
+            return recorded_write
+        return self.matches_managed_server_config(native, expected)
 
     def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
         """Extra target-specific guidance for a preserved conflicting entry."""
@@ -445,15 +487,27 @@ class MCPClientAdapter(ABC):
         A missing or blank file yields ``{}``.  Returns ``None`` after a
         warning when rewriting the file could lose data, so the caller skips
         the write: the existing content is not a JSON object (for example
-        JSONC comments), or a user-scope path runs through a symlink, which
-        stale cleanup refuses to rewrite later.
+        JSONC comments), or the path runs through a symlink (under ``$HOME``
+        at user scope), which stale cleanup refuses to rewrite later.
         """
         if self.user_scope and has_symlink_component(Path.home(), config_path):
-            _rich_warning(
-                f"Skipped {config_path}: APM does not write MCP config through "
-                "symlinks. Replace the symlink or configure this server manually.",
-                symbol="warning",
-            )
+            _warn_symlinked_mcp_config(config_path)
+            return None
+        return self._parse_json_config_for_update(config_path)
+
+    def _parse_json_config_for_update(self, config_path: Path) -> dict | None:
+        """Parse *config_path* for a merge-and-write.
+
+        Adapters whose user-scope file may live outside ``$HOME`` (for
+        example ``CLAUDE_CONFIG_DIR`` or ``COPILOT_HOME``) use this half of
+        :meth:`_read_json_config_for_update`, which skips only the
+        ``$HOME`` symlink policy. Project-scope configs that are, or are
+        reached through, a symbolic link are refused here, so every entry
+        point applies it. Same contract: ``{}`` for a missing or blank file,
+        ``None`` after a warning when a rewrite could lose data.
+        """
+        if self._is_linked_project_config(config_path):
+            _warn_symlinked_mcp_config(config_path)
             return None
         try:
             raw = config_path.read_text(encoding="utf-8")
@@ -490,14 +544,36 @@ class MCPClientAdapter(ABC):
             return None
         return config
 
-    @staticmethod
-    def _write_json_config(config_path: Path, config: dict) -> None:
+    def _is_linked_project_config(self, config_path: Path) -> bool:
+        """Return whether a project-scope config path is or crosses a symlink.
+
+        Components below the project root are checked; a path outside it
+        (an adapter-specific location) is checked for its final component.
+        """
+        if self.user_scope:
+            return False
+        try:
+            config_path.relative_to(self.project_root)
+        except ValueError:
+            return config_path.is_symlink()
+        return has_symlink_component(self.project_root, config_path)
+
+    def _write_json_config(self, config_path: Path, config: dict, *, shared: bool = False) -> None:
         """Atomically write *config* as JSON and keep the file owner-only.
 
-        Entries can carry env values resolved at install time.
+        Entries can carry env values resolved at install time. ``shared``
+        marks a committed project config file: it keeps its existing or
+        umask mode instead. A project-scope path that is, or is reached
+        through, a symbolic link is refused with ``OSError``.
         """
+        if self._is_linked_project_config(config_path):
+            raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(config_path, json.dumps(config, indent=2), new_file_mode=0o600)
+        payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
+        if shared:
+            atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
+            return
+        atomic_write_text(config_path, payload, new_file_mode=0o600)
         os.chmod(config_path, 0o600)
 
     @abstractmethod

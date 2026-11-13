@@ -128,9 +128,11 @@ def render_drift_text(
 
     if by_kind.get("unmanaged-conflict"):
         lines.append(
-            f"  {STATUS_SYMBOLS['info']} Rename the conflicting local skill or choose a valid "
-            "skill/target selection before reinstalling. Ordinary 'apm install' refuses "
-            "unmanaged conflicts; it cannot repair these files."
+            f"  {STATUS_SYMBOLS['info']} Rename the conflicting local file or skill (APM "
+            "does not own it), or choose a valid skill/target selection, before "
+            "reinstalling. Ordinary 'apm install' skips or refuses unmanaged "
+            "conflicts; it cannot repair these files. 'apm install --force' "
+            "overwrites a skipped non-skill file."
         )
         if any(finding.kind != "unmanaged-conflict" for finding in findings):
             lines.append(

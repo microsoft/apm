@@ -46,7 +46,9 @@ def select_manifest_dependency(
     Exact declared identifiers use ``DependencyReference`` identity semantics.
     A portable local alias such as ``_local/pkg`` is accepted only when persisted
     lock metadata maps that alias back to one declared local dependency key.
-    Ambiguous aliases fail closed instead of guessing.
+    Ambiguous aliases fail closed instead of guessing. One package declared
+    more than once (in both sections, or under two spellings) is one match;
+    ``manifest_declarations_of`` returns every declaration to remove.
     """
     try:
         requested_identity = DependencyReference.parse(package).get_identity()
@@ -86,11 +88,11 @@ def select_manifest_dependency(
                 matched_entries[index] = entry
 
     matches = list(matched_entries.values())
-    if len(matches) == 1:
+    if matches and len(manifest_declarations_of(matches, matches[:1])) == len(matches):
         return DependencySelection(
             status=DependencySelectionStatus.MATCHED,
             manifest_entry=matches[0],
-            match_count=1,
+            match_count=len(matches),
         )
     if len(matches) > 1:
         return DependencySelection(
@@ -103,3 +105,29 @@ def select_manifest_dependency(
         manifest_entry=None,
         match_count=0,
     )
+
+
+def _declared_identity(dep_entry: object) -> str | None:
+    try:
+        return parse_dependency_entry(dep_entry).get_identity()
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return None
+
+
+def manifest_declarations_of(
+    manifest_dependencies: list[object],
+    selected: list[object],
+) -> list[object]:
+    """Return every manifest declaration of the packages named by *selected*.
+
+    Declarations match by ``DependencyReference`` identity, so a package listed
+    in both ``dependencies`` and ``devDependencies`` or under two spellings is
+    removed as a whole. Unparseable entries match only themselves.
+    """
+    identities = {_declared_identity(entry) for entry in selected} - {None}
+    return [
+        entry
+        for entry in manifest_dependencies
+        if (identity := _declared_identity(entry)) in identities
+        or (identity is None and entry in selected)
+    ]

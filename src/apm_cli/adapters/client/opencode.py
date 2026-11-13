@@ -242,13 +242,21 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         except (OSError, json.JSONDecodeError):
             return {}
 
-    def render_server_config(self, server_info: dict) -> dict:
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
         """Render the entry APM writes, for exact baseline comparisons.
 
         The layout is re-read from the file on each call so the comparison
         always matches what ``update_config`` would write now.
         """
-        copilot_entry = super().render_server_config(server_info)
+        copilot_entry = super().render_server_config(
+            server_info, env_overrides=env_overrides, runtime_vars=runtime_vars
+        )
         enabled = opencode_enabled_value(server_info)
         if self.uses_native_v2(self._read_config_file()):
             return self._to_opencode_v2_format(copilot_entry, enabled=enabled)

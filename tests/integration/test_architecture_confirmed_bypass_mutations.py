@@ -48,6 +48,13 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         ),
     ),
     BypassMutation(
+        name="local-bundle-ignores-manifest-targets",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/install/local_bundle_handler.py",
+        old="explicit = resolve_manifest_target_decision(",
+        new="explicit = target or _ignore_manifest_targets(",
+    ),
+    BypassMutation(
         name="symlink-owner-exemption",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/utils/net.py",
