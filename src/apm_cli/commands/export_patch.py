@@ -223,17 +223,20 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
 def _upstream_candidates(index: _SourceIndex, candidates: list[str]) -> list[str]:
     """Drop install-generated ``.apm/`` mirrors from digest-matched candidates.
 
-    Routes through :func:`~apm_cli.deps.plugin_parser.is_install_generated_mirror`
-    (the normalization owner) so mirror classification stays in one place.
+    A candidate is dropped only when the normalization owner
+    (:func:`~apm_cli.deps.plugin_parser.install_generated_mirror_source`)
+    proves it was copied from another candidate; otherwise ambiguity stays.
     """
     if len(candidates) < 2 or index.source_root is None:
         return candidates
-    from ..deps.plugin_parser import is_install_generated_mirror
+    from ..deps.plugin_parser import install_generated_mirror_source
 
-    upstream = [
-        rel for rel in candidates if not is_install_generated_mirror(rel, index.source_root)
-    ]
-    return upstream or candidates
+    mirrors = set()
+    for rel in candidates:
+        source = install_generated_mirror_source(rel, index.source_root)
+        if source is not None and source in candidates:
+            mirrors.add(rel)
+    return [rel for rel in candidates if rel not in mirrors]
 
 
 def _repository_prefix(dep: LockedDependency) -> str:
