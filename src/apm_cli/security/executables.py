@@ -816,8 +816,9 @@ def write_allow_executables(
 ) -> None:
     """Persist *allow_executables* back to the project's ``apm.yml``.
 
-    Reads the existing YAML, updates the ``allowExecutables`` key, and
-    writes it back using the standard ``dump_yaml`` helper.
+    Reads the existing YAML through the manifest owner, updates the
+    ``allowExecutables`` key, and writes it back round-trip so comments,
+    key order and anchors survive.
 
     Note: this writes only the project gate opt-in signal
     (``allowExecutables: {}``) and the CI/automated-context approvals that are
@@ -825,9 +826,10 @@ def write_allow_executables(
     ``~/.apm/config.json`` under ``executables: {allow, deny}`` (see
     :func:`save_user_executables`); there is no standalone approvals file.
     """
-    from ..utils.yaml_io import dump_yaml, load_yaml
+    from ..models.manifest_io import load_manifest_roundtrip
+    from ..utils.yaml_io import dump_yaml_roundtrip
 
-    data = load_yaml(manifest_path)
+    data = load_manifest_roundtrip(manifest_path)
     if not isinstance(data, dict):
         return
 
@@ -836,7 +838,7 @@ def write_allow_executables(
     elif "allowExecutables" in data:
         del data["allowExecutables"]
 
-    dump_yaml(data, manifest_path)
+    dump_yaml_roundtrip(data, manifest_path)
 
 
 def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:

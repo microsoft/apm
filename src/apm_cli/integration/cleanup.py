@@ -81,7 +81,10 @@ class CleanupResult:
 
     @property
     def retained(self) -> list[str]:
-        """Return unique paths that were deliberately left on disk."""
+        """Return unique paths that were deliberately left on disk.
+
+        Does not include ``released`` paths, whose ownership was dropped.
+        """
         return list(
             dict.fromkeys(
                 [
