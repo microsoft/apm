@@ -96,6 +96,26 @@ def written_native_hash(
     )
 
 
+def retain_native_receipt(
+    native_hashes: dict[str, dict[str, str]] | None,
+    runtime: str,
+    client: Any,
+    name: str,
+    *,
+    requested_info: dict | None,
+) -> None:
+    """Keep a fingerprint for a managed entry that already matched, without writing.
+
+    A lock rebuilt without its deployment rows would otherwise lose the receipt
+    of an unchanged managed connection on the next install.
+    """
+    if native_hashes is None or name in native_hashes.get(runtime, {}):
+        return
+    fingerprint = written_native_hash(client, name, requested_info=requested_info)
+    if fingerprint is not None:
+        native_hashes.setdefault(runtime, {})[name] = fingerprint
+
+
 def compare_native_mcp_connection(
     client: Any,
     name: str,

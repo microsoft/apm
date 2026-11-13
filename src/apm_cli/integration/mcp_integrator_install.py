@@ -275,6 +275,7 @@ def _install_registry_group(  # noqa: PLR0913
         NativeMcpConnectionState,
         compare_native_mcp_connection,
         native_comparison_clients,
+        retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -454,6 +455,14 @@ def _install_registry_group(  # noqa: PLR0913
                             NativeMcpConnectionState.MATCHING_MANAGED,
                             NativeMcpConnectionState.MATCHING_FOREIGN,
                         }:
+                            if state is NativeMcpConnectionState.MATCHING_MANAGED:
+                                retain_native_receipt(
+                                    native_hashes,
+                                    rt,
+                                    client,
+                                    dep,
+                                    requested_info=server_info_cache.get(dep),
+                                )
                             logger.verbose_detail(f"{dep} already matches {rt}; no write")
                             continue
                         replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
@@ -1294,6 +1303,7 @@ def _install_self_defined_deps(
         NativeMcpConnectionState,
         compare_native_mcp_connection,
         native_comparison_clients,
+        retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -1436,6 +1446,10 @@ def _install_self_defined_deps(
                     NativeMcpConnectionState.MATCHING_MANAGED,
                     NativeMcpConnectionState.MATCHING_FOREIGN,
                 }:
+                    if state is NativeMcpConnectionState.MATCHING_MANAGED:
+                        retain_native_receipt(
+                            native_hashes, rt, client, dep.name, requested_info=synthetic_info
+                        )
                     logger.verbose_detail(f"{dep.name} already matches {rt}; no write")
                     continue
                 replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
