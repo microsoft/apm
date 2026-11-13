@@ -6,6 +6,7 @@ import pytest
 
 from scripts.architecture_linter.checks.marketplace_locked_evidence import (
     check_json_envelope,
+    check_json_projection,
 )
 from scripts.architecture_linter.facts import FactsProvider
 
@@ -35,4 +36,27 @@ def test_boundary_requires_shared_envelopes(
 
     findings = check_json_envelope(FactsProvider(tmp_path, paths, registry=None))
 
+    assert {finding.path for finding in findings} == (set(paths) if rejected else set())
+
+
+@pytest.mark.parametrize(
+    ("source", "rejected"),
+    [
+        ("def safe_source(value):\n    return value\n", True),
+        ("payload = urlsplit(value)\n", True),
+        ("payload = safe_source(value)\n", False),
+        ("payload = safe_text(value)\n", False),
+    ],
+)
+def test_boundary_requires_shared_projection(tmp_path: Path, source: str, rejected: bool) -> None:
+    """Consumer commands must not establish a second sanitization owner."""
+    paths = (
+        "src/apm_cli/commands/marketplace/__init__.py",
+        "src/apm_cli/commands/view.py",
+    )
+    for path in paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+    findings = check_json_projection(FactsProvider(tmp_path, paths, registry=None))
     assert {finding.path for finding in findings} == (set(paths) if rejected else set())
