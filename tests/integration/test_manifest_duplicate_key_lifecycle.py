@@ -53,37 +53,52 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     }
 
 
+_LAYOUTS = {
+    "block": (
+        "name: consumer\nversion: 0.1.0\ntarget: copilot\n"
+        "dependencies:\n  apm:\n    - ./pkgs/alpha\n",
+        "name: consumer\nversion: 0.1.0\ntarget: copilot\n"
+        "dependencies:\n  apm:\n    - ./pkgs/alpha\n"
+        "dependencies:\n  apm:\n    - ./pkgs/beta\n",
+        "declares the top-level key 'dependencies' twice (lines 4 and 7)",
+        "Merge both 'dependencies:' blocks into one",
+    ),
+    "flow": (
+        "{name: consumer, version: 0.1.0, target: copilot, dependencies: {apm: [./pkgs/alpha]}}\n",
+        "{name: consumer, version: 0.1.0, target: copilot, dependencies: {apm: [./pkgs/alpha]},"
+        " dependencies: {apm: [./pkgs/beta]}}\n",
+        "declares the top-level key 'dependencies' twice on line 1",
+        "Merge both 'dependencies' entries into one",
+    ),
+}
+
+
+@pytest.mark.parametrize("layout", sorted(_LAYOUTS))
 def test_duplicate_top_level_key_is_refused_before_any_write(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, layout: str
 ) -> None:
+    original, duplicated, refusal, remedy = _LAYOUTS[layout]
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     project = isolated.work_root / "consumer"
     for name in ("alpha", "beta", "gamma"):
         _package(project / "pkgs" / name, name)
     manifest = project / "apm.yml"
-    manifest.write_text(
-        "name: consumer\nversion: 0.1.0\ntarget: copilot\n"
-        "dependencies:\n  apm:\n    - ./pkgs/alpha\n",
-        encoding="ascii",
-    )
+    manifest.write_text(original, encoding="ascii")
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
     first = runner.run(("install", "--no-policy"), cwd=project, env=env)
     assert first.returncode == 0, first.stdout + first.stderr
     assert (project / ".github" / "instructions" / "alpha.instructions.md").is_file()
 
-    # A bad merge leaves a second dependencies block (line 7).
-    manifest.write_text(
-        manifest.read_text(encoding="ascii") + "dependencies:\n  apm:\n    - ./pkgs/beta\n",
-        encoding="ascii",
-    )
+    # A bad merge leaves a second dependencies entry.
+    manifest.write_text(duplicated, encoding="ascii")
     before = _snapshot(project)
 
     for args in _COMMANDS:
         result = runner.run(args, cwd=project, env=env)
         output = " ".join((result.stdout + result.stderr).split())
         assert result.returncode != 0, f"apm {' '.join(args)} accepted the manifest\n{output}"
-        assert "declares the top-level key 'dependencies' twice (lines 4 and 7)" in output, output
-        assert "Merge both 'dependencies:' blocks into one" in output, output
+        assert refusal in output, output
+        assert remedy in output, output
         assert "yaml.dev" not in output and "Traceback" not in output, output
         assert _snapshot(project) == before, f"apm {' '.join(args)} changed the project"

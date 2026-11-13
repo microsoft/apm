@@ -26,10 +26,14 @@ class DuplicateManifestKeyError(ValueError):
         self.path = path
         self.key = key
         self.lines = (first_line, second_line)
+        if first_line == second_line:
+            where, remedy = f"on line {first_line}", f"Merge both '{key}' entries into one"
+        else:
+            where = f"(lines {first_line} and {second_line})"
+            remedy = f"Merge both '{key}:' blocks into one"
         super().__init__(
-            f"{path} declares the top-level key '{key}' twice "
-            f"(lines {first_line} and {second_line}), so one of them would be "
-            f"ignored. Merge both '{key}:' blocks into one, then retry."
+            f"{path} declares the top-level key '{key}' twice {where}, so one of "
+            f"them would be ignored. {remedy}, then retry."
         )
 
 
@@ -51,9 +55,10 @@ def reject_duplicate_manifest_keys(path: Path, text: str) -> None:
         if not isinstance(key_node, yaml.ScalarNode) or key_node.tag == _MERGE_TAG:
             continue
         line = key_node.start_mark.line + 1
-        first = first_lines.setdefault(key_node.value, line)
-        if first != line:
+        first = first_lines.get(key_node.value)
+        if first is not None:
             raise DuplicateManifestKeyError(path, key_node.value, first, line)
+        first_lines[key_node.value] = line
 
 
 def read_manifest_text(path: str | Path) -> str:
