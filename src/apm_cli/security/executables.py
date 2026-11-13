@@ -21,7 +21,7 @@ import fnmatch
 import hashlib
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -471,9 +471,13 @@ def dependency_approval_key(dependency_ref: Any) -> str:
 
     Uses the lockfile identity domain that ``apm approve`` writes (bare
     ``owner/repo`` for github.com), bound to the selected source so a
-    replacement never inherits upstream approval.
+    replacement never inherits upstream approval. A replacement is keyed by
+    the ``with:`` source the consumer declared; its absolute local anchor is
+    a materialization coordinate, not a trust principal.
     """
     source = dependency_ref.source_reference
+    if dependency_ref.replacement is not None:
+        source = replace(source, anchored_local_path=None)
     return build_approval_key(source.get_unique_key(), source.reference or "")
 
 
