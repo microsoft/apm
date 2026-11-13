@@ -15,6 +15,7 @@ import pytest
 
 from apm_cli.constants import InstallMode
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.lsp.integration import (
     reconcile_lsp_after_uninstall,
@@ -82,6 +83,7 @@ class TestOwnedLspIntegration:
         dependency = _make_dep("new")
         mock_integrator.install.return_value = 1
         mock_integrator.get_server_names.return_value = {"new"}
+        mock_integrator.expressible_server_names.return_value = {"new"}
         mock_integrator.get_server_configs.return_value = {"new": dependency.to_lsp_json_entry()}
         mock_integrator.supported_target_runtimes.return_value = ["copilot"]
 
@@ -782,6 +784,7 @@ class TestSkipInstall:
         mock_integrator.collect_transitive.return_value = []
         mock_integrator.install.return_value = 1
         mock_integrator.get_server_names.return_value = {"pyright"}
+        mock_integrator.expressible_server_names.return_value = {"pyright"}
         mock_integrator.get_server_configs.return_value = {"pyright": {}}
 
         run_lsp_integration(
@@ -807,3 +810,99 @@ class TestSkipInstall:
             "claude": set(),
             "copilot": {"pyright"},
         }
+
+
+class TestOpenCodeLspIntegration:
+    def _run(self, tmp_path, **kwargs):
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("gopls", command="gopls")]
+        return run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            fail_on_write_error=True,
+            **kwargs,
+        )
+
+    def test_opencode_target_writes_config_and_lockfile(self, tmp_path) -> None:
+        count = self._run(tmp_path, runtime="opencode", explicit_target="opencode")
+
+        assert count == 1
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert data["lsp"]["gopls"]["command"] == ["gopls"]
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock.lsp_target_servers["opencode"] == ["gopls"]
+
+    def test_name_only_server_is_not_recorded_for_opencode(self, tmp_path) -> None:
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [
+            _make_dep("pyright"),
+            LSPDependency.from_string("gopls"),
+        ]
+        run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            fail_on_write_error=True,
+            explicit_target="opencode",
+            runtime="opencode",
+        )
+
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock.lsp_target_servers["opencode"] == ["pyright"]
+        assert "gopls" not in json.loads((tmp_path / "opencode.json").read_text())["lsp"]
+
+    def test_skipped_socket_server_is_not_recorded_for_opencode(self, tmp_path) -> None:
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [
+            _make_dep("gopls", command="gopls"),
+            _make_dep("sock", transport="socket"),
+        ]
+        run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            fail_on_write_error=True,
+            explicit_target=["opencode", "copilot"],
+            target_decision=EffectiveTargetDecision(["opencode", "copilot"], "--target flag"),
+        )
+
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock.lsp_target_servers["opencode"] == ["gopls"]
+        assert lock.lsp_target_servers["copilot"] == ["gopls", "sock"]
+
+    def test_user_authored_server_is_neither_overwritten_nor_claimed(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        config = tmp_path / "opencode.json"
+        content = json.dumps({"lsp": {"gopls": {"command": ["my-gopls"]}}})
+        config.write_text(content, encoding="utf-8")
+
+        with pytest.raises(RequiredIntegrationError, match="not managed by APM"):
+            self._run(tmp_path, runtime="opencode", explicit_target="opencode")
+
+        assert config.read_text(encoding="utf-8") == content
+        assert not (tmp_path / "apm.lock.yaml").exists()
+
+    def test_unsupported_target_still_raises_with_new_message(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError) as exc_info:
+            self._run(tmp_path, runtime="cursor", explicit_target="cursor")
+
+        assert "--target copilot, --target claude or --target opencode" in str(exc_info.value)

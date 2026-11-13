@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,7 +22,7 @@ from apm_cli.integration._shared import (
 )
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
 from apm_cli.utils.path_security import PathTraversalError
 
 if TYPE_CHECKING:
@@ -35,7 +36,53 @@ _COPILOT_LANGUAGE_KEY = "fileExtensions"
 _CLAUDE_STARTUP_TIMEOUT_KEY = "startupTimeout"
 _COPILOT_STARTUP_TIMEOUT_KEY = "warmupTimeoutMs"
 _LEGACY_DEFAULT_TARGETS = ("claude",)
-_LSP_TARGET_ORDER = ("copilot", "claude")
+_LSP_TARGET_ORDER = ("copilot", "claude", "opencode")
+_OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json"
+_OPENCODE_LSP_KEY = "lsp"
+_SNAKE_LANGUAGE_KEY = "extension_to_language"
+
+
+class _SkipServer(Exception):
+    """Raised by an entry translator when a server cannot be expressed for a target."""
+
+
+def _language_map(entry: dict) -> dict | None:
+    """Return the extension-to-language map under any accepted spelling."""
+    return (
+        entry.get(_CLAUDE_LANGUAGE_KEY)
+        or entry.get(_COPILOT_LANGUAGE_KEY)
+        or entry.get(_SNAKE_LANGUAGE_KEY)
+    )
+
+
+def _opencode_entry(entry: dict) -> dict:
+    """Translate a neutral LSP entry to OpenCode's ``lsp`` schema.
+
+    OpenCode shape: ``{command: [cmd, *args], extensions: [...], env, initialization}``.
+    Unsupported fields (timeouts, restart policy, workspace folder, settings) are
+    dropped. Raises ``_SkipServer`` for transports OpenCode cannot express and
+    for name-only declarations, since an OpenCode server entry needs a command.
+    """
+    transport = entry.get("transport")
+    if transport is not None and transport != "stdio":
+        raise _SkipServer(f"transport '{transport}' is not supported by OpenCode")
+    command = entry.get("command")
+    if not command:
+        raise _SkipServer(
+            "it declares no 'command' (name-only form), which OpenCode requires; "
+            "declare it in object form with 'command' and 'extensionToLanguage'"
+        )
+    out: dict = {"command": [command, *(entry.get("args") or [])]}
+    language_map = _language_map(entry)
+    if language_map:
+        out["extensions"] = sorted(
+            {ext if ext.startswith(".") else f".{ext}" for ext in language_map}
+        )
+    if entry.get("env"):
+        out["env"] = entry["env"]
+    if entry.get("initializationOptions") is not None:
+        out["initialization"] = entry["initializationOptions"]
+    return out
 
 
 @dataclass(frozen=True)
@@ -46,8 +93,6 @@ class _LSPTargetSpec:
     project_relative_path: tuple[str, ...]
     user_relative_path: tuple[str, ...]
     """Config path relative to the runtime's user root (``resolve_user_root``)."""
-    language_key: str
-    startup_timeout_key: str
     project_servers_key: str | None
     user_servers_key: str | None
     project_label: str
@@ -55,6 +100,22 @@ class _LSPTargetSpec:
     user_config_defaults: tuple[tuple[str, str], ...] = ()
     cleanup_empty_relative_dirs: tuple[tuple[str, ...], ...] = ()
     user_cleanup_empty_relative_dirs: tuple[tuple[str, ...], ...] = ()
+    # Keys of the default rename-only translation (unused with entry_translator).
+    language_key: str | None = None
+    startup_timeout_key: str | None = None
+    # Optional per-target entry translator (replaces the rename-only default).
+    # It receives the neutral entry and returns the on-disk entry, or raises
+    # ``_SkipServer`` to omit that server for this target only.
+    entry_translator: Callable[[dict], dict] | None = None
+    # Top-level keys written only when APM creates the file (never overwritten).
+    # They do not count as user content when cleanup decides to delete the file.
+    created_defaults: tuple[tuple[str, str], ...] = ()
+    # The file also holds settings APM does not own (for example OpenCode's
+    # ``mcp`` key). A file that is not a JSON object, or whose servers key is
+    # not an object, is refused instead of being rewritten from scratch,
+    # even with --force. A same-name server APM does not manage is a
+    # collision that only --force overrides.
+    shared_config: bool = False
 
     def user_root(self) -> Path:
         """Return the runtime's user root through the harness user-root owner."""
@@ -137,6 +198,17 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
         project_servers_key=_LSP_SERVERS_KEY,
         user_servers_key=_LSP_SERVERS_KEY,
         project_label=".github/lsp.json",
+    ),
+    "opencode": _LSPTargetSpec(
+        runtime="opencode",
+        project_relative_path=("opencode.json",),
+        user_relative_path=("opencode.json",),
+        project_servers_key=_OPENCODE_LSP_KEY,
+        user_servers_key=_OPENCODE_LSP_KEY,
+        project_label="opencode.json",
+        entry_translator=_opencode_entry,
+        created_defaults=(("$schema", _OPENCODE_SCHEMA_URL),),
+        shared_config=True,
     ),
 }
 
@@ -279,11 +351,14 @@ class LSPIntegrator:
     @staticmethod
     def _entry_for_target(entry: dict, spec: _LSPTargetSpec) -> dict:
         """Translate a neutral LSP entry to one target's on-disk schema."""
-        out = dict(entry)
-        snake_case_extensions = out.pop("extension_to_language", None)
-        extension_to_language = out.pop(_CLAUDE_LANGUAGE_KEY, None)
-        file_extensions = out.pop(_COPILOT_LANGUAGE_KEY, None)
-        language_map = extension_to_language or file_extensions or snake_case_extensions
+        if spec.entry_translator is not None:
+            return spec.entry_translator(entry)
+        language_map = _language_map(entry)
+        out = {
+            key: value
+            for key, value in entry.items()
+            if key not in (_SNAKE_LANGUAGE_KEY, _CLAUDE_LANGUAGE_KEY, _COPILOT_LANGUAGE_KEY)
+        }
         if language_map is not None:
             out[spec.language_key] = language_map
         startup_timeout = out.pop(_CLAUDE_STARTUP_TIMEOUT_KEY, None)
@@ -296,11 +371,37 @@ class LSPIntegrator:
         return out
 
     @staticmethod
-    def _servers_for_target(servers: dict[str, dict], spec: _LSPTargetSpec) -> dict[str, dict]:
-        """Translate all server entries to one target's schema."""
-        return {
-            name: LSPIntegrator._entry_for_target(entry, spec) for name, entry in servers.items()
-        }
+    def _servers_for_target(
+        servers: dict[str, dict],
+        spec: _LSPTargetSpec,
+        warn: Callable[[str], object],
+    ) -> dict[str, dict]:
+        """Translate all server entries to one target's schema.
+
+        Servers a target cannot express are skipped and reported through *warn*.
+        """
+        out: dict[str, dict] = {}
+        for name, entry in servers.items():
+            try:
+                out[name] = LSPIntegrator._entry_for_target(entry, spec)
+            except _SkipServer as skip:
+                warn(f"Skipped LSP server '{name}' for {spec.runtime}: {skip}")
+        return out
+
+    @staticmethod
+    def expressible_server_names(lsp_deps: list, runtime: str) -> builtins.set:
+        """Return the names of *lsp_deps* that *runtime* can write.
+
+        Lifecycle owners record target ownership from this set so a server a
+        target skips (for example a socket server on OpenCode) is never
+        claimed, and later cleanup cannot delete a same-name user entry.
+        """
+        servers = LSPIntegrator._servers_for_target(
+            LSPIntegrator._base_server_entries(lsp_deps),
+            _LSP_TARGET_SPECS[runtime],
+            warn=lambda _message: None,
+        )
+        return builtins.set(servers)
 
     # ------------------------------------------------------------------
     # Target resolution
@@ -368,6 +469,10 @@ class LSPIntegrator:
             )
             if claude_root or find_runtime_binary("claude") is not None:
                 candidates.append("claude")
+            if (project_root_path / ".opencode").is_dir() or find_runtime_binary(
+                "opencode"
+            ) is not None:
+                candidates.append("opencode")
 
         if exclude:
             exclusions = {exclude}
@@ -423,6 +528,12 @@ class LSPIntegrator:
         return [target for target in _LSP_TARGET_ORDER if target in target_runtimes]
 
     @staticmethod
+    def target_choice_hint() -> str:
+        """Return e.g. ``--target copilot, --target claude or --target opencode``."""
+        flags = [f"--target {target}" for target in _LSP_TARGET_ORDER]
+        return f"{', '.join(flags[:-1])} or {flags[-1]}"
+
+    @staticmethod
     def supported_target_runtimes(target_runtimes: list[str]) -> list[str]:
         """Return requested runtimes that have an LSP target adapter."""
         requested = set(target_runtimes)
@@ -439,39 +550,57 @@ class LSPIntegrator:
         *,
         user_scope: bool,
     ) -> Path:
-        """Resolve a target config through the canonical deployment-path gate."""
+        """Resolve a target config through the canonical deployment-path gate.
+
+        The gate is pinned to the spec's exact path in both scopes, which also
+        admits root-level files such as ``opencode.json`` without widening the
+        harness directory prefixes.
+        """
         if user_scope:
-            user_root = spec.user_root()
+            root = spec.user_root()
             relative = Path(*spec.user_relative_path)
             # Validate from HOME when the root lives there, so a symlinked
             # ``~/.claude`` or ``~/.copilot`` stays rejected; a configured
             # root outside HOME must not be a symlink either.
             home = Path.home()
-            if user_root.is_relative_to(home):
-                relative = user_root.relative_to(home) / relative
-                user_root = home
-            elif user_root.is_symlink():
+            if root.is_relative_to(home):
+                relative = root.relative_to(home) / relative
+                root = home
+            elif root.is_symlink():
                 raise PathTraversalError(
                     "Refusing deployment through a symlinked path component: "
-                    f"{user_root.as_posix()}"
+                    f"{root.as_posix()}"
                 )
-            relative_path = relative.as_posix()
-            return BaseIntegrator.resolve_deploy_path(
-                relative_path,
-                user_root,
-                allowed_prefixes=(relative_path,),
-            )
-        relative_path = Path(*spec.project_relative_path).as_posix()
-        return BaseIntegrator.resolve_deploy_path(relative_path, project_root)
+        else:
+            root = project_root
+            relative = Path(*spec.project_relative_path)
+        relative_path = relative.as_posix()
+        return BaseIntegrator.resolve_deploy_path(
+            relative_path,
+            root,
+            allowed_prefixes=(relative_path,),
+        )
 
     @staticmethod
-    def _read_json_object(config_path: Path, *, fail_on_error: bool = False) -> dict:
-        """Read a JSON object from disk, returning an empty object on malformed input."""
+    def _read_json_object(
+        config_path: Path,
+        *,
+        fail_on_error: bool = False,
+        allow_blank: bool = False,
+    ) -> dict:
+        """Read a JSON object from disk, returning an empty object on malformed input.
+
+        With *allow_blank*, an empty or whitespace-only file reads as ``{}``
+        even when *fail_on_error* is set.
+        """
         if not config_path.exists():
             return {}
         try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            raw = config_path.read_text(encoding="utf-8")
+            if allow_blank and not raw.strip():
+                return {}
+            data = json.loads(raw)
+        except (OSError, UnicodeError, json.JSONDecodeError):
             if fail_on_error:
                 raise
             return {}
@@ -528,10 +657,24 @@ class LSPIntegrator:
                     "skill directory not owned by APM; remove it or rerun with --force"
                 )
         config_exists = config_path.exists()
-        config = LSPIntegrator._read_json_object(
-            config_path,
-            fail_on_error=protected_plugin and not force,
-        )
+        try:
+            config = LSPIntegrator._read_json_object(
+                config_path,
+                fail_on_error=spec.shared_config or (protected_plugin and not force),
+                allow_blank=spec.shared_config,
+            )
+        except (OSError, UnicodeError, ValueError) as exc:
+            if not spec.shared_config:
+                raise
+            raise ValueError(
+                f"{spec.label(user_scope=user_scope)} is not a plain JSON object "
+                f"({exc}); APM will not rewrite it because that would drop other "
+                "settings. Fix the file (comments and trailing commas are not "
+                "supported) or add the LSP servers manually"
+            ) from exc
+        if not config_exists:
+            for key, value in spec.created_defaults:
+                config[key] = value
         for key, value in spec.config_defaults(user_scope=user_scope):
             current_default = config.get(key)
             if config_exists and current_default != value and not force:
@@ -551,6 +694,12 @@ class LSPIntegrator:
         else:
             existing = config.get(servers_key, {})
             if not isinstance(existing, dict):
+                if spec.shared_config:
+                    raise ValueError(
+                        f"{spec.label(user_scope=user_scope)} has a non-object "
+                        f"'{servers_key}' value; replace it with an object to let "
+                        "APM add LSP servers"
+                    )
                 if protected_plugin and not force:
                     raise ValueError(
                         f"{spec.label(user_scope=user_scope)} has a non-object "
@@ -561,8 +710,10 @@ class LSPIntegrator:
 
         changed: builtins.set = builtins.set()
         for name, server_config in servers.items():
+            # A same-name entry APM does not manage is user content: refuse to
+            # overwrite it (and so never claim it) unless --force is given.
             if (
-                protected_plugin
+                (protected_plugin or spec.shared_config)
                 and name in existing
                 and existing[name] != server_config
                 and name not in managed_names
@@ -587,8 +738,17 @@ class LSPIntegrator:
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
         prepared.path.parent.mkdir(parents=True, exist_ok=True)
-        write_text_lf(prepared.path, prepared.content)
+        LSPIntegrator._atomic_write_config(prepared.path, prepared.content)
         return prepared.changed
+
+    @staticmethod
+    def _atomic_write_config(config_path: Path, content: str) -> None:
+        """Replace *config_path* atomically so an interrupted write never truncates it.
+
+        A new file gets the mode a plain ``open()`` would give it; an existing
+        file keeps its mode.
+        """
+        atomic_write_text(config_path, content, new_file_mode=umask_file_mode(config_path))
 
     @staticmethod
     def _write_target_config(
@@ -650,6 +810,12 @@ class LSPIntegrator:
             if servers_key is not None:
                 config[servers_key] = servers
             owned_keys = {key for key, _value in spec.config_defaults(user_scope=user_scope)}
+            # A created default counts as APM-owned only while it still holds
+            # the value APM writes; a user-set value (for example a custom
+            # ``$schema``) is user content that keeps the file alive.
+            owned_keys.update(
+                key for key, value in spec.created_defaults if config.get(key) == value
+            )
             if servers_key is not None:
                 owned_keys.add(servers_key)
             if not servers and owned_keys and set(config) <= owned_keys:
@@ -660,7 +826,7 @@ class LSPIntegrator:
                     except OSError:
                         break
             else:
-                write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
+                LSPIntegrator._atomic_write_config(config_path, json.dumps(config, indent=2) + "\n")
         return removed
 
     # ------------------------------------------------------------------
@@ -820,7 +986,13 @@ class LSPIntegrator:
         prepared_targets: list[tuple[str, _LSPTargetSpec, _PreparedTargetConfig]] = []
         for runtime in runtimes:
             spec = _LSP_TARGET_SPECS[runtime]
-            servers = LSPIntegrator._servers_for_target(base_servers, spec)
+            servers = LSPIntegrator._servers_for_target(
+                base_servers,
+                spec,
+                warn=diagnostics.warn if diagnostics is not None else logger.warning,
+            )
+            if not servers:
+                continue
             try:
                 managed_names = managed_server_names
                 if managed_target_servers is not None:

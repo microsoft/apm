@@ -33,9 +33,17 @@ def test_claude_lsp_plugin_path_bypass_is_rejected() -> None:
     """The LSP rule must reject a direct project-path write."""
     path = "src/apm_cli/integration/lsp_integrator.py"
     source = (ROOT / path).read_text(encoding="utf-8")
-    old = "return BaseIntegrator.resolve_deploy_path(relative_path, project_root)"
+    old = (
+        "        return BaseIntegrator.resolve_deploy_path(\n"
+        "            relative_path,\n"
+        "            root,\n"
+        "            allowed_prefixes=(relative_path,),\n"
+        "        )\n"
+    )
     assert old in source
-    mutated = source.replace(old, "return spec.path(project_root, user_scope=False)", 1)
+    mutated = source.replace(
+        old, "        return spec.path(project_root, user_scope=user_scope)\n", 1
+    )
 
     report = run_selected_rules(
         ROOT,
