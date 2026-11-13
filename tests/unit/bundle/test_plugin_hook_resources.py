@@ -492,3 +492,31 @@ def test_relative_hook_script_is_packed_like_install_resolves_it(tmp_path: Path)
     assert handlers[1]["command"] == "cd ./src && make"
     assert (result.bundle_path / "hooks/scripts/fmt.sh").read_bytes() == script.read_bytes()
     assert "hooks/scripts/fmt.sh" in result.files
+
+
+@pytest.mark.parametrize("link", ["scripts/alias.sh", "scripts"])
+def test_relative_hook_script_through_a_symlink_is_rejected(tmp_path: Path, link: str) -> None:
+    """A contained ``./scripts/alias.sh -> fmt.sh`` (or linked directory) is not packed."""
+    factory = LocalPackageFactory(tmp_path)
+    package = factory.create("linked", version="1.0.0")
+    factory.add_hook(
+        package,
+        "fmt",
+        {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "./scripts/alias.sh"}]}]}},
+    )
+    hooks_dir = package.root / ".apm/hooks"
+    real = hooks_dir / "real"
+    real.mkdir(parents=True)
+    (real / "fmt.sh").write_text("echo fmt\n", encoding="utf-8")
+    (real / "alias.sh").write_text("echo alias\n", encoding="utf-8")
+    if link == "scripts":
+        (hooks_dir / "scripts").symlink_to("real", target_is_directory=True)
+    else:
+        (hooks_dir / "scripts").mkdir()
+        (hooks_dir / "scripts/fmt.sh").write_text("echo fmt\n", encoding="utf-8")
+        (hooks_dir / "scripts/alias.sh").symlink_to("fmt.sh")
+    output = package.root / "dist"
+
+    with pytest.raises(ValueError, match="Hook resource uses a symlink"):
+        export_plugin_bundle(package.root, output)
+    assert not output.exists()
