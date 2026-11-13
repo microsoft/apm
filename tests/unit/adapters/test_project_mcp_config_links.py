@@ -92,3 +92,28 @@ def test_project_config_parent_link_is_not_written(tmp_path: Path) -> None:
 
     assert _write(adapter, KiroClientAdapter) is False
     assert not any(outside.iterdir())
+
+
+def test_config_outside_the_project_is_not_a_project_link(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    adapter = _adapter(CopilotClientAdapter, project)
+    outside = tmp_path / "home" / ".codeium" / "windsurf" / "mcp_config.json"
+
+    assert adapter._is_linked_project_config(outside) is False
+
+
+def test_relative_project_root_still_detects_a_link(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "project"
+    (project / ".github").mkdir(parents=True)
+    linked = tmp_path / "linked.json"
+    linked.write_text("{}\n", encoding="utf-8")
+    config = project / ".github" / "mcp.json"
+    try:
+        config.symlink_to(linked)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    monkeypatch.chdir(tmp_path)
+    adapter = _adapter(CopilotClientAdapter, Path("project"))
+
+    assert adapter._is_linked_project_config(config) is True
