@@ -28,6 +28,7 @@ Only verbatim-deployed files can be exported: a local edit maps cleanly back to 
 
 - Deployments that transform their content (frontmatter rewrites for rule directories, compiled `AGENTS.md` output, aggregated `copilot-instructions.md` sections, files with resolved links).
 - Source files that are not normalization-clean (CRLF line endings, a UTF-8 BOM, or a build-id header): the deployed copy matches them only after normalization, so an exported diff could not be applied to the raw file.
+- Ambiguous sources: when several package files hold the same bytes, the edit is skipped instead of guessing. A Claude plugin skill that install copied into `.apm/skills/` maps back to its original plugin directory; an authored `.apm/` source never counts as such a copy.
 - Conflicting edits: when one source file is deployed to several targets and the copies were edited differently, the conflict is reported instead of exporting either version. Identical edits across copies export as a single diff.
 - Local deletions of managed files are never exported, since deleting a deployed copy does not imply the file should be removed from the package.
 

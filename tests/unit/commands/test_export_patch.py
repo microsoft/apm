@@ -10,6 +10,7 @@ handling, and header sanitization.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -471,6 +472,42 @@ def test_normalized_plugin_mirror_does_not_make_source_ambiguous(trees, monkeypa
     assert result.skipped == []
     assert result.exported == [ExportedEdit(deployed, "skills/rx/SKILL.md", key)]
     assert "--- a/skills/rx/SKILL.md\n" in result.patches[key]
+
+
+@pytest.mark.parametrize(
+    ("authored", "receipt_sources"),
+    [
+        (".apm/skills/own/SKILL.md", {"own": ".apm/skills/own", "rx": "skills/rx"}),
+        (".apm/agents/own.md", {"rx": "skills/rx"}),
+    ],
+)
+def test_receipt_without_path_evidence_keeps_ambiguity(
+    trees, monkeypatch, authored, receipt_sources
+):
+    """A receipt does not make every .apm/ file a mirror: an authored .apm/
+    source sharing bytes with an unrelated file stays ambiguous."""
+    deployed = ".claude/skills/own/SKILL.md"
+    _write(trees["source"] / authored, _ORIGINAL)
+    _write(trees["source"] / "docs/unrelated.md", _ORIGINAL)
+    for name, source in receipt_sources.items():
+        content = _ORIGINAL if name == "own" else b"# rx\n"
+        _write(trees["source"] / source / "SKILL.md", content)
+        _write(trees["source"] / ".apm/skills" / name / "SKILL.md", content)
+    _write(
+        trees["source"] / ".apm/.plugin-skill-sources.json",
+        json.dumps({"declared": True, "sources": receipt_sources, "version": 1}).encode(),
+    )
+    _write(trees["scratch"] / deployed, _ORIGINAL)
+    _write(trees["project"] / deployed, _EDITED)
+    lock = _lockfile_with_remote([deployed])
+    _patch_materialize(monkeypatch, trees["source"])
+    findings = [DriftFinding(path=deployed, kind="modified", package=_remote_key(lock))]
+
+    result = build_patch_export(trees["project"], trees["scratch"], lock, findings)
+
+    assert result.patches == {}
+    assert len(result.skipped) == 1
+    assert "ambiguous source" in result.skipped[0].reason
 
 
 def test_subdirectory_package_patch_paths_are_repository_relative(trees, monkeypatch):

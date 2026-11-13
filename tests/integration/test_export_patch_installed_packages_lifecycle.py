@@ -159,3 +159,41 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     install = world.apm(project, "install", "--no-policy")
     assert "apm export-patch" in output(install)
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
+
+
+def test_export_patch_keeps_ambiguity_for_authored_apm_plugin_sources(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A plugin that declares an authored ``.apm/skills`` source is not a mirror.
+
+    When that source shares bytes with an unrelated repository file, export
+    must report ambiguity instead of patching the unrelated file.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    plugin = world.isolated.package_root / "authoredplug"
+    body = skill_md("own", "authored\n")
+    write(
+        plugin / ".claude-plugin" / "plugin.json",
+        '{"name": "authoredplug", "version": "1.0.0", "skills": ["./.apm/skills/own"]}\n',
+    )
+    write(plugin / ".apm" / "skills" / "own" / "SKILL.md", body)
+    write(plugin / "docs" / "own-template.md", body)
+    _, commit = world.publish("authoredplug", plugin)
+
+    project = world.consumer(
+        "consumer-authored",
+        targets=("claude",),
+        deps=({"git": remote_url("authoredplug"), "ref": commit.sha},),
+    )
+    world.apm(project, "install", "--no-policy")
+    deployed = project / ".claude" / "skills" / "own" / "SKILL.md"
+    assert deployed.read_text() == body
+    deployed.write_text(body + "consumer edit\n")
+
+    before_project = tree_bytes(project)
+    result = world.apm(project, "export-patch", "-o", str(tmp_path / "out"))
+    assert tree_bytes(project) == before_project
+    combined = output(result)
+    assert "ambiguous source" in combined, combined
+    assert ".apm/skills/own/SKILL.md" in combined, combined
+    assert list((tmp_path / "out").glob("*.patch")) == []

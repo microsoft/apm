@@ -16,7 +16,7 @@ import logging
 import os
 import shutil
 from collections.abc import Callable, Iterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -361,19 +361,25 @@ def has_normalized_plugin_skill_sources_receipt(plugin_path: Path) -> bool:
     return not apm_dir.is_symlink() and receipt.is_file() and not receipt.is_symlink()
 
 
-def is_install_generated_mirror(rel_path: str, plugin_path: Path) -> bool:
-    """Return whether *rel_path* is an install-generated ``.apm/`` mirror.
+def install_generated_mirror_source(rel_path: str, plugin_path: Path) -> str | None:
+    """Return the upstream path an install-generated ``.apm/`` file mirrors.
 
-    Plugin normalization (``_map_plugin_artifacts``) copies ``skills/``,
-    ``agents/``, ``commands/`` and pass-through files into ``.apm/`` inside
-    the cache.  Those copies do not exist upstream, so a consumer that needs
-    the upstream path (e.g. ``export-patch``) should prefer the non-mirror
-    candidate.  Only paths inside the ``.apm/`` subtree of a plugin whose
-    normalization receipt is present are classified as mirrors.
+    Plugin normalization (``_map_plugin_artifacts``) copies each skill into
+    ``.apm/skills/<name>/`` and records the original directory in its
+    receipt. Only that path-specific evidence classifies a file as a mirror:
+    ``.apm/skills/<name>/<tail>`` mirrors ``<recorded source>/<tail>`` when the
+    recorded source is a different directory. Anything else, including
+    authored ``.apm/`` sources a plugin declares, returns ``None``.
     """
-    if not rel_path.startswith(".apm/"):
-        return False
-    return has_normalized_plugin_skill_sources_receipt(plugin_path)
+    parts = PurePosixPath(rel_path).parts
+    if len(parts) < 4 or parts[:2] != (".apm", "skills"):
+        return None
+    sources, _declared = normalized_plugin_skill_sources(plugin_path)
+    source = sources.get(parts[2])
+    if source is None:
+        return None
+    upstream = PurePosixPath(*source.relative_to(plugin_path.resolve()).parts, *parts[3:])
+    return None if upstream.as_posix() == rel_path else upstream.as_posix()
 
 
 def _write_plugin_skill_sources(
