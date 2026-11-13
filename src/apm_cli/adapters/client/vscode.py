@@ -62,7 +62,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
         self.registry_integration = RegistryIntegration(registry_url)
 
     @staticmethod
-    def _determine_config_key(
+    def determine_config_key(
         server_url: str,
         server_name: str | None,
         server_info: dict | None = None,
@@ -192,7 +192,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
             # Use provided server name or fallback to server_url
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Get current config before formatting so optional registry fields
             # that the user already edited can be preserved on reinstall.
@@ -273,7 +273,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
         """
         servers = self.get_current_config().get("servers")
         existing = (
-            servers.get(self._determine_config_key(server_info.get("name", ""), None))
+            servers.get(self.determine_config_key(server_info.get("name", ""), None))
             if isinstance(servers, dict)
             else None
         )
