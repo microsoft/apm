@@ -37,8 +37,6 @@ from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
     build_skill_ownership_maps,
-    clean_orphaned_skills,
-    get_lockfile_owned_agent_skills,
     skill_dir_has_content,
 )
 from apm_cli.integration.targets import TargetProfile
@@ -1912,10 +1910,10 @@ class SkillIntegrator(BaseIntegrator):
         targets=None,
         removed_paths: list[Path] | None = None,
     ) -> dict[str, int]:
-        """Sync recorded skill paths, or use legacy package-name orphan detection.
+        """Remove recorded skill paths; without a managed set remove nothing.
 
         Scope-resolved ``targets`` supply skill prefixes; absent targets use the
-        catalog. An explicit managed set limits cleanup to those recorded paths.
+        catalog. Only paths in the managed set (lockfile ownership) are removed.
         Return removed-file and error counts.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -2013,83 +2011,12 @@ class SkillIntegrator(BaseIntegrator):
 
             return stats
 
-        installed_skill_names = set()
-        for dep in apm_package.get_apm_dependencies():
-            raw_name = dep.repo_url.split("/")[-1]
-            if dep.is_virtual and dep.virtual_path:
-                raw_name = dep.virtual_path.split("/")[-1]
-            is_valid, _ = validate_skill_name(raw_name)
-            skill_name = raw_name if is_valid else normalize_skill_name(raw_name)
-            installed_skill_names.add(skill_name)
+        # Without lockfile ownership nothing proves which skill directories
+        # APM deployed, so legacy cleanup removes nothing.
+        from apm_cli.utils.console import _rich_info
 
-            # Also include promoted sub-skills from installed packages
-            install_path = dep.get_install_path(project_root / "apm_modules")
-            sub_skills_dir = install_path / ".apm" / "skills"
-            if sub_skills_dir.is_dir():
-                for sub_skill_path in sub_skills_dir.iterdir():
-                    if sub_skill_path.is_dir() and (sub_skill_path / "SKILL.md").exists():
-                        raw_sub = sub_skill_path.name
-                        is_valid, _ = validate_skill_name(raw_sub)
-                        installed_skill_names.add(
-                            raw_sub if is_valid else normalize_skill_name(raw_sub)
-                        )
-
-        # Clean all target skill directories dynamically
-        seen_cleanup_dirs: set[Path] = set()
-        for t in source:
-            if not t.supports("skills"):
-                continue
-            sm = t.primitives["skills"]
-
-            # Special guard for cross-tool deploy_root (.agents/)
-            # Only clean if the owning target dir exists
-            if sm.deploy_root:
-                if not (project_root / t.root_dir).is_dir():
-                    continue
-
-            skills_dir = project_root / t.skills_rel_root
-
-            # Dedup: skip if same resolved skills dir already cleaned.
-            resolved_skills = skills_dir.resolve()
-            if resolved_skills in seen_cleanup_dirs:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "%s -- already processed, skipping cleanup for %s", skills_dir, t.name
-                )
-                continue
-            seen_cleanup_dirs.add(resolved_skills)
-
-            if skills_dir.exists():
-                result = self._clean_orphaned_skills(
-                    skills_dir,
-                    installed_skill_names,
-                    project_root=project_root,
-                    removed_paths=removed_paths,
-                )
-                stats["files_removed"] += result["files_removed"]
-                stats["errors"] += result["errors"]
-
-        return stats
-
-    def _clean_orphaned_skills(
-        self,
-        skills_dir: Path,
-        installed_skill_names: set,
-        *,
-        project_root: Path | None = None,
-        removed_paths: list[Path] | None = None,
-    ) -> dict[str, int]:
-        """Clean legacy-orphan skill directories without touching foreign agents."""
-        return clean_orphaned_skills(
-            skills_dir,
-            installed_skill_names,
-            project_root=project_root,
-            get_lockfile_owned_agent_skills=self._get_lockfile_owned_agent_skills,
-            removed_paths=removed_paths,
+        _rich_info(
+            "Skipped skill directory cleanup: no lockfile records which skills APM deployed.",
+            symbol="info",
         )
-
-    @staticmethod
-    def _get_lockfile_owned_agent_skills(project_root: Path) -> set[str]:
-        """Return the lockfile-owned ``.agents/skills`` names."""
-        return get_lockfile_owned_agent_skills(project_root)
+        return stats

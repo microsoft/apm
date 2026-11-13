@@ -416,18 +416,6 @@ class LSPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def reserved_project_skill_names(skills_dir: Path, project_root: Path) -> set[str]:
-        """Return LSP-owned names nested under one target's skills directory."""
-        reserved: set[str] = set()
-        for spec in _LSP_TARGET_SPECS.values():
-            parts = spec.project_relative_path
-            if len(parts) < 3 or parts[1] != "skills":
-                continue
-            if skills_dir == project_root.joinpath(*parts[:2]):
-                reserved.add(parts[2])
-        return reserved
-
-    @staticmethod
     def _target_config_path(
         spec: _LSPTargetSpec,
         project_root: Path,

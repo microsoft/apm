@@ -142,16 +142,12 @@ def check_lsp_target_contract(provider: FactsProvider) -> tuple[Violation, ...]:
         GUARD_LSP_TARGET_CONTRACT,
         {
             _LSP_INTEGRATOR: (
-                "def reserved_project_skill_names(",
                 "def _prepare_target_config(",
                 "prepared_targets.append((runtime, spec, prepared))",
                 "BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
                 "allowed_prefixes=(relative_path,)",
                 "locked_dependency_approval_keys(locked_dependency)",
                 "approval_keys=approval_keys",
-            ),
-            _SKILL_SUPPORT: (
-                "LSPIntegrator.reserved_project_skill_names(skills_dir, project_root)",
             ),
         },
     )
