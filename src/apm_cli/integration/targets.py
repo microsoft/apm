@@ -1635,7 +1635,15 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
         )
     for mapping in profile.primitives.values():
         primitive_rel = Path(mapping.deploy_root or profile.root_dir, mapping.subdir)
-        if has_symlink_component(project_root, project_root / primitive_rel):
+        try:
+            linked = has_symlink_component(
+                project_root, project_root / primitive_rel, raise_on_error=True
+            )
+        except OSError:
+            # An obstructed component (for example a file in place of the
+            # root) is reported by the obstructed-path diagnostics instead.
+            continue
+        if linked:
             raise PathTraversalError(
                 "Refusing deployment through symlinked target directory: "
                 f"{primitive_rel.as_posix()}"
