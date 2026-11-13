@@ -825,7 +825,83 @@ def _check_mcp_ownership_migration(provider: FactsProvider) -> Iterable[Violatio
     return tuple(findings)
 
 
+# -- MCP config-key derivation owner guard ----------------------------------
+
+_MCP_CONFIG_KEY_CONSUMERS: tuple[str, ...] = (
+    "src/apm_cli/integration/mcp_integrator.py",
+    "src/apm_cli/integration/mcp_integrator_install.py",
+    "src/apm_cli/install/mcp/ownership.py",
+)
+
+# Pattern that re-derives a config key from a server name by splitting on "/"
+# outside the canonical owner.  The adapter's determine_config_key already
+# handles scoped-npm, self-defined, and owner/repo fallback cases; a bare
+# split in a consumer would diverge.
+_INLINE_KEY_DERIVATION_RE = re.compile(r"""(?:rsplit|split)\(\s*["']/["']\s*[,)].*\[-1\]""")
+
+
+def _check_mcp_config_key_derivation(provider: FactsProvider) -> Iterable[Violation]:
+    """MCP config-key derivation must route through MCPClientAdapter.determine_config_key.
+
+    The adapter owns the scoped-npm, self-defined and owner/repo -> short-name
+    fallback logic.  Consumers must call through the adapter, not re-derive a
+    config key from a server name by splitting on ``"/"``.
+    """
+    rule_id = "mutation_writes.mcp_config_key_derivation"
+    base_facts, failures = checked_facts(provider, _MCP_ADAPTER_BASE, rule_id, require_python=True)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+
+    # Owner must define the canonical static method.
+    if not _has_fixed(base_facts, "def determine_config_key("):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_ADAPTER_BASE,
+                "MCPClientAdapter must define determine_config_key as the config-key owner",
+            )
+        )
+
+    # Consumers must route through the owner, not inline slash-based key derivation.
+    findings.extend(
+        _missing_consumers(
+            provider,
+            rule_id,
+            _MCP_CONFIG_KEY_CONSUMERS,
+            "determine_config_key(",
+            "MCP config-key consumer must route through MCPClientAdapter.determine_config_key",
+        )
+    )
+
+    for path in _MCP_CONFIG_KEY_CONSUMERS:
+        facts, f = checked_facts(provider, path, rule_id, require_python=True)
+        findings.extend(f)
+        if f:
+            continue
+        for lineno, line in enumerate(facts.lines, 1):
+            if _INLINE_KEY_DERIVATION_RE.search(line) is not None:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "MCP config-key must not be re-derived by splitting on '/'; "
+                        "route through MCPClientAdapter.determine_config_key",
+                        line=lineno,
+                    )
+                )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="mutation_writes.mcp_config_key_derivation",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-config-key-derivation",),
+        description="MCP config-key derivation must route through MCPClientAdapter.determine_config_key.",
+        check=_check_mcp_config_key_derivation,
+    ),
     Rule(
         id="mutation_writes.mcp_target_selection",
         group=GROUP,

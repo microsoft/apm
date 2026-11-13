@@ -297,7 +297,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry", symbol="error")
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})

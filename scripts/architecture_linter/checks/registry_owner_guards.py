@@ -297,7 +297,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
     consumers = {
         "src/apm_cli/install/drift.py": ("run_replay",),
         "src/apm_cli/install/audit_replay.py": ("prepare_ci_audit_replay",),
-        "src/apm_cli/policy/ci_checks.py": ("_check_drift", "run_baseline_checks"),
+        "src/apm_cli/policy/ci_checks.py": ("_check_drift", "resolve_audit_scope"),
         "src/apm_cli/security/file_scanner.py": ("scan_project_result",),
     }
     findings: list[Violation] = []

@@ -195,7 +195,7 @@ class CodexClientAdapter(MCPClientAdapter):
         servers = config.get("mcp_servers", {})
         migrated: set[str] = set()
         for name in sorted(managed_names):
-            config_key = self._determine_config_key(name, None)
+            config_key = self.determine_config_key(name, None)
             entry = servers.get(config_key)
             if not isinstance(entry, dict) or "id" not in entry:
                 continue
@@ -362,7 +362,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)

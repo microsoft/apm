@@ -774,7 +774,7 @@ def _report_distributed_dry_run_protection(
         return
     noun = "file" if protected_count == 1 else "files"
     logger.progress(
-        f"Would retain {protected_count} hand-authored root {noun}; "
+        f"Would retain {protected_count} hand-authored context {noun}; "
         "no protected files would be generated.",
         symbol="info",
     )
@@ -803,7 +803,7 @@ def _report_distributed_live_success(
         protected_note = ""
         if protected_count:
             protected_noun = "file" if protected_count == 1 else "files"
-            protected_note = f"; retained {protected_count} hand-authored root {protected_noun}"
+            protected_note = f"; retained {protected_count} hand-authored context {protected_noun}"
         logger.success(
             f"Compiled {files_written} output {output_noun} "
             f"({agents_generated} AGENTS.md {generated_noun}){protected_note}; "
@@ -814,7 +814,7 @@ def _report_distributed_live_success(
         protected_noun = "file" if protected_count == 1 else "files"
         logger.success(
             f"Generated {files_written} output {output_noun}; "
-            f"retained {protected_count} hand-authored root {protected_noun}.",
+            f"retained {protected_count} hand-authored context {protected_noun}.",
             symbol="check",
         )
     else:
@@ -841,7 +841,7 @@ def _report_protected_no_write(
         skipped_noun = "placement" if nested_skips == 1 else "placements"
         skipped_note = f" skipped {nested_skips} nested Git repository {skipped_noun};"
     logger.progress(
-        f"Retained {protected_count} hand-authored root {protected_noun};"
+        f"Retained {protected_count} hand-authored context {protected_noun};"
         f"{skipped_note} no files generated.",
         symbol="info",
     )

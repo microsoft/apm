@@ -164,6 +164,13 @@ before anything is written.
 > [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract)
 > for the full surface.
 
+> **Scope note:** org policy governs project installs only. Discovery starts
+> from the project's git remote, and `apm install -g` (user scope, under
+> `~/.apm`) has no git remote, so user-scope installs, updates and
+> uninstalls are not governed by org policy today, including lifecycle
+> `executables.deny_all`. A package your org policy denies in a project can
+> still be installed with `-g`.
+
 ### CI time (audit gate)
 
 `apm audit --ci --policy org` runs 21 policy checks plus 8 baseline lockfile

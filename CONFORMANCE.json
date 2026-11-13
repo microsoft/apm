@@ -313,8 +313,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
       ]
     },

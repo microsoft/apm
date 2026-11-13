@@ -965,13 +965,11 @@ class AgentsCompiler:
             primitives, placement_map, claude_config
         )
 
-        root_claude_path = self.base_dir / "CLAUDE.md"
-        protected_claude_paths = (
-            {root_claude_path}
-            if root_claude_path in claude_result.content_map
-            and self._hand_authored_root_context_blocks_write(root_claude_path)
-            else set()
-        )
+        protected_claude_paths = {
+            path
+            for path in claude_result.content_map
+            if self._hand_authored_root_context_blocks_write(path)
+        }
         if protected_claude_paths:
             claude_result.content_map = {
                 path: content
@@ -1126,7 +1124,7 @@ class AgentsCompiler:
         if would_emit_no_claude_md:
             if protected_claude_paths:
                 no_output_message = (
-                    "CLAUDE.md not generated -- protected hand-authored root file retained"
+                    "CLAUDE.md not generated -- protected hand-authored file retained"
                 )
             elif skip_instructions:
                 no_output_message = (
@@ -1836,10 +1834,19 @@ class AgentsCompiler:
             content (str): Content to write.
             config (CompilationConfig): Compilation configuration.
         """
-        root_agents_path = self.base_dir / "AGENTS.md"
+        deploy_inventory = self._deploy_inventory or CompileInventory.collect(self.base_dir)
+        nested_root = deploy_inventory.nested_repository_root_for(agents_path.parent)
+        if nested_root is not None:
+            agents_rel = portable_relpath(agents_path, self.base_dir)
+            root_rel = portable_relpath(nested_root, self.base_dir)
+            self.warnings.append(
+                f"Skipping AGENTS.md at {agents_rel}: nested Git repository "
+                f"{root_rel} belongs to a separate repository. "
+                f"Run apm compile from {nested_root} to compile it separately"
+            )
+            return None
         if (
             config.agents_md_mode != "managed_section"
-            and agents_path == root_agents_path
             and self._hand_authored_root_context_blocks_write(agents_path)
         ):
             return None
@@ -1849,17 +1856,6 @@ class AgentsCompiler:
             )
         try:
             ensure_path_within(agents_path, self.base_dir)
-            deploy_inventory = self._deploy_inventory or CompileInventory.collect(self.base_dir)
-            nested_root = deploy_inventory.nested_repository_root_for(agents_path.parent)
-            if nested_root is not None:
-                agents_rel = portable_relpath(agents_path, self.base_dir)
-                root_rel = portable_relpath(nested_root, self.base_dir)
-                self.warnings.append(
-                    f"Skipping AGENTS.md at {agents_rel}: nested Git repository "
-                    f"{root_rel} belongs to a separate repository. "
-                    f"Run apm compile from {nested_root} to compile it separately"
-                )
-                return None
 
             # Handle constitution injection for distributed files
             final_content = content

@@ -45,7 +45,7 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
-from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
+from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
@@ -604,15 +604,12 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # write directly to stdout / call ``click.confirm`` without
     # collision.
     # ------------------------------------------------------------------
-    if plan_callback is not None:
-        plan = build_resolved_update_plan(ctx, _early_lockfile)
-        proceed = plan_callback(plan)
-        if not proceed:
-            transaction.rollback()
-            return InstallResult(
-                disposition=InstallDisposition.CANCELLED,
-                target_decision=target_decision,
-            )
+    if not confirm_update_plan(ctx, _early_lockfile, plan_callback):
+        transaction.rollback()
+        return InstallResult(
+            disposition=InstallDisposition.CANCELLED,
+            target_decision=target_decision,
+        )
 
     if target_decision.value is None and scope is InstallScope.PROJECT and not lockfile_only:
         from apm_cli.core.target_detection import resolve_effective_target_decision

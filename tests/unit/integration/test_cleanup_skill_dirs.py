@@ -93,6 +93,11 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            recorded_hashes={
+                ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                    project_root / ".agents/skills/my-skill/SKILL.md"
+                )
+            },
         )
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
         assert ".agents/skills/my-skill" in result.deleted
@@ -233,6 +238,11 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            recorded_hashes={
+                ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                    project_root / ".agents/skills/my-skill/SKILL.md"
+                )
+            },
         )
         # SKILL.md is deleted (it is a file entry)
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
@@ -255,6 +265,9 @@ class TestSkillDirectoryCleanup:
         )
         # Recorded hash does NOT match current content
         recorded_hashes = {
+            ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                project_root / ".agents/skills/my-skill/SKILL.md"
+            ),
             ".agents/skills/my-skill/references/guide.md": "sha256:" + "0" * 64,
         }
         stale = [
@@ -270,7 +283,7 @@ class TestSkillDirectoryCleanup:
             diagnostics=diagnostics,
             recorded_hashes=recorded_hashes,
         )
-        # SKILL.md deleted (no hash recorded -> falls through)
+        # SKILL.md deleted (recorded hash matches)
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
         # guide.md skipped (hash mismatch -> user edit)
         assert ".agents/skills/my-skill/references/guide.md" in result.skipped_user_edit
@@ -308,8 +321,8 @@ class TestSkillDirectoryCleanup:
         assert result.failed == []
         assert result.skipped_unmanaged == []
 
-    def test_backward_compat_no_hashes_empty_dir_removed(self, project_root, diagnostics):
-        """Legacy lockfile without hashes: skill dir removed when empty."""
+    def test_no_hashes_keep_skill_file_and_dir(self, project_root, diagnostics):
+        """Without recorded hashes nothing is deleted (#3663)."""
         _make_file(project_root, ".agents/skills/old-skill/SKILL.md", "# Old\n")
         stale = [
             ".agents/skills/old-skill",
@@ -323,9 +336,10 @@ class TestSkillDirectoryCleanup:
             diagnostics=diagnostics,
             recorded_hashes=None,
         )
-        assert ".agents/skills/old-skill/SKILL.md" in result.deleted
-        assert ".agents/skills/old-skill" in result.deleted
-        assert not (project_root / ".agents/skills/old-skill").exists()
+        assert result.deleted == []
+        assert ".agents/skills/old-skill/SKILL.md" in result.skipped_unmanaged
+        assert ".agents/skills/old-skill" in result.skipped_unmanaged
+        assert (project_root / ".agents/skills/old-skill/SKILL.md").exists()
 
     def test_skill_dir_with_subdirs_removed_when_all_tracked(self, project_root, diagnostics):
         """Skill bundle with scripts/ and assets/ subdirs, all tracked."""
@@ -384,6 +398,11 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            recorded_hashes={
+                ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                    project_root / ".agents/skills/my-skill/SKILL.md"
+                )
+            },
         )
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
         assert ".agents/skills/my-skill" in result.skipped_unmanaged

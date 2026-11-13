@@ -664,17 +664,15 @@ def _audit_ci_gate(
     )
 
     fetch_result = None
-    auto_discovered = False
-    if policy_source and (not fail_fast or ci_result.passed):
+    auto_discovered = not policy_source
+    # Explicit --policy and auto-discovery (mirror install path) share one
+    # discovery call so --no-cache forces a fresh fetch for both (#3659).
+    if (policy_source or not no_policy) and (not fail_fast or ci_result.passed):
         fetch_result = discover_policy_with_chain(
             cfg.project_root,
-            policy_override=policy_source,
+            policy_override=policy_source or None,
             no_cache=no_cache,
         )
-    elif not policy_source and not no_policy and (not fail_fast or ci_result.passed):
-        # Auto-discovery (mirror install path)
-        fetch_result = discover_policy_with_chain(cfg.project_root)
-        auto_discovered = True
 
     # An explicit --policy <source> names the exact policy the caller wants
     # enforced, so failing to load it fails closed regardless of
@@ -866,7 +864,14 @@ def _audit_ci_gate(
             from ..install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose, lockfile=lockfile))
+            click.echo(
+                render_drift_text(
+                    drift_findings,
+                    verbose=cfg.verbose,
+                    lockfile=lockfile,
+                    project_root=cfg.project_root,
+                )
+            )
 
     sys.exit(0 if ci_result.passed else 1)
 
@@ -1205,7 +1210,14 @@ def _audit_content_scan(
             from ..install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose, lockfile=lockfile))
+            click.echo(
+                render_drift_text(
+                    drift_findings,
+                    verbose=cfg.verbose,
+                    lockfile=lockfile,
+                    project_root=cfg.project_root,
+                )
+            )
     elif effective_format == "markdown":
         from ..security.audit_report import findings_to_markdown
 

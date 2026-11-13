@@ -297,4 +297,4 @@ def test_native_config_key_follows_stored_self_defined_config(project, runtime):
 def test_registry_info_markers_cannot_choose_an_arbitrary_key(marker):
     info = {"name": "user-owned-entry", **marker}
 
-    assert MCPClientAdapter._determine_config_key(REVERSE_DNS, None, info) == REVERSE_DNS
+    assert MCPClientAdapter.determine_config_key(REVERSE_DNS, None, info) == REVERSE_DNS

@@ -25,6 +25,8 @@ from apm_cli.install.local_edits import (
     count_local_edits,
     is_upstream_package,
     local_edit_hint,
+    rendering_change_hint,
+    unedited_modified_paths,
 )
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -276,3 +278,45 @@ class TestInstallPipelineHint:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT, lockfile_only=True)
         assert _hint_calls(logger) == []
         counter.assert_not_called()
+
+
+class TestRenderingChangeIsNotALocalEdit:
+    """Drift whose bytes still match the lock is a rendering change (#3654)."""
+
+    def _findings(self, tmp_path: Path) -> tuple[LockFile, list[DriftFinding]]:
+        lock = _lockfile(
+            tmp_path,
+            **{".github/a.md": (_ORIGINAL, _ORIGINAL), ".github/b.md": (_ORIGINAL, _EDITED)},
+        )
+        key = next(iter(lock.dependencies))
+        return lock, [
+            DriftFinding(path=".github/a.md", kind="modified", package=key),
+            DriftFinding(path=".github/b.md", kind="modified", package=key),
+        ]
+
+    def test_unedited_paths_match_the_locked_hash(self, tmp_path: Path) -> None:
+        lock, findings = self._findings(tmp_path)
+        assert unedited_modified_paths(findings, lock, tmp_path) == {".github/a.md"}
+        assert unedited_modified_paths(findings, lock, None) == frozenset()
+        assert unedited_modified_paths(findings, None, tmp_path) == frozenset()
+
+    def test_drift_text_separates_edits_from_rendering_changes(self, tmp_path: Path) -> None:
+        lock, findings = self._findings(tmp_path)
+        out = render_drift_text(findings, lockfile=lock, project_root=tmp_path)
+        assert local_edit_hint(1) in out
+        assert rendering_change_hint(1) in out
+        assert rendering_change_hint(1).isascii()
+
+    def test_rendering_change_alone_gets_no_export_hint(self, tmp_path: Path) -> None:
+        lock, findings = self._findings(tmp_path)
+        out = render_drift_text(findings[:1], lockfile=lock, project_root=tmp_path)
+        assert "apm export-patch" not in out
+        assert rendering_change_hint(1) in out
+
+    def test_without_project_root_every_modified_finding_is_exportable(
+        self, tmp_path: Path
+    ) -> None:
+        lock, findings = self._findings(tmp_path)
+        out = render_drift_text(findings, lockfile=lock)
+        assert local_edit_hint(2) in out
+        assert "renders them differently" not in out

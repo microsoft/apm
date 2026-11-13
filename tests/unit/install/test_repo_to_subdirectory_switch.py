@@ -99,6 +99,7 @@ def _subdir_manifest_lines() -> list[str]:
 
 def _ctx(apm_dir: Path, scope: InstallScope, previous: LockFile, current: LockFile) -> MagicMock:
     ctx = MagicMock()
+    ctx.frozen = False
     ctx.existing_lockfile = previous
     ctx.only_packages = False
     ctx.intended_dep_keys = set(current.dependencies)

@@ -3,8 +3,8 @@
   "owners": [
     {
       "id": "single-file-package-materialization",
-      "decision": "Single-file dependency package layout and local source admission for replacement, audit replay and frozen hash images",
-      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, compute_local_package_hash, materialize_local_file_for_replay); DependencyReference owns suffix vocabulary",
+      "decision": "Single-file dependency package layout, local source admission and the local package image shared by install, uninstall refresh and audit replay",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay); DependencyReference owns suffix vocabulary",
       "selectors": [
         "src/apm_cli/deps/virtual_file.py",
         "src/apm_cli/deps/github_downloader.py",
@@ -79,8 +79,8 @@
     },
     {
       "id": "frozen-install-mutation-eligibility",
-      "decision": "Frozen install mutation eligibility",
-      "owner": "install/service.py (InstallService)",
+      "decision": "Frozen install mutation eligibility and post-deploy deployed-hash re-verification (req-lk-017)",
+      "owner": "install/service.py (InstallService); deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
       "selectors": ["src/apm_cli/install/service.py"],
       "guards": ["install-deployment-frozen-mutation-eligibility"]
     },
@@ -192,8 +192,8 @@
     },
     {
       "id": "post-uninstall-dependency-reachability",
-      "decision": "Post-uninstall dependency reachability",
-      "owner": "deps/reachability.py (compute_forward_reachable_keys)",
+      "decision": "Dependency reachability after uninstall and the lock entries prune and deps list retain",
+      "owner": "deps/reachability.py (compute_forward_reachable_keys, retained_lock_keys)",
       "selectors": ["src/apm_cli/deps/reachability.py"],
       "guards": ["install-deployment-uninstall-reachability"]
     },

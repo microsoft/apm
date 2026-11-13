@@ -17,6 +17,7 @@ from apm_cli.install.mcp.ownership import (
     compare_native_mcp_connection,
     mcp_native_hash,
     migrate_legacy_project_target_servers,
+    project_mcp_cleanup_reachable,
     require_removable_mcp_connections,
 )
 from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -624,3 +625,41 @@ def test_codex_expanded_env_names_lists_forwarded_names_stored_as_values(
     # A stored reference never held a secret, so it needs no rotation note.
     stored_refs = {"env": {"A": "${A}", "B": "${env:B}"}}
     assert client.expanded_env_names(stored_refs, requested) == []
+
+
+@pytest.mark.parametrize(
+    ("dir_exists", "runtime_scoped", "expected"),
+    [(True, False, True), (False, True, True), (False, False, False)],
+)
+def test_project_cleanup_reachability_follows_opt_in_dir_or_ledger_scope(
+    tmp_path: Path, dir_exists: bool, runtime_scoped: bool, expected: bool
+) -> None:
+    """#3664: ledger-scoped cleanup survives an opt-in directory pruned by uninstall."""
+    if dir_exists:
+        (tmp_path / ".claude").mkdir()
+    assert (
+        project_mcp_cleanup_reachable(tmp_path, ".claude", runtime_scoped=runtime_scoped)
+        is expected
+    )
+
+
+@pytest.mark.parametrize("runtime", ["claude", None])
+def test_remove_stale_cleans_recorded_claude_server_without_claude_dir(
+    tmp_path: Path, runtime: str | None
+) -> None:
+    """Only ledger-scoped cleanup may reach .mcp.json once .claude/ is gone."""
+    stored = {"name": "managed", "registry": False, "transport": "stdio", "command": "npx"}
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = client.render_server_config(
+        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
+    )
+    config = tmp_path / ".mcp.json"
+    config.write_text(json.dumps({"mcpServers": {"managed": native}}), encoding="utf-8")
+    MCPIntegrator.remove_stale(
+        {"managed"},
+        runtime=runtime,
+        project_root=tmp_path,
+        stored_configs={"managed": stored},
+    )
+    servers = json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
+    assert ("managed" in servers) is (runtime is None)

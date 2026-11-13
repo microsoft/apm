@@ -32,7 +32,7 @@ from __future__ import annotations
 import atexit
 import tempfile
 import tracemalloc
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from shutil import copytree, rmtree
 from typing import TYPE_CHECKING, Any
@@ -42,7 +42,11 @@ import click
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
 )
-from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import (
+    build_local_parent_index,
+    resolve_local_dep_base,
+    resolve_local_dep_dir,
+)
 from apm_cli.install.audit_target_roots import (
     canvas_deploy_prefixes as _canvas_deploy_prefixes,
 )
@@ -239,8 +243,12 @@ def _materialize_install_path(
     registry_resolver: Any | None = None,
     registries: dict[str, str] | None = None,
     declared_transports: DeclaredTransportIndex | None = None,
+    local_modules_dir: Path | None = None,
 ) -> Path:
     """Resolve the on-disk path for a locked dep's package contents.
+
+    Local package images are written under ``local_modules_dir`` (default
+    ``apm_modules_dir``); replay passes an ungoverned scratch dir instead.
 
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,
@@ -286,22 +294,15 @@ def _materialize_install_path(
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
             )
-        if candidate.is_file():
-            from apm_cli.install.phases.local_content import materialize_local_file_for_replay
+        from apm_cli.install.phases.local_content import materialize_local_package_for_replay
 
-            # Resolve the declaring directory through the same anchor owner.
-            # Keep the original spelling for admission so file symlinks cannot
-            # disappear behind the resolved candidate.
-            source_base = resolve_local_dep_dir(
-                replace(lock_dep, local_path="."),
-                lockfile,
-                project_root,
-                parent_index=parent_index,
-            )
-            return materialize_local_file_for_replay(
-                lock_dep.to_dependency_ref(), source_base, apm_modules_dir
-            )
-        return candidate
+        # Replay the image install copies, never the raw source tree.
+        source_base = resolve_local_dep_base(
+            lock_dep, lockfile, project_root, parent_index=parent_index
+        )
+        return materialize_local_package_for_replay(
+            lock_dep.to_dependency_ref(), source_base, local_modules_dir or apm_modules_dir
+        )
 
     dep_ref = lock_dep.to_dependency_ref()
     candidate = dep_ref.get_install_path(apm_modules_dir)
@@ -376,14 +377,12 @@ def _materialize_install_path(
 
 
 def _normalize_legacy_local_plugin_for_replay(
-    lock_dep: LockedDependency,
-    install_path: Path,
-    apm_modules_dir: Path,
+    lock_dep: LockedDependency, install_path: Path
 ) -> Path:
     """Normalize a local legacy plugin only in the scratch replay tree."""
     from apm_cli.agent_plugins.loader import detect_agent_plugin
     from apm_cli.deps.plugin_parser import normalize_plugin_directory
-    from apm_cli.models.validation import PackageType
+    from apm_cli.models.validation import PackageType, detect_package_type
     from apm_cli.utils.helpers import find_plugin_json
 
     if lock_dep.package_type == PackageType.AGENT_PLUGIN.value:
@@ -392,16 +391,19 @@ def _normalize_legacy_local_plugin_for_replay(
     if detect_agent_plugin(install_path) is not None:
         return install_path
 
+    # Install normalizes only what the canonical classifier calls a legacy
+    # plugin; an apm.yml package that also ships plugin.json is not one.
+    if detect_package_type(install_path)[0] != PackageType.MARKETPLACE_PLUGIN:
+        return install_path
+
     plugin_json = find_plugin_json(install_path)
     if plugin_json is None:
         return install_path
 
-    replay_path = lock_dep.to_dependency_ref().get_install_path(apm_modules_dir)
-    _copy_install_tree(install_path, replay_path)
-    # The canonical loader has already excluded native Agent Plugin inputs.
-    manifest_path = replay_path / plugin_json.relative_to(install_path)
-    normalize_plugin_directory(replay_path, manifest_path)
-    return replay_path
+    # install_path is the scratch image from materialize_local_package_for_replay;
+    # the canonical loader has already excluded native Agent Plugin inputs.
+    normalize_plugin_directory(install_path, plugin_json)
+    return install_path
 
 
 def _build_package_info(
@@ -662,14 +664,13 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             registry_resolver=registry_resolver,
                             registries=registries,
                             declared_transports=declared_transports,
+                            local_modules_dir=scratch_root / "apm_modules",
                         )
                         if declared_transports is not None:
                             declared_transports.record_package(install_path, lock_dep)
                         if lock_dep.is_local_source:
                             install_path = _normalize_legacy_local_plugin_for_replay(
-                                lock_dep,
-                                install_path,
-                                apm_modules_dir,
+                                lock_dep, install_path
                             )
 
                     if lock_dep.local_path == _SELF_KEY:

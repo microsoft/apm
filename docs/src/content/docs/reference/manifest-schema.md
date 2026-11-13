@@ -978,7 +978,7 @@ compilation:
 
 ### 6.2. `compilation.agents_md`
 
-Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files and non-root placements. An unmarked project-root `AGENTS.md` is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored root file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
+Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files. An unmarked `AGENTS.md`, at the project root or in a distributed subdirectory, is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|

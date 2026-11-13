@@ -10,6 +10,11 @@ CHANGELOG when using policy features.
 - **Repo-level:** `apm-policy.yml` in the repository root
 - **Local override:** `--policy ./path/to/apm-policy.yml`
 
+Org policy governs project installs only: discovery starts from the project's
+git remote. `apm install -g` (user scope) has no git remote, so user-scope
+installs, updates and uninstalls are not governed by org policy today
+(including lifecycle `executables.deny_all`).
+
 Do not embed credentials in direct policy URLs. APM omits URL userinfo, query
 strings, and fragments from policy cache metadata and diagnostics; prefer
 repository references with the normal host authentication chain.

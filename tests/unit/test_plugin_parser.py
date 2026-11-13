@@ -18,6 +18,7 @@ from apm_cli.deps.plugin_parser import (
     _mcp_servers_to_apm_deps,
     _union_dep_list,
     has_normalized_plugin_skill_sources_receipt,
+    install_generated_mirror_source,
     normalize_plugin_directory,
     normalized_plugin_skill_sources,
     parse_plugin_manifest,
@@ -319,6 +320,48 @@ class TestMapPluginArtifacts:
         assert declared is True
         assert sources == {"tdd": skill}
         assert (plugin_dir / ".apm" / "skills" / "tdd" / "SKILL.md").is_file()
+
+    def test_mirror_source_needs_path_specific_receipt_evidence(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        nested = plugin_dir / "skills" / "engineering" / "tdd"
+        (nested / "ref").mkdir(parents=True)
+        (nested / "SKILL.md").write_text("# tdd", encoding="utf-8")
+        (nested / "ref" / "notes.md").write_text("notes", encoding="utf-8")
+        authored = plugin_dir / ".apm" / "skills" / "own"
+        authored.mkdir(parents=True)
+        (authored / "SKILL.md").write_text("# own", encoding="utf-8")
+        agents = plugin_dir / "agents"
+        agents.mkdir()
+        (agents / "a.md").write_text("# a", encoding="utf-8")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            plugin_dir / ".apm",
+            {
+                "skills": ["./skills/engineering/tdd", "./.apm/skills/own"],
+                "agents": ["./agents/"],
+            },
+        )
+
+        assert install_generated_mirror_source(".apm/skills/tdd/SKILL.md", plugin_dir) == (
+            "skills/engineering/tdd/SKILL.md"
+        )
+        assert install_generated_mirror_source(".apm/skills/tdd/ref/notes.md", plugin_dir) == (
+            "skills/engineering/tdd/ref/notes.md"
+        )
+        # An authored source the plugin declares is not a generated mirror.
+        assert install_generated_mirror_source(".apm/skills/own/SKILL.md", plugin_dir) is None
+        # No path-specific evidence for other copies: callers keep ambiguity.
+        assert install_generated_mirror_source(".apm/agents/a.md", plugin_dir) is None
+        assert (
+            install_generated_mirror_source("skills/engineering/tdd/SKILL.md", plugin_dir) is None
+        )
+
+    def test_mirror_source_is_none_without_a_receipt(self, tmp_path):
+        skill = tmp_path / ".apm" / "skills" / "x"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# x", encoding="utf-8")
+        assert install_generated_mirror_source(".apm/skills/x/SKILL.md", tmp_path) is None
 
     def test_duplicate_declared_skill_leaf_names_fail_closed(self, tmp_path):
         plugin_dir = tmp_path / "plugin"

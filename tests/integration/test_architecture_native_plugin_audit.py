@@ -36,8 +36,8 @@ def test_native_replay_owner_rules_pass() -> None:
         (REPLAY, 'if result.get("native_plugin"):', "if False:"),
         (
             ADMISSION,
-            "_copy_tree_dereferencing_validated(source, replay_path, source)",
-            "_copy_install_tree(source, replay_path)",
+            "expected_hash = compute_package_hash(replay_path)",
+            "expected_hash = compute_package_hash(source)",
         ),
         (ADMISSION, "verify_locked_package(candidate, expected_hash, carried)", "True"),
     ],

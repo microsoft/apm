@@ -61,6 +61,7 @@ from apm_cli.integration.hook_native_formats import (
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
     dependency_hook_sources,
+    drop_source_entries,
     legacy_source_marker_is_unambiguous,
 )
 from apm_cli.integration.hook_ownership import (
@@ -73,8 +74,8 @@ from apm_cli.integration.hook_source_selection import (
     HookSourceSelection,
     _parse_hook_json,
     _referenced_hook_source_files,
-    _resolve_relative_hook_script,
     resolve_plugin_root_hook_script,
+    resolve_relative_hook_script,
     select_hook_sources,
 )
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -677,7 +678,7 @@ class HookIntegrator(BaseIntegrator):
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            source_file = _resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
+            source_file = resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
             if source_file is None:
                 continue
             if source_file.exists() and source_file.is_file():
@@ -1294,16 +1295,10 @@ class HookIntegrator(BaseIntegrator):
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
+        # Safe legacy leaf aliases retire with the canonical marker (#3665).
+        owned_markers = frozenset({source_marker, *legacy_source_markers})
         if config.target_key == "cursor":
-            for event in list(json_config[container]):
-                json_config[container][event] = [
-                    entry
-                    for entry in json_config[container][event]
-                    if not isinstance(entry, dict)
-                    or entry.get("_apm_source") not in {source_marker, *legacy_source_markers}
-                ]
-                if not json_config[container][event]:
-                    del json_config[container][event]
+            drop_source_entries(json_config[container], owned_markers)
 
         # Defaults never overwrite existing user fields.
         injected_keys: list[str] = []
@@ -1509,6 +1504,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
 
+        drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
         # Shared configs are cleaned by ownership, never file-level deletion.
         json_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -26,6 +26,9 @@ _has_local_apm_content
     Return True when ``.apm/`` contains at least one primitive file.
 _copy_local_package
     Copy a local-path dependency into ``apm_modules/``.
+materialize_local_package
+    The single raising owner of a local package image, shared by install,
+    the uninstall survivor refresh and the audit replay.
 """
 
 import shutil
@@ -201,16 +204,47 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
         ) from exc
 
 
-def materialize_local_file_for_replay(
+def materialize_local_package(
+    dep_ref: DependencyReference, install_path: Path, base_dir: Path
+) -> Path:
+    """Admit a local source and write its package image to *install_path*.
+
+    The single owner of the local package image: install, the uninstall
+    survivor refresh and the audit replay all copy through it, so in-package
+    links are dereferenced and single files are materialized identically.
+
+    Raises:
+        LocalPackageError: The source cannot be admitted.
+        PathTraversalError: A link escapes the package, is broken or loops;
+            *install_path* is removed so no partial copy remains.
+    """
+    source = read_local_package_source(dep_ref, base_dir)
+    install_path.parent.mkdir(parents=True, exist_ok=True)
+    if install_path.exists():
+        # install_path is already validated by get_install_path() (Layer 2),
+        # but use safe_rmtree for defense-in-depth.
+        safe_rmtree(install_path, install_path.parent.parent)
+    # Dereference in-package symlinks per-file (fix for #1668), matching the
+    # remote install path (robust_copytree with symlinks=False).
+    try:
+        if source.content is None:
+            _copy_tree_dereferencing_validated(source.path, install_path, source.path)
+        else:
+            materialize_virtual_file_package(
+                dep_ref, install_path, source.path.name, source.content
+            )
+    except PathTraversalError:
+        if install_path.exists():
+            safe_rmtree(install_path, install_path.parent.parent)
+        raise
+    return install_path
+
+
+def materialize_local_package_for_replay(
     dep_ref: DependencyReference, base_dir: Path, modules_dir: Path
 ) -> Path:
-    """Admit the authored leaf before materializing a scratch replay package."""
-    source = read_local_package_source(dep_ref, base_dir)
-    if source.content is None:
-        raise ValueError(f"Local single-file source changed kind during audit: {source.path}")
-    replay_path = dep_ref.get_install_path(modules_dir)
-    materialize_virtual_file_package(dep_ref, replay_path, source.path.name, source.content)
-    return replay_path
+    """Write the package image install would copy into a scratch replay root."""
+    return materialize_local_package(dep_ref, dep_ref.get_install_path(modules_dir), base_dir)
 
 
 def _copy_tree_dereferencing_validated(
@@ -364,34 +398,7 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
         logger = NullCommandLogger()
 
     try:
-        source = read_local_package_source(dep_ref, base_dir)
+        return materialize_local_package(dep_ref, install_path, base_dir)
     except LocalPackageError as exc:
         logger.error(str(exc))
         return None
-    local = source.path
-
-    # Ensure parent exists and clean target (always re-copy for local deps)
-    install_path.parent.mkdir(parents=True, exist_ok=True)
-    if install_path.exists():
-        # install_path is already validated by get_install_path() (Layer 2),
-        # but use safe_rmtree for defense-in-depth.
-        apm_modules_dir = install_path.parent.parent  # _local/<name> -> apm_modules
-        safe_rmtree(install_path, apm_modules_dir)
-
-    # Dereference in-package symlinks per-file (fix for #1668).
-    # Each symlink is resolved -> validated within `local` -> copied as a real
-    # file, matching the behavior of the remote install path which uses
-    # robust_copytree with symlinks=False.  Symlinks that escape the package
-    # root raise PathTraversalError immediately (hard-fail, not warn-and-skip).
-    # On any PathTraversalError, clean up install_path to prevent dangling
-    # partial-copy content from a malicious package.
-    try:
-        if source.content is None:
-            _copy_tree_dereferencing_validated(local, install_path, local)
-        else:
-            materialize_virtual_file_package(dep_ref, install_path, local.name, source.content)
-    except PathTraversalError:
-        if install_path.exists():
-            safe_rmtree(install_path, install_path.parent.parent)
-        raise
-    return install_path

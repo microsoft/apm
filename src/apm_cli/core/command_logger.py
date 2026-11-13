@@ -167,7 +167,10 @@ class CommandLogger:
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
-        _rich_warning(f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.")
+        _rich_warning(
+            f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.",
+            symbol="warning",
+        )
 
     def tree_item(self, message: str):
         """Log a tree sub-item (└─ line) under a package block.
@@ -613,6 +616,14 @@ class InstallLogger(CommandLogger):
         self._stale_cleaned_total += count
         noun = "file" if count == 1 else "files"
         _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
+
+    def frozen_orphans_kept(self, dep_keys: list[str]) -> None:
+        """Name undeclared packages a frozen install left in place (#3662)."""
+        _rich_info(
+            "Kept packages no longer in apm.yml because --frozen does not change "
+            f"apm.lock.yaml: {', '.join(dep_keys)}. Run 'apm install' to remove them.",
+            symbol="info",
+        )
 
     def orphan_cleanup(self, count: int):
         """Log post-install orphan-file cleanup outcome at default verbosity.

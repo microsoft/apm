@@ -205,12 +205,15 @@ def test_kiro_prompt_installed_lifecycle(
     edited = prompts / "edited.md"
     edited.write_text("USER_EDITED_MANAGED_PROMPT\n")
     manifest_before = (state_root / "apm.yml").read_bytes()
-    lock_before = (state_root / "apm.lock.yaml").read_bytes()
+    claims_before = {record["value"] for record in lock()["deployments"]}
     owner = records[".kiro/prompts/review.md"]["owners"][0]
     removal = run("uninstall", *scope, owner, expected_returncode=1)
     assert "Retained user-edited file" in removal.stdout
     assert (state_root / "apm.yml").read_bytes() == manifest_before
-    assert (state_root / "apm.lock.yaml").read_bytes() == lock_before
+    # The refusal drops already-removed files from the lockfile (#3656).
+    claims = {record["value"] for record in lock()["deployments"]}
+    assert ".kiro/prompts/edited.md" in claims and claims < claims_before
+    assert all((target_root.parent / value).exists() for value in claims if "://" not in value)
     assert not deployed.exists()
     assert not (target_root / "agents/reviewer.md").exists()
     assert not (target_root / "steering/style.md").exists()

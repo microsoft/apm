@@ -130,7 +130,10 @@ becomes `${CLAUDE_PLUGIN_ROOT}/skills/demo/scripts/check.py`. A reference to
 `${CLAUDE_PLUGIN_ROOT}/scripts/check.py` can resolve from the source hook
 descriptor's directory; `.apm/hooks/scripts/check.py` is then packed as
 `hooks/scripts/check.py` and the command follows that path. Hook sibling assets
-are preserved, with Node module type retained when needed. No hook or package
+are preserved, with Node module type retained when needed. A `./scripts/check.py`
+reference resolves the way `apm install` resolves it (hook file directory, then
+package root) and is anchored on the installed plugin root, such as
+`"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check.py"`; existing quoting is kept. No hook or package
 script is executed during packing.
 
 Quoted filenames and split-quoted roots retain their shell meaning.

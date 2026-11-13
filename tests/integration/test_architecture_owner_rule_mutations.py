@@ -110,6 +110,69 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
 
 
 @pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/compilation/root_context_protection.py",
+            "if not lexical_root and path.name in accepted_markers_by_name:",
+            "if False:",
+            id="helper-root-only",
+        ),
+        pytest.param(
+            "src/apm_cli/compilation/agents_compiler.py",
+            "for path in claude_result.content_map\n            if self._hand_authored",
+            "for path in claude_result.content_map\n            if path.parent == self.base_dir"
+            " and self._hand_authored",
+            id="claude-root-only",
+        ),
+    ],
+)
+def test_context_protection_cannot_regress_to_root_only(
+    path: str, original: str, replacement: str
+) -> None:
+    """Hand-authored context protection covers nested placements too (#3655)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "contracts-tooling-root-context-write-eligibility"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/service.py",
+            "drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)",
+            "drifted, unresolved = [], []",
+            id="frozen-skips-hash-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
+            "hash_mismatches, unresolved_hash_paths = _local_hash_loop(",
+            id="audit-bypasses-shared-verifier",
+        ),
+    ],
+)
+def test_frozen_and_audit_share_deployed_hash_verifier(
+    path: str, original: str, replacement: str
+) -> None:
+    """``install --frozen`` and ``audit --ci`` re-verify hashes through one owner (#3654)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-frozen-mutation-eligibility"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement", "refused"),
     [
         (
@@ -509,6 +572,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Read-only lockfile resolution stops guarding the mutating migration path.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-symlink-write-guard",
+        rule_id="contracts-tooling-lockfile-symlink-write-guard",
+        path="src/apm_cli/deps/lockfile.py",
+        old="def ensure_lockfile_writable(",
+        new="def _ensure_lockfile_writable(",
+        intent="Lockfile symlink write guard loses its canonical public definition.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-timestamp",
         rule_id="contracts-tooling-lockfile-timestamp",
         path="src/apm_cli/integration/mcp_integrator.py",
@@ -629,6 +700,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def _intellij_config_dir(",
         new="def _intellij_config_dir_impl(",
         intent="JetBrains MCP config-path owner no longer defines the single resolver.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-mcp-config-key-derivation",
+        rule_id="mutation_writes.mcp_config_key_derivation",
+        path="src/apm_cli/adapters/client/base.py",
+        old="def determine_config_key(",
+        new="def _derive_config_key(",
+        intent="MCPClientAdapter loses the canonical config-key derivation definition.",
     ),
     MutationCase(
         guard_id="hooks-integrations-mcp-declaration-scope",
@@ -910,14 +989,12 @@ MUTATIONS: tuple[MutationCase, ...] = (
         rule_id="install-deployment-single-file-materialization",
         path="src/apm_cli/install/phases/local_content.py",
         old=(
-            "    try:\n"
-            "        source = read_local_package_source(dep_ref, base_dir)\n"
-            "    except LocalPackageError as exc:"
+            "    source = read_local_package_source(dep_ref, base_dir)\n"
+            "    install_path.parent.mkdir(parents=True, exist_ok=True)"
         ),
         new=(
-            "    try:\n"
-            "        source = bypass_local_package_source(dep_ref, base_dir)\n"
-            "    except LocalPackageError as exc:"
+            "    source = bypass_local_package_source(dep_ref, base_dir)\n"
+            "    install_path.parent.mkdir(parents=True, exist_ok=True)"
         ),
         intent="Local copying bypasses the canonical single-file admission authority.",
     ),
@@ -1113,6 +1190,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             "        host_info = AuthResolver.classify_host"
         ),
         intent="Marketplace client reintroduces source-host parsing outside the owner.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-source-parsing",
+        rule_id="marketplace-integrations-source-parsing",
+        path="src/apm_cli/marketplace/ref_resolver.py",
+        old="dependency = DependencyReference.parse(source_url)",
+        new="dependency = urlparse(source_url)",
+        intent="Marketplace entry coordinates stop parsing through DependencyReference.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-tag-pattern",
@@ -1912,6 +1997,50 @@ def test_owner_rules_report_nothing_before_mutation(
     assert baseline_violated_rule_ids == frozenset()
 
 
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "mutation_writes.neutral_hook_contract",
+            "src/apm_cli/integration/hook_integrator.py",
+            "drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)",
+            "json_config.setdefault(container, {})",
+            id="merged-hooks-stop-retiring-undeclared-events-3665",
+        ),
+        pytest.param(
+            "mutation_writes.neutral_hook_contract",
+            "src/apm_cli/integration/hook_integrator.py",
+            "drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)",
+            "drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)",
+            id="merged-hooks-retire-without-legacy-leaf-markers",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/integration/mcp_integrator.py",
+            "claude_project_enabled = project_mcp_cleanup_reachable(",
+            'claude_project_enabled = (project_root_path / ".claude").is_dir() or bool(',
+            id="claude-mcp-cleanup-regates-on-opt-in-dir-3664",
+        ),
+        pytest.param(
+            "install-deployment-outcome",
+            "src/apm_cli/commands/mcp.py",
+            'cli.main(args=forwarded, prog_name="apm")',
+            "cli.main(args=forwarded, standalone_mode=False)",
+            id="mcp-install-drops-forwarded-exit-code-3666",
+        ),
+    ],
+)
+def test_lifecycle_sweep_guard_extensions_have_teeth(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Guard sub-rules added by the 0.36.0 lifecycle sweep (#3649) reject their regressions."""
+    source = _source(path)
+    assert source.count(old) == 1
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 def test_claude_cleanup_guard_preserves_unresolved_path_check() -> None:
     """The profile-path guard catches normalization before symlink inspection."""
     path = "src/apm_cli/integration/mcp_integrator.py"
@@ -2678,3 +2807,43 @@ def test_version_rendering_guard_rejects_second_renderer_in_helpers() -> None:
     report = run_selected_rules(ROOT, (_VR_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(v.rule_id == _VR_RULE for v in report.violations)
+
+
+# ---------------------------------------------------------------------------
+# Targeted proxy-route equivalence mutations (#3657)
+# ---------------------------------------------------------------------------
+
+_HOST_CRED_RULE = "transport-platform-host-credential-resolution"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/drift.py",
+            "    return ArtifactoryRouter.routes_to_locked_proxy(dep_ref, locked_dep)",
+            "    return bool(getattr(locked_dep, 'registry_prefix', None))",
+        ),
+        (
+            "src/apm_cli/deps/artifactory_orchestrator.py",
+            "        target = cls.routing_target(dep_ref)",
+            "        target = (locked_dep.host, locked_prefix, 'https', True)",
+        ),
+        (
+            "src/apm_cli/install/artifactory_resolver.py",
+            "def _resolve_artifactory_boundary(",
+            "def _proxy_routing_target(dep_ref):\n    return None\n\n\n"
+            "def _resolve_artifactory_boundary(",
+        ),
+    ],
+    ids=["drift-local-predicate", "router-skips-routing-target", "resolver-private-copy"],
+)
+def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, new: str) -> None:
+    """Proxy-route equivalence must reuse ArtifactoryRouter.routing_target."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (_HOST_CRED_RULE,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(v.rule_id == _HOST_CRED_RULE for v in report.violations)

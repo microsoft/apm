@@ -95,6 +95,8 @@ def bundle_deploy_relative_path(
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root."""
     validate_path_segments(rel_path, context="bundle deploy path")
+    if _is_plugin_hook_path(rel_path):
+        return None
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
@@ -110,6 +112,12 @@ def bundle_deploy_skip_warning(
 ) -> str | None:
     """Return an explicit warning for a deliberately skipped bundle path."""
     validate_path_segments(rel_path, context="bundle deploy path")
+    if _is_plugin_hook_path(rel_path):
+        return (
+            f"Skipped packed bundle hook file {rel_path!r}: local bundle install "
+            "does not register plugin hooks yet. Install the package from source "
+            "to deploy its hooks."
+        )
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
@@ -124,6 +132,22 @@ def bundle_deploy_skip_warning(
         f"local bundle install cannot convert plugin-native files to "
         f"{mapping.format_id} ({mapping.extension}) yet. Repack for that "
         "target or install from source."
+    )
+
+
+def _is_plugin_hook_path(rel_path: str) -> bool:
+    """Return whether a packed path is plugin-native hook config or resources.
+
+    Plugin hooks need merging into each target's hook configuration; copying
+    them as files would leave ``hooks.json`` unregistered and lower hook
+    scripts through the hook descriptor extension.
+    """
+    from ..bundle.plugin_layout import PLUGIN_HOOKS_CONFIG, PLUGIN_LAYOUT
+
+    rel_path = rel_path.removeprefix(f"{COM_MICROSOFT_APM_NAMESPACE}/")
+    return (
+        rel_path == PLUGIN_HOOKS_CONFIG
+        or rel_path.split("/", 1)[0] == PLUGIN_LAYOUT["hooks"].plugin_dir
     )
 
 

@@ -258,16 +258,47 @@ class TestNoCacheFlag:
             assert result.exit_code == 0
 
     def test_no_cache_without_policy(self, runner, tmp_path, monkeypatch):
-        """--no-cache without --policy doesn't error (just ignored)."""
+        """--no-cache without --policy forces a fresh auto-discovered fetch (#3659)."""
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        result = runner.invoke(
-            audit,
-            ["--ci", "--no-drift", "--no-cache"],
-            catch_exceptions=False,
-        )
+        mock_result = PolicyFetchResult(outcome="absent")
+        with patch(
+            "apm_cli.policy.discovery.discover_policy", return_value=mock_result
+        ) as mock_disc:
+            result = runner.invoke(
+                audit,
+                ["--ci", "--no-drift", "--no-cache"],
+                catch_exceptions=False,
+            )
         assert result.exit_code == 0
+        mock_disc.assert_called_once()
+        assert mock_disc.call_args.kwargs.get("no_cache") is True
+        assert mock_disc.call_args.kwargs.get("policy_override") is None
+
+    def test_auto_discovery_uses_cache_by_default(self, runner, tmp_path, monkeypatch):
+        """Without --no-cache, auto-discovery keeps the policy cache."""
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+
+        mock_result = PolicyFetchResult(outcome="absent")
+        with patch(
+            "apm_cli.policy.discovery.discover_policy", return_value=mock_result
+        ) as mock_disc:
+            runner.invoke(audit, ["--ci", "--no-drift"], catch_exceptions=False)
+        mock_disc.assert_called_once()
+        assert mock_disc.call_args.kwargs.get("no_cache") is False
+
+    def test_no_policy_skips_discovery_even_with_no_cache(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+
+        with patch("apm_cli.policy.discovery.discover_policy") as mock_disc:
+            result = runner.invoke(
+                audit, ["--ci", "--no-drift", "--no-policy", "--no-cache"], catch_exceptions=False
+            )
+        assert result.exit_code == 0
+        mock_disc.assert_not_called()
 
 
 class TestCiWithoutPolicy:

@@ -86,6 +86,8 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
+_GUARD_LOCKFILE_SYMLINK_WRITE = "contracts-tooling-lockfile-symlink-write-guard"
+
 _GUARD_NATIVE_LIFECYCLE = "contracts-tooling-native-lifecycle-evidence"
 
 
@@ -427,6 +429,60 @@ def check_lockfile_timestamp_fallback(provider: FactsProvider) -> tuple[Violatio
             for node in facts.tree_index.nodes
             if _owns_reproducible_fallback(node)
         )
+    return tuple(findings)
+
+
+def check_lockfile_symlink_write_guard(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Lockfile symlink write refusal must be centralized in deps/lockfile.py.
+
+    The owner provides ``ensure_lockfile_writable`` and
+    ``refuse_lockfile_before_mutation``; consumers that would rewrite the
+    lockfile must route through them instead of inlining ``is_symlink()``
+    checks on lockfile paths.
+    """
+    rule_id = _GUARD_LOCKFILE_SYMLINK_WRITE
+    owner, owner_failures = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    if owner_failures:
+        return tuple(owner_failures)
+
+    findings: list[Violation] = []
+    # The owner must define both centralized functions.
+    if not _present(owner, "def ensure_lockfile_writable("):
+        findings.append(
+            _summary(
+                rule_id, _LOCKFILE_OWNER, "ensure_lockfile_writable must exist in lockfile owner"
+            )
+        )
+    if not _present(owner, "def refuse_lockfile_before_mutation("):
+        findings.append(
+            _summary(
+                rule_id,
+                _LOCKFILE_OWNER,
+                "refuse_lockfile_before_mutation must exist in lockfile owner",
+            )
+        )
+    # Consumers that import LockfileSymlinkError must also import or call the
+    # owner API, never raise LockfileSymlinkError directly with their own
+    # is_symlink() logic.
+    _LOCKFILE_SYMLINK_CONSUMERS = (
+        "src/apm_cli/commands/uninstall/cli.py",
+        "src/apm_cli/install/helpers/plan_inputs.py",
+    )
+    for path in _LOCKFILE_SYMLINK_CONSUMERS:
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        if not _present(facts, "ensure_lockfile_writable") and not _present(
+            facts, "refuse_lockfile_before_mutation"
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    "Lockfile symlink write refusal must route through lockfile owner API",
+                )
+            )
     return tuple(findings)
 
 
@@ -1929,6 +1985,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKFILE_TIMESTAMP_FALLBACK,
         "Reproducible timestamp fallback stays owned by deps/lockfile.py.",
         check_lockfile_timestamp_fallback,
+    ),
+    _owner_rule(
+        _GUARD_LOCKFILE_SYMLINK_WRITE,
+        "Lockfile symlink write refusal stays owned by deps/lockfile.py.",
+        check_lockfile_symlink_write_guard,
     ),
     _owner_rule(
         _GUARD_GENERATION_FOOTER,

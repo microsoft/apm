@@ -174,6 +174,41 @@ class LockfileSymlinkError(OSError):
         )
 
 
+def ensure_lockfile_writable(path: Path) -> None:
+    """Raise :class:`LockfileSymlinkError` when *path* cannot be written.
+
+    Single owner of the "never write through a symlinked lockfile" rule:
+    :meth:`LockFile.write` enforces it, and commands that will rewrite the
+    lockfile call it before any other project write so a refusal is atomic.
+    """
+    if path.is_symlink():
+        raise LockfileSymlinkError(path)
+
+
+def refuse_lockfile_before_mutation(
+    lockfile: LockFile | None,
+    lockfile_path: Path,
+    *,
+    would_mutate: bool,
+) -> None:
+    """Pre-mutation guard: refuse an unwritable lockfile before side effects.
+
+    Commands that rewrite ``apm.lock.yaml`` (install --update, uninstall)
+    must call this *before* scripts, file deletions, or manifest edits so
+    that a symlinked lockfile stops the operation while it is still a no-op.
+
+    Args:
+        lockfile: The loaded lockfile, or ``None`` when no lockfile exists.
+        lockfile_path: On-disk path to be rewritten.
+        would_mutate: ``True`` when the operation will definitely change
+            the lockfile (e.g. at least one locked key is being removed,
+            or the update plan has changes).
+    """
+    if lockfile is None or not would_mutate:
+        return
+    ensure_lockfile_writable(lockfile_path)
+
+
 # Git writes each marker at the start of a line, followed by a space and a label
 # (or nothing, for a bare ``=======`` separator). A separator alone is not
 # evidence of a conflict, so only the labelled markers are matched here.
@@ -1308,12 +1343,13 @@ class LockFile:
         path: Path,
         *,
         existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
-    ) -> None:
+    ) -> bool:
         """Write lock file to disk, preserving legacy timestamp behavior.
 
         Inside :func:`suppress_lockfile_writes` (``apm install --frozen``,
         req-lk-006) the serialised content is recorded for the caller and
-        the file on disk is left byte-for-byte untouched.
+        the file on disk is left byte-for-byte untouched.  Returns whether
+        the file was persisted, so callers never report a withheld write.
 
         New lockfiles omit ``generated_at``.  When the on-disk lockfile already
         carries the field, keep it stable for semantic no-ops and refresh it for
@@ -1327,9 +1363,8 @@ class LockFile:
         suppressed = _suppressed_writes.get()
         if suppressed is not None:
             suppressed.append(self.to_yaml())
-            return
-        if path.is_symlink():
-            raise LockfileSymlinkError(path)
+            return False
+        ensure_lockfile_writable(path)
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
@@ -1369,6 +1404,7 @@ class LockFile:
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
+        return True
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
@@ -1483,9 +1519,9 @@ class LockFile:
         path: Path,
         *,
         existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
-    ) -> None:
-        """Save lock file to disk (alias for write)."""
-        self.write(path, existing_lockfile=existing_lockfile)
+    ) -> bool:
+        """Save lock file to disk (alias for write); return whether it persisted."""
+        return self.write(path, existing_lockfile=existing_lockfile)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP/LSP servers, and configs.

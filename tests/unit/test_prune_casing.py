@@ -89,7 +89,9 @@ def test_prune_does_not_casefold_sensitive_materialization(dependency, tmp_path)
     wrong_case = modules / source_path.relative_to(modules).as_posix().lower()
     wrong_case.mkdir(parents=True)
     (wrong_case / "notes.txt").write_bytes(b"retained")
-    with patch("apm_cli.commands._helpers.find_case_equivalent_materialization_path") as lookup:
+    with patch(
+        "apm_cli.models.dependency.materialization.find_case_equivalent_materialization_path"
+    ) as lookup:
         expected = _build_expected_install_paths(
             [dependency], None, modules, preserve_installed_case=True
         )
