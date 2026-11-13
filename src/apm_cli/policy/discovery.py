@@ -1519,24 +1519,17 @@ def _is_github_host(host: str) -> bool:
 
 
 def _get_token_for_host(host: str) -> str | None:
-    """Get authentication token for a given host.
+    """Get the authentication token for *host* through AuthResolver only.
 
-    Environment-variable tokens (GITHUB_TOKEN, GITHUB_APM_PAT, GH_TOKEN)
-    are only returned when *host* is a recognized GitHub-family hostname.
-    For other hosts the token manager + git credential helpers are used.
+    A resolution failure yields no token; credentials are never read from
+    the environment outside the resolver's host classification.
     """
     try:
         from ..core.auth import AuthResolver
 
         return AuthResolver().resolve(host).token
     except Exception as exc:
-        logger.debug("Token manager failed for %s: %s", host, exc)
-        if _is_github_host(host):
-            return (
-                os.environ.get("GITHUB_TOKEN")
-                or os.environ.get("GITHUB_APM_PAT")
-                or os.environ.get("GH_TOKEN")
-            )
+        logger.debug("Token resolution failed for %s: %s", host, exc)
         return None
 
 

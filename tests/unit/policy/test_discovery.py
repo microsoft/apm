@@ -2077,11 +2077,11 @@ class TestGetTokenForHost(unittest.TestCase):
         "apm_cli.core.auth.AuthResolver.resolve",
         side_effect=Exception("simulated failure"),
     )
-    def test_fallback_to_env_vars(self, _mock_method):
+    def test_resolver_failure_ignores_env_vars(self, _mock_method):
         from apm_cli.policy.discovery import _get_token_for_host
 
         token = _get_token_for_host("github.com")
-        self.assertEqual(token, "test-tok")
+        self.assertIsNone(token)
 
     @patch.dict(
         os.environ,
