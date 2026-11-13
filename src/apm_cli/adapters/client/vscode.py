@@ -259,6 +259,36 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 print(f"Error configuring MCP server: {e}")
             return False
 
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
+        """Render the entry ``configure_mcp_server`` would write now.
+
+        Like the write path, keep optional registry fields the existing entry
+        already carries, so an unchanged entry never compares as different.
+        """
+        servers = self.get_current_config().get("servers")
+        existing = (
+            servers.get(self._determine_config_key(server_info.get("name", ""), None))
+            if isinstance(servers, dict)
+            else None
+        )
+        rendered = self._format_server_config(
+            server_info,
+            runtime_vars=runtime_vars or {},
+            env_overrides=env_overrides or {},
+            existing_server_config=existing,
+        )
+        if isinstance(rendered, tuple):
+            rendered = rendered[0]
+        if not isinstance(rendered, dict):
+            raise ValueError("Adapter did not produce a native MCP server mapping")
+        return rendered
+
     def _format_server_config(
         self,
         server_info,
