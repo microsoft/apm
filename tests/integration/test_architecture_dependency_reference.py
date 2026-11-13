@@ -212,7 +212,7 @@ def test_install_phase_materialization_guard_rejects_alias_path_bypass(
 @pytest.mark.parametrize(
     ("old", "new"),
     [
-        ("is_full_revision_pin(reference)", "False"),
+        ("revision_pin_mismatch(dep.reference, locked_dep)", "None"),
         ("detect_ref_change(dep, locked_dep)", "False"),
         (
             "if detect_ref_change(dep, locked_dep):",

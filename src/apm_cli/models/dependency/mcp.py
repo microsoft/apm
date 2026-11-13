@@ -2,12 +2,13 @@
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
 
 from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.github_host import has_parser_dependent_url_chars
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
 
 # Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
@@ -35,6 +36,7 @@ _KNOWN_DICT_KEYS = frozenset(
         # the serialized config. Only current-source derivation may set it.
         # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
+        "approval_keys",
     }
 )
 
@@ -151,6 +153,9 @@ class MCPDependency:
     # ``to_dict`` so it never leaks into the lockfile ``mcp_configs`` values or
     # the config-drift comparison (#2081).
     resolved_by: str | None = None
+    # Executable-approval keys of the declaring locked package; empty for
+    # root-declared servers. Never serialized and not part of equality.
+    approval_keys: tuple[str, ...] = field(default=(), compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
@@ -239,6 +244,21 @@ class MCPDependency:
     def is_self_defined(self) -> bool:
         """True when the dependency is self-defined (registry: false)."""
         return self.registry is False
+
+    @property
+    def requires_transitive_trust(self) -> bool:
+        """True when a transitive declaration is more than a registry reference.
+
+        A transitive package may name a server from the consumer's configured
+        registry. A self-defined server, a per-dependency ``registry`` URL,
+        or any value overlay (``env``, ``headers``, ``args``, ``url``,
+        ``command``, ``cwd``, ``extra``) supplies configuration the consumer's
+        registry did not provide, so it needs the same explicit trust.
+        """
+        if self.is_self_defined or isinstance(self.registry, str):
+            return True
+        overlays = (self.env, self.headers, self.args, self.url, self.command, self.cwd, self.extra)
+        return any(value not in (None, "", {}, []) for value in overlays)
 
     @property
     def has_enabled(self) -> bool:
@@ -354,6 +374,12 @@ class MCPDependency:
                 f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
         if self.url is not None:
+            if has_parser_dependent_url_chars(self.url):
+                raise ValueError(
+                    f"Invalid MCP url {self.url!r}: backslashes, whitespace and "
+                    f"control characters are not allowed. Use a plain "
+                    f"http:// or https:// URL."
+                )
             scheme = urlparse(self.url).scheme.lower()
             if scheme not in _ALLOWED_URL_SCHEMES:
                 raise ValueError(

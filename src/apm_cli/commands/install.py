@@ -166,6 +166,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
+    trust_transitive_mcp_option,
 )
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
@@ -928,11 +929,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
-@click.option(
-    "--trust-transitive-mcp",
-    is_flag=True,
-    help="Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
-)
+@trust_transitive_mcp_option
 @click.option(
     "--parallel-downloads",
     type=int,

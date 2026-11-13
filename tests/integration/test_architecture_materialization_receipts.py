@@ -49,11 +49,6 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
             "pass",
         ),
         (
-            "integration/skill_support.py",
-            "removed_paths.append(skill_subdir)",
-            "pass",
-        ),
-        (
             "install/phases/cleanup.py",
             "DeploymentMaterializationSession.retire_removed(",
             "parallel_retirement(",

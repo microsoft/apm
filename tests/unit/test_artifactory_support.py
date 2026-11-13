@@ -932,17 +932,30 @@ class TestArtifactoryDownloader:
             assert dl.artifactory_token is None
 
     def test_get_artifactory_headers_with_token(self):
-        """Headers include Bearer token when token is set."""
+        """Headers carry the registry token only for the configured registry origin."""
+        env = {
+            "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
+            "PROXY_REGISTRY_TOKEN": "my-token",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            dl = GitHubPackageDownloader()
+            assert dl._get_artifactory_headers(scheme="https", host="art.example.com") == {
+                "Authorization": "Bearer my-token"
+            }
+            assert dl._get_artifactory_headers(scheme="https", host="other.example.com") == {}
+            assert dl._get_artifactory_headers(scheme="http", host="art.example.com") == {}
+
+    def test_get_artifactory_headers_token_without_registry_url(self):
+        """A registry token without a configured registry URL is never attached."""
         with patch.dict(os.environ, {"ARTIFACTORY_APM_TOKEN": "my-token"}, clear=True):
             dl = GitHubPackageDownloader()
-            headers = dl._get_artifactory_headers()
-            assert headers == {"Authorization": "Bearer my-token"}
+            assert dl._get_artifactory_headers(scheme="https", host="art.example.com") == {}
 
     def test_get_artifactory_headers_without_token(self):
         """Headers are empty when no token is set."""
         with patch.dict(os.environ, {}, clear=True):
             dl = GitHubPackageDownloader()
-            headers = dl._get_artifactory_headers()
+            headers = dl._get_artifactory_headers(scheme="https", host="art.example.com")
             assert headers == {}
 
     def test_should_use_artifactory_proxy_github(self):
@@ -1591,7 +1604,7 @@ class TestFrozenArtifactoryCommitReplay:
             return _archive_response(404)
 
         registry_config = MagicMock()
-        registry_config.get_headers.return_value = {"Authorization": "Bearer proxy-test-token"}
+        registry_config.headers_for.return_value = {"Authorization": "Bearer proxy-test-token"}
         proxy_host = MagicMock()
         proxy_host.registry_config = registry_config
         proxy_host.artifactory_token = None
@@ -2682,3 +2695,63 @@ class TestDeprecatedArtifactoryOnlyBackwardCompat:
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package("microsoft/some-package", Path("/tmp/test-pkg"))
+
+
+class TestRegistryConfigOriginScope:
+    """The registry token is scoped to the configured registry origin."""
+
+    def _config(self):
+        env = {
+            "PROXY_REGISTRY_URL": "https://Art.Example.com/artifactory/github",
+            "PROXY_REGISTRY_TOKEN": "reg-token",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            from apm_cli.deps.registry_proxy import RegistryConfig
+
+            return RegistryConfig.from_env()
+
+    def test_headers_for_configured_origin(self):
+        cfg = self._config()
+        assert cfg.headers_for("https", "art.example.com") == cfg.get_headers()
+        assert cfg.headers_for("HTTPS", "ART.EXAMPLE.COM") == cfg.get_headers()
+
+    def test_no_headers_for_other_host_or_scheme(self):
+        cfg = self._config()
+        assert cfg.headers_for("https", "other.example.com") == {}
+        assert cfg.headers_for("http", "art.example.com") == {}
+
+
+class TestRegistryTokenWithoutUrlWarning:
+    """A registry token without a registry URL is reported once and not used."""
+
+    def _from_env(self, env):
+        from apm_cli.deps import registry_proxy
+
+        registry_proxy._emitted_warnings.clear()
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("apm_cli.utils.console._rich_warning") as warn,
+        ):
+            first = registry_proxy.RegistryConfig.from_env()
+            second = registry_proxy.RegistryConfig.from_env()
+        registry_proxy._emitted_warnings.clear()
+        return first, second, warn
+
+    def test_token_without_url_warns_once(self):
+        first, second, warn = self._from_env({"ARTIFACTORY_APM_TOKEN": "tok"})
+        assert first is None and second is None
+        warn.assert_called_once_with(
+            "ARTIFACTORY_APM_TOKEN is ignored without PROXY_REGISTRY_URL; "
+            "set PROXY_REGISTRY_URL and PROXY_REGISTRY_TOKEN"
+        )
+
+    def test_no_warning_without_token_or_with_url(self):
+        _, _, warn = self._from_env({})
+        warn.assert_not_called()
+        env = {
+            "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
+            "ARTIFACTORY_APM_TOKEN": "tok",
+        }
+        first, _, warn = self._from_env(env)
+        assert first is not None
+        warn.assert_not_called()

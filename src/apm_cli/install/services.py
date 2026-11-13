@@ -932,6 +932,13 @@ def integrate_local_bundle(
     else:
         _canvas_approved_bundle = False
 
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from ..security.executables import is_package_approved as _is_approved
+
+    _hooks_approved_bundle = allow_executables is None or (
+        approval_key is not None and _is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)
+    )
+
     if not (_canvas_enabled and _canvas_approved_bundle):
         _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))
         if _blocked:
@@ -1019,6 +1026,8 @@ def integrate_local_bundle(
                 _allowed_deploy_prefixes,
                 _known_deploy_prefixes,
                 target=target,
+                hooks_approved=_hooks_approved_bundle,
+                canvas_approved=_canvas_enabled and _canvas_approved_bundle,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -1026,6 +1035,8 @@ def integrate_local_bundle(
                     _allowed_deploy_prefixes,
                     _known_deploy_prefixes,
                     target=target,
+                    hooks_approved=_hooks_approved_bundle,
+                    canvas_approved=_canvas_enabled and _canvas_approved_bundle,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))

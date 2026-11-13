@@ -263,7 +263,10 @@ Two environment-level kill-switches are also available:
 - Org policy `executables.deny_all: true` -- when set in `apm-policy.yml`,
   suppresses all lifecycle scripts as a one-directional safety ceiling. An
   org that has locked down all executable primitives will also have lifecycle
-  scripts suppressed automatically.
+  scripts suppressed automatically. When the org policy cannot be enforced in
+  a way that would block `apm install` (for example, it cannot be fetched and
+  `apm.yml` sets `policy.fetch_failure_default: block`), lifecycle scripts are
+  suppressed too.
 
 ## Analytics use case
 

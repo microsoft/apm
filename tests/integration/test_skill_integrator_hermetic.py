@@ -737,8 +737,8 @@ class TestSyncIntegration:
         )
         assert stats["files_removed"] == 0
 
-    def test_legacy_orphan_detection_removes_unknown_skill(self, tmp_path):
-        """Lines 1383-1438: npm-style fallback removes skills not in installed set."""
+    def test_skill_cleanup_without_lockfile_ownership_removes_nothing(self, tmp_path):
+        """Without recorded ownership no skill directory is removed."""
         project_root = tmp_path / "project"
         project_root.mkdir()
         skills_dir = project_root / ".github" / "skills"
@@ -764,8 +764,8 @@ class TestSyncIntegration:
             managed_files=None,
             targets=[fake_target],
         )
-        # Orphaned skill should be removed
-        assert stats["files_removed"] >= 1
+        assert stats["files_removed"] == 0
+        assert (skills_dir / "orphaned").is_dir()
 
     def test_legacy_target_without_skills_support_skipped(self, tmp_path):
         """Target without skills support is skipped in legacy path."""
@@ -787,143 +787,3 @@ class TestSyncIntegration:
             targets=[fake_target],
         )
         assert stats == {"files_removed": 0, "errors": 0}
-
-
-# ---------------------------------------------------------------------------
-# SkillIntegrator._clean_orphaned_skills
-# ---------------------------------------------------------------------------
-
-
-class TestCleanOrphanedSkills:
-    def test_removes_skill_not_in_installed_set(self, tmp_path):
-        """Orphaned skill directory is removed."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        orphan = skills_dir / "old-skill"
-        orphan.mkdir()
-
-        integrator = SkillIntegrator()
-        result = integrator._clean_orphaned_skills(skills_dir, {"new-skill"})
-        assert result["files_removed"] == 1
-        assert not orphan.exists()
-
-    def test_keeps_skill_in_installed_set(self, tmp_path):
-        """Installed skill directory is preserved."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        keeper = skills_dir / "installed-skill"
-        keeper.mkdir()
-
-        integrator = SkillIntegrator()
-        result = integrator._clean_orphaned_skills(skills_dir, {"installed-skill"})
-        assert result["files_removed"] == 0
-        assert keeper.exists()
-
-    def test_agents_dir_only_removes_lockfile_owned_skills(self, tmp_path):
-        """Lines 1464-1484: .agents/skills only removes APM-owned skills."""
-        agents_skills_dir = tmp_path / ".agents" / "skills"
-        agents_skills_dir.mkdir(parents=True)
-        foreign = agents_skills_dir / "foreign-tool-skill"
-        foreign.mkdir()
-        apm_owned = agents_skills_dir / "apm-skill"
-        apm_owned.mkdir()
-
-        integrator = SkillIntegrator()
-
-        # Patch lockfile ownership: only apm-skill is owned
-        with patch.object(
-            SkillIntegrator,
-            "_get_lockfile_owned_agent_skills",
-            return_value={"apm-skill"},
-        ):
-            result = integrator._clean_orphaned_skills(
-                agents_skills_dir,
-                installed_skill_names=set(),
-                project_root=tmp_path,
-            )
-
-        # Only apm-skill is removed; foreign-tool-skill is kept
-        assert result["files_removed"] == 1
-        assert foreign.exists()
-        assert not apm_owned.exists()
-
-    def test_error_during_rmtree_counted(self, tmp_path):
-        """Exception during rmtree is counted as error."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        orphan = skills_dir / "bad-skill"
-        orphan.mkdir()
-
-        integrator = SkillIntegrator()
-        with patch("shutil.rmtree", side_effect=PermissionError("denied")):
-            result = integrator._clean_orphaned_skills(skills_dir, set())
-
-        assert result["errors"] == 1
-
-
-# ---------------------------------------------------------------------------
-# SkillIntegrator._get_lockfile_owned_agent_skills
-# ---------------------------------------------------------------------------
-
-
-class TestGetLockfileOwnedAgentSkills:
-    def test_returns_skill_names_from_agents_paths(self, tmp_path):
-        """Lines 1495-1506: parses .agents/skills/ paths from lockfile."""
-        from unittest.mock import MagicMock
-
-        mock_dep = MagicMock()
-        mock_dep.deployed_files = [
-            ".agents/skills/skill-one/SKILL.md",
-            ".agents/skills/skill-two/",
-            ".github/skills/other",
-        ]
-        mock_lockfile = MagicMock()
-        mock_lockfile.dependencies = {"pkg": mock_dep}
-
-        with (
-            patch(
-                "apm_cli.deps.lockfile.LockFile.read",
-                return_value=mock_lockfile,
-            ),
-            patch(
-                "apm_cli.deps.lockfile.get_lockfile_path",
-                return_value=tmp_path / "apm.lock.yaml",
-            ),
-        ):
-            result = SkillIntegrator._get_lockfile_owned_agent_skills(tmp_path)
-
-        assert "skill-one" in result
-        assert "skill-two" in result
-        assert "other" not in result
-
-    def test_returns_empty_on_missing_lockfile(self, tmp_path):
-        """FileNotFoundError yields empty set."""
-        with (
-            patch(
-                "apm_cli.deps.lockfile.LockFile.read",
-                side_effect=FileNotFoundError,
-            ),
-            patch(
-                "apm_cli.deps.lockfile.get_lockfile_path",
-                return_value=tmp_path / "apm.lock.yaml",
-            ),
-        ):
-            result = SkillIntegrator._get_lockfile_owned_agent_skills(tmp_path)
-
-        assert result == set()
-
-    def test_returns_empty_when_lockfile_is_none(self, tmp_path):
-        """LockFile.read returning None yields empty set."""
-        with (
-            patch(
-                "apm_cli.deps.lockfile.LockFile.read",
-                return_value=None,
-            ),
-            patch(
-                "apm_cli.deps.lockfile.get_lockfile_path",
-                return_value=tmp_path / "apm.lock.yaml",
-            ),
-        ):
-            result = SkillIntegrator._get_lockfile_owned_agent_skills(tmp_path)
-
-        assert result == set()

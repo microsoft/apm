@@ -552,29 +552,6 @@ metadata:
 
         assert result == {"files_removed": 0, "errors": 0}
 
-    def test_sync_integration_removes_orphaned_subdirectory_skill(self):
-        """Test that sync removes skills for uninstalled subdirectory packages.
-
-        This tests the full install → uninstall flow for virtual subdirectory packages
-        like ComposioHQ/awesome-claude-skills/mcp-builder.
-        """
-        # Simulate an installed skill from a subdirectory package
-        skill_name = "mcp-builder"
-        skill_dir = self.project_root / ".agents" / "skills" / skill_name
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("---\nname: mcp-builder\n---\n# MCP Builder Skill\n")
-        _setup_agents_orphan_cleanup(self.project_root, [skill_name])
-
-        # Now simulate that this package was uninstalled (not in dependencies)
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []  # Empty = uninstalled
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Orphaned skill should be removed
-        assert result["files_removed"] == 1
-        assert not skill_dir.exists()
-
     def test_sync_integration_keeps_installed_subdirectory_skill(self):
         """Test that sync keeps skills for still-installed subdirectory packages."""
         # Simulate an installed skill from a subdirectory package
@@ -2167,29 +2144,6 @@ Detailed instructions here.
 
     # ========== Test: sync_integration cleans both locations ==========
 
-    def test_sync_removes_orphans_from_both_locations(self):
-        """Test that sync_integration removes orphaned skills from both locations."""
-        # Create skill directories in both locations (no metadata needed)
-        github_skill = self.project_root / ".agents" / "skills" / "orphan-skill"
-        github_skill.mkdir(parents=True)
-        (github_skill / "SKILL.md").write_text("# Orphan Skill\n")
-
-        claude_skill = self.project_root / ".claude" / "skills" / "orphan-skill"
-        claude_skill.mkdir(parents=True)
-        (claude_skill / "SKILL.md").write_text("# Orphan Skill\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan-skill"])
-
-        # Mock apm_package with no dependencies (orphan)
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Both orphans should be removed
-        assert result["files_removed"] == 2
-        assert not github_skill.exists()
-        assert not claude_skill.exists()
-
     def test_sync_keeps_installed_skills_in_both_locations(self):
         """Test that sync_integration keeps installed skills in both locations."""
         # Create skill directories in both locations (no metadata needed)
@@ -2217,24 +2171,6 @@ Detailed instructions here.
         assert claude_skill.exists()
 
     # ========== Test: Only .claude/skills/ cleaned when .claude/ exists ==========
-
-    def test_sync_only_cleans_claude_skills_when_claude_exists(self):
-        """Test that sync only cleans .claude/skills/ when .claude/ directory exists."""
-        # Only .github/ exists, not .claude/
-        github_skill = self.project_root / ".agents" / "skills" / "orphan-skill"
-        github_skill.mkdir(parents=True)
-        (github_skill / "SKILL.md").write_text("# Orphan Skill\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan-skill"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Only the github orphan should be removed (claude doesn't exist)
-        assert result["files_removed"] == 1
-        assert not github_skill.exists()
-        assert not (self.project_root / ".claude").exists()
 
     # ========== Test: APM metadata added to both copies ==========
 
@@ -2271,129 +2207,6 @@ Detailed instructions here.
         assert claude_content == original_content
 
     # ========== T12: Additional orphan cleanup tests ==========
-
-    def test_sync_removes_all_unknown_skill_dirs(self):
-        """Test that sync removes ALL skill directories not matching installed packages.
-
-        Uses npm-style approach: .github/skills/ is fully APM-managed.
-        Any directory not matching an installed package name is removed.
-        """
-        # Create a skill dir not matching any installed package
-        unknown_skill = self.project_root / ".agents" / "skills" / "unknown-skill"
-        unknown_skill.mkdir(parents=True)
-        (unknown_skill / "SKILL.md").write_text("---\nname: unknown\n---\n# Custom Skill\n")
-
-        # Create another with no SKILL.md
-        (self.project_root / ".claude").mkdir()
-        claude_unknown = self.project_root / ".claude" / "skills" / "my-workflow"
-        claude_unknown.mkdir(parents=True)
-        (claude_unknown / "SKILL.md").write_text("---\nname: my-workflow\n---\n# Workflow\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["unknown-skill"])
-
-        # Run sync with no dependencies
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # All unknown dirs should be removed (npm-style)
-        assert result["files_removed"] == 2
-        assert not unknown_skill.exists()
-        assert not claude_unknown.exists()
-
-    def test_sync_removes_skill_dirs_without_skill_md(self):
-        """Test that sync removes orphaned skill directories even without SKILL.md.
-
-        Uses npm-style approach: any directory not matching an installed package
-        name is removed, regardless of its contents.
-        """
-        # Create a skill directory without SKILL.md
-        empty_skill = self.project_root / ".agents" / "skills" / "empty-skill"
-        empty_skill.mkdir(parents=True)
-        (empty_skill / "README.md").write_text("# Some file")
-        _setup_agents_orphan_cleanup(self.project_root, ["empty-skill"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Should be removed (not in installed set)
-        assert result["files_removed"] == 1
-        assert not empty_skill.exists()
-
-    def test_sync_removes_malformed_skill_dirs(self):
-        """Test that sync removes orphaned skill directories with malformed SKILL.md.
-
-        Uses npm-style approach: directory name matching, not SKILL.md content.
-        Malformed SKILL.md has no effect on orphan detection.
-        """
-        # Create a skill with malformed frontmatter
-        malformed_skill = self.project_root / ".agents" / "skills" / "malformed"
-        malformed_skill.mkdir(parents=True)
-        (malformed_skill / "SKILL.md").write_text("""---
-invalid yaml: [this is broken
-  no closing bracket
----
-# Content
-""")
-        _setup_agents_orphan_cleanup(self.project_root, ["malformed"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Should be removed (not in installed set)
-        assert result["files_removed"] == 1
-        assert not malformed_skill.exists()
-
-    def test_sync_removes_orphans_only_from_github_when_no_claude(self):
-        """Test cleanup works correctly when .claude/ directory doesn't exist."""
-        # Ensure .claude/ does NOT exist
-        assert not (self.project_root / ".claude").exists()
-
-        # Create an orphan skill in .github/skills/
-        orphan_skill = self.project_root / ".agents" / "skills" / "orphan"
-        orphan_skill.mkdir(parents=True)
-        (orphan_skill / "SKILL.md").write_text("# Orphan Skill\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Only github orphan should be removed
-        assert result["files_removed"] == 1
-        assert not orphan_skill.exists()
-
-    def test_sync_aggregates_stats_from_both_locations(self):
-        """Test that sync correctly aggregates removal stats from both locations."""
-        # Create both target directories
-        (self.project_root / ".github").mkdir(exist_ok=True)
-        (self.project_root / ".claude").mkdir()
-
-        # Create orphan in .github/skills/
-        github_orphan = self.project_root / ".agents" / "skills" / "orphan-a"
-        github_orphan.mkdir(parents=True)
-        (github_orphan / "SKILL.md").write_text("# Orphan A\n")
-
-        # Create different orphan in .claude/skills/
-        claude_orphan = self.project_root / ".claude" / "skills" / "orphan-b"
-        claude_orphan.mkdir(parents=True)
-        (claude_orphan / "SKILL.md").write_text("# Orphan B\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan-a"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        # Both orphans should be removed (1 from each location)
-        assert result["files_removed"] == 2
-        assert not github_orphan.exists()
-        assert not claude_orphan.exists()
 
 
 class TestSubSkillPromotion:
@@ -2709,23 +2522,6 @@ class TestSubSkillPromotionForNonSkillPackages:
         assert result.sub_skills_promoted == 1
         assert (self.project_root / ".agents" / "skills" / "style-checker" / "SKILL.md").exists()
         assert (self.project_root / ".claude" / "skills" / "style-checker" / "SKILL.md").exists()
-
-    def test_sync_removes_orphaned_promoted_sub_skills(self):
-        """When a package is uninstalled, its promoted sub-skills should be cleaned up."""
-        # Create the promoted sub-skill as if it had been installed
-        style_checker = self.project_root / ".agents" / "skills" / "style-checker"
-        style_checker.mkdir(parents=True)
-        (style_checker / "SKILL.md").write_text("# style-checker")
-        _setup_agents_orphan_cleanup(self.project_root, ["style-checker"])
-
-        # Simulate an empty apm.yml (package was uninstalled)
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        assert result["files_removed"] == 1
-        assert not style_checker.exists()
 
     def test_sync_preserves_promoted_sub_skills_when_package_installed(self):
         """When a package is still installed, its promoted sub-skills should be preserved."""
@@ -3240,46 +3036,6 @@ class TestCursorSkillIntegration:
 
     # ========== Test: Sync cleanup for .cursor/skills/ ==========
 
-    def test_sync_removes_orphans_from_cursor(self):
-        """sync_integration removes orphaned skills from .cursor/skills/."""
-        cursor_orphan = self.project_root / ".agents" / "skills" / "orphan-skill"
-        cursor_orphan.mkdir(parents=True)
-        (cursor_orphan / "SKILL.md").write_text("# Orphan\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan-skill"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        assert result["files_removed"] >= 1
-        assert not cursor_orphan.exists()
-
-    def test_sync_removes_orphans_from_all_three_targets(self):
-        """sync_integration removes orphans from converged .agents/ and .claude/ skills.
-
-        Copilot, cursor, opencode and codex all converge on .agents/skills/
-        (deduped to a single cleanup pass). Claude remains independent at
-        .claude/skills/. So a single orphan in .agents/ plus a separate
-        orphan in .claude/ produces 2 removals.
-        """
-        agents_orphan = self.project_root / ".agents" / "skills" / "orphan"
-        agents_orphan.mkdir(parents=True)
-        (agents_orphan / "SKILL.md").write_text("# Orphan\n")
-        claude_orphan = self.project_root / ".claude" / "skills" / "orphan"
-        claude_orphan.mkdir(parents=True)
-        (claude_orphan / "SKILL.md").write_text("# Orphan\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        assert result["files_removed"] == 2
-        assert not agents_orphan.exists()
-        assert not claude_orphan.exists()
-
     def test_sync_keeps_installed_skills_in_cursor(self):
         """sync_integration preserves installed skills in .cursor/skills/."""
         skill_name = "installed-skill"
@@ -3312,21 +3068,6 @@ class TestCursorSkillIntegration:
 
         assert result["files_removed"] == 1
         assert not cursor_skill.exists()
-
-    def test_sync_no_cursor_cleanup_when_cursor_missing(self):
-        """sync_integration should not error when .cursor/ doesn't exist."""
-        github_orphan = self.project_root / ".agents" / "skills" / "orphan"
-        github_orphan.mkdir(parents=True)
-        (github_orphan / "SKILL.md").write_text("# Orphan\n")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(apm_package, self.project_root)
-
-        assert result["files_removed"] == 1
-        assert not (self.project_root / ".cursor").exists()
 
     # ========== Test: SKILL.md content preserved ==========
 
@@ -3575,87 +3316,6 @@ class TestSyncIntegrationDynamicPrefixes:
         )
 
         assert result["files_removed"] == 1
-
-    def test_legacy_cleanup_uses_target_dirs(self):
-        """Legacy orphan cleanup iterates target skill dirs dynamically."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        copilot = KNOWN_TARGETS["copilot"]
-
-        # Create a skill dir that's NOT in installed deps (orphan)
-        skills_dir = self.project_root / ".agents" / "skills" / "orphan"
-        skills_dir.mkdir(parents=True)
-        (skills_dir / "SKILL.md").write_text("# Orphan")
-        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        result = self.integrator.sync_integration(
-            apm_package,
-            self.project_root,
-            managed_files=None,
-            targets=[copilot],
-        )
-
-        assert result["files_removed"] == 1
-        assert not skills_dir.exists()
-
-    def test_agents_skills_cleanup_requires_codex_dir(self):
-        """Cross-tool .agents/skills/ only cleaned when .codex/ exists.
-
-        The ownership-respecting cleanup (§5.3) only deletes skills that
-        appear in the lockfile's deployed_files. A lockfile entry is
-        required for the orphan to be considered APM-owned.
-        """
-        import yaml
-
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        codex = KNOWN_TARGETS["codex"]
-
-        agents_skills = self.project_root / ".agents" / "skills" / "orphan"
-        agents_skills.mkdir(parents=True)
-        (agents_skills / "SKILL.md").write_text("# Orphan")
-
-        # Create lockfile with orphan listed so ownership check passes.
-        lockfile_data = {
-            "lockfile_version": "1",
-            "dependencies": [
-                {
-                    "repo_url": "owner/orphan-pkg",
-                    "resolved_commit": "abc123",
-                    "deployed_files": [".agents/skills/orphan/SKILL.md"],
-                }
-            ],
-        }
-        (self.project_root / "apm.lock.yaml").write_text(
-            yaml.dump(lockfile_data, default_flow_style=False), encoding="utf-8"
-        )
-
-        apm_package = Mock()
-        apm_package.get_apm_dependencies.return_value = []
-
-        # Without .codex/ dir, should NOT clean .agents/skills/
-        result = self.integrator.sync_integration(
-            apm_package,
-            self.project_root,
-            managed_files=None,
-            targets=[codex],
-        )
-        assert result["files_removed"] == 0
-        assert agents_skills.exists()
-
-        # With .codex/ dir, should clean
-        (self.project_root / ".codex").mkdir()
-        result = self.integrator.sync_integration(
-            apm_package,
-            self.project_root,
-            managed_files=None,
-            targets=[codex],
-        )
-        assert result["files_removed"] == 1
-        assert not agents_skills.exists()
 
 
 class TestUninstallPhase2SkillTargets:
@@ -4212,35 +3872,6 @@ class TestAgentSkillsDedupAndSecurity:
             validate_path_segments("../etc", context="skill name")
         with pytest.raises(PathTraversalError):
             validate_path_segments("..", context="skill name")
-
-
-class TestLockfileOwnershipCorruptFile:
-    """S1 regression: corrupt lockfile must return empty set (fail-closed)."""
-
-    def test_get_lockfile_owned_agent_skills_corrupt_lockfile_returns_empty(
-        self, tmp_path: Path
-    ) -> None:
-        """Malformed YAML in apm.lock.yaml returns empty owned set."""
-        from apm_cli.integration.skill_integrator import SkillIntegrator
-
-        project = tmp_path / "project"
-        project.mkdir()
-        (project / "apm.lock.yaml").write_text("{{{{invalid yaml: [", encoding="utf-8")
-
-        result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
-        assert result == set(), f"expected empty set for corrupt lockfile, got {result!r}"
-
-    def test_get_lockfile_owned_agent_skills_missing_lockfile_returns_empty(
-        self, tmp_path: Path
-    ) -> None:
-        """Missing apm.lock.yaml returns empty owned set."""
-        from apm_cli.integration.skill_integrator import SkillIntegrator
-
-        project = tmp_path / "no-lockfile"
-        project.mkdir()
-
-        result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
-        assert result == set(), f"expected empty set for missing lockfile, got {result!r}"
 
 
 class TestCopySkillToTargetSymlinkContainment:

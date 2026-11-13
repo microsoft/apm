@@ -252,7 +252,7 @@ class TestUninstallPreservesOtherPackageSkills:
         )
         root_pkg = APMPackage.from_apm_yml(remaining_manifest)
 
-        skill_int.sync_integration(root_pkg, project_root)
+        skill_int.sync_integration(root_pkg, project_root, managed_files={".agents/skills/skill-a"})
 
         # skill-a removed, skill-b preserved
         assert not (skills_dir / "skill-a").exists()

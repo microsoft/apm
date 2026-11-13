@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall X` removes every declaration of `X` (both sections, any spelling), and `apm install --dev X` moves `X` from `dependencies` to `devDependencies` instead of adding a duplicate that could not be uninstalled. (#3709)
 - Declaring a repository together with one of its own subdirectory packages in `apm.yml` is now rejected before anything is fetched. (#3709)
 - SIGTERM (for example a cancelled CI job) now takes the same path as Ctrl+C: the install transaction rolls back and running lifecycle scripts are stopped; a second SIGTERM terminates. (#3709)
+- Transitive MCP entries that set their own registry or env, header, args or URL overlays now need `--trust-transitive-mcp`; `apm update` accepts `--trust-transitive-mcp`, and the lockfile no longer carries transitive MCP consent between runs. (#3716)
+- `apm uninstall` without `apm.lock.yaml` no longer removes skill directories, at project or user scope, because it cannot tell which ones APM deployed. (#3716)
+- `APM_POLICY_DISABLE` accepts only the documented value `1` in every command, including `apm audit` `fail_on_drift`; lifecycle scripts follow `fetch_failure_default` when the org policy cannot be fetched. (#3716)
 - Cursor rules now use Cursor's native always-on `alwaysApply: true` instead of `globs: **` when an instruction's `applyTo` is exactly one `**`; reinstalling replaces old rules, and other `applyTo` values are unchanged. -- by @WilliamK112 (#2030)
 - `apm mcp install --help` now lists its forwarded install options (`--transport`, `--url`, `--env`, `--header`, `--target`, `--registry`, `--mcp-version`, `--global`, `--trust-transitive-mcp`, `--dev`, `--dry-run`, `--force`, `--verbose`, `--no-policy`) with the same help text, accepted values and shell completion as `apm install`, instead of a hand-written summary that had drifted; forwarded installs behave as before. (#3633)
 - `apm compile` places scoped `applyTo` instructions much faster on large projects (about 41x on a ~10,000-directory benchmark) by caching resolved paths and computing placement scores once per run; matching, placement, symlink handling and generated output are unchanged. -- by @sekosen (#3379)
@@ -152,6 +155,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A `lifecycle:` block that names `pre-compile` asks for fresh `apm lifecycle trust` after upgrading, because a trust record given while the key had no meaning would otherwise start running it. Trust for other blocks is unchanged. -- by @Ryangr0 (#3596)
 - Org policy `executables.deny_all: true` now suppresses lifecycle scripts on `apm install`, `apm update`, `apm uninstall` and `apm compile` as documented; the policy lookup for lifecycle scripts failed silently before, so they ran. (#3596)
+- Credentials stay with their configured origin: the registry proxy token goes only to the `PROXY_REGISTRY_URL` origin, `ARTIFACTORY_APM_TOKEN` without a proxy URL is not sent (APM warns; set `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_TOKEN`), credential headers are dropped on cross-origin redirects, GitHub MCP credentials attach only to unambiguous `https` hosts, and policy fetches resolve tokens only through APM's auth resolver. (#3716)
+- Deployment refuses symlinked primitive directories and destination files, project MCP config and hook settings files reached through a symlink are not written, `apm unpack` writes only under managed integration directories, and skill cleanup stays inside the project root. (#3716)
+- `apm install <bundle>` deploys only files under a target's primitive directories, and bundle hooks and canvas files follow the executables gate. (#3716)
+- The executables gate now covers package-declared self-defined MCP and LSP servers by the declaring package, survives `apm uninstall` and `apm prune` rebuilds, and matches deny rules on the canonical package identity in any spelling. (#3716)
+- A full-SHA manifest pin stays authoritative over the commit recorded in `apm.lock.yaml`. (#3716)
+- Copilot-family MCP configs outside the project, such as Windsurf's, are written owner-only (0600). (#3716)
 
 ## [0.35.1] - 2026-11-11
 

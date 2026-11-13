@@ -83,7 +83,7 @@ dependencies:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. When `apm.yml` itself pins a full commit SHA, only a lock row with that same `resolved_commit` satisfies it: `apm install` re-resolves the pinned commit, `apm install --frozen` refuses, and `apm audit --ci` reports a `ref-consistency` failure. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
 
 ### GitHub API throttle containment
 
@@ -358,7 +358,8 @@ Trust boundaries:
 1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are rejected and the install aborts.
 2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.
 3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved targets get the server in their native MCP configs (Claude `.mcp.json`, Copilot CLI `.github/mcp.json` (project) or `$COPILOT_HOME/mcp-config.json` (global), VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
-4. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
+4. **Only primitive files deploy.** A packed file is written only when it lands in a primitive directory the target owns (for example `skills/`, `agents/`, `instructions/`, `prompts/`). Files directly under a target root, such as runtime settings or MCP configuration, and directories no primitive owns are skipped with a warning. Target hook files follow the [executable trust gate](#executable-trust-gate) through the bundle's content-bound approval key.
+5. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
 
 ### Symlink handling
 
@@ -369,7 +370,11 @@ during contained package materialization:
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
 - **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
-- **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
+- **Deploy destinations** -- install refuses when a project target root, a primitive directory (for example `.github/prompts` or `.claude/commands`), or a deploy file location is a symlink. Nothing is written through the link.
+- **MCP configuration files** that are symlinks are rejected with a warning and not parsed or written. This covers project configs such as `.mcp.json`, `.github/mcp.json`, and `.vscode/mcp.json`.
+- **Hook settings merges** -- install refuses to merge hook entries into a project settings file (for example `.claude/settings.json`) whose path runs through a symlink; neither the link nor its target is read or written.
+- **Skill cleanup** removes only skill directories the lockfile records, and never through a symlinked skills root or a symlinked skill entry. Without a lockfile, no skill directories are removed.
+- **`apm unpack`** writes bundle files only under known integration directories (`.github/`, `.claude/`, ...) of the output directory, validates every destination before the first write, and does not read bundle paths that run through a symlink.
 - **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; `apm update`, `apm install --update` and `apm uninstall` refuse before deploying, deleting or editing anything else. Replace the link with a regular file to continue.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
@@ -479,7 +484,9 @@ first-match-wins ladder:
 - **Org** (`apm-policy.yml` `executables:`) is the ceiling on deny. It can
   `deny_all`, `deny` packages, `require` packages be present and trusted, and
   `recommend` a vetted set. See [executables](../../reference/policy-schema/#executables) in the policy
-  schema.
+  schema. Deny entries match the package identity, whatever its spelling
+  (shorthand, host-qualified, URL, or letter case on GitHub and Azure DevOps hosts), and cover
+  sub-packages below the denied path.
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
@@ -540,12 +547,12 @@ MCP servers declared by your direct dependencies (packages listed in your `apm.y
 
 ### Transitive dependencies
 
-MCP servers declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. Transitive MCP servers can request tool access, file system permissions, or network capabilities — blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency.
+Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Registry-resolved servers declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
 
-To allow transitive MCP servers, you must either:
+To allow transitive self-defined MCP servers, you must either:
 
 - **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
-- **Pass `--trust-transitive-mcp`** to explicitly opt in to transitive MCP servers for that install.
+- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to opt in for that run. The lockfile records which servers were written; it does not carry this consent to later runs.
 
 ## Token handling
 

@@ -546,17 +546,17 @@ class TestGetArtifactoryHeaders:
 
     def test_with_registry_config(self) -> None:
         cfg = MagicMock()
-        cfg.get_headers.return_value = {"Authorization": "Bearer token"}
+        cfg.headers_for.return_value = {"Authorization": "Bearer token"}
         delegate = self._make_delegate(registry_config=cfg)
-        headers = delegate.get_artifactory_headers()
+        headers = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert "Authorization" in headers
 
-    def test_with_legacy_token(self) -> None:
+    def test_legacy_token_without_registry_url_is_not_attached(self) -> None:
         delegate = self._make_delegate(artifactory_token="tok123")
-        headers = delegate.get_artifactory_headers()
-        assert headers["Authorization"] == "Bearer tok123"
+        headers = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
+        assert headers == {}
 
     def test_no_auth(self) -> None:
         delegate = self._make_delegate(artifactory_token=None)
-        headers = delegate.get_artifactory_headers()
+        headers = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert headers == {}

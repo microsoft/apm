@@ -1207,7 +1207,14 @@ def _sync_integrations_after_uninstall(
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
     # their known-good merged settings (#3226).
-    _allow_executables = getattr(apm_package, "allow_executables", None)
+    from ...security.executables import resolve_project_exec_allow_map
+
+    # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
+    _allow_executables = None
+    if target_survivor_plan:
+        _allow_executables = resolve_project_exec_allow_map(
+            project_root, apm_package, logger=logger
+        )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only
@@ -1534,7 +1541,8 @@ def _cleanup_stale_mcp(
         apm_modules_path,
         trust_transitive_self_defined=True,
     )
-    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies)
+    # Uninstall never admits a server: only previously managed servers survive.
+    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers
     stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 
@@ -1567,19 +1575,25 @@ def _cleanup_stale_mcp(
         if servers.intersection(new_mcp_servers)
     }
     surviving_mcp_servers = new_mcp_servers | retained_unowned
+    surviving_configs = {
+        name: config for name, config in view.configs.items() if name in surviving_mcp_servers
+    }
+    surviving_provenance = {
+        name: source for name, source in view.provenance.items() if name in surviving_mcp_servers
+    }
     if persist:
         MCPIntegrator.update_lockfile(
             surviving_mcp_servers,
             lockfile_path,
-            mcp_configs=dict(view.configs),
-            mcp_config_provenance=dict(view.provenance),
+            mcp_configs=surviving_configs,
+            mcp_config_provenance=surviving_provenance,
             mcp_target_servers=contracted_target_servers,
         )
         return
 
     lockfile.mcp_servers = sorted(surviving_mcp_servers)
-    lockfile.mcp_configs = dict(view.configs)
-    lockfile.mcp_config_provenance = dict(view.provenance)
+    lockfile.mcp_configs = surviving_configs
+    lockfile.mcp_config_provenance = surviving_provenance
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     DeploymentLedgerCodec.replace_mcp_target_servers(

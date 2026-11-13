@@ -17,7 +17,7 @@ from ...models.dependency.mcp import TrustedEnvLiteral
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
-from ...utils.github_host import is_github_hostname
+from ...utils.github_host import is_github_hostname, unambiguous_https_hostname
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import (
     _ENV_PLACEHOLDER_RE,
@@ -1087,8 +1087,6 @@ class CopilotClientAdapter(MCPClientAdapter):
         Returns:
             bool: True if this is a legitimate GitHub MCP server, False otherwise.
         """
-        from urllib.parse import urlparse
-
         github_server_names = [
             "github-mcp-server",
             "github",
@@ -1111,18 +1109,9 @@ class CopilotClientAdapter(MCPClientAdapter):
             server_name and server_name.lower() in [n.lower() for n in github_server_names]
         )
 
-        # Parse and validate hostname from URL
-        hostname = None
-        if url:
-            try:
-                parsed_url = urlparse(url)
-                # Reject non-HTTPS URLs to prevent cleartext token leakage
-                if parsed_url.scheme and parsed_url.scheme.lower() != "https":
-                    return False
-                hostname = parsed_url.hostname
-            except Exception:
-                return False
-
+        # Only an absolute https URL whose host every parser agrees on may
+        # carry a GitHub credential.
+        hostname = unambiguous_https_hostname(url)
         host_matches = bool(hostname and _is_github_mcp_hostname(hostname))
 
         return name_matches and host_matches

@@ -384,7 +384,7 @@ def test_dependency_dev_mcp_isolated_across_installed_lifecycle(
         updated = _run_ok(
             runner,
             scenario,
-            ("update", "--yes", "--target", case.manifest_target),
+            ("update", "--yes", "--target", case.manifest_target, "--trust-transitive-mcp"),
             f"{case.runtime}-update",
         )
         update_state = _snapshot(scenario)
@@ -474,7 +474,7 @@ def test_stale_dependency_dev_mcp_repair_and_frozen_no_write(
         _run_ok(
             runner,
             scenario,
-            ("update", "--yes", "--target", case.manifest_target),
+            ("update", "--yes", "--target", case.manifest_target, "--trust-transitive-mcp"),
             "repair-normal-update",
         )
         updated = _snapshot(scenario)

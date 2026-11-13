@@ -183,7 +183,7 @@ class TestCollectTransitiveMCPDeps:
         assert result[0].name == "ghcr.io/a/server"
 
     def test_collects_dict_deps(self, tmp_path):
-        inline = {"name": "kb", "type": "sse", "url": "https://kb.example.com"}
+        inline = {"name": "kb", "transport": "sse", "version": "1.0.0"}
         pkg_dir = tmp_path / "org" / "pkg-b"
         pkg_dir.mkdir(parents=True)
         (pkg_dir / "apm.yml").write_text(
@@ -1418,3 +1418,65 @@ class TestCodexProjectScopedMCP:
         data = toml.loads(config_path.read_text(encoding="utf-8"))
         assert "keep" in data["mcp_servers"]
         assert "stale" not in data["mcp_servers"]
+
+
+class TestTransitiveTrustClassification:
+    """A transitive declaration is trusted only as a plain registry reference."""
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "io.github.acme/server",
+            {"name": "io.github.acme/server"},
+            {"name": "io.github.acme/server", "version": "1.0.0", "transport": "stdio"},
+            {"name": "io.github.acme/server", "package": "npm", "tools": ["read"]},
+        ],
+    )
+    def test_plain_registry_reference_needs_no_trust(self, entry):
+        dep = (
+            MCPDependency.from_string(entry)
+            if isinstance(entry, str)
+            else MCPDependency.from_dict(entry)
+        )
+        assert dep.requires_transitive_trust is False
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"name": "srv", "registry": False, "transport": "stdio", "command": "srv"},
+            {"name": "srv", "registry": "https://registry.example.com"},
+            {"name": "srv", "headers": {"X-Key": "${SOME_VAR}"}},
+            {"name": "srv", "env": {"LEVEL": "debug"}},
+            {"name": "srv", "args": {"flag": "value"}},
+            {"name": "srv", "url": "https://srv.example.com/mcp"},
+        ],
+    )
+    def test_custom_source_or_overlay_needs_trust(self, entry):
+        assert MCPDependency.from_dict(entry).requires_transitive_trust is True
+
+    def test_compat_collection_skips_overlay_without_trust(self, tmp_path):
+        pkg_dir = tmp_path / "org" / "pkg-overlay"
+        pkg_dir.mkdir(parents=True)
+        entry = {"name": "srv", "registry": "https://registry.example.com", "headers": {"X": "y"}}
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump({"name": "pkg-overlay", "version": "1.0.0", "dependencies": {"mcp": [entry]}})
+        )
+        assert MCPIntegrator.collect_transitive(tmp_path) == []
+        trusted = MCPIntegrator.collect_transitive(tmp_path, trust_private=True)
+        assert [dep.name for dep in trusted] == ["srv"]
+
+
+class TestMCPUrlValidation:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://a.example\\@api.githubcopilot.com/mcp/",
+            "https://a.example /mcp",
+            "https://a\tb/",
+        ],
+    )
+    def test_url_with_parser_dependent_characters_is_rejected(self, url):
+        with pytest.raises(ValueError, match="Invalid MCP url"):
+            MCPDependency.from_dict(
+                {"name": "srv", "registry": False, "transport": "http", "url": url}
+            )
