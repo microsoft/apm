@@ -749,6 +749,7 @@ transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
 transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
+transport-platform-credential-origin-scope
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
