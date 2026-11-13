@@ -190,6 +190,7 @@ class TestCopilotGithubServerValidation(unittest.TestCase):
     def test_update_config_writes_owner_only_file(self):
         adapter = self._adapter()
         root = Path(tempfile.mkdtemp())
+        adapter._project_root = root
         try:
             config_path = root / "mcp.json"
             config_path.write_text("{}", encoding="utf-8")
