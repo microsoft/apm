@@ -20,6 +20,7 @@ from tests.integration._fault_injection_kit import build_world, evidence
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
 ]
 
 _COPILOT = '{\n  "mcpServers": {\n    "user-srv": {"type": "stdio", "command": "mine"},\n  }\n}\n'

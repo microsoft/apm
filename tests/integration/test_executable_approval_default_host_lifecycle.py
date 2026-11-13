@@ -22,7 +22,11 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+]
 
 _REMOTE = "https://github.com/acme/hooky.git"
 _HOOK_COMMAND = "echo approved-hook"

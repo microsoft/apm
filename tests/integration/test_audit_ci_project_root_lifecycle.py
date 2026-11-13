@@ -16,7 +16,11 @@ import pytest
 
 from tests.integration._path_corner_world_kit import CornerWorld, output, tree_bytes, write
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+]
 
 CI = ("audit", "--ci", "--no-policy")
 

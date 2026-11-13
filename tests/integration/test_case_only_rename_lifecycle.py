@@ -22,7 +22,11 @@ from tests.integration._path_corner_world_kit import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+]
 
 RENAMES = {
     ".apm/instructions/Guide.instructions.md": ".apm/instructions/guide.instructions.md",
