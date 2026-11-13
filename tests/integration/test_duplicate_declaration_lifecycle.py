@@ -83,3 +83,35 @@ def test_uninstall_removes_every_declaration_of_one_package(
     world.apm("install", NO_POLICY)
     assert world.lock_bytes() == lock_before
     world.cross_check(present={"test/d"}, absent=frozenset({"test/c", "test/e"}))
+
+
+def test_cross_section_moves_keep_the_declared_pin(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A move or keep reuses the existing declaration's ref and skills (#3693)."""
+    world = World.create(tmp_path, apm_binary_path)
+    rules = world.publish("c") / ".apm" / "instructions" / "c.instructions.md"
+    releases = []
+    for text in ("c v1", "c v2 on main"):
+        rules.write_text(f"---\napplyTo: '**/*.py'\n---\n{text}\n", encoding="ascii")
+        releases.append(world.factory.commit(world.repos["c"], message=text))
+    world.factory.tag(world.repos["c"], "v1.0.0", releases[0])
+    first = releases[0]
+    pinned = {"git": remote("c"), "ref": "v1.0.0"}
+    world.manifest([pinned])
+    world.apm("install", NO_POLICY)
+    lock_before = world.lock_bytes()
+    assert world.locked()["test/c"]["resolved_commit"] == first.sha
+
+    # --dev moves the pinned declaration, not a bare copy tracking main.
+    world.apm("install", "--dev", "test/c", NO_POLICY)
+    assert _sections(world) == ([], [pinned])
+    locked = world.locked()["test/c"]
+    assert locked["resolved_commit"] == first.sha and locked["is_dev"] is True
+
+    # A bare install keeps the dev declaration and its pin untouched.
+    manifest_before = (world.project / "apm.yml").read_bytes()
+    lock_dev = world.lock_bytes()
+    world.apm("install", "test/c", NO_POLICY)
+    assert (world.project / "apm.yml").read_bytes() == manifest_before
+    assert world.lock_bytes() == lock_dev
+    assert lock_dev != lock_before
+    world.cross_check(present={"test/c"})

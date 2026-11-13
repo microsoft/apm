@@ -14,7 +14,6 @@ from apm_cli.install.package_resolution import (
     get_existing_dep_ref_for_identity,
     merge_structured_entry_into_current_deps,
     persist_dependency_list_if_changed,
-    reconcile_cross_section_declarations,
     update_existing_dependency_entry_if_needed,
 )
 from apm_cli.models.apm_package import APMPackage
@@ -394,29 +393,82 @@ def test_explicit_https_upgrade_preserves_metadata_and_repeats_without_writes(
     assert manifest.read_bytes() == original
 
 
-def test_install_dev_moves_a_production_declaration() -> None:
-    """#3693: ``install --dev X`` with X in dependencies moves it (npm)."""
-    data = {"dependencies": {"apm": ["acme/c", "acme/d"]}}
-    section, current, other = dependency_sections(data, dev=True)
-    validated = ["acme/c"]
+def _install_into(manifest: Path, packages: list[str], *, dev: bool) -> dict:
+    """Run the real add-to-manifest owner (offline) and return the written manifest."""
+    from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
 
-    changed = reconcile_cross_section_declarations(validated, {}, other, dev=True)
+    with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+        _validate_and_add_packages_to_apm_yml(packages, dev=dev, manifest_path=manifest)
+    return load_yaml(manifest)
 
-    assert (section, current, changed, validated) == ("devDependencies", [], True, ["acme/c"])
+
+_RESTRICTED = {"git": "https://github.com/acme/c.git", "ref": "v1.0.0", "skills": ["review"]}
+_REGISTRY = {"id": "acme/c", "version": "1.0.0", "registry": "internal"}
+
+
+@pytest.mark.parametrize(
+    "declared", [_RESTRICTED, _REGISTRY, "acme/c#v1.0.0"], ids=["restricted", "registry", "pin"]
+)
+def test_install_dev_moves_a_production_declaration_with_its_fields(
+    tmp_path: Path, declared: object
+) -> None:
+    """#3693: ``install --dev X`` moves X's existing declaration, never a bare copy."""
+    manifest = tmp_path / "apm.yml"
+    dump_yaml_roundtrip(
+        {
+            "name": "p",
+            "version": "1.0.0",
+            "registries": {"internal": {"url": "https://r.example"}},
+            "dependencies": {"apm": [declared, "acme/d"]},
+        },
+        manifest,
+    )
+
+    data = _install_into(manifest, ["acme/c"], dev=True)
+
     assert data["dependencies"]["apm"] == ["acme/d"]
+    assert data["devDependencies"]["apm"] == [declared]
 
 
-def test_plain_install_keeps_a_dev_declaration_in_place() -> None:
-    """#3693: plain ``install X`` keeps X in devDependencies and updates its ref."""
-    data = {"devDependencies": {"apm": ["acme/c#v1.0.0"]}}
-    _section, current, other = dependency_sections(data, dev=False)
-    validated = ["acme/c#v2.0.0"]
+@pytest.mark.parametrize(
+    "declared", [_RESTRICTED, _REGISTRY, "acme/c#v1.0.0"], ids=["restricted", "registry", "pin"]
+)
+def test_plain_install_keeps_a_dev_declaration_and_its_fields(
+    tmp_path: Path, declared: object
+) -> None:
+    """#3693: a bare ``install X`` keeps X in devDependencies, unchanged."""
+    manifest = tmp_path / "apm.yml"
+    dump_yaml_roundtrip(
+        {
+            "name": "p",
+            "version": "1.0.0",
+            "registries": {"internal": {"url": "https://r.example"}},
+            "dependencies": {"apm": ["acme/d"]},
+            "devDependencies": {"apm": ["acme/e", declared]},
+        },
+        manifest,
+    )
+    original = manifest.read_bytes()
 
-    changed = reconcile_cross_section_declarations(validated, {}, other, dev=False)
+    data = _install_into(manifest, ["acme/c"], dev=False)
 
-    assert (current, validated, changed) == ([], [], True)
+    assert data["dependencies"]["apm"] == ["acme/d"]
+    assert data["devDependencies"]["apm"] == ["acme/e", declared]
+    assert manifest.read_bytes() == original
+
+
+def test_explicit_cli_ref_still_updates_the_kept_dev_declaration(tmp_path: Path) -> None:
+    """The existing explicit-change rules apply to the declaration where it lives."""
+    manifest = tmp_path / "apm.yml"
+    dump_yaml_roundtrip(
+        {"name": "p", "version": "1.0.0", "devDependencies": {"apm": ["acme/c#v1.0.0"]}},
+        manifest,
+    )
+
+    data = _install_into(manifest, ["acme/c#v2.0.0"], dev=False)
+
     assert data["devDependencies"]["apm"] == ["acme/c#v2.0.0"]
-    assert "dependencies" in data and "devDependencies" in data
+    assert "acme/c#v2.0.0" not in (data.get("dependencies") or {}).get("apm", [])
 
 
 def test_dependency_sections_never_creates_the_other_section() -> None:

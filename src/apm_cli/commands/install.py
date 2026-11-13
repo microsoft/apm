@@ -74,13 +74,14 @@ from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     apply_cli_skill_pin,
+    borrow_cross_section_declarations,
     cli_skill_subset,
     dependency_reference_to_yaml_entry,
     dependency_sections,
     persist_dependency_list_if_changed,
     propagate_existing_registry_source,
-    reconcile_cross_section_declarations,
     resolve_parsed_dependency_reference,
+    settle_cross_section_declarations,
     try_update_existing_dependency_entry,
     user_scope_rejection_reason,
 )
@@ -620,7 +621,7 @@ def _validate_and_add_packages_to_apm_yml(
     _default_registry_for_cli = get_effective_default_registry(data, create_config=create_config)
 
     dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
-    # Detect duplicates against existing deps
+    cross_section = borrow_cross_section_declarations(packages, current_deps, other_deps, dev=dev)
     existing_identities = _check_package_conflicts(current_deps)
 
     # Validate and canonicalize all package references
@@ -648,8 +649,8 @@ def _validate_and_add_packages_to_apm_yml(
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
     )
-    dependencies_changed |= reconcile_cross_section_declarations(
-        validated_packages, _apm_yml_entries, other_deps, dev=dev, dry_run=dry_run, logger=logger
+    dependencies_changed |= settle_cross_section_declarations(
+        cross_section, current_deps, other_deps, dry_run=dry_run, logger=logger
     )
 
     prospective_package = None

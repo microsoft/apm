@@ -834,8 +834,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         UNINSTALL_RULE,
         "src/apm_cli/install/package_resolution.py",
         _replace(
-            "declared = manifest_declarations_of(other_deps, [entry])",
-            "declared = [item for item in other_deps if item == entry]",
+            "declared = manifest_declarations_of(other_deps, [package])",
+            "declared = [item for item in other_deps if item == package]",
         ),
     ),
     CompoundMutation(

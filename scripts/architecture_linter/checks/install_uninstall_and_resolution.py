@@ -300,7 +300,7 @@ def check_uninstall_selection(provider: FactsProvider) -> tuple[Violation, ...]:
     resolution, resolution_fail = _facts_for(provider, _PACKAGE_RESOLUTION, rule_id)
     findings.extend(resolution_fail)
     if not resolution_fail and not _present(
-        resolution, "declared = manifest_declarations_of(other_deps, [entry])"
+        resolution, "declared = manifest_declarations_of(other_deps, [package])"
     ):
         findings.append(
             _summary(
