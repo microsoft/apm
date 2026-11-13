@@ -825,8 +825,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-cleanup-ownership-release",
         rule_id="install-deployment-cleanup-ownership-release",
         path="src/apm_cli/integration/cleanup.py",
-        old="(result.released if user_content_only else result.skipped_unmanaged)",
-        new="result.skipped_unmanaged",
+        old="release = user_content_only and not failed_path_retained",
+        new="release = user_content_only",
         intent="A skill directory left only for user content pins its removed owner again.",
     ),
     MutationCase(

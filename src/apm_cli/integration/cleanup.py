@@ -66,9 +66,11 @@ class CleanupResult:
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
     released: list[str] = field(default_factory=list)
-    """Skill directories kept on disk because only user content remains in
-    them. Every APM-owned member is gone, so ownership is released rather
-    than retained: no retry could ever remove them."""
+    """Skill directories of a departing owner (orphan cleanup) kept on disk
+    because only user content remains in them. Every APM-owned member is
+    gone and the owner leaves the lockfile, so ownership is released rather
+    than retained. A still-declared owner keeps the directory claim so a
+    later install can remove the directory once the user content is gone."""
 
     deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
@@ -239,7 +241,8 @@ def _safe_remove_skill_directory(
         preview = blocking[:5]
         suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
         file_list = ", ".join(preview) + suffix
-        if user_content_only:
+        release = user_content_only and not failed_path_retained
+        if release:
             message = (
                 f"Kept skill directory {rel_path} for {len(blocking)} file(s) not "
                 f"owned by APM: {file_list}. APM no longer manages it; "
@@ -253,7 +256,7 @@ def _safe_remove_skill_directory(
                 "Remove manually if no longer needed."
             )
         diagnostics.warn(message, package=dep_key)
-        (result.released if user_content_only else result.skipped_unmanaged).append(rel_path)
+        (result.released if release else result.skipped_unmanaged).append(rel_path)
         return
 
     # All remaining files are APM-tracked with matching hashes -- safe

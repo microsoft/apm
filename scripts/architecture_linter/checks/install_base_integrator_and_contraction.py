@@ -230,23 +230,25 @@ _CLEANUP_HELPER = "src/apm_cli/integration/cleanup.py"
 
 
 def check_cleanup_ownership_release(provider: FactsProvider) -> tuple[Violation, ...]:
-    """A skill directory left only for user content releases its ownership.
+    """A departing owner's skill directory left only for user content is released.
 
     ``_safe_remove_skill_directory`` files it under ``CleanupResult.released``
-    and ``CleanupResult.retained`` never includes released paths, so a
-    removed dependency's row and checkout are not pinned by user files.
+    only for orphan cleanup (``failed_path_retained=False``), and
+    ``CleanupResult.retained`` never includes released paths, so a removed
+    dependency's row is not pinned by user files while a still-declared
+    owner keeps its directory claim.
     """
     rule_id = _GUARD_CLEANUP_RELEASE
     facts, failures = _facts_for(provider, _CLEANUP_HELPER, rule_id)
     if failures:
         return tuple(failures)
     findings: list[Violation] = []
-    if not _present(facts, "(result.released if user_content_only else result.skipped_unmanaged)"):
+    if not _present(facts, "release = user_content_only and not failed_path_retained"):
         findings.append(
             _summary(
                 rule_id,
                 _CLEANUP_HELPER,
-                "Skill directories holding only user content must be filed as released",
+                "Only a departing owner's user-content-only skill directory may be released",
             )
         )
     if _present(facts, "*self.released"):

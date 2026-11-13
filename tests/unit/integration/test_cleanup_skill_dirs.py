@@ -195,8 +195,7 @@ class TestSkillDirectoryCleanup:
         )
 
         assert loose_pyc.exists()
-        assert ".agents/skills/my-skill" in result.released
-        assert ".agents/skills/my-skill" not in result.retained
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
 
     def test_skill_dir_preserves_non_bytecode_file_inside_pycache(
         self,
@@ -222,7 +221,7 @@ class TestSkillDirectoryCleanup:
         )
 
         assert note.exists()
-        assert ".agents/skills/my-skill" in result.released
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
 
     def test_skill_dir_not_removed_when_user_file_present(self, project_root, diagnostics):
         """Skill dir is NOT removed when it contains user-created files."""
@@ -247,10 +246,8 @@ class TestSkillDirectoryCleanup:
         )
         # SKILL.md is deleted (it is a file entry)
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
-        # The directory stays for the user's file, but APM owns nothing in it
-        # any more: ownership is released, not retained for a futile retry.
-        assert ".agents/skills/my-skill" in result.released
-        assert result.retained == []
+        # But directory is skipped because of user file
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
         # User file intact
         assert (project_root / ".agents/skills/my-skill/my-notes.txt").exists()
         msgs = [d.message for d in diagnostics._diagnostics]
@@ -292,7 +289,6 @@ class TestSkillDirectoryCleanup:
         assert ".agents/skills/my-skill/references/guide.md" in result.skipped_user_edit
         # Directory skipped because guide.md is still there with mismatch
         assert ".agents/skills/my-skill" in result.skipped_unmanaged
-        assert ".agents/skills/my-skill" not in result.released
         assert asset.exists()
 
     def test_non_skill_dir_still_rejected(self, project_root, diagnostics):
@@ -409,7 +405,49 @@ class TestSkillDirectoryCleanup:
             },
         )
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
-        assert ".agents/skills/my-skill" in result.released
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
         # Symlink and its target remain
         assert link.is_symlink()
         assert target.exists()
+
+
+class TestDepartingOwnerReleasesUserContentDirectory:
+    """Orphan cleanup releases a skill dir kept only for user content (#3677)."""
+
+    def test_orphan_cleanup_releases_dir_holding_only_user_files(self, project_root, diagnostics):
+        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        notes = _make_file(project_root, ".agents/skills/my-skill/my-notes.txt", "user notes\n")
+
+        result = remove_stale_deployed_files(
+            [".agents/skills/my-skill", ".agents/skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            failed_path_retained=False,
+        )
+
+        assert notes.exists()
+        assert result.released == [".agents/skills/my-skill"]
+        assert result.retained == []
+
+    def test_orphan_cleanup_retains_dir_with_edited_apm_member(self, project_root, diagnostics):
+        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        _make_file(project_root, ".agents/skills/my-skill/guide.md", "edited\n")
+
+        result = remove_stale_deployed_files(
+            [
+                ".agents/skills/my-skill",
+                ".agents/skills/my-skill/SKILL.md",
+                ".agents/skills/my-skill/guide.md",
+            ],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            recorded_hashes={".agents/skills/my-skill/guide.md": "sha256:" + "0" * 64},
+            failed_path_retained=False,
+        )
+
+        assert result.released == []
+        assert ".agents/skills/my-skill" in result.retained
