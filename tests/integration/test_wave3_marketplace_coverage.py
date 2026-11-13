@@ -549,11 +549,9 @@ class TestIntegrationScenarios:
             # Get the project directory
             proj_dir = Path(isolated_cwd) / "e2e-test"
 
-            # Add dependencies
+            # init already declares an empty dependencies block
             apm_yml = proj_dir / "apm.yml"
-            content = apm_yml.read_text(encoding="utf-8")
-            content += "\ndependencies:\n  apm: []\n"
-            apm_yml.write_text(content, encoding="utf-8")
+            assert "dependencies:" in apm_yml.read_text(encoding="utf-8")
 
             # Create lock file
             lock_file = proj_dir / "apm.lock.yaml"
