@@ -8,8 +8,8 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 SCHEMA_VERSION = 1
 _SOURCE_TOKEN = re.compile(
-    r"""[a-zA-Z][a-zA-Z0-9+.-]*://[^\s<>"']+|[^\s/@:]+@[^\s/:]+:[^\s<>"']+"""
-    r"""|(?<!\w)(?:/|~/|[A-Za-z]:[\\/])[^\s<>"']+"""
+    r"""[a-zA-Z][a-zA-Z0-9+.-]*://[^\s<>"]+|[^\s/@]+@[^\s/:]+:[^\s<>"]+"""
+    r"""|(?<!\w)(?:/|~/|[A-Za-z]:[\\/])[^\s<>"]+"""
 )
 
 
@@ -28,12 +28,50 @@ def safe_text(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
 
+    from apm_cli.cache.paths import cache_roots_for_display
+    from apm_cli.config import CONFIG_DIR
+
+    text = value
+    try:
+        roots = (*cache_roots_for_display(), Path(CONFIG_DIR) / "cache")
+        for root in roots:
+            root_str = root.resolve().as_posix()
+            if text == root_str or text.startswith(root_str + "/"):
+                return "[internal-cache]"
+            # Find and redact complete paths that start with this root
+            # Match paths that may contain spaces: root + "/" + anything until whitespace followed by lowercase word
+            root_pattern = re.escape(root_str) + r"(?:/[^\s<>\"]*(?:\s+[^\s<>\"]+)*)*"
+            matches = list(re.finditer(root_pattern, text))
+            for match in reversed(matches):
+                path_str = match.group()
+                try:
+                    path_obj = Path(path_str).resolve()
+                    if any(path_obj.is_relative_to(r.resolve()) for r in roots):
+                        text = text[: match.start()] + "[internal-cache]" + text[match.end() :]
+                except (OSError, ValueError, RuntimeError):
+                    pass
+    except (OSError, ValueError, RuntimeError):
+        pass
+
     def clean(match: re.Match[str]) -> str:
         token = match.group()
         if token.startswith(("/", "~/", "file://")) or re.match(r"^[A-Za-z]:[\\/]", token):
             return safe_source(token) or "[internal-cache]"
         if "://" not in token:
-            token = "ssh://" + token.replace(":", "/", 1)
+            # SSH URL: user:password@host:port or user@host:path
+            # Parse it to extract and redact credentials
+            try:
+                at_index = token.rfind("@")
+                if at_index != -1:
+                    # Has credentials - redact them by taking only the part after @
+                    host_part = token[at_index + 1 :]
+                    parsed = urlsplit("ssh://" + host_part)
+                    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+                else:
+                    # No @ sign - just format as SSH URL
+                    token = "ssh://" + token.replace(":", "/", 1)
+            except ValueError:
+                return "[redacted-url]"
         try:
             parsed = urlsplit(token)
             return urlunsplit(
@@ -42,7 +80,7 @@ def safe_text(value: object) -> str | None:
         except ValueError:
             return "[redacted-url]"
 
-    result = _SOURCE_TOKEN.sub(clean, value)
+    result = _SOURCE_TOKEN.sub(clean, text)
     return None if result in {"[internal-cache]", "[redacted-url]"} else result
 
 
