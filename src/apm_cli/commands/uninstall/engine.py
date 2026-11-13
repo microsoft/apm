@@ -1210,11 +1210,11 @@ def _sync_integrations_after_uninstall(
     from ...security.executables import resolve_project_exec_allow_map
 
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
-    _allow_executables = (
-        resolve_project_exec_allow_map(project_root, apm_package, logger=logger)
-        if target_survivor_plan
-        else None
-    )
+    _allow_executables = None
+    if target_survivor_plan:
+        _allow_executables = resolve_project_exec_allow_map(
+            project_root, apm_package, logger=logger
+        )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only

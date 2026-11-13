@@ -187,12 +187,13 @@ class TestCopilotGithubServerValidation(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertFalse(adapter._is_github_server("github", url))
 
-    def test_update_config_writes_owner_only_file(self):
+    def test_update_config_writes_owner_only_file_outside_the_project(self):
         adapter = self._adapter()
         root = Path(tempfile.mkdtemp())
-        adapter._project_root = root
+        adapter._project_root = root / "project"
         try:
-            config_path = root / "mcp.json"
+            config_path = root / "home" / "mcp.json"
+            config_path.parent.mkdir()
             config_path.write_text("{}", encoding="utf-8")
             config_path.chmod(0o644)
             with patch.object(adapter, "get_config_path", return_value=str(config_path)):

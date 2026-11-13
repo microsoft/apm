@@ -160,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <bundle>` deploys only files under a target's primitive directories, and bundle hooks and canvas files follow the executables gate. (#3716)
 - The executables gate now covers package-declared self-defined MCP and LSP servers by the declaring package, survives `apm uninstall` and `apm prune` rebuilds, and matches deny rules on the canonical package identity in any spelling. (#3716)
 - A full-SHA manifest pin stays authoritative over the commit recorded in `apm.lock.yaml`. (#3716)
-- User-scope Copilot-family MCP configs and `.github/mcp.json` are written owner-only (0600). (#3716)
+- Copilot-family MCP configs outside the project, such as Windsurf's, are written owner-only (0600). (#3716)
 
 ## [0.35.1] - 2026-11-11
 

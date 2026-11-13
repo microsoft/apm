@@ -1971,9 +1971,9 @@ class HookIntegrator(BaseIntegrator):
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
         )
-        allow_map = (
-            resolve_project_exec_allow_map(project_root, apm_package) if survivor_plan else None
-        )
+        allow_map = None
+        if survivor_plan:
+            allow_map = resolve_project_exec_allow_map(project_root, apm_package)
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(

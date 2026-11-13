@@ -37,7 +37,7 @@ pytestmark = [
 ]
 
 _POLICY = {"name": "contoso-policy", "version": "1.0.0", "enforcement": "block"}
-_ALLOW_KEY = "github.com/contoso/pkg-hook"
+_ALLOW_KEY = "contoso/pkg-hook#v1.0.0"
 
 
 def _publish_hook_package(world: PolicyScopeWorld) -> PublishedPackage:
