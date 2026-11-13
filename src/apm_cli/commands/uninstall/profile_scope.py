@@ -60,25 +60,34 @@ def split_profile_retained(packages: Iterable, lockfile, key_of) -> tuple[list, 
 def selected_profile_survivors(lockfile, dependency_keys: Collection[str]) -> set[str]:
     """Return rows of *dependency_keys* that a selected-profile uninstall keeps.
 
-    Only rows under the selected root of a runtime whose profiles split the
-    package are removed: the runtime that has rows under another profile
-    root (#3425). Every other row survives, including another runtime's
-    selected root and targets without profiles, as for a non-profile target.
+    Each package loses only rows under the selected root of a runtime whose
+    profiles split that package: the runtime with rows of the same package
+    under another profile root (#3425). The split is computed per package,
+    so a batched uninstall removes exactly what separate uninstalls would.
+    Every other row survives, including another runtime's selected root and
+    targets without profiles, as for a non-profile target.
     """
     from apm_cli.integration.targets import get_integration_prefixes, selected_user_profiles
 
-    split = {target for _owner, target, _value in _other_profile_records(lockfile, dependency_keys)}
-    profiles = [profile for name, profile in selected_user_profiles().items() if name in split]
-    prefixes = tuple(
-        prefix.replace("\\", "/") for prefix in get_integration_prefixes(targets=profiles)
-    )
-    return {
-        row
-        for key in dependency_keys
-        if key in lockfile.dependencies
-        for row in lockfile.dependencies[key].deployed_files
-        if "://" in row or not row.replace("\\", "/").startswith(prefixes)
-    }
+    split: dict[str, set[str]] = {}
+    for owner, target, _value in _other_profile_records(lockfile, dependency_keys):
+        split.setdefault(owner, set()).add(target)
+    profiles = selected_user_profiles()
+    survivors: set[str] = set()
+    for key in dependency_keys:
+        dependency = lockfile.dependencies.get(key)
+        if dependency is None:
+            continue
+        removable = [profile for name, profile in profiles.items() if name in split.get(key, ())]
+        prefixes = tuple(
+            prefix.replace("\\", "/") for prefix in get_integration_prefixes(targets=removable)
+        )
+        survivors.update(
+            row
+            for row in dependency.deployed_files
+            if "://" in row or not row.replace("\\", "/").startswith(prefixes)
+        )
+    return survivors
 
 
 def retire_selected_profile_rows(
