@@ -66,6 +66,7 @@ compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 replace:       <list<ReplacementRule>>    # candidate; explicit selector required
+marketplaces:  <list<MarketplaceEntry>>   # user manifest only; see 3.14
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
 ```
 
@@ -412,6 +413,36 @@ additive `replace` key. Verified v0.25.0, v0.32.0 and v0.33.0 readers reject thi
 selector and lock version `"3"`; v0.24.1 does not. Rejection is not feature support,
 and untested clients are not qualified. See the
 [usage and compatibility warning](../../consumer/manage-dependencies/#replace-a-source-candidate).
+
+---
+
+### 3.14. `marketplaces` (user manifest only)
+
+| | |
+|---|---|
+| **Type** | `list<MarketplaceEntry>` |
+| **Required** | OPTIONAL |
+| **Scope** | Only the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`). A project or package `apm.yml` that contains the key fails to parse with an error naming the user manifest. |
+| **Description** | Marketplaces that `apm install -g` registers for discovery. It registers missing entries, updates changed ones, and removes entries it registered earlier that are no longer listed. Registrations made with `apm marketplace add` are never overwritten or removed. |
+
+```yaml
+marketplaces:
+  - name: acme
+    source: https://github.com/acme-org/agent-marketplace#v1.2.0
+  - name: internal
+    source: git@gitea.example.com:platform/marketplace.git
+    ref: v3.0.0
+```
+
+| Sub-key | Type | Required | Constraint |
+|---|---|---|---|
+| `name` | `string` | REQUIRED | Letters, digits, `.`, `_` and `-`; unique (case-insensitive) in the list. Used as `PKG@NAME`. |
+| `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). No `--host` equivalent; use a full URL for non-default hosts. Local paths must be absolute or start with `~/`. |
+| `ref` | `string` | OPTIONAL | Same as `--ref`. Cannot be combined with a `#ref` in `source`. |
+
+Unknown entry keys are rejected. Registering a marketplace does not install
+packages or grant trust. See
+[Declare marketplaces in your user manifest](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
 
 ---
 
@@ -947,7 +978,7 @@ compilation:
 
 ### 6.2. `compilation.agents_md`
 
-Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files and non-root placements. An unmarked project-root `AGENTS.md` is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored root file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
+Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files. An unmarked `AGENTS.md`, at the project root or in a distributed subdirectory, is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|

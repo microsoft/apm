@@ -134,6 +134,9 @@ removes a package's files and lockfile rows only under the selected
 `CLAUDE_CONFIG_DIR` (or `~/.claude`). Files deployed to another profile stay.
 If another profile still uses the package, it stays in `~/.apm/apm.yml` and
 `apm_modules/`; uninstall it with that profile selected to remove it everywhere.
+Hermes homes (`HERMES_HOME`) follow the same rule. Only the runtime whose
+profiles share the package loses files: selecting a Claude profile leaves
+`~/.hermes` (and other targets such as `~/.agents`) untouched, and the reverse.
 The selected profile is matched by path; symlinks are not resolved.
 Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
 Codex agents and hooks.
@@ -162,10 +165,11 @@ command; `--verbose` includes the underlying error. Earlier deletions in a
 multi-package request are not rolled back.
 
 If a target-scoped file owned only by a removed package was edited or cannot be
-deleted, uninstall lists the retained paths and exits before changing `apm.yml`
-or the on-disk `apm.lock.yaml`. Direct and orphan directories run first and may
-already be gone; declarations and deployed ownership remain. Resolve the listed
-files and retry the same uninstall command.
+deleted, uninstall lists the retained paths and exits before changing `apm.yml`.
+Files it already removed are dropped from `apm.lock.yaml`, so the lockfile
+claims only what is still on disk. Direct and orphan directories run first and
+may already be gone; declarations remain. Resolve the listed files and retry the
+same uninstall command.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the

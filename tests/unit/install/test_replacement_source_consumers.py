@@ -27,6 +27,7 @@ from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
 from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
+from apm_cli.install.phases.local_content import materialize_local_package_for_replay
 from apm_cli.install.pipeline import _preflight_auth_check
 from apm_cli.install.plan import build_update_plan
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
@@ -222,7 +223,9 @@ def test_replacement_uninstall_bounds_unique_unverifiable_manifest_names(
     )
     lock = LockFile(replacements=[])
     with (
-        patch("apm_cli.commands.uninstall.engine._read_survivor_direct_refs", return_value=[]),
+        patch(
+            "apm_cli.commands.uninstall.engine._read_survivor_direct_refs", return_value=([], [])
+        ),
         patch(
             "apm_cli.deps.reachability.compute_forward_reachable_keys",
             return_value=reachability,
@@ -344,11 +347,12 @@ def test_retained_request_alias_does_not_reassign_the_owned_slot(tmp_path: Path)
 def test_local_replacement_audit_reads_source_not_upstream_cache(tmp_path: Path) -> None:
     source = tmp_path.parent / f"{tmp_path.name}-local"
     source.mkdir()
+    (source / "apm.yml").write_text("name: local\nversion: 1.0.0\n", encoding="ascii")
     _, locked, lock = _locked(tmp_path, {"path": str(source)})
-    assert (
-        _materialize_install_path(locked, tmp_path, tmp_path / "scratch", True, lockfile=lock)
-        == source
-    )
+    replay = _materialize_install_path(locked, tmp_path, tmp_path / "scratch", True, lockfile=lock)
+    # Replay copies the selected source through install's local package image.
+    assert replay.is_relative_to(tmp_path / "scratch")
+    assert (replay / "apm.yml").read_bytes() == (source / "apm.yml").read_bytes()
 
 
 def test_native_local_replacement_audit_uses_current_selected_source_bytes(tmp_path: Path) -> None:
@@ -362,7 +366,10 @@ def test_native_local_replacement_audit_uses_current_selected_source_bytes(tmp_p
     (candidate / "SKILL.md").write_text("old selected content\n", encoding="ascii")
     locked.content_hash = compute_package_hash(candidate)
     scratch = tmp_path / "scratch"
-    replay = selected.get_install_path(scratch / "apm_modules")
+    replay = materialize_local_package_for_replay(
+        locked.to_dependency_ref(), tmp_path, scratch / "apm_modules"
+    )
+    assert replay == selected.get_install_path(scratch / "apm_modules")
     with pytest.raises(AgentPluginDeploymentBoundaryError, match="cache differs"):
         verify_native_plugin_cache(locked, source, replay, modules, scratch)
     (candidate / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())

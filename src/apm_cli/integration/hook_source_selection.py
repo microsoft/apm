@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,20 +88,36 @@ def _relative_hook_script_bases(
     return bases
 
 
-def _resolve_relative_hook_script(
+def resolve_relative_hook_script(
     package_path: Path,
     hook_file_dir: Path | None,
     rel_path: str,
+    *,
+    lexical: bool = False,
 ) -> Path | None:
-    """Resolve a relative hook script path without escaping the package."""
+    """Resolve a relative hook script path without escaping the package.
+
+    Installation copies the resolved file. Producers pass ``lexical=True`` to
+    receive the unresolved path, including linked components, so they can
+    reject symlinks as :func:`resolve_plugin_root_hook_script` allows. The
+    lexical containment test is only a pre-filter; callers must still validate
+    the returned path with a resolving containment check.
+    """
     last_candidate: Path | None = None
     for base in _relative_hook_script_bases(package_path, hook_file_dir):
-        try:
-            candidate = ensure_path_within(base / rel_path, package_path)
-        except PathTraversalError:
-            continue
+        if lexical:
+            candidate = Path(os.path.normpath(base / rel_path))
+            if not candidate.is_relative_to(package_path):
+                continue
+            found = candidate.is_file() or candidate.is_symlink()
+        else:
+            try:
+                candidate = ensure_path_within(base / rel_path, package_path)
+            except PathTraversalError:
+                continue
+            found = candidate.is_file()
         last_candidate = candidate
-        if candidate.exists() and candidate.is_file():
+        if found:
             return candidate
     return last_candidate
 
@@ -148,7 +165,7 @@ def _referenced_hook_source_files(
             if source_file.is_file():
                 source_files.add(source_file)
         for match in iter_relative_script_paths(command):
-            source_file = _resolve_relative_hook_script(
+            source_file = resolve_relative_hook_script(
                 package_path,
                 hook_file_dir,
                 match.group(1)[2:].replace("\\", "/"),

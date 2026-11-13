@@ -13,7 +13,7 @@ Exit-code contract (consumed by the ``apm audit --ci`` command):
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast  # noqa: UP035
 
@@ -542,6 +542,119 @@ def _check_config_consistency(
     )
 
 
+@dataclass(frozen=True)
+class DeployedHashDrift:
+    """One deployed file whose on-disk bytes differ from its locked hash envelope."""
+
+    owner: str
+    path: str
+    expected: str
+    actual: str
+
+
+def resolve_audit_scope(
+    project_root: Path, lock: LockFile | None
+) -> tuple[Path, bool, Sequence[TargetProfile]]:
+    """Return the deployment root, user-scope flag and targets audit verifies against."""
+    from ..core.scope import get_workspace_deploy_root
+    from ..deps.lockfile import LockFile
+    from ..integration.targets import resolve_audit_targets
+
+    deployment_root = get_workspace_deploy_root(project_root)
+    user_scope = deployment_root != project_root.resolve()
+    targets = resolve_audit_targets(
+        project_root,
+        user_scope=user_scope,
+        lockfile=lock if lock is not None else LockFile(),
+    )
+    return deployment_root, user_scope, targets
+
+
+def verify_deployed_file_hashes(
+    deploy_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile] = (),
+) -> tuple[list[DeployedHashDrift], list[str]]:
+    """Re-verify every locked deployed-file hash against on-disk bytes (req-lk-017).
+
+    Single owner shared by ``apm audit`` content-integrity and the
+    ``apm install --frozen`` post-deploy check. Returns the hash
+    mismatches and the claimed paths that resolve unsafely. Relative claims
+    resolve against *deploy_root*, the live deployment root. Missing files
+    are skipped: ``deployed-files-present`` owns that signal.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.deployment_state import LocatorKind
+    from ..integration.targets import KNOWN_TARGETS
+    from ..utils.content_hash import compute_file_hash
+
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+
+    def _has_symlink_component(path: Path) -> bool:
+        try:
+            relative = path.relative_to(deploy_root)
+        except ValueError:
+            return path.is_symlink()
+        current = deploy_root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return True
+        return False
+
+    # Per-file hash verification across canonical deployment records.
+    hash_mismatches: list[DeployedHashDrift] = []
+    unresolved_hash_paths: list[str] = []
+    for record in ledger.records.values():
+        expected_hash = record.content_hash
+        if expected_hash is None:
+            continue
+        locator = record.locator
+        if locator.kind == LocatorKind.URI:
+            continue
+        if locator.kind == LocatorKind.PROJECT_RELATIVE:
+            file_path = _resolve_deployed_file_path(locator.value, deploy_root, targets)
+            if file_path is None:
+                unresolved_hash_paths.append(locator.value)
+                continue
+        else:
+            target = next(
+                (candidate for candidate in targets if candidate.name == locator.target),
+                KNOWN_TARGETS.get(locator.target),
+            )
+            if target is None:
+                continue
+            try:
+                resolved = DeploymentLedgerCodec.resolve_locator(
+                    locator,
+                    project_root=deploy_root,
+                    target=target,
+                )
+            except (OSError, RuntimeError, ValueError):
+                unresolved_hash_paths.append(locator.value)
+                continue
+            if isinstance(resolved, str):
+                unresolved_hash_paths.append(locator.value)
+                continue
+            file_path = resolved
+        if not file_path.exists():
+            continue  # _check_deployed_files_present owns this signal
+        if locator.kind == LocatorKind.PROJECT_RELATIVE and _has_symlink_component(file_path):
+            continue
+        if file_path.is_symlink() or not file_path.is_file():
+            unresolved_hash_paths.append(locator.value)
+            continue
+        actual_hash = compute_file_hash(file_path)
+        if actual_hash != expected_hash:
+            hash_mismatches.append(
+                DeployedHashDrift(
+                    record.active_owner or "", locator.value, expected_hash, actual_hash
+                )
+            )
+
+    return hash_mismatches, unresolved_hash_paths
+
+
 def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
@@ -568,7 +681,6 @@ def _check_content_integrity(
     recorded hash (e.g. directories) are skipped silently.
     """
     from ..security.file_scanner import scan_project_result
-    from ..utils.content_hash import compute_file_hash
 
     # Reuse the already-parsed lock and union its recorded paths with the
     # independently governed deploy-tree scope. The scanner owns exact path
@@ -595,8 +707,6 @@ def _check_content_integrity(
     )
 
     from ..core.deployment_ledger import DeploymentLedgerCodec
-    from ..core.deployment_state import LocatorKind
-    from ..integration.targets import KNOWN_TARGETS
 
     ledger = DeploymentLedgerCodec.from_lockfile(lock)
     ledger_values = {
@@ -609,63 +719,9 @@ def _check_content_integrity(
         legacy_hash_paths.update(dependency.deployed_file_hashes)
     missing_ownership = sorted(legacy_hash_paths.difference(ledger_values))
 
-    def _has_symlink_component(path: Path) -> bool:
-        try:
-            relative = path.relative_to(project_root)
-        except ValueError:
-            return path.is_symlink()
-        current = project_root
-        for part in relative.parts:
-            current = current / part
-            if current.is_symlink():
-                return True
-        return False
-
-    # Per-file hash verification across canonical deployment records.
-    hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
-    unresolved_hash_paths: list[str] = []
-    for record in ledger.records.values():
-        expected_hash = record.content_hash
-        if expected_hash is None:
-            continue
-        locator = record.locator
-        if locator.kind == LocatorKind.URI:
-            continue
-        if locator.kind == LocatorKind.PROJECT_RELATIVE:
-            file_path = _resolve_deployed_file_path(locator.value, project_root, targets)
-            if file_path is None:
-                unresolved_hash_paths.append(locator.value)
-                continue
-        else:
-            target = next(
-                (candidate for candidate in targets if candidate.name == locator.target),
-                KNOWN_TARGETS.get(locator.target),
-            )
-            if target is None:
-                continue
-            try:
-                resolved = DeploymentLedgerCodec.resolve_locator(
-                    locator,
-                    project_root=project_root,
-                    target=target,
-                )
-            except (OSError, RuntimeError, ValueError):
-                unresolved_hash_paths.append(locator.value)
-                continue
-            if isinstance(resolved, str):
-                unresolved_hash_paths.append(locator.value)
-                continue
-            file_path = resolved
-        if not file_path.exists():
-            continue  # _check_deployed_files_present owns this signal
-        if locator.kind == LocatorKind.PROJECT_RELATIVE and _has_symlink_component(file_path):
-            continue
-        if file_path.is_symlink() or not file_path.is_file():
-            unresolved_hash_paths.append(locator.value)
-            continue
-        actual_hash = compute_file_hash(file_path)
-        if actual_hash != expected_hash:
-            hash_mismatches.append((record.active_owner, locator.value, expected_hash, actual_hash))
+    hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(
+        project_root, lock, targets
+    )
 
     if (
         not critical_files
@@ -693,7 +749,9 @@ def _check_content_integrity(
         details.append(f"missing-ownership: {rel_path}")
     for rel_path in unresolved_hash_paths:
         details.append(f"unresolved: {rel_path}")
-    for dep_key, rel_path, expected, actual in hash_mismatches:
+    for dep_key, rel_path, expected, actual in (
+        (drift.owner, drift.path, drift.expected, drift.actual) for drift in hash_mismatches
+    ):
         # Truncate hashes for terminal width; full hashes available via JSON output.
         exp_short = expected.split(":", 1)[-1][:12] if ":" in expected else expected[:12]
         act_short = actual.split(":", 1)[-1][:12] if ":" in actual else actual[:12]
@@ -962,22 +1020,13 @@ def run_baseline_checks(
     failure (``passed=False``); otherwise it is an advisory warning only.
     Returns :class:`CIAuditResult` with individual check results.
     """
-    from ..core.scope import get_workspace_deploy_root
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
-    deployment_root = get_workspace_deploy_root(project_root)
-    user_scope = deployment_root != project_root.resolve()
-    from ..integration.targets import resolve_audit_targets
-
     lockfile_path = get_lockfile_path(project_root)
     lock = LockFile.read(lockfile_path)
-    resolved_targets = resolve_audit_targets(
-        project_root,
-        user_scope=user_scope,
-        lockfile=lock if lock is not None else LockFile(),
-    )
+    deployment_root, user_scope, resolved_targets = resolve_audit_scope(project_root, lock)
     apm_yml_path = project_root / "apm.yml"
 
     # Parse manifest ONCE -- this function owns parse-error handling.

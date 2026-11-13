@@ -265,13 +265,9 @@ def mcp_install(ctx, name):
     else:
         forwarded = ["install", "--mcp", name, *option_args, *ctx.args]
 
-    try:
-        cli.main(args=forwarded, standalone_mode=False)
-    except SystemExit as e:
-        sys.exit(e.code if e.code is not None else 0)
-    except click.ClickException as e:
-        e.show()
-        sys.exit(e.exit_code)
+    # Standalone mode exits through the same path as 'apm install': the install
+    # outcome owner's ctx.exit(code) and Click's error rendering and exit codes.
+    cli.main(args=forwarded, prog_name="apm")
 
 
 @mcp.command(help="Search MCP servers in registry")

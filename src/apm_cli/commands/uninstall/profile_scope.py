@@ -13,8 +13,8 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable
 
 
-def other_profile_rows(lockfile, dependency_keys: Collection[str]) -> dict[str, frozenset[str]]:
-    """Return each key's lockfile rows recorded under another profile root.
+def _other_profile_records(lockfile, dependency_keys: Collection[str]):
+    """Yield ``(owner, target, value)`` for rows recorded under another profile root.
 
     A row belongs to another profile when its ledger record names a target
     of :data:`USER_ROOT_ENV_VARS` and the value lies outside that target's
@@ -25,7 +25,6 @@ def other_profile_rows(lockfile, dependency_keys: Collection[str]) -> dict[str, 
 
     profiles = selected_user_profiles()
     keys = {key for key in dependency_keys if key in lockfile.dependencies}
-    rows: dict[str, set[str]] = {}
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         profile = profiles.get(record.locator.target)
         value = record.locator.value
@@ -33,7 +32,14 @@ def other_profile_rows(lockfile, dependency_keys: Collection[str]) -> dict[str, 
             continue
         for owner in keys.intersection(record.owners):
             if value in lockfile.dependencies[owner].deployed_files:
-                rows.setdefault(owner, set()).add(value)
+                yield owner, record.locator.target, value
+
+
+def other_profile_rows(lockfile, dependency_keys: Collection[str]) -> dict[str, frozenset[str]]:
+    """Return each key's lockfile rows recorded under another profile root."""
+    rows: dict[str, set[str]] = {}
+    for owner, _target, value in _other_profile_records(lockfile, dependency_keys):
+        rows.setdefault(owner, set()).add(value)
     return {key: frozenset(values) for key, values in rows.items()}
 
 
@@ -54,22 +60,34 @@ def split_profile_retained(packages: Iterable, lockfile, key_of) -> tuple[list, 
 def selected_profile_survivors(lockfile, dependency_keys: Collection[str]) -> set[str]:
     """Return rows of *dependency_keys* that a selected-profile uninstall keeps.
 
-    Only rows under a selected profile root are removed; every other row
-    (another profile, another target) survives.
+    Each package loses only rows under the selected root of a runtime whose
+    profiles split that package: the runtime with rows of the same package
+    under another profile root (#3425). The split is computed per package,
+    so a batched uninstall removes exactly what separate uninstalls would.
+    Every other row survives, including another runtime's selected root and
+    targets without profiles, as for a non-profile target.
     """
     from apm_cli.integration.targets import get_integration_prefixes, selected_user_profiles
 
-    prefixes = tuple(
-        prefix.replace("\\", "/")
-        for prefix in get_integration_prefixes(targets=list(selected_user_profiles().values()))
-    )
-    return {
-        row
-        for key in dependency_keys
-        if key in lockfile.dependencies
-        for row in lockfile.dependencies[key].deployed_files
-        if "://" in row or not row.replace("\\", "/").startswith(prefixes)
-    }
+    split: dict[str, set[str]] = {}
+    for owner, target, _value in _other_profile_records(lockfile, dependency_keys):
+        split.setdefault(owner, set()).add(target)
+    profiles = selected_user_profiles()
+    survivors: set[str] = set()
+    for key in dependency_keys:
+        dependency = lockfile.dependencies.get(key)
+        if dependency is None:
+            continue
+        removable = [profile for name, profile in profiles.items() if name in split.get(key, ())]
+        prefixes = tuple(
+            prefix.replace("\\", "/") for prefix in get_integration_prefixes(targets=removable)
+        )
+        survivors.update(
+            row
+            for row in dependency.deployed_files
+            if "://" in row or not row.replace("\\", "/").startswith(prefixes)
+        )
+    return survivors
 
 
 def retire_selected_profile_rows(

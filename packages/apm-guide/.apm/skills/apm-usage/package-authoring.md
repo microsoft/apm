@@ -124,7 +124,12 @@ files and directories, including `.apm/agents -> ../agents`.
 directories under `.apm/agents/` or real `*.agent.md` files at root, then
 rerun `apm install`. Local-path dependencies (`./...` or `../...`) still work:
 contained symlinks are validated and copied as real files into
-`apm_modules/` before agent discovery.
+`apm_modules/` before agent discovery. `apm pack` likewise does not follow
+symlinked source files and names each skipped link in a warning.
+
+`apm install <bundle>` (a packed Claude plugin bundle) does not register
+plugin hooks yet: `hooks.json` and `hooks/` files are skipped with one
+warning per file. Install the package from source to deploy its hooks.
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
@@ -149,7 +154,9 @@ For legacy Claude plugin output (`apm pack --format plugin` or
 Plugin-root command paths are rewritten to their packed locations, including
 `.apm/skills/...` to `skills/...` and `.apm/hooks/...` to `hooks/...`.
 References may resolve relative to the source hook descriptor when absent
-at the package root. Sibling assets and Node module type are preserved.
+at the package root. A `./` script reference is packed the way `apm install`
+resolves it and anchored on the installed plugin root (for example
+`"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`); a symlinked script fails pack. Sibling assets and Node module type are preserved.
 Packing never executes scripts or translates hook semantics between hosts.
 Quoted filenames and selected directory references retain their meaning after
 relocation. Selected files must materialize each referenced directory; empty

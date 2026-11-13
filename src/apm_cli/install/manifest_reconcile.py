@@ -39,6 +39,7 @@ from .helpers.reconciliation_scope import (
     _scoped_known_targets_for_reconciliation,
 )
 from .presentation import surface_target_cleanup
+from .selected_cleanup import SelectedCleanupOutcome
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -753,7 +754,7 @@ def reconcile_target_deployed_files(
     diagnostics: DiagnosticCollector,
     dependency_keys: set[str] | None = None,
     remove_selected_ownership: bool = False,
-    retained_selected_paths: set[str] | None = None,
+    selected_outcome: SelectedCleanupOutcome | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
     preserved_selected_values: frozenset[str] = frozenset(),
@@ -770,7 +771,8 @@ def reconcile_target_deployed_files(
 
     With *remove_selected_ownership*, *preserved_selected_values* lists rows
     of the selected dependencies that must stay on disk, such as rows a
-    selected-profile uninstall keeps for another profile.
+    selected-profile uninstall keeps for another profile, and
+    *selected_outcome* collects what each selected dependency still owns.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import DeploymentLedger
@@ -865,9 +867,14 @@ def reconcile_target_deployed_files(
             user_scope=user_scope,
         )
         if selected_owner_removal:
-            if retained_selected_paths is not None:
-                retained_selected_paths.update(
-                    path for path in files if path not in survivor_files and "://" not in path
+            if selected_outcome is not None:
+                selected_outcome.record(
+                    dep_key,
+                    dependency,
+                    files,
+                    hashes,
+                    survivors=survivor_files,
+                    preserved=preserved_selected_values,
                 )
             continue
         if files != prior_files or hashes != prior_hashes:

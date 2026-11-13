@@ -208,5 +208,5 @@ def test_static_guard_safe_installer_centralizes_naming_in_adapter():
             pytest.fail(
                 f"safe_installer.py references {node.value!r} at line {node.lineno}; "
                 "MCP server config key determination must be centralized in "
-                "MCPClientAdapter._determine_config_key."
+                "MCPClientAdapter.determine_config_key."
             )

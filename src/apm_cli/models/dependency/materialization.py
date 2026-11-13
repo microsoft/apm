@@ -330,6 +330,32 @@ def find_case_equivalent_materialization_path(
     return current
 
 
+def installed_package_path(
+    dependency: DependencyReference,
+    apm_modules_dir: Path,
+    *,
+    reader: MaterializationPathReader = _NATIVE_READER,
+) -> Path:
+    """Return where *dependency* is materialized for read-only consumers.
+
+    An existing case-equivalent directory (e.g. ``Microsoft/APM`` for a
+    ``microsoft/apm`` declaration on a case-sensitive file system) is
+    recognized without renaming it; otherwise the canonical install path.
+    """
+    desired = dependency.get_install_path(apm_modules_dir)
+    if dependency.alias is None and dependency.has_case_insensitive_repo_identity:
+        existing = find_case_equivalent_materialization_path(
+            desired,
+            apm_modules_dir,
+            dependency=dependency,
+            reader=reader,
+            match_complete_path=True,
+        )
+        if existing is not None:
+            return existing
+    return desired
+
+
 def _relocate_case_components(
     existing: Path,
     desired: Path,

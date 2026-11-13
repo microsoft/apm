@@ -12,7 +12,8 @@ Two distinct cleanup passes run in sequence:
     ``ctx.intended_dep_keys``, deployed files not freshly claimed by an active
     package are removed. ``targets=None`` is passed deliberately so the helper
     validates against *all* ``KNOWN_TARGETS``, not just the active install's
-    target set.
+    target set. ``--frozen`` never rewrites the lockfile, so it retains every
+    orphan instead (files, checkout and claims) until a normal install.
 
 **Block B -- Intra-package stale-file cleanup**
     For every dependency still in the manifest, files present in the old
@@ -137,6 +138,14 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 continue  # still in manifest -- handled by stale-cleanup below
             if only_packages and _orphan_key not in partial_dropped:
                 continue  # unrelated to the selected packages' subtree
+            if ctx.frozen:
+                # Frozen never rewrites the lock, so an undeclared package keeps
+                # its files, checkout and claims until a normal install (#3662).
+                orphan_cleanup_retained[_orphan_key] = {
+                    path: _orphan_dep.deployed_file_hashes.get(path)
+                    for path in _orphan_dep.deployed_files
+                }
+                continue
             orphan_only_files = [
                 deployed_file
                 for deployed_file in _orphan_dep.deployed_files
@@ -177,6 +186,8 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             BaseIntegrator.cleanup_empty_parents(_orphan_deleted_targets, project_root)
         if logger:
             logger.orphan_cleanup(_orphan_total_deleted)
+            if ctx.frozen and orphan_cleanup_retained:
+                logger.frozen_orphans_kept(sorted(orphan_cleanup_retained))
         if partial_dropped:
             pinned = _pin_retained_ancestors(
                 existing_lockfile, partial_dropped, frozenset(orphan_cleanup_retained)

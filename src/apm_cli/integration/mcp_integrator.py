@@ -787,7 +787,10 @@ class MCPIntegrator:
             target_runtimes.discard(exclude)
 
         from apm_cli.core.scope import InstallScope
-        from apm_cli.install.mcp.ownership import require_removable_mcp_connections
+        from apm_cli.install.mcp.ownership import (
+            project_mcp_cleanup_reachable,
+            require_removable_mcp_connections,
+        )
 
         # Scope filtering: at USER scope, only clean global-capable runtimes.
         if scope is InstallScope.USER:
@@ -817,12 +820,19 @@ class MCPIntegrator:
             )
 
         # Build an expanded set that includes both the full reference and the
-        # last-segment short name so we match config keys in every runtime.
+        # native key the adapters write (registry ``owner/name`` -> ``name``).
+        # Self-defined servers keep their declared key (#3493); their older
+        # truncated keys are reconciled only under ownership proof at install
+        # time, so a short-name entry here may belong to the user.
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
         expanded_stale: builtins.set = builtins.set()
         for n in stale_names:
             expanded_stale.add(n)
-            if "/" in n:
-                expanded_stale.add(n.rsplit("/", 1)[-1])
+            stored = (stored_configs or {}).get(n)
+            self_defined = isinstance(stored, dict) and stored.get("registry") is False
+            info = {"name": n, "is_self_defined": True} if self_defined else None
+            expanded_stale.add(MCPClientAdapter.determine_config_key(n, None, info))
 
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
@@ -893,7 +903,9 @@ class MCPIntegrator:
 
         # Project scope is opt-in; user scope uses ~/.config/opencode/.
         if "opencode" in target_runtimes:
-            if clean_user_scope or (project_root_path / ".opencode").is_dir():
+            if clean_user_scope or project_mcp_cleanup_reachable(
+                project_root_path, ".opencode", runtime_scoped=runtime is not None
+            ):
                 from apm_cli.adapters.client.opencode import (
                     V2_MCP_SETTINGS,
                     OpenCodeClientAdapter,
@@ -1013,9 +1025,11 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
+        # Clean Claude Code project .mcp.json when it is reachable for cleanup.
         if clean_claude_project:
-            claude_project_enabled = (project_root_path / ".claude").is_dir()
+            claude_project_enabled = project_mcp_cleanup_reachable(
+                project_root_path, ".claude", runtime_scoped=runtime is not None
+            )
             if claude_project_enabled or stored_configs:
                 if _reject_symlink_config(
                     project_root_path / ".mcp.json",

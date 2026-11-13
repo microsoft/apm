@@ -359,6 +359,12 @@ placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
 
+The `marketplace` value names a marketplace registered with
+`apm marketplace add` or declared in the user manifest's `marketplaces:`
+list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
+`apm install -g`). Dependencies and
+project manifests cannot declare `marketplaces:`.
+
 For object-form declarations, `apm audit --ci` uses recorded
 `discovered_via` + `marketplace_plugin_name` to find one locked coordinate.
 Semver selections also record `constraint`, `resolved_tag`, and the selected

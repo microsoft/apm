@@ -42,6 +42,7 @@ def _make_ctx(
     ctx = MagicMock()
     ctx.existing_lockfile = existing_lockfile
     ctx.only_packages = only_packages
+    ctx.frozen = False
     ctx.intended_dep_keys = intended_dep_keys if intended_dep_keys is not None else set()
     ctx.package_deployed_files = (
         package_deployed_files if package_deployed_files is not None else {}
@@ -287,13 +288,14 @@ def test_real_cleanup_preserves_survivors_and_refusals_in_ledger(
     expected_bytes = deployed.read_bytes()
     cleanup.run(ctx)
 
-    retained = case not in {"last-claim", "no-hash"}
+    retained = case != "last-claim"
     assert deployed.exists() is retained
     if retained:
         assert deployed.read_bytes() == expected_bytes
-    refused = case in {"edited", "unlink-failed"}
+    # A claim without a recorded hash is kept, never deleted (#3663).
+    refused = case in {"edited", "unlink-failed", "no-hash"}
     assert ctx.package_deployed_files[owner] == ([path] if refused else [])
-    assert ctx.package_cleanup_retained == ({owner: hashes} if refused else {})
+    assert ctx.package_cleanup_retained == ({owner: {path: hashes.get(path)}} if refused else {})
     files, final_hashes, final_ledger = union_preserving(
         ctx.package_deployed_files[owner],
         {},
@@ -422,6 +424,31 @@ class TestOrphanCleanupNoDeployedFiles:
 # ---------------------------------------------------------------------------
 # Block 6: orphan cleanup — full run with remove_stale_deployed_files
 # ---------------------------------------------------------------------------
+
+
+class TestFrozenKeepsOrphans:
+    def test_frozen_retains_every_orphan_file_and_names_the_package(self, tmp_path):
+        """--frozen never rewrites the lock, so it deletes nothing an orphan claims (#3662)."""
+        orphan_dep = _make_orphan_dep(["a/b.md", "a/c.md"], file_hashes={"a/b.md": "abc123"})
+        lf = _make_lockfile({"removed-pkg": orphan_dep})
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            only_packages=False,
+            intended_dep_keys=set(),
+            project_root=tmp_path,
+        )
+        ctx.frozen = True
+
+        with (
+            patch("apm_cli.install.phases.cleanup.remove_stale_deployed_files") as remove,
+            patch("apm_cli.install.phases.cleanup._trim_superseded_package_roots") as trim,
+        ):
+            cleanup.run(ctx)
+
+        remove.assert_not_called()
+        assert ctx.orphan_cleanup_retained == {"removed-pkg": {"a/b.md": "abc123", "a/c.md": None}}
+        assert trim.call_args.args[1] == frozenset()
+        ctx.logger.frozen_orphans_kept.assert_called_once_with(["removed-pkg"])
 
 
 class TestOrphanCleanupFullRun:

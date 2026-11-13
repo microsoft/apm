@@ -40,7 +40,7 @@ def _native_config_key(
     info = requested_info
     if info is None and isinstance(stored_config, dict) and stored_config.get("registry") is False:
         info = {"name": name, "is_self_defined": True}
-    return client._determine_config_key(name, None, info)
+    return client.determine_config_key(name, None, info)
 
 
 def compare_native_mcp_connection(
@@ -141,6 +141,20 @@ def compare_native_mcp_connection(
         if matches_baseline
         else NativeMcpConnectionState.CONFLICT
     )
+
+
+def project_mcp_cleanup_reachable(
+    project_root: Path, opt_in_dir: str, *, runtime_scoped: bool
+) -> bool:
+    """Return whether stale entries may be removed from a project runtime config.
+
+    The runtime's opt-in directory (``.claude/``, ``.opencode/``) gates first
+    writes. Cleanup scoped to one runtime comes from the ownership ledger, so it
+    stays reachable after install or uninstall prunes that directory because it
+    held only APM-deployed files (#3664). Broadcast cleanup (no runtime) still
+    skips a project that never opted in to the runtime.
+    """
+    return runtime_scoped or (project_root / opt_in_dir).is_dir()
 
 
 def require_removable_mcp_connections(

@@ -536,7 +536,7 @@ def _codex_expanded_env_names(client: Any, name: str, requested_info: dict) -> l
 
     native = MCPConflictDetector(client).get_existing_server_configs()
     return client.expanded_env_names(
-        native.get(client._determine_config_key(name, None)),
+        native.get(client.determine_config_key(name, None)),
         client.render_server_config(requested_info),
     )
 
@@ -659,7 +659,7 @@ def _reconcile_legacy_truncated_key(
     from apm_cli.factory import ClientFactory
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-    legacy_key = MCPClientAdapter._determine_config_key(dep_name, None)
+    legacy_key = MCPClientAdapter.determine_config_key(dep_name, None)
     if legacy_key == dep_name or legacy_key in claimed_keys:
         return
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
@@ -1306,7 +1306,7 @@ def _install_self_defined_deps(
     }
     previous_native_hashes = {rt: dict(hashes) for rt, hashes in (native_hashes or {}).items()}
     claimed_keys = builtins.set(self_defined_names) | {
-        MCPClientAdapter._determine_config_key(name, None) for name in registry_dep_names or ()
+        MCPClientAdapter.determine_config_key(name, None) for name in registry_dep_names or ()
     }
     self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
         self_defined_names,

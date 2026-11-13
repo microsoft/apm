@@ -132,6 +132,56 @@ class ArtifactoryRouter:
             return None
         return (cfg.host, cfg.prefix, cfg.scheme)
 
+    @classmethod
+    def routing_target(cls, dep_ref: DependencyReference) -> tuple[str, str, str, bool] | None:
+        """Return ``(host, prefix, scheme, is_mode_1)`` if *dep_ref* routes through the proxy.
+
+        * Mode 1 (explicit FQDN): host and prefix come from the dependency ref;
+          scheme is always ``https`` (Mode 1 deps reject ``http://`` upstream).
+        * Mode 2 (shorthand routed by the registry-proxy config): host,
+          prefix, and scheme come from that config, so installs that
+          intentionally route through an ``http://`` proxy (isolated networks
+          using ``PROXY_REGISTRY_ALLOW_HTTP=1``) probe over the same transport.
+
+        Returns ``None`` when no proxy routing applies (regular GitHub/ADO deps)
+        or when host/prefix are not real strings (e.g. mocked dependency refs
+        in unit tests).
+        """
+        if dep_ref.is_artifactory():
+            host = dep_ref.host
+            prefix = dep_ref.artifactory_prefix
+            if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
+                return (host, prefix, "https", True)
+            return None
+        if not cls.should_use_proxy(dep_ref):
+            return None
+        cfg = cls.parse_proxy_config()
+        if cfg is None:
+            return None
+        host, prefix, scheme = cfg
+        if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
+            return (host, prefix, scheme or "https", False)
+        return None
+
+    @classmethod
+    def routes_to_locked_proxy(cls, dep_ref: DependencyReference, locked_dep) -> bool:
+        """Return True when *dep_ref* routes through the proxy *locked_dep* recorded.
+
+        A proxy-routed lock row records the proxy host and ``registry_prefix``
+        instead of the upstream host, so its provider identity differs from
+        the manifest shorthand. The row still names the same source when the
+        current routing for *dep_ref* lands on that same proxy route.
+        """
+        locked_prefix = getattr(locked_dep, "registry_prefix", None)
+        if not locked_prefix:
+            return False
+        target = cls.routing_target(dep_ref)
+        if target is None:
+            return False
+        host, prefix, _scheme, _is_mode_1 = target
+        locked_host = getattr(locked_dep, "host", None) or ""
+        return (host.lower(), prefix.strip("/")) == (locked_host.lower(), locked_prefix.strip("/"))
+
 
 # ---------------------------------------------------------------------------
 # Download orchestration

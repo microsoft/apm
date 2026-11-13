@@ -67,6 +67,18 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 
 
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
+# req-lk-017: frozen install and audit content-integrity share one verifier.
+_DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
+_DEPLOYED_HASH_FRAGMENTS = (
+    (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
+    (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
+    (_DEPLOYED_HASH_VERIFIER, "def verify_deployed_file_hashes("),
+    (
+        _DEPLOYED_HASH_VERIFIER,
+        "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
+    ),
+    (_DEPLOYED_HASH_VERIFIER, "= resolve_audit_scope(project_root, lock)"),
+)
 
 
 def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -82,8 +94,15 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
+    audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
     failures = (
-        owner_fail + adapter_fail + services_fail + integration_fail + outcome_fail + mcp_fail
+        owner_fail
+        + adapter_fail
+        + services_fail
+        + integration_fail
+        + outcome_fail
+        + mcp_fail
+        + audit_fail
     )
     if failures:
         return tuple(failures)
@@ -198,6 +217,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         )
         or not _before(acquisition, hydrated_check)
         or not _before(hydrated_check, deployment)
+        or not all(
+            _present(owner if path == _FROZEN_OWNER else audit, needle)
+            for path, needle in _DEPLOYED_HASH_FRAGMENTS
+        )
         or bool(duplicates)
     )
     if not failed:
@@ -259,6 +282,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             pattern=re.compile(
                 r"^[ \t]*(?:def (?:compare_native_mcp_connection|"
                 r"require_removable_mcp_connections|mcp_native_hash|"
+                r"project_mcp_cleanup_reachable|"
                 r"retain_deferred_mcp_claims)\(|class NativeMcpConnectionState\b)"
             ),
             owner=_MCP_OWNERSHIP_OWNER,
@@ -271,6 +295,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         "require_removable_mcp_connections",
         "mcp_native_hash",
         "retain_deferred_mcp_claims",
+        "project_mcp_cleanup_reachable",
     ):
         if not _present_re(owner, re.compile(rf"^def {name}\(")):
             findings.append(
@@ -315,6 +340,11 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "remove_stale",
             "require_removable_mcp_connections",
         ),
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "remove_stale",
+            "project_mcp_cleanup_reachable",
+        ),
         (_MCP_OWNERSHIP_OWNER, "compare_native_mcp_connection", "mcp_native_hash"),
         (
             "src/apm_cli/install/mcp/integration.py",
@@ -352,6 +382,17 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                 )
             )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
+    opt_in_gate = re.compile(r'/ "\.(?:claude|opencode)"\)\.is_dir\(\)')
+    for number, line in enumerate(_lines(cleanup), start=1):
+        if opt_in_gate.search(line):
+            findings.append(
+                violation(
+                    rule_id,
+                    "src/apm_cli/integration/mcp_integrator.py",
+                    "Stale MCP cleanup must gate opt-in dirs through project_mcp_cleanup_reachable",
+                    line=number,
+                )
+            )
     index = cleanup.tree_index
     if index is not None:
         for node in index.nodes:
@@ -489,6 +530,29 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     findings.append(
                         violation(rule_id, path, message, line=number, column=column + 1)
                     )
+    # Prune and the expected-path selector ask the same owner which lock
+    # entries are retained instead of re-deriving ``depth > 1`` (#3668).
+    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/commands/_helpers.py"):
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        if not _present_re(facts, re.compile(r"\bretained_lock_keys\(")):
+            findings.append(
+                _summary(rule_id, path, "Retained lock keys must come from deps/reachability.py")
+            )
+        for number, line in enumerate(_lines(facts), start=1):
+            column = line.find("depth > 1")
+            if column >= 0 and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Retained lock entries are decided by deps/reachability.py",
+                        line=number,
+                        column=column + 1,
+                    )
+                )
     return tuple(findings)
 
 

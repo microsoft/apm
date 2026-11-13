@@ -102,6 +102,7 @@ class _SourceIndex:
 
     by_digest: dict[str, list[str]]  # sha256(normalized bytes) -> source rel paths
     unindexed: tuple[str, ...]  # rel paths excluded by size cap or read errors
+    source_root: Path | None = None  # cached tree root for owner-delegated queries
 
 
 def _filename_segment(value: str, fallback: str) -> str:
@@ -212,7 +213,47 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
             unindexed.append(rel)
             continue
         by_digest.setdefault(digest, []).append(rel)
-    return _SourceIndex(by_digest=by_digest, unindexed=tuple(unindexed))
+    return _SourceIndex(
+        by_digest=by_digest,
+        unindexed=tuple(unindexed),
+        source_root=source_root,
+    )
+
+
+def _upstream_candidates(index: _SourceIndex, candidates: list[str]) -> list[str]:
+    """Drop install-generated ``.apm/`` mirrors from digest-matched candidates.
+
+    A candidate is dropped only when the normalization owner
+    (:func:`~apm_cli.deps.plugin_parser.install_generated_mirror_source`)
+    proves it was copied from another candidate; otherwise ambiguity stays.
+    """
+    if len(candidates) < 2 or index.source_root is None:
+        return candidates
+    from ..deps.plugin_parser import install_generated_mirror_source
+
+    mirrors = set()
+    for rel in candidates:
+        source = install_generated_mirror_source(rel, index.source_root)
+        if source is not None and source in candidates:
+            mirrors.add(rel)
+    return [rel for rel in candidates if rel not in mirrors]
+
+
+def _repository_prefix(dep: LockedDependency) -> str:
+    """Repository-relative directory a subdirectory package was cached from.
+
+    The cache holds only the package subdirectory, so source paths are
+    relative to it; the patch must be relative to the repository root.
+    """
+    if not dep.is_virtual or not dep.virtual_path:
+        return ""
+    try:
+        is_subdirectory = dep.to_dependency_ref().is_virtual_subdirectory()
+    except (ValueError, TypeError):
+        return ""
+    if not is_subdirectory:
+        return ""
+    return dep.virtual_path.strip("/")
 
 
 def _diff_lines(text: str) -> list[str]:
@@ -407,12 +448,15 @@ def build_patch_export(
             continue
 
         index = _index_source_tree(source_root)
+        repo_prefix = _repository_prefix(dep)
         # (deployed path, source rel, diff text) per successful mapping;
         # grouped afterwards so several deployed copies of one source
         # file cannot emit clashing hunks into a single patch.
         successes: list[tuple[str, str, str]] = []
         for finding in sorted(group, key=lambda f: f.path):
-            edit = _export_one(finding, key, index, scratch_root, project_root, source_root)
+            edit = _export_one(
+                finding, key, index, scratch_root, project_root, source_root, repo_prefix
+            )
             if isinstance(edit, SkippedEdit):
                 result_skipped.append(edit)
                 continue
@@ -458,6 +502,7 @@ def _export_one(
     scratch_root: Path,
     project_root: Path,
     source_root: Path,
+    repo_prefix: str = "",
 ) -> SkippedEdit | tuple[str, str, str]:
     """Map one ``modified`` finding to (deployed, source rel, diff text).
 
@@ -473,7 +518,7 @@ def _export_one(
         return SkippedEdit(finding.path, dep_key, f"unreadable: {exc}")
 
     digest = hashlib.sha256(scratch_bytes).hexdigest()
-    candidates = index.by_digest.get(digest, [])
+    candidates = _upstream_candidates(index, index.by_digest.get(digest, []))
     if not candidates:
         reason = (
             "deployed content does not match any source file byte-for-byte "
@@ -517,7 +562,8 @@ def _export_one(
     except UnicodeDecodeError:
         return SkippedEdit(finding.path, dep_key, "binary or non-UTF-8 content")
 
-    diff_text = _unified_diff(a_text, b_text, source_rel)
+    patch_rel = f"{repo_prefix}/{source_rel}" if repo_prefix else source_rel
+    diff_text = _unified_diff(a_text, b_text, patch_rel)
     return finding.path, source_rel, diff_text
 
 

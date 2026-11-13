@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
@@ -573,6 +574,22 @@ class TestMcpInstallAlias:
             assert "fetch" in forwarded
             assert "npx" in forwarded
             assert "@modelcontextprotocol/server-fetch" in forwarded
+
+    @pytest.mark.parametrize("code", [0, 1, 2])
+    def test_exit_code_comes_from_the_forwarded_install(self, code):
+        """#3666: the alias exits with the install outcome, never a swallowed code."""
+        from apm_cli.cli import cli
+
+        @click.command(context_settings={"ignore_unknown_options": True})
+        @click.argument("argv", nargs=-1, type=click.UNPROCESSED)
+        @click.pass_context
+        def fake_install(ctx, argv):
+            ctx.exit(code)
+
+        runner = make_runner()
+        with patch.dict(cli.commands, {"install": fake_install}):
+            result = runner.invoke(mcp, ["install", "srv", "--", "npx", "srv"])
+        assert result.exit_code == code
 
     def test_forwards_transport_options(self):
         runner = make_runner()

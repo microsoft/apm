@@ -283,13 +283,14 @@ _NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 _ROOT_CONTEXT_OWNER_FRAGMENTS = (
     "def _hand_authored_root_context_blocks_write(",
     "return hand_authored_root_context_blocks_write(",
-    "and self._hand_authored_root_context_blocks_write(root_claude_path)",
+    "for path in claude_result.content_map\n            if self._hand_authored_root_context_blocks_write(path)",
     "and self._hand_authored_root_context_blocks_write(output_file)",
     "and self._hand_authored_root_context_blocks_write(agents_path)",
 )
 
 _ROOT_CONTEXT_HELPER_FRAGMENTS = (
     "def hand_authored_root_context_blocks_write(",
+    "if not lexical_root and path.name in accepted_markers_by_name:",
     "def catalog_root_context_markers(",
     "for profile in KNOWN_TARGETS.values():",
 )

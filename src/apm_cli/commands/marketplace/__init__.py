@@ -14,7 +14,7 @@ import sys
 import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import click
 
@@ -39,6 +39,12 @@ from ...marketplace.migration import (
     migrate_marketplace_yml,
 )
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
+from ...marketplace.registration import (
+    ALIAS_PATTERN,
+    is_valid_alias,
+    local_source_points_to_file,
+    split_source_fragment_ref,
+)
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
 from ...utils.console import STATUS_SYMBOLS
@@ -57,14 +63,11 @@ logger = logging.getLogger(__name__)
 list = builtins.list
 
 
-# Marketplace alias must satisfy this pattern so it can appear on the right of
-# ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
-_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
-
-
-def _is_valid_alias(value: str) -> bool:
-    """Return True when ``value`` is a legal marketplace alias."""
-    return bool(value) and _ALIAS_PATTERN.match(value) is not None
+# Compatibility exports: the canonical owner is ``marketplace.registration``.
+_ALIAS_PATTERN = ALIAS_PATTERN
+_is_valid_alias = is_valid_alias
+_split_source_fragment_ref = split_source_fragment_ref
+_local_source_points_to_file = local_source_points_to_file
 
 
 # ---------------------------------------------------------------------------
@@ -360,41 +363,34 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
-        from ...marketplace.client import (
-            _auto_detect_path_with_payload,
-            _fetch_file,
-            fetch_marketplace,
-            is_local_authoring_source,
-        )
+        from ...marketplace.client import is_local_authoring_source
         from ...marketplace.models import MarketplaceSource
+        from ...marketplace.registration import (
+            MarketplaceCatalogPathError,
+            MarketplaceManifestNotFoundError,
+            parse_registration_source,
+            probe_registration,
+        )
         from ...marketplace.registry import add_marketplace
         from ...marketplace.source_identity import (
             admit_marketplace_catalog_path,
             parse_marketplace_source,
         )
 
-        source_arg, fragment_ref = _split_source_fragment_ref(source)
-
-        # --ref / --branch reconciliation. --branch stays as a hidden alias
-        # for one release so legacy invocations keep working; passing multiple
-        # ref sources is a hard error so we never silently pick one.
-        explicit_ref = ref is not None or branch is not None
+        # --branch stays as a hidden CLI-only alias for --ref for one release.
+        # Normalize it here; the shared parser owns the rest of the SOURCE
+        # grammar (#ref fragments, ref precedence, direct-URL classification),
+        # exactly as the user-manifest ``marketplaces:`` reconcile does.
         if ref is not None and branch is not None:
             logger.error(
                 "--ref and --branch are mutually exclusive. Use --ref (--branch is a deprecated alias).",
                 symbol="error",
             )
             sys.exit(1)
-        if fragment_ref and explicit_ref:
-            logger.error(
-                "Do not combine a git URL #ref with --ref or --branch. Use one ref source.",
-                symbol="error",
-            )
-            sys.exit(1)
-        effective_ref = fragment_ref or ref or branch or "main"
+        explicit_ref = ref if ref is not None else branch
 
         try:
-            url, kind, resolved_host = _parse_marketplace_source(source_arg, host)
+            parsed = parse_registration_source(source, ref=explicit_ref, host=host)
         except PathTraversalError:
             logger.error(
                 f"Invalid source '{source}': contains a path-traversal sequence. "
@@ -402,13 +398,18 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             )
             sys.exit(1)
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(str(exc), symbol="error")
             sys.exit(1)
+        url, kind, resolved_host = parsed.url, parsed.kind, parsed.host
+        fragment_ref = parsed.fragment_ref
+        effective_ref = parsed.ref
+        is_direct_url = parsed.is_direct_url
+        # Without a #ref fragment the source is the argument itself.
+        source_arg = source.strip()
 
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
         # --host is being ignored rather than silently overriding.
-        is_direct_url = _is_remote_marketplace_json_url(url)
 
         if host is not None and is_direct_url:
             logger.warning(
@@ -467,7 +468,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         )
         logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
         if _should_warn_unpinned_git_url(
-            source_arg, kind, is_direct_url, fragment_ref, explicit_ref
+            source_arg, kind, is_direct_url, fragment_ref, explicit_ref is not None
         ):
             from ...marketplace.source_identity import parse_marketplace_source
 
@@ -483,74 +484,29 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
-        # placeholder -- _auto_detect_path_with_payload only consults url/ref/path/kind.
+        # placeholder -- the probe only consults url/ref/path/kind.
         probe_name = provisional_label
-        probe_source = MarketplaceSource(
-            name=probe_name,
-            url=url,
-            ref="" if is_direct_url else effective_ref,
-            path="" if is_direct_url else "marketplace.json",
-        )
-        if offline and not is_local_authoring_source(probe_source):
+        if offline and not is_local_authoring_source(
+            MarketplaceSource(name=probe_name, url=url, ref=effective_ref)
+        ):
             logger.error(
                 "--offline requires an explicitly selected local apm.yml. "
                 "Omit --offline to register a JSON or repository source."
             )
             sys.exit(1)
-        if is_direct_url or _local_source_points_to_file(probe_source):
-            if explicit_path is not None:
-                logger.error(
-                    "--path is not supported when SOURCE is a marketplace.json file. "
-                    "Pass the repository directory as SOURCE instead.",
-                    symbol="error",
-                )
-                sys.exit(1)
-            detected_path = ""
-            discovered_manifest = None
-        elif explicit_path is not None:
-            discovered_manifest = _fetch_file(probe_source, explicit_path)
-            if discovered_manifest is None:
-                at_ref = "" if kind == "local" else f" at ref '{effective_ref}'"
-                logger.error(
-                    f"No marketplace catalog found at '{explicit_path}' in "
-                    f"'{probe_source.display_source}'{at_ref}. Check that --path is "
-                    "relative to the repository root and that the file exists.",
-                    symbol="error",
-                )
-                sys.exit(1)
-            detected_path = explicit_path
-        else:
-            detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
-
-        if detected_path is None:
-            hint = (
-                " To register a local authoring catalog, pass the apm.yml file "
-                "itself (for example ./my-catalog/apm.yml)."
-                if probe_source.kind == "local"
-                else ""
+        try:
+            fetch_source, manifest = probe_registration(
+                probe_name,
+                url,
+                effective_ref,
+                is_direct_url=is_direct_url,
+                offline=offline,
+                explicit_path=explicit_path,
             )
-            logger.error(
-                f"No marketplace.json found in '{probe_source.display_source}'. "
-                f"Checked: marketplace.json, .github/plugin/marketplace.json, "
-                f".claude-plugin/marketplace.json.{hint}",
-                symbol="error",
-            )
+        except (MarketplaceManifestNotFoundError, MarketplaceCatalogPathError) as exc:
+            logger.error(str(exc), symbol="error")
             sys.exit(1)
-
-        fetch_source = MarketplaceSource(
-            name=probe_name,
-            url=url,
-            ref="" if is_direct_url else effective_ref,
-            path=detected_path,
-        )
-        manifest = fetch_marketplace(
-            fetch_source,
-            force_refresh=True,
-            # Reuse the catalog response the probe above just fetched from
-            # the same url/ref/path instead of re-fetching it (apm#3283).
-            discovery_payload=discovered_manifest,
-            offline=offline,
-        )
+        detected_path = fetch_source.path
         plugin_count = len(manifest.plugins)
 
         manifest_name = (manifest.name or "").strip()
@@ -629,31 +585,6 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         sys.exit(1)
 
 
-def _split_source_fragment_ref(source: str) -> tuple[str, str]:
-    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
-    raw = (source or "").strip()
-    if raw.lower().startswith("ssh://") and "#" in raw:
-        raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
-    if not raw.lower().startswith("https://"):
-        return raw, ""
-    parsed = urlsplit(raw)
-    if not parsed.fragment:
-        return raw, ""
-    clean_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
-    return clean_url, parsed.fragment
-
-
-def _is_remote_marketplace_json_url(url: str) -> bool:
-    """Return True when *url* names a hosted marketplace.json document.
-
-    Delegates to the single shared classifier in ``marketplace.models`` so
-    the CLI and ``MarketplaceSource`` cannot drift on the url-kind decision.
-    """
-    from ...marketplace.models import url_names_remote_manifest
-
-    return url_names_remote_manifest(url)
-
-
 def _should_warn_unpinned_git_url(
     source: str,
     kind: str,
@@ -669,19 +600,6 @@ def _should_warn_unpinned_git_url(
     from ...marketplace.source_identity import parse_marketplace_source
 
     return parse_marketplace_source(source).transport in {"https", "ssh", "scp"}
-
-
-def _local_source_points_to_file(source: MarketplaceSource) -> bool:
-    """Return True when a local marketplace source points directly to a file."""
-    if source.kind != "local":
-        return False
-    from ...marketplace.client import is_local_authoring_source
-
-    try:
-        path = Path(source.local_path).expanduser()
-        return path.is_file() or is_local_authoring_source(source)
-    except OSError:
-        return False
 
 
 def _warn_if_replacing_catalog(

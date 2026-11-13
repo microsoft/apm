@@ -19,6 +19,7 @@ import pytest
 
 from apm_cli.core.deployment_state import MaterializationStatus
 from apm_cli.hook_contract import HookContractError
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.hook_command_paths import normalize_quoted_plugin_root
 from apm_cli.integration.hook_file_routing import (
     legacy_hook_file_selection as _filter_hook_files_for_target,
@@ -1441,7 +1442,12 @@ class TestCursorIntegration:
 
         integrator = HookIntegrator()
         managed_files = {".cursor/hooks/hookify/pretooluse.py"}
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
 
         assert stats["files_removed"] == 1
         assert not (temp_project / ".cursor" / "hooks").exists()
@@ -1610,7 +1616,12 @@ class TestSyncIntegration:
 
         integrator = HookIntegrator()
         managed_files = {".github/hooks/scripts/hookify/hooks/pretooluse.py"}
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
 
         assert stats["files_removed"] == 1
         assert not (hooks_dir / "scripts").exists()
@@ -1656,7 +1667,12 @@ class TestSyncIntegration:
 
         integrator = HookIntegrator()
         managed_files = {".claude/hooks/hookify/pretooluse.py"}
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
 
         assert stats["files_removed"] == 1
         assert not (temp_project / ".claude" / "hooks").exists()
@@ -2814,7 +2830,12 @@ class TestEndToEnd:
             str(p.relative_to(temp_project))
             for p in vscode_result.target_paths + claude_result.target_paths
         }
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
         assert stats["files_removed"] > 0
 
         # Verify cleanup
@@ -2856,7 +2877,12 @@ class TestEndToEnd:
         managed_files = {
             str(p.relative_to(temp_project)) for p in r1.target_paths + r2.target_paths
         }
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
         assert stats["files_removed"] >= 2
         assert not (temp_project / ".github" / "hooks" / "ralph-loop-hooks.json").exists()
         assert not (
@@ -3491,6 +3517,7 @@ class TestScopeResolvedHookDeployment:
             None,
             self.root,
             managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, self.root),
             targets=[copilot_target],
         )
         assert stats["files_removed"] > 0

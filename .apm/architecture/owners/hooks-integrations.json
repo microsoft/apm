@@ -71,10 +71,10 @@
     },
     {
       "id": "mcp-package-launcher",
-      "decision": "MCP package launcher selection and argv shape (container and non-container)",
-      "owner": "adapters/client/base.py (MCPClientAdapter)",
+      "decision": "MCP package launcher selection, argv shape (container and non-container), and config-key derivation",
+      "owner": "adapters/client/base.py (MCPClientAdapter, including determine_config_key)",
       "selectors": ["src/apm_cli/adapters/client/base.py"],
-      "guards": ["hooks-integrations-mcp-package-launcher"]
+      "guards": ["hooks-integrations-mcp-config-key-derivation", "hooks-integrations-mcp-package-launcher"]
     },
     {
       "id": "mcp-passthrough-denylist",

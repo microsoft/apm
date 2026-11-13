@@ -17,7 +17,7 @@ apm export-patch [OPTIONS]
 
 It replays the locked install into a scratch tree (the same machinery as the [`apm audit`](../audit/) drift check) and, for every managed file that was modified locally, maps the change back to the package source file that produced it. Each package with exportable edits gets one patch file, `patches/<pkg>@<ref>.patch` (the pnpm and Bun convention), ready for `git apply` in a clone of the package repository. `<pkg>` is the dependency key with `/` written as `__`; `<ref>` is the locked version for registry packages, otherwise the locked git ref (or the short commit when no ref was recorded). For example, `microsoft/apm-sample-package` locked at `v1.2.0` becomes `patches/microsoft__apm-sample-package@v1.2.0.patch`. When two packages would sanitize to the same filename, each gets a short digest suffix so nothing is overwritten.
 
-Every patch file records its base in a leading comment block: the package key, its source, and the exact snapshot the diff applies to (`commit <sha>` for git dependencies, `version <x>` for registry packages). Apply the patch from the package repository root, checked out at that base, then open your upstream pull request from the result:
+Every patch file records its base in a leading comment block: the package key, its source, and the exact snapshot the diff applies to (`commit <sha>` for git dependencies, `version <x>` for registry packages). Diff paths are relative to the package repository root (a subdirectory package's paths include its subdirectory). Apply the patch from the package repository root, checked out at that base, then open your upstream pull request from the result:
 
 ```bash
 git -C path/to/package-clone checkout <base-commit>
@@ -28,6 +28,7 @@ Only verbatim-deployed files can be exported: a local edit maps cleanly back to 
 
 - Deployments that transform their content (frontmatter rewrites for rule directories, compiled `AGENTS.md` output, aggregated `copilot-instructions.md` sections, files with resolved links).
 - Source files that are not normalization-clean (CRLF line endings, a UTF-8 BOM, or a build-id header): the deployed copy matches them only after normalization, so an exported diff could not be applied to the raw file.
+- Ambiguous sources: when several package files hold the same bytes, the edit is skipped instead of guessing. A Claude plugin skill that install copied into `.apm/skills/` maps back to its original plugin directory; an authored `.apm/` source never counts as such a copy.
 - Conflicting edits: when one source file is deployed to several targets and the copies were edited differently, the conflict is reported instead of exporting either version. Identical edits across copies export as a single diff.
 - Local deletions of managed files are never exported, since deleting a deployed copy does not imply the file should be removed from the package.
 

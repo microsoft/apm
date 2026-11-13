@@ -38,11 +38,12 @@
     },
     {
       "id": "host-credential-resolution",
-      "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds",
-      "owner": "core/auth.py (AuthResolver), core/host_providers.py (effective_host_provider_identity); consumers: drift.py and tiered_ref_resolver.py",
+      "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds, including registry-proxy route equivalence of lock rows",
+      "owner": "core/auth.py (AuthResolver), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py and tiered_ref_resolver.py",
       "selectors": [
         "src/apm_cli/core/auth.py",
         "src/apm_cli/core/host_providers.py",
+        "src/apm_cli/deps/artifactory_orchestrator.py",
         "src/apm_cli/drift.py"
       ],
       "guards": [

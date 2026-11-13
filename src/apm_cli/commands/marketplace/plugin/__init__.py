@@ -114,7 +114,7 @@ def _resolve_ref(
     Returns the (possibly resolved) ref string, or ``None`` when
     *version* is set (version-based pinning, no ref needed).
     """
-    from ....marketplace.ref_resolver import RefResolver
+    from ....marketplace.ref_resolver import RefResolver, explicit_ref_error
 
     # Version-based - no ref resolution needed.
     if version is not None:
@@ -153,15 +153,17 @@ def _resolve_ref(
         )
         return sha
 
-    # Non-HEAD, non-SHA ref - check whether it is a branch name.
-    resolver = RefResolver()
+    # Non-HEAD, non-SHA ref - verify it exists the same way ``check`` does.
+    resolver = RefResolver(host=host)
     try:
         remote_refs = resolver.list_remote_refs(source)
-    except (GitLsRemoteError, OfflineMissError):
-        # Cannot verify - store as-is but warn the user.
+    except (GitLsRemoteError, OfflineMissError) as exc:
+        detail = exc.summary_text if isinstance(exc, GitLsRemoteError) else str(exc)
+        if not no_verify:
+            logger.error(f"Cannot verify ref '{ref}' for '{source}': {detail}", symbol="error")
+            sys.exit(2)
         logger.warning(
-            f"Could not verify ref '{ref}' for '{source}' (network unavailable). "
-            "Storing unresolved -- run with network access to pin a concrete SHA.",
+            f"Could not verify ref '{ref}' for '{source}' ({detail}). Storing unresolved.",
             symbol="warning",
         )
         return ref
@@ -185,7 +187,14 @@ def _resolve_ref(
             )
             return remote_ref.sha
 
-    # Not a branch - tag or unknown ref; store as-is.
+    # Not a branch - a tag must exist on the remote, as ``marketplace check``
+    # requires; --no-verify keeps the explicit opt-out.
+    error = explicit_ref_error(
+        ref, remote_refs, resolver=resolver, owner_repo=source, offline=False
+    )
+    if error and not no_verify:
+        logger.error(f"{error} for '{source}'", symbol="error")
+        sys.exit(2)
     return ref
 
 

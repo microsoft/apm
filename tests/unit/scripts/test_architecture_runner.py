@@ -609,6 +609,7 @@ contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
 contracts-tooling-lockfile-read
+contracts-tooling-lockfile-symlink-write-guard
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
@@ -701,6 +702,7 @@ mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
 mutation_writes.jetbrains_mcp_path
+mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher

@@ -414,6 +414,7 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_config_writes(provider, rule_id),
         *_nhc_ownership_markers(provider, rule_id),
         *_nhc_drift_projection(provider, rule_id),
+        *_nhc_source_retirement(provider, rule_id),
         *_nhc_native_metadata_thaw(provider, rule_id),
     )
 
@@ -907,6 +908,54 @@ def _nhc_drift_projection(provider: FactsProvider, rule_id: str) -> tuple[Violat
                 exempt=False,
             )
         )
+    return tuple(findings)
+
+
+def _nhc_source_retirement(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Merged-hook source retirement must route through ``drop_source_entries`` (#3665)."""
+    facts_by_path, failures = _read_required(provider, rule_id, (_HOOK_OWNERSHIP, _HOOK_INTEGRATOR))
+    findings: list[Violation] = list(failures)
+    if not failures:
+        findings.extend(
+            _require(
+                _count_regex_lines(facts_by_path[_HOOK_OWNERSHIP], r"^def drop_source_entries\(")
+                == 1,
+                rule_id,
+                _HOOK_OWNERSHIP,
+                "drop_source_entries must be defined exactly once",
+            )
+        )
+        findings.extend(
+            _require(
+                _count_fixed_lines(facts_by_path[_HOOK_INTEGRATOR], "drop_source_entries(") == 2,
+                rule_id,
+                _HOOK_INTEGRATOR,
+                "merged hooks must retire Cursor and undeclared source events through "
+                "drop_source_entries",
+            )
+        )
+        findings.extend(
+            _require(
+                _count_fixed_lines(
+                    facts_by_path[_HOOK_INTEGRATOR],
+                    "drop_source_entries(json_config[container], owned_markers",
+                )
+                == 2,
+                rule_id,
+                _HOOK_INTEGRATOR,
+                "both retirement passes must include safe legacy source markers (owned_markers)",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,)),
+            pattern=r"^\s*def drop_source_entries\(",
+            message="merged hook source retirement must route through hook_ownership.py",
+            exempt=False,
+        )
+    )
     return tuple(findings)
 
 

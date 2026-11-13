@@ -48,6 +48,7 @@ from .export_common import (
     _scan_bundle_sources,
     _warn_no_local_primitives,
     _warn_skipped_root_components,
+    _warn_skipped_source_links,
     _write_bundle_sources,
 )
 from .formats import BundleFormat, agent_plugin_warning
@@ -401,7 +402,10 @@ def export_agent_plugin_bundle(
         if root_hooks_present:
             dropped_surfaces.add("hooks")
     else:
-        own_components, own_dropped = _portable_components(_collect_apm_components(own_apm_dir))
+        skipped_links: list[Path] = []
+        own_components, own_dropped = _portable_components(
+            _collect_apm_components(own_apm_dir, skipped_links=skipped_links)
+        )
         dropped_surfaces |= own_dropped
         if _apm_hooks_present(own_apm_dir):
             dropped_surfaces.add("hooks")
@@ -409,12 +413,13 @@ def export_agent_plugin_bundle(
             _warn_skipped_root_components(project_root, logger)
         else:
             root_components, root_dropped = _portable_components(
-                _collect_root_plugin_components(project_root)
+                _collect_root_plugin_components(project_root, skipped_links=skipped_links)
             )
             own_components.extend(root_components)
             dropped_surfaces |= root_dropped
             if _root_hooks_present(project_root):
                 dropped_surfaces.add("hooks")
+        _warn_skipped_source_links(project_root, skipped_links, logger)
 
     if (
         not isinstance(package.includes, list)

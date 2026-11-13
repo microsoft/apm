@@ -41,7 +41,10 @@ JSON retains the finding's path and kind; SARIF uses
 When `modified` findings belong to remote (non-local) dependencies, the text output adds a hint
 such as `[i] 2 local edit(s) to managed files; run 'apm export-patch' to export
 them as upstream patches before the next install overwrites them`. See
-[`apm export-patch`](../export-patch/).
+[`apm export-patch`](../export-patch/). A `modified` file whose bytes still
+match its locked hash is not a local edit: this APM version renders it
+differently. Audit reports it with a hint to run `apm install` and commit the
+result, not with the export-patch hint.
 
 Replay and coverage use the current `apm.yml` target declaration when present,
 otherwise the concrete target identities recorded by install. An unrelated

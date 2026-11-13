@@ -443,10 +443,14 @@ class TestGetScriptsLogPath:
         assert path.name == "scripts.log"
         assert "logs" in path.parts
 
-    def test_respects_apm_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("APM_HOME", "/custom/apm")
+    @pytest.mark.windows_compat
+    def test_respects_apm_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # "/custom/apm" is drive-relative on Windows, so get_apm_home() anchors
+        # it to the startup drive; use a path that is absolute on every OS.
+        apm_home = tmp_path / "custom" / "apm"
+        monkeypatch.setenv("APM_HOME", str(apm_home))
         path = _get_scripts_log_path()
-        assert str(path) == str(Path("/custom/apm") / "logs" / "scripts.log")
+        assert path == apm_home / "logs" / "scripts.log"
 
 
 class TestAppendToScriptLog:

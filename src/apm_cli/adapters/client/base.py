@@ -1554,7 +1554,7 @@ class MCPClientAdapter(ABC):
         return server_info
 
     @staticmethod
-    def _determine_config_key(
+    def determine_config_key(
         server_url: str,
         server_name: str | None,
         server_info: dict | None = None,
@@ -1565,6 +1565,9 @@ class MCPClientAdapter(ABC):
         preserve self-defined names and npm-style scoped names such as
         ``@scope/name`` (one slash by npm convention) while keeping the historical
         ``owner/repo -> repo`` fallback for registry paths.
+
+        This is the canonical owner of MCP config-key derivation; all call
+        sites (install, ownership, cleanup) must route through it.
 
         Args:
             server_url: Registry reference used as fallback source.

@@ -278,6 +278,52 @@ dependencies. Remote `marketplace.json` installs record `source_url` and
 `source_digest` provenance. See
 [lockfile reference](../../reference/lockfile-spec/).
 
+## Declare marketplaces in your user manifest
+
+Instead of running `apm marketplace add` on every machine, list your
+marketplaces once in the user manifest (`$APM_HOME/apm.yml`, default
+`~/.apm/apm.yml`; see the [`APM_HOME` path contract](../../reference/environment-variables/#apm_home-path-contract))
+and run `apm install -g`:
+
+```yaml
+# $APM_HOME/apm.yml (default ~/.apm/apm.yml)
+name: me
+version: 1.0.0
+marketplaces:
+  - name: acme
+    source: https://github.com/acme-org/agent-marketplace#v1.2.0
+  - name: internal
+    source: git@gitea.example.com:platform/marketplace.git
+    ref: v3.0.0
+```
+
+Each entry takes a `name` and a `source` in any SOURCE form
+`apm marketplace add` accepts, plus an optional `ref` that works like
+`--ref`. There is no `--host` equivalent: use a full URL for hosts other
+than the default. Local paths must be absolute or start with `~/`. `apm install -g`
+then:
+
+- registers declared marketplaces that are missing, and re-registers
+  entries whose `source` or `ref` changed;
+- removes marketplaces it registered earlier that you deleted from the
+  list;
+- keeps marketplaces you added with `apm marketplace add`. If a declared
+  `name` matches one of them, APM reports the conflict and leaves your
+  manual registration alone. Run `apm marketplace remove NAME` and re-run
+  `apm install -g` to hand it over to the manifest.
+
+The output lists each marketplace registered, updated, removed or kept.
+If an entry cannot be fetched, or the user manifest or an entry is
+invalid, `apm install -g` exits with an error and removes nothing.
+`apm install -g --dry-run` previews the changes without fetching or
+writing. Registering a marketplace only makes it searchable with
+`apm search QUERY@NAME` and installable with `apm install PKG@NAME`. It
+installs nothing and grants no trust.
+
+Only the user manifest may declare marketplaces. A project or package
+`apm.yml` that contains `marketplaces:` fails with an error pointing to the
+user manifest.
+
 ## Where next
 
 - [Install packages](../install-packages/) -- the full `apm install`

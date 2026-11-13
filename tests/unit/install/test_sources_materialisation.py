@@ -457,6 +457,7 @@ class TestResolveCachedCommit:
         """Lockfile SHA == 'cached' → falls back to dep_ref.reference."""
         locked_dep = MagicMock()
         locked_dep.resolved_commit = "cached"
+        locked_dep.registry_prefix = None
         existing_lockfile = MagicMock()
         existing_lockfile.get_dependency.return_value = locked_dep
 
@@ -467,6 +468,20 @@ class TestResolveCachedCommit:
         result = source._resolve_cached_commit()
         # "cached" is rejected → falls back
         assert result == "main-branch"
+
+    def test_cached_proxy_row_has_no_commit_identity(self) -> None:
+        """A registry-proxy row locks its ref name only, never a commit (#3657)."""
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = None
+        locked_dep.registry_prefix = "artifactory/github"
+        existing_lockfile = MagicMock()
+        existing_lockfile.get_dependency.return_value = locked_dep
+
+        ctx = _make_ctx(existing_lockfile=existing_lockfile)
+        dep_ref = _make_dep_ref(reference="1.0.0")
+        source = self._make_source(ctx, dep_ref, fetched_this_run=False)
+
+        assert source._resolve_cached_commit() is None
 
     def test_no_lockfile_falls_back_to_dep_ref_reference(self) -> None:
         """No existing_lockfile → dep_ref.reference used."""

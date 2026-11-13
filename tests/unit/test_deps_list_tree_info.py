@@ -90,6 +90,9 @@ def test_deps_list_source_label_mapping():
     assert _deps_list_source_label("github.com") == "github"
     # GHES / generic enterprise: not GitLab-class → github bucket for this column
     assert _deps_list_source_label("ghes.example.org") == "github"
+    # #3671: a declared or locked host_type labels a self-hosted GitLab.
+    assert _deps_list_source_label("git.corp.example", host_type="gitlab") == "gitlab"
+    assert _deps_list_source_label("git.corp.example") == "github"
 
 
 class TestDepsListCommand(_DepsCmdBase):

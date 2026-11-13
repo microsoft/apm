@@ -24,7 +24,7 @@ from ..constants import (
 from ..core import project_name as _project_name
 from ..models.dependency.materialization import (
     CachedMaterializationPathReader,
-    find_case_equivalent_materialization_path,
+    installed_package_path,
 )
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
@@ -149,30 +149,17 @@ def _build_expected_install_paths(
 ) -> set:
     """Build expected package paths under *apm_modules_dir*.
 
-    Combines direct deps (from ``apm.yml``) with transitive deps
-    (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
+    Combines direct deps (from ``apm.yml``) with the lock entries
+    ``deps.reachability.retained_lock_keys`` retains, using ``get_install_path()`` for
     consistency with how packages are actually installed. Prune opts into
     recognizing existing case-equivalent paths without renaming them.
     """
     reader = CachedMaterializationPathReader()
 
     def expected_path(dependency):
-        desired = dependency.get_install_path(apm_modules_dir)
-        if (
-            preserve_installed_case
-            and dependency.alias is None
-            and dependency.has_case_insensitive_repo_identity
-        ):
-            existing = find_case_equivalent_materialization_path(
-                desired,
-                apm_modules_dir,
-                dependency=dependency,
-                reader=reader,
-                match_complete_path=True,
-            )
-            if existing is not None:
-                return existing
-        return desired
+        if preserve_installed_case:
+            return installed_package_path(dependency, apm_modules_dir, reader=reader)
+        return dependency.get_install_path(apm_modules_dir)
 
     expected = set()
     for dep in declared_deps:
@@ -184,10 +171,14 @@ def _build_expected_install_paths(
             expected.add(str(install_path))
 
     if lockfile:
+        from ..deps.reachability import retained_lock_keys
+
+        retained = retained_lock_keys(
+            lockfile, apm_modules_dir.parent, apm_modules_dir, list(declared_deps)
+        )
         for dep in lockfile.get_package_dependencies():
-            if dep.depth is not None and dep.depth > 1:
-                dep_ref = dep.to_dependency_ref()
-                install_path = expected_path(dep_ref)
+            if dep.get_unique_key() in retained:
+                install_path = expected_path(dep.to_dependency_ref())
                 try:
                     relative_path = install_path.relative_to(apm_modules_dir)
                     expected.add(relative_path.as_posix())

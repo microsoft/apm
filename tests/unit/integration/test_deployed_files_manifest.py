@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.base_integrator import BaseIntegrator, _managed_absolute_target_root
 from apm_cli.integration.command_integrator import CommandIntegrator
@@ -705,7 +706,12 @@ class TestHookSync:
         (hooks_dir / "user-hooks.json").write_text('{"user": true}')
 
         managed = {".github/hooks/pkg-hooks.json"}
-        stats = HookIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = HookIntegrator().sync_integration(
+            None,
+            tmp_path,
+            managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, tmp_path),
+        )
 
         assert stats["files_removed"] == 1
         assert not (hooks_dir / "pkg-hooks.json").exists()
@@ -1376,7 +1382,12 @@ class TestSyncPreservesUserFiles:
         (hooks_dir / "user-hooks.json").write_text('{"user": true}')
 
         managed = {".github/hooks/managed.json"}
-        HookIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        HookIntegrator().sync_integration(
+            None,
+            tmp_path,
+            managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, tmp_path),
+        )
 
         assert not (hooks_dir / "managed.json").exists()
         assert (hooks_dir / "user-hooks.json").exists()

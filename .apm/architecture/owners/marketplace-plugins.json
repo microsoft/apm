@@ -28,9 +28,23 @@
     {
       "id": "marketplace-source-admission",
       "decision": "Marketplace source admission, transport identity, and repository-relative catalog path",
-      "owner": "marketplace/source_identity.py (parse_marketplace_source, admit_marketplace_catalog_path)",
-      "selectors": ["src/apm_cli/marketplace/source_identity.py"],
+      "owner": "marketplace/source_identity.py (parse_marketplace_source, admit_marketplace_catalog_path); marketplace/registration.py (parse_registration_source) owns the registration SOURCE grammar (#ref fragment, ref precedence, direct-URL classification) for marketplace add and the user-manifest marketplaces reconcile",
+      "selectors": [
+        "src/apm_cli/marketplace/source_identity.py",
+        "src/apm_cli/marketplace/registration.py"
+      ],
       "guards": ["marketplace-integrations-source-admission"]
+    },
+    {
+      "id": "marketplace-entry-ref-verification",
+      "decision": "Which remote an authored marketplace entry resolves against, and whether its explicit ref exists there",
+      "owner": "marketplace/ref_resolver.py (package_entry_coordinates, explicit_ref_error); consumers: apm marketplace check and marketplace package add/set. Build-time sibling: builder._remote_source_coordinates",
+      "selectors": [
+        "src/apm_cli/commands/marketplace/check.py",
+        "src/apm_cli/commands/marketplace/plugin/__init__.py",
+        "src/apm_cli/commands/marketplace/plugin/set.py"
+      ],
+      "guards": ["marketplace-integrations-source-parsing"]
     },
     {
       "id": "local-marketplace-version-precedence",

@@ -199,11 +199,38 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
                 "from apm_cli.core.host_providers import effective_host_provider_identity",
                 "manifest_provider = effective_host_provider_identity(",
                 "locked_provider = effective_host_provider_identity(",
-                "if manifest_provider != locked_provider:",
+                "if manifest_provider != locked_provider and not _routes_to_locked_proxy(",
+                "return ArtifactoryRouter.routes_to_locked_proxy(dep_ref, locked_dep)",
             ),
             "Dependency drift must route provider comparison through the canonical "
-            "effective identity owner",
+            "effective identity owner and proxy-route equivalence through ArtifactoryRouter",
             parse=True,
+        )
+    )
+    # #3657 -- proxy routing targets have one owner; drift and the resolver reuse it.
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            "src/apm_cli/deps/artifactory_orchestrator.py",
+            (
+                ("sub", "def routing_target(", 1, "eq"),
+                ("sub", "target = cls.routing_target(dep_ref)", 1, "eq"),
+            ),
+            "Proxy route equivalence must reuse ArtifactoryRouter.routing_target",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _src_python(provider, exclude={"src/apm_cli/deps/artifactory_orchestrator.py"}),
+            re.compile(r"def _?proxy_routing_target\("),
+            "Proxy routing targets belong to ArtifactoryRouter.routing_target",
+            exempt=False,
         )
     )
     findings.extend(
