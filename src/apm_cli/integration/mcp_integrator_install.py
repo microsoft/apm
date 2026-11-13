@@ -313,11 +313,10 @@ def _install_registry_group(  # noqa: PLR0913
             dep for dep in valid_servers if dep not in servers_to_install
         ]
 
-        # Detect config drift for "already configured" servers
-        if stored_mcp_configs and already_configured_candidates:
-            drifted_reg_deps = [
-                group_dep_map[n] for n in already_configured_candidates if n in group_dep_map
-            ]
+        # Detect declaration drift; native comparison needs it for every server.
+        drift_scope = valid_servers if protected_clients else already_configured_candidates
+        if stored_mcp_configs and drift_scope:
+            drifted_reg_deps = [group_dep_map[n] for n in drift_scope if n in group_dep_map]
             drifted = MCPIntegrator._detect_mcp_config_drift(
                 drifted_reg_deps,
                 stored_mcp_configs,
@@ -425,6 +424,7 @@ def _install_registry_group(  # noqa: PLR0913
                             managed_fields=managed_fields,
                             native_hash=(native_hashes or {}).get(rt, {}).get(dep),
                             registry_request=True,
+                            declaration_changed=is_update,
                             env_overrides=shared_env_vars,
                             runtime_vars=shared_runtime_vars,
                         )
@@ -1398,6 +1398,7 @@ def _install_self_defined_deps(
                     and dep.name in managed_target_servers.get(rt, set()),
                     managed_fields=managed_fields,
                     native_hash=(native_hashes or {}).get(rt, {}).get(dep.name),
+                    declaration_changed=is_update,
                 )
                 if (
                     state

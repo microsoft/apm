@@ -65,6 +65,7 @@ class CodexClientAdapter(MCPClientAdapter):
     supports_user_scope: bool = True
     target_name: str = "codex"
     mcp_servers_key: str = "mcp_servers"
+    refreshes_environment_renders: bool = True
 
     def __init__(
         self,

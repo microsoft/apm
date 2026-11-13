@@ -304,6 +304,12 @@ class MCPClientAdapter(ABC):
     # Consumed only through ``install.mcp.ownership.native_comparison_clients``.
     compares_native_connections: bool = True
 
+    # Whether an unchanged declaration still rewrites an APM-written entry whose
+    # render now differs only through the install environment (credential
+    # source precedence, resolved values). Claude and Codex reconcile those; the
+    # other adapters keep their written entry until the declaration changes.
+    refreshes_environment_renders: bool = False
+
     @staticmethod
     def _merge_extra(config: dict, server_info: dict) -> dict:
         """Merge harness-specific ``_extra`` keys from server_info into config.

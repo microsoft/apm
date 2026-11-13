@@ -148,20 +148,22 @@ def test_managed_connection_repeats_updates_and_retires(
     assert "shared" not in _servers(project, target)
 
 
-def test_resolved_env_value_change_updates_managed_gemini_connection(
+def test_resolved_env_value_change_keeps_managed_gemini_connection(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A written fingerprint proves APM's entry even after its resolved value changes."""
+    """An unchanged declaration keeps APM's written entry; a user edit still conflicts."""
     scenario = Scenario.create(tmp_path, apm_binary_path)
     _package(tmp_path / "pkg", env="      env:\n        TOKEN: ${MCP_TOKEN}\n")
     project = _project(tmp_path, "gemini")
+    config = project / TARGETS["gemini"][0]
 
     scenario.run(*INSTALL, cwd=project, env={**scenario.env, "MCP_TOKEN": "first-value"})
     assert "first-value" in json.dumps(_servers(project, "gemini")["shared"])
-    scenario.run(*INSTALL, cwd=project, env={**scenario.env, "MCP_TOKEN": "second-value"})
-    assert "second-value" in json.dumps(_servers(project, "gemini")["shared"])
+    written = config.read_bytes()
+    repeat = scenario.run(*INSTALL, cwd=project, env={**scenario.env, "MCP_TOKEN": "second-value"})
+    assert config.read_bytes() == written, output(repeat)
+    assert "conflicts with the existing" not in output(repeat)
 
-    config = project / TARGETS["gemini"][0]
     data = json.loads(config.read_text(encoding="utf-8"))
     data["mcpServers"]["shared"]["args"] = ["user-edit"]
     config.write_text(json.dumps(data), encoding="utf-8")

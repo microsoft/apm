@@ -211,8 +211,9 @@ runtime entry -- with its full ownership history:
 Fresh MCP writes on Claude, Codex and every JSON-config target store a SHA-256
 fingerprint of the normalized native entry actually written in the MCP URI
 row's existing `content_hash`. The fingerprint also proves APM's own entry
-when a value resolved at install time (for example a Gemini `env` value) has
-changed since. Cleanup verifies against this retained receipt without a
+when a value resolved at install time (a credential source or a Gemini `env`
+value) has changed since: outside Claude and Codex, that entry is kept as
+written until its declaration changes, and is never reported as a conflict. Cleanup verifies against this retained receipt without a
 registry lookup. Older registry rows with null hashes remain unverified and
 protected. This records no duplicate secret values and requires no new
 lockfile field or version. Full APM dependency lockfile rebuilds retain these

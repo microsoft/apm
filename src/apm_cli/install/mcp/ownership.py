@@ -109,8 +109,14 @@ def compare_native_mcp_connection(
     registry_request: bool = False,
     env_overrides: dict | None = None,
     runtime_vars: dict | None = None,
+    declaration_changed: bool = True,
 ) -> NativeMcpConnectionState:
-    """Compare a connection with its requested and previously recorded native shapes."""
+    """Compare a connection with its requested and previously recorded native shapes.
+
+    An APM-written entry whose declaration did not change is kept as written on
+    adapters that do not refresh environment-derived renders, so a different
+    credential source or resolved value never churns the native file.
+    """
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -189,11 +195,11 @@ def compare_native_mcp_connection(
                 if matches_baseline
                 else NativeMcpConnectionState.MATCHING_FOREIGN
             )
-    return (
-        NativeMcpConnectionState.UPDATE_MANAGED
-        if matches_baseline
-        else NativeMcpConnectionState.CONFLICT
-    )
+    if not matches_baseline:
+        return NativeMcpConnectionState.CONFLICT
+    if not declaration_changed and not client.refreshes_environment_renders:
+        return NativeMcpConnectionState.MATCHING_MANAGED
+    return NativeMcpConnectionState.UPDATE_MANAGED
 
 
 def project_mcp_cleanup_reachable(
