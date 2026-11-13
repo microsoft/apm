@@ -23,9 +23,9 @@ def error_envelope(code: str) -> dict[str, object]:
     return {"schema_version": SCHEMA_VERSION, "error": code}
 
 
-def safe_text(value: str | None) -> str | None:
+def safe_text(value: object) -> str | None:
     """Project optional metadata without URL credentials, queries, or fragments."""
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
 
     def clean(match: re.Match[str]) -> str:
@@ -43,12 +43,12 @@ def safe_text(value: str | None) -> str | None:
             return "[redacted-url]"
 
     result = _SOURCE_TOKEN.sub(clean, value)
-    return None if result == "[internal-cache]" else result
+    return None if result in {"[internal-cache]", "[redacted-url]"} else result
 
 
-def safe_install_path(value: str | None) -> str | None:
-    """Retain an actual installation path unless it points into an internal cache."""
-    if not value:
+def safe_install_path(value: object) -> str | None:
+    """Retain an actual installation path; cache or unresolvable paths are unavailable."""
+    if not isinstance(value, str) or not value:
         return None
     from apm_cli.cache.paths import cache_roots_for_display
     from apm_cli.config import CONFIG_DIR
@@ -63,12 +63,15 @@ def safe_install_path(value: str | None) -> str | None:
         return None
 
 
-def safe_source(value: str | None) -> str | None:
+def safe_source(value: object) -> str | None:
     """Sanitize a source URL or show a safe local source with home abbreviation."""
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
     if value.startswith("file://"):
-        value = unquote(urlsplit(value).path)
+        try:
+            value = unquote(urlsplit(value).path)
+        except ValueError:
+            return None
     if value.startswith(("/", "./", "../", "~", "\\")) or re.match(r"^[A-Za-z]:[\\/]", value):
         local = safe_install_path(value)
         if local is None:
