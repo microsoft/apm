@@ -995,6 +995,21 @@ class LockedDependency:
         )
 
 
+def local_staging_slug(path: str) -> str | None:
+    """Return the bundle slug when *path* is local staging under ``apm_modules/<slug>/.apm/``.
+
+    Unsafe slugs (empty, ``.``, ``..``, separators or drive markers) are never a
+    staging root; discovery also confines roots to ``apm_modules`` (defense in depth).
+    """
+    parts = Path(path).parts
+    if len(parts) < 3 or parts[0] != "apm_modules" or parts[2] != ".apm":
+        return None
+    slug = parts[1]
+    if slug in {"", ".", ".."} or any(sep in slug for sep in "/\\:"):
+        return None
+    return slug
+
+
 @dataclass
 class LockFile:
     """APM lock file for reproducible dependency resolution."""
@@ -1120,15 +1135,13 @@ class LockFile:
         Lockfiles written before #3705 recorded staging in
         ``local_deployed_files``; both views prove a root.
         """
-        slugs: set[str] = set()
-        for staged in (*self.local_staged_files, *self.local_deployed_files):
-            parts = Path(staged).parts
-            if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
-                slug = parts[1]
-                # Defense in depth: discovery also confines roots to apm_modules.
-                if slug not in {"", ".", ".."} and not any(sep in slug for sep in "/\\:"):
-                    slugs.add(slug)
-        return sorted(slugs)
+        paths = (*self.local_staged_files, *self.local_deployed_files)
+        return sorted({slug for path in paths if (slug := local_staging_slug(path))})
+
+    def absent_staging_slugs(self, modules_dir: Path) -> list[str]:
+        """Return recorded staging slugs whose ``modules_dir/<slug>`` root no longer exists."""
+        slugs = {slug for path in self.local_staged_files if (slug := local_staging_slug(path))}
+        return sorted(slug for slug in slugs if not (modules_dir / slug).exists())
 
     def retire_local_staging(self, slugs: Collection[str]) -> None:
         """Forget staged compile input under removed ``apm_modules/<slug>`` roots."""

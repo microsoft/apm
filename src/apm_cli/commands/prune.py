@@ -166,7 +166,18 @@ def prune(ctx, dry_run):
             else ()
         )
 
-        if not orphaned_packages and not missing_orphaned_keys and not owner_violations:
+        # Staging records whose root is already gone must not keep authorizing
+        # compile if the directory is recreated (#3705).
+        absent_staging = (
+            lockfile.absent_staging_slugs(apm_modules_dir) if lockfile is not None else []
+        )
+
+        if (
+            not orphaned_packages
+            and not missing_orphaned_keys
+            and not owner_violations
+            and not absent_staging
+        ):
             if not apm_modules_dir.exists():
                 logger.progress("No apm_modules/ directory found. Nothing to prune.")
             else:
@@ -209,11 +220,20 @@ def prune(ctx, dry_run):
                 f"Found {len(missing_orphaned_keys)} stale lockfile dependency "
                 "record(s) without removable package content."
             )
+        if absent_staging:
+            logger.progress(
+                f"Found {len(absent_staging)} stale local bundle staging record(s) "
+                f"without a staging directory: {', '.join(absent_staging)}."
+            )
 
         if dry_run:
             if missing_orphaned_keys:
                 logger.dry_run_notice(
                     f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
+                )
+            if absent_staging:
+                logger.dry_run_notice(
+                    f"forget {len(absent_staging)} stale local bundle staging record(s)"
                 )
             planned_owner_repairs = (
                 DeploymentLedgerCodec.owner_reference_violations(
@@ -329,7 +349,7 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
-            lockfile.retire_local_staging(removed_packages)
+            lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
             if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
                 from .uninstall.engine import _cleanup_stale_mcp

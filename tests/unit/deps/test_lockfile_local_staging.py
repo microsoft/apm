@@ -69,3 +69,27 @@ def test_staging_slugs_reject_unsafe_roots() -> None:
     ]
     lock = LockFile(local_staged_files=[*unsafe, _STAGED], local_deployed_files=unsafe)
     assert lock.local_staging_slugs() == ["bundler"]
+
+
+def test_pre_3705_staging_claims_migrate_even_when_not_restaged() -> None:
+    """A newer bundle that omits or skips an instruction still retires its old claim."""
+    lock = LockFile()
+    DeploymentLedgerCodec.record_local_bundle_files(
+        lock, [_SKILL, _STAGED], {_SKILL: _HASH, _STAGED: _HASH}
+    )
+
+    DeploymentLedgerCodec.record_local_bundle_files(lock, [_SKILL], {_SKILL: _HASH})
+
+    assert lock.local_deployed_files == [_SKILL]
+    assert DeploymentLedgerCodec.local_bundle_paths(lock) == {_SKILL}
+    assert lock.local_staged_files == [_STAGED]
+
+
+def test_absent_staging_slugs_only_reports_recorded_missing_roots(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    (modules / "present").mkdir(parents=True)
+    lock = LockFile(
+        local_staged_files=[_STAGED, "apm_modules/present/.apm/instructions/x.md"],
+        local_deployed_files=["apm_modules/legacy/.apm/instructions/y.md"],
+    )
+    assert lock.absent_staging_slugs(modules) == ["bundler"]

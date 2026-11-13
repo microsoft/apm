@@ -15,6 +15,7 @@ of writing Markdown into ``.codex/agents/*.toml``.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -161,8 +162,9 @@ def _move_staging_into_claims(project: Path) -> None:
     dump_yaml(lock, project / "apm.lock.yaml")
 
 
+@pytest.mark.parametrize("edited", [False, True], ids=["restaged", "edited-skipped"])
 def test_bundle_reinstall_migrates_pre_3705_staging_claims(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, edited: bool
 ) -> None:
     world = _Bundle(tmp_path, apm_binary_path)
     bundle = world.pack()
@@ -173,15 +175,52 @@ def test_bundle_reinstall_migrates_pre_3705_staging_claims(
     assert _STAGED in _claims(project)
     # The old shape reproduces #3705: audit verifies staging no target reads.
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    staged = project / _STAGED
+    if edited:
+        # Collision handling skips the edited file, so it is not restaged.
+        _write(staged, staged.read_text(encoding="ascii") + "Edited locally.\n")
+    expected_bytes = staged.read_bytes()
 
-    world.apm(project, *install)
+    reinstalled = world.apm(project, *install)
+    if edited:
+        assert f"Skipped {_STAGED}" in _output(reinstalled)
     lock = load_yaml(project / "apm.lock.yaml")
     assert not any(claim.startswith("apm_modules/") for claim in _claims(project))
     assert lock["local_staged_files"] == [_STAGED]
+    assert staged.read_bytes() == expected_bytes
     assert ".agents/skills/helper/SKILL.md" in _claims(project)
     world.apm(project, "compile")
     assert "Always be global." in (project / "AGENTS.md").read_text(encoding="utf-8")
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+
+def test_prune_retires_staging_records_whose_root_is_gone(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _Bundle(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    project = world.consumer("codex")
+    world.apm(project, "install", str(bundle), "--target", "codex", _NO_POLICY)
+    shutil.rmtree(project / "apm_modules/bundler")
+    lock = (project / "apm.lock.yaml").read_bytes()
+
+    dry = world.apm(project, "prune", "--dry-run")
+    assert "stale local bundle staging record" in _output(dry)
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+
+    world.apm(project, "prune")
+    assert "local_staged_files" not in load_yaml(project / "apm.lock.yaml")
+    assert ".agents/skills/helper/SKILL.md" in _claims(project)
+    # A recreated directory is no longer lockfile-proven compile input.
+    _write(project / _STAGED, '---\napplyTo: "**"\n---\nInjected.\n')
+    world.apm(project, "compile", expect=None)
+    agents = project / "AGENTS.md"
+    assert not agents.exists() or "Injected." not in agents.read_text(encoding="utf-8")
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+    # Prune is idempotent once the record is gone.
+    lock = (project / "apm.lock.yaml").read_bytes()
+    world.apm(project, "prune")
+    assert (project / "apm.lock.yaml").read_bytes() == lock
 
 
 def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(

@@ -4,7 +4,7 @@
     {
       "id": "local-bundle-compile-staging",
       "decision": "Local bundle instructions staged under apm_modules/<slug>/.apm/ for compile-only targets are lockfile-proven compile input, never deployment claims",
-      "owner": "deps/lockfile.py (LockFile.local_staged_files, local_staging_slugs, retire_local_staging -- apm prune is the only retirement path) written by core/deployment_ledger.py (record_local_bundle_files staged=) from install/services.py (integrate_local_bundle staged_files)",
+      "owner": "deps/lockfile.py (local_staging_slug, LockFile.local_staged_files, local_staging_slugs, absent_staging_slugs, retire_local_staging -- apm prune is the only retirement path) written by core/deployment_ledger.py (record_local_bundle_files staged=) from install/services.py (integrate_local_bundle staged_files)",
       "selectors": ["src/apm_cli/install/local_bundle_handler.py"],
       "guards": ["install-deployment-bundle-compile-staging"]
     },

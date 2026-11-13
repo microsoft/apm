@@ -25,14 +25,16 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
         ("local_staged_files: list[str] = field(default_factory=list)", "own the staging record"),
         ("def local_staging_slugs(self) -> list[str]:", "own staging-root proof"),
         ("def retire_local_staging(self, slugs: Collection[str]) -> None:", "own retirement"),
+        ("def local_staging_slug(path: str) -> str | None:", "own the staging path shape"),
+        ("def absent_staging_slugs(self, modules_dir: Path) -> list[str]:", "own stale roots"),
     ),
     LEDGER: (
         (
-            "retired_paths = prior_bundle_paths.intersection(staged)",
-            "drop prior staging claims",
+            "path for path in prior_bundle_paths if local_staging_slug(path) is not None",
+            "migrate every prior bundle staging claim",
         ),
         (
-            "lockfile.local_staged_files = sorted(set(lockfile.local_staged_files).union(staged))",
+            "set(lockfile.local_staged_files).union(staged, retired_paths)",
             "record staging apart from claims",
         ),
     ),
@@ -49,7 +51,13 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
     DISCOVERY: (
         ("for slug in lock.local_staging_slugs():", "prove staging roots via the lockfile owner"),
     ),
-    PRUNE: (("lockfile.retire_local_staging(removed_packages)", "retire pruned staging"),),
+    PRUNE: (
+        ("lockfile.absent_staging_slugs(apm_modules_dir)", "plan absent staging roots"),
+        (
+            "lockfile.retire_local_staging([*removed_packages, *absent_staging])",
+            "retire pruned and absent staging",
+        ),
+    ),
 }
 
 _PATH_HEURISTIC = re.compile(r'"/\.apm/instructions/"|parts\[2\] == "\.apm"')
