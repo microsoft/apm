@@ -65,12 +65,16 @@ class InstallService:
         *,
         mcp_servers: set[str],
         mcp_targets: list[str],
-        lsp_servers: set[str],
-        lsp_targets: list[str],
+        lsp_target_servers: dict[str, set[str]],
         current_mcp: CurrentMcpConfigView | None,
         user_scope: bool,
     ) -> None:
-        """Refuse unrecorded service claims before either service mutates native state."""
+        """Refuse unrecorded service claims before either service mutates native state.
+
+        MCP claims every server on every target. LSP claims are per target
+        (*lsp_target_servers* maps each selected runtime to the servers it can
+        express), so a server a target skips is never required to be owned there.
+        """
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
@@ -91,16 +95,16 @@ class InstallService:
                     f"  - MCP server {name!a} cannot reproduce its locked config "
                     "from the available source declarations"
                 )
-        for service, names, targets, recorded in (
-            ("MCP", mcp_servers, mcp_targets, mcp_ownership),
-            ("LSP", lsp_servers, lsp_targets, lockfile.lsp_target_servers),
-        ):
-            for target in targets:
-                for name in sorted(names - set(recorded.get(target, ()))):
-                    reasons.append(
-                        f"  - {service} server {name!a} target {target!a} "
-                        "ownership is not recorded in apm.lock.yaml"
-                    )
+        claims = [("MCP", target, mcp_servers, mcp_ownership) for target in mcp_targets] + [
+            ("LSP", target, names, lockfile.lsp_target_servers)
+            for target, names in lsp_target_servers.items()
+        ]
+        for service, target, names, recorded in claims:
+            for name in sorted(names - set(recorded.get(target, ()))):
+                reasons.append(
+                    f"  - {service} server {name!a} target {target!a} "
+                    "ownership is not recorded in apm.lock.yaml"
+                )
         if reasons:
             raise FrozenInstallError(
                 "--frozen cannot replay the selected native services.",

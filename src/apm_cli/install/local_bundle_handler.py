@@ -258,7 +258,7 @@ def install_local_bundle(
             if not LSPIntegrator.supported_target_runtimes(target_names):
                 raise RequiredIntegrationError(
                     "Bundle lsp.json cannot be configured because the resolved target set has "
-                    "no LSP-compatible runtime. Select --target claude or --target copilot."
+                    f"no LSP-compatible runtime. Select {LSPIntegrator.target_choice_hint()}."
                 )
 
         result = integrate_local_bundle(

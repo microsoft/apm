@@ -140,10 +140,12 @@ def run_owned_lsp_integration(
 
         raise RequiredIntegrationError(
             "Bundle lsp.json cannot be configured because the resolved target set has "
-            "no LSP-compatible runtime. Select --target claude or --target copilot."
+            f"no LSP-compatible runtime. Select {LSPIntegrator.target_choice_hint()}."
         )
     for runtime in supported_target_runtimes:
-        new_targets.setdefault(runtime, set()).update(new_names)
+        new_targets.setdefault(runtime, set()).update(
+            LSPIntegrator.expressible_server_names(dependencies, runtime)
+        )
 
     count = 0
     if dependencies:
@@ -464,7 +466,7 @@ def run_lsp_integration(  # noqa: PLR0913
 
                 raise RequiredIntegrationError(
                     "LSP dependencies are declared, but no effective target supports "
-                    "LSP configuration. Choose --target claude or --target copilot, then retry."
+                    f"LSP configuration. Choose {LSPIntegrator.target_choice_hint()}, then retry."
                 )
             lsp_count = LSPIntegrator.install(
                 lsp_deps,
@@ -485,7 +487,9 @@ def run_lsp_integration(  # noqa: PLR0913
         for server_names in new_targets.values():
             server_names.difference_update(old_regular_names)
         for target_runtime in target_runtimes or []:
-            new_targets.setdefault(target_runtime, set()).update(new_regular_names)
+            new_targets.setdefault(target_runtime, set()).update(
+                LSPIntegrator.expressible_server_names(lsp_deps, target_runtime)
+            )
         if old_lsp_targets_present:
             _clean_target_differences(
                 old_targets=old_lsp_targets,

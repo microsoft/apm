@@ -12,8 +12,8 @@ This page covers LSP servers: how you declare them, what gets written,
 and how the install pipeline manages their lifecycle.
 
 LSP integration targets supported agent runtimes. Today APM writes
-configuration for Claude Code and GitHub Copilot CLI, while keeping the
-manifest dependency model runtime-agnostic. See Claude Code's
+configuration for Claude Code, GitHub Copilot CLI and OpenCode, while keeping
+the manifest dependency model runtime-agnostic. See Claude Code's
 [Plugins reference](https://code.claude.com/docs/en/plugins-reference)
 and GitHub's
 [Copilot CLI LSP servers documentation](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/lsp-servers)
@@ -45,8 +45,15 @@ APM writes runtime-specific config for each detected target. At project scope,
 Claude Code discovers LSP servers from the APM-managed plugin manifest at
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; user-scope installs use
 `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. Copilot CLI uses
-`.github/lsp.json` or `~/.copilot/lsp-config.json`. This generated shape
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. OpenCode uses the `lsp`
+key of `opencode.json` or `~/.config/opencode/opencode.json`. This generated shape
 matches each runtime's documented discovery contract.
+
+`opencode.json` also holds your other OpenCode settings, so APM never rewrites
+it from scratch. If the file is not a plain JSON object (for example it
+contains comments or trailing commas), or its `lsp` key is not an object (such
+as `"lsp": false`), APM leaves the file unchanged and reports an error, even
+with `--force`. Fix the file or add the servers by hand.
 
 Claude skills-directory plugin discovery requires Claude Code v2.1.157 or
 newer. For project installs, accept Claude Code's workspace-trust prompt; LSP
@@ -102,6 +109,7 @@ The full field reference is in the
 |---|---|---|---|
 | Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `extensionToLanguage` |
 | GitHub Copilot CLI | `.github/lsp.json` `lspServers` | `~/.copilot/lsp-config.json` `lspServers` | `fileExtensions` |
+| OpenCode | `opencode.json` `lsp` | `~/.config/opencode/opencode.json` `lsp` | `extensions` |
 
 **Claude Code project-scope plugin manifest example:**
 
@@ -140,6 +148,41 @@ User-scope files keep the same runtime-specific server shape under their
 `lspServers` section. Claude skills-directory plugins are auto-discovered, so
 APM does not write an `enabledPlugins` entry.
 
+**OpenCode project-scope `opencode.json` example:**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "gopls": {
+      "command": ["gopls", "serve"],
+      "extensions": [".go"]
+    }
+  }
+}
+```
+
+### OpenCode limitations
+
+OpenCode's `lsp` schema is narrower than the APM manifest, so APM translates
+each server and drops what OpenCode cannot express:
+
+| Manifest field | OpenCode `lsp.<name>` |
+|---|---|
+| `command` + `args` | `command` (one array) |
+| keys of `extensionToLanguage` | `extensions` (language IDs are not used) |
+| `env` | `env` |
+| `initializationOptions` | `initialization` |
+| `startupTimeout`, `shutdownTimeout`, `restartOnCrash`, `maxRestarts`, `workspaceFolder`, `settings` | not written |
+| `transport: socket` | server not written for OpenCode; install warns |
+| string form (name only, no `command`) | server not written for OpenCode; install warns |
+
+A skipped server is still written for the other selected targets, and APM
+records it only for those targets. APM adds `$schema` only when it creates
+the file. If `opencode.json` already has a `lsp` entry with the same name
+that APM does not manage and that differs from the declared one, install
+stops instead of overwriting it; rename one of them or rerun with `--force`.
+
 ## Required and optional fields
 
 Two fields are required for every LSP server definition (object form):
@@ -163,6 +206,10 @@ Optional fields give you finer control:
 | `shutdownTimeout` | `int` | -- | Max time (ms) for graceful shutdown. |
 | `restartOnCrash` | `bool` | -- | Restart the server automatically on crash. |
 | `maxRestarts` | `int` | -- | Maximum restart attempts before giving up. |
+
+Not every runtime supports every field. OpenCode skips socket servers and
+ignores the timeout, restart, `workspaceFolder` and `settings` fields; see
+[OpenCode limitations](#opencode-limitations).
 
 ## Transitive LSP dependencies
 
@@ -231,6 +278,7 @@ success.
 |---|---|
 | Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` / `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` |
 | GitHub Copilot CLI | `.github/lsp.json` / `~/.copilot/lsp-config.json` |
+| OpenCode | `opencode.json` / `~/.config/opencode/opencode.json` |
 | Others | Not yet supported |
 
 ## Next
