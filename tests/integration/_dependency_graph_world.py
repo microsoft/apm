@@ -4,6 +4,12 @@ Every remote package is a local bare repository reached through a
 process-scoped ``insteadOf`` rewrite of ``https://github.com/test/<name>``.
 Each scenario step asserts the exit code and then inspects disk,
 ``apm.lock.yaml`` and ``apm_modules`` directly.
+
+A package named on the ``apm install`` command line is validated before the
+install; on github.com that probe is a REST API call that no rewrite can
+route.  Scenarios that name packages on the command line serve them under
+:data:`GENERIC_HOST` too (:meth:`World.serve_on`), whose probe is
+``git ls-remote`` through the same fixture rewrite.
 """
 
 from __future__ import annotations
@@ -19,10 +25,11 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
 
 NO_POLICY = "--no-policy"
+GENERIC_HOST = "git.example.test"
 
 
-def remote(name: str) -> str:
-    return f"https://github.com/test/{name}.git"
+def remote(name: str, host: str = "github.com") -> str:
+    return f"https://{host}/test/{name}.git"
 
 
 def write(path: Path, text: str) -> Path:
@@ -63,6 +70,7 @@ class World:
     project: Path
     repos: dict[str, LocalGitRepository] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
+    hosts: list[str] = field(default_factory=lambda: ["github.com"])
 
     @classmethod
     def create(cls, tmp_path: Path, apm_binary_path: Path) -> World:
@@ -83,10 +91,24 @@ class World:
         repository = self.factory.create(name, source_tree=source)
         self.factory.commit(repository, message=f"publish {name}")
         self.repos[name] = repository
-        self.env = self.factory.url_rewrite_subprocess_env_many(
-            [(repo, remote(repo_name)) for repo_name, repo in self.repos.items()]
-        )
+        self._route()
         return repository.worktree
+
+    def serve_on(self, host: str) -> None:
+        """Also serve every fixture (published now or later) under *host*."""
+        self.hosts.append(host)
+        self._route()
+
+    def _route(self) -> None:
+        if not self.repos:
+            return
+        self.env = self.factory.url_rewrite_subprocess_env_many(
+            [
+                (repo, remote(repo_name, host))
+                for host in self.hosts
+                for repo_name, repo in self.repos.items()
+            ]
+        )
 
     def republish(self, name: str, message: str = "update") -> None:
         self.factory.commit(self.repos[name], message=message)
