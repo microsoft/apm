@@ -373,10 +373,41 @@ def test_view_json_sanitizes_marketplace_strings(structured_source: bool) -> Non
 
 
 @pytest.mark.parametrize(
+    ("source", "expected"),
+    [("./plugins/review", "plugins/review"), ("plugins/review", "plugins/review"), ("./", ".")],
+)
+def test_view_json_relative_plugin_source_is_not_cwd_anchored(
+    source: str, expected: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Relative plugin sources stay marketplace-relative regardless of the invoking directory."""
+    from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+
+    monkeypatch.chdir(tmp_path)
+    plugin = MarketplacePlugin(name="review", source=source)
+    with (
+        patch("apm_cli.marketplace.registry.get_marketplace_by_name"),
+        patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=MarketplaceManifest(name="tools", plugins=(plugin,)),
+        ),
+        patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=ValueError("not resolvable"),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["view", "review@tools", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["source"] == expected
+    assert tmp_path.as_posix() not in result.stdout
+
+
+@pytest.mark.parametrize(
     "source",
     [
         {"type": ["raw"], "url": {"token": "RAW_SECRET"}, "ref": ["RAW_SECRET"]},
         "file://[",
+        "../outside",
     ],
 )
 def test_view_json_unusable_optional_source_is_null(source: object) -> None:

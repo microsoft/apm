@@ -361,7 +361,7 @@ def _display_marketplace_plugin(
         pass
 
     if output_format == "json":
-        from ..core.json_envelope import safe_source, safe_text
+        from ..core.json_envelope import safe_plugin_source, safe_source, safe_text
 
         if isinstance(plugin.source, dict):
             raw_repo = plugin.source.get("repo") or plugin.source.get("url")
@@ -374,7 +374,7 @@ def _display_marketplace_plugin(
             elif source_display and source_ref:
                 source_display += f" @ {source_ref}"
         else:
-            source_display = safe_source(plugin.source)
+            source_display = safe_plugin_source(plugin.source)
         data = {
             "name": safe_text(plugin.name),
             "marketplace": safe_text(marketplace_name),

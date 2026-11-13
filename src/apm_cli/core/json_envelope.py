@@ -105,6 +105,30 @@ def safe_install_path(value: object) -> str | None:
         return None
 
 
+def safe_plugin_source(value: object) -> str | None:
+    """Project a marketplace plugin source without anchoring it to the working directory.
+
+    Relative locators are relative to the marketplace, so they are normalized
+    textually instead of resolved against the invoking directory.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    is_relative = not (
+        value.startswith(("/", "~", "\\"))
+        or "://" in value
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+        or re.match(r"^[^\s/@]+@[^\s/:]+:", value)
+    )
+    if not is_relative:
+        return safe_source(value)
+    if not value.isprintable():
+        return None
+    parts = [part for part in value.replace("\\", "/").split("/") if part not in {"", "."}]
+    if ".." in parts:
+        return None
+    return "/".join(parts) or "."
+
+
 def safe_source(value: object) -> str | None:
     """Sanitize a source URL or show a safe local source with home abbreviation."""
     if not isinstance(value, str) or not value:
