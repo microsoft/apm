@@ -1,11 +1,18 @@
 """Keep marketplace declaration association, ref and catalog-origin evidence in their owners."""
 
+import ast
+
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import checked_facts, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 RULE_ID = "marketplace-integrations-locked-evidence"
 ORIGIN_RULE_ID = "marketplace-integrations-catalog-origin"
+ENVELOPE_RULE_ID = "marketplace-integrations-json-envelope"
+_ENVELOPE_CONSUMERS = (
+    "src/apm_cli/commands/marketplace/__init__.py",
+    "src/apm_cli/commands/view.py",
+)
 _ROUTES = (
     ("src/apm_cli/policy/ci_checks.py", "_check_ref_consistency", "lock.get_dependency"),
     ("src/apm_cli/policy/ci_checks.py", "_check_ref_consistency", "marketplace_ref_mismatch"),
@@ -303,6 +310,30 @@ def _catalog_metadata_consumers(provider: FactsProvider) -> list[Violation]:
     return findings
 
 
+def check_json_envelope(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Reject duplicate literal envelopes in the marketplace and view commands."""
+    findings: list[Violation] = []
+    for path in _ENVELOPE_CONSUMERS:
+        facts, failures = checked_facts(provider, path, ENVELOPE_RULE_ID, require_python=True)
+        findings.extend(failures)
+        if failures or facts.tree_index is None:
+            continue
+        for node in facts.tree_index.nodes:
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {key.value for key in node.keys if isinstance(key, ast.Constant)}
+            if "schema_version" in keys and ("data" in keys or "error" in keys):
+                findings.append(
+                    violation(
+                        ENVELOPE_RULE_ID,
+                        path,
+                        "Marketplace and view envelopes must use core/json_envelope.py",
+                        line=node.lineno,
+                    )
+                )
+    return tuple(findings)
+
+
 RULES = (
     Rule(
         id=RULE_ID,
@@ -320,5 +351,12 @@ RULES = (
             "and registration compare that origin, never the alias (#3912)."
         ),
         check=_check_origin,
+    ),
+    Rule(
+        id=ENVELOPE_RULE_ID,
+        group="marketplace_integrations",
+        guard_ids=(ENVELOPE_RULE_ID,),
+        description="Marketplace and view JSON envelopes use their shared owner.",
+        check=check_json_envelope,
     ),
 )
