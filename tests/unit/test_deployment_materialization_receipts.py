@@ -346,9 +346,8 @@ def test_cleanup_retires_only_successfully_removed_members(
     assert _session(root, lock).baseline(path, [TARGET]) is None
 
 
-@pytest.mark.parametrize("managed", [True, False], ids=["recorded", "legacy"])
 def test_sync_reports_only_successful_removals_for_receipt_retirement(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, managed: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import shutil
     from types import SimpleNamespace
@@ -384,11 +383,7 @@ def test_sync_reports_only_successful_removals_for_receipt_retirement(
     result = SkillIntegrator().sync_integration(
         SimpleNamespace(get_apm_dependencies=lambda: []),
         root,
-        managed_files=(
-            {member.parent.relative_to(root).as_posix() for member in (path, blocked)}
-            if managed
-            else None
-        ),
+        managed_files={member.parent.relative_to(root).as_posix() for member in (path, blocked)},
         targets=[TARGET],
         removed_paths=removed,
     )

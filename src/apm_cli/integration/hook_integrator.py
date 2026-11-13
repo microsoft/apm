@@ -1966,11 +1966,13 @@ class HookIntegrator(BaseIntegrator):
         surviving_deps = surviving_dependency_refs_for_reintegration(
             apm_package, project_root, lockfile=lockfile
         )
-        allow_map = resolve_project_exec_allow_map(project_root, apm_package)
         survivor_plan = preflight_reintegration_survivors(
             surviving_deps,
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
+        )
+        allow_map = (
+            resolve_project_exec_allow_map(project_root, apm_package) if survivor_plan else None
         )
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:

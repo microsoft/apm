@@ -681,17 +681,19 @@ def build_runner_from_context(
         # Discovery joins paths onto the root, so a str root would raise
         # TypeError here and the except below would silently skip deny_all.
         root = Path(project_root) if project_root else Path.cwd()
-        try:
-            policy = route_discovery_outcome(
-                discover_policy_with_chain(root),
-                logger=None,
-                fetch_failure_default=read_project_fetch_failure_default(root),
-            )
-        except PolicyViolationError:
-            suppressed_reason = "org policy could not be enforced"
-        else:
-            if policy is not None and policy.executables.deny_all:
-                suppressed_reason = "org policy (executables.deny_all)"
+        fetch_result = discover_policy_with_chain(root)
+        resolved = getattr(fetch_result, "policy", None)
+        if resolved is not None and resolved.executables.deny_all:
+            suppressed_reason = "org policy (executables.deny_all)"
+        elif fetch_result is not None:
+            try:
+                route_discovery_outcome(
+                    fetch_result,
+                    logger=None,
+                    fetch_failure_default=read_project_fetch_failure_default(root),
+                )
+            except PolicyViolationError:
+                suppressed_reason = "org policy could not be enforced"
     except Exception:
         _logger.debug("Lifecycle org-policy check failed", exc_info=True)
 
