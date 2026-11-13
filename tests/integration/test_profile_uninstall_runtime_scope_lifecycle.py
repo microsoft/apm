@@ -117,3 +117,82 @@ def test_profile_uninstall_keeps_other_runtime_default_root(
     for root in (*roots.values(), agents, profile):
         assert _skills(root) == set(), root
     assert _declared(manifest_path) == []
+
+
+def test_batched_profile_uninstall_scopes_each_package_to_its_own_split(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """One uninstall of two packages removes what two separate uninstalls would.
+
+    ``alpha`` lives in two Hermes homes and only the default Claude root;
+    ``beta`` lives in two Claude profiles and only the default Hermes root.
+    With ``HERMES_HOME`` selecting alpha's second home, alpha's split runtime
+    is Hermes and beta's is Claude, so neither loses the other runtime's files.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "w", base_env=dict(os.environ))
+    home = isolated.home
+    manifest_path = isolated.config_root / "apm.yml"
+    lock_path = isolated.config_root / "apm.lock.yaml"
+    dump_yaml({"name": "user", "version": "0.1.0"}, manifest_path)
+    factory = LocalPackageFactory(isolated.package_root)
+    packages = {}
+    for name in ("alpha", "beta"):
+        package = factory.create(f"{name}-pkg")
+        factory.add_skill(package, name, f"---\nname: {name}\ndescription: D.\n---\n{name}\n")
+        packages[name] = str(package.root)
+    claude, hermes = home / ".claude", home / ".hermes"
+    hermes_home = isolated.root / "profiles" / "hermes-2"
+    claude_profile = isolated.root / "profiles" / "claude-2"
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
+
+    def run(*args: str, step: str, **selected: Path) -> None:
+        env = isolated.subprocess_env()
+        for var, _directory in _RUNTIMES.values():
+            env.pop(var, None)
+        env.update({var: str(root) for var, root in selected.items()})
+        result = runner.run(args, scenario_id=step, cwd=isolated.work_root, env=env)
+        assert result.returncode == 0, f"[{step}]\n{result.stdout}\n{result.stderr}"
+
+    install = ("install", "-g", "--no-policy", "--target")
+    run(*install, "claude,hermes", packages["alpha"], step="1-alpha-defaults")
+    run(*install, "hermes", packages["alpha"], step="2-alpha-hermes-2", HERMES_HOME=hermes_home)
+    run(*install, "claude,hermes", packages["beta"], step="3-beta-defaults")
+    run(
+        *install,
+        "claude",
+        packages["beta"],
+        step="4-beta-claude-2",
+        CLAUDE_CONFIG_DIR=claude_profile,
+    )
+    before = {
+        "claude": _skills(claude),
+        "hermes": _skills(hermes),
+        "hermes-2": _skills(hermes_home),
+        "claude-2": _skills(claude_profile),
+    }
+    assert before == {
+        "claude": {"alpha", "beta"},
+        "hermes": {"alpha", "beta"},
+        "hermes-2": {"alpha"},
+        "claude-2": {"beta"},
+    }, before
+
+    run(
+        "uninstall",
+        "-g",
+        packages["alpha"],
+        packages["beta"],
+        step="5-batched-uninstall",
+        HERMES_HOME=hermes_home,
+    )
+    # alpha (split in Hermes) leaves only the selected Hermes home; beta
+    # (split in Claude) leaves only the selected (default) Claude root.
+    assert _skills(hermes_home) == set()
+    assert _skills(claude) == {"alpha"}, "batched uninstall removed alpha's Claude files"
+    assert _skills(hermes) == {"alpha", "beta"}, "batched uninstall removed beta's Hermes files"
+    assert _skills(claude_profile) == {"beta"}
+    rows = _lock_rows(lock_path)
+    assert {".claude/skills/alpha/SKILL.md", ".hermes/skills/beta/SKILL.md"} <= rows, rows
+    assert ".claude/skills/beta/SKILL.md" not in rows, rows
+    assert not any(row.startswith(hermes_home.as_posix()) for row in rows), rows
+    assert set(_declared(manifest_path)) == set(packages.values())
