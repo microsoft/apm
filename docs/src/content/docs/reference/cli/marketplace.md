@@ -15,8 +15,9 @@ validating it, and preparing artifacts for consumer repositories).
 ```bash
 # Consume
 apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--path P] [--offline]
-apm marketplace list
-apm marketplace browse NAME [--offline]
+apm marketplace list [--format text|json]
+apm marketplace browse NAME [--offline] [--format text|json]
+apm marketplace search QUERY@MARKETPLACE [--limit N] [--format text|json]
 apm marketplace update [NAME]
 apm marketplace remove NAME
 apm marketplace validate NAME
@@ -208,12 +209,12 @@ then subprocess git. See
 
 ### `apm marketplace list`
 
-List every registered marketplace with its source URL and tracked
-branch.
+List registered marketplaces with their source and tracked branch.
 
 ```bash
 apm marketplace list
 apm marketplace list --verbose
+apm marketplace list --format json
 ```
 
 ### `apm marketplace browse NAME`
@@ -223,6 +224,40 @@ Show the packages exposed by a registered marketplace.
 ```bash
 apm marketplace browse awesome-agents
 ```
+
+### JSON output
+
+`list` and `browse` accept `--format text|json` (`-f`); text is the default
+and keeps the existing table output. JSON success output is one version-1
+document on stdout, with `data` as an array:
+
+```json
+{"schema_version":1,"data":[{"name":"skills","source":"github.com/acme/skills","ref":"main","path":"marketplace.json"}]}
+```
+
+List rows contain `name`, `source`, `ref`, and `path`. Browse rows contain
+`name`, `description`, `version`, and `install`:
+
+```json
+{"schema_version":1,"data":[{"name":"review","description":null,"version":"1.0.0","install":"review@skills"}]}
+```
+
+Missing scalar values are `null`. JSON list and browse rows sort
+case-insensitively by `name`; no results produce `{"schema_version":1,"data":[]}`
+with exit code `0`. URL-bearing values have userinfo, query strings, and
+fragments removed. Local source paths use `~` for the home directory; sources
+inside APM's internal cache are `null`. Cache paths embedded in descriptions
+are replaced with `[internal-cache]`. Other marketplace metadata is not
+included in these projections.
+
+Handled JSON failures write `{"schema_version":1,"error":"<code>"}` to stderr
+and exit nonzero; the code is stable and does not contain exception text.
+List uses `marketplace_list_failed`; browse uses `marketplace_not_found` or
+`marketplace_fetch_failed`. Click usage errors, including invalid option
+values, retain their normal usage-error output.
+
+`apm marketplace search` is also available; see [`apm search`](../search/)
+for its format, ordering, and `--limit` behavior.
 
 ### `apm marketplace update [NAME]`
 
