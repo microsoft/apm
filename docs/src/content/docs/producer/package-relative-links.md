@@ -70,6 +70,11 @@ different -- see below.
 
 `#fragment` and `?query` suffixes are preserved through the rewrite.
 
+Compile-time validation checks the file path independently of those
+suffixes: an existing file is not reported missing just because the link
+adds a section address. The suffix itself is not validated -- APM does
+not check that the heading or query exists in the target document.
+
 ## What APM does not rewrite
 
 | Link form | Why it is left alone |
