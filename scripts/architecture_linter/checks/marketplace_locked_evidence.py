@@ -8,6 +8,7 @@ from scripts.architecture_linter.models import Rule, Violation
 
 RULE_ID = "marketplace-integrations-locked-evidence"
 ENVELOPE_RULE_ID = "marketplace-integrations-json-envelope"
+PROJECTION_RULE_ID = "marketplace-integrations-json-projection"
 _ENVELOPE_CONSUMERS = (
     "src/apm_cli/commands/marketplace/__init__.py",
     "src/apm_cli/commands/view.py",
@@ -71,6 +72,49 @@ def check_json_envelope(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def check_json_projection(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep JSON string/path sanitization in the shared projection owner."""
+    findings: list[Violation] = []
+    for path in _ENVELOPE_CONSUMERS:
+        facts, failures = checked_facts(provider, path, PROJECTION_RULE_ID, require_python=True)
+        findings.extend(failures)
+        if failures or facts.tree_index is None:
+            continue
+        for node in facts.tree_index.nodes:
+            if not isinstance(node, ast.FunctionDef) or not node.name.startswith("safe_"):
+                continue
+            findings.append(
+                violation(
+                    PROJECTION_RULE_ID,
+                    path,
+                    "Marketplace and view safe_* projection belongs in core/json_envelope.py",
+                    line=node.lineno,
+                )
+            )
+        for call in facts.calls:
+            if call.qualname.rsplit(".", 1)[-1] in {
+                "urlsplit",
+                "urlunsplit",
+                "urlparse",
+                "urlunparse",
+            }:
+                # Registration's URL parser is unrelated to JSON projection.
+                if path.endswith("marketplace/__init__.py") and call.scope in {
+                    "_default_alias_from_remote_url",
+                    "_default_alias_from_url",
+                }:
+                    continue
+                findings.append(
+                    violation(
+                        PROJECTION_RULE_ID,
+                        path,
+                        "Route JSON URL projection through safe_source/safe_text",
+                        line=call.line,
+                    )
+                )
+    return tuple(findings)
+
+
 RULES = (
     Rule(
         id=RULE_ID,
@@ -85,5 +129,12 @@ RULES = (
         guard_ids=(ENVELOPE_RULE_ID,),
         description="Marketplace and view JSON envelopes use their shared owner.",
         check=check_json_envelope,
+    ),
+    Rule(
+        id=PROJECTION_RULE_ID,
+        group="marketplace_integrations",
+        guard_ids=(PROJECTION_RULE_ID,),
+        description="Marketplace and view safe string/path projection uses its shared owner.",
+        check=check_json_projection,
     ),
 )
