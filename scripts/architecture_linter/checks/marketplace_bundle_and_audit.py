@@ -257,6 +257,8 @@ _SOURCE_IDENTITY = "src/apm_cli/marketplace/source_identity.py"
 _MARKETPLACE_COMMAND = "src/apm_cli/commands/marketplace/__init__.py"
 _MARKETPLACE_MODEL = "src/apm_cli/marketplace/models.py"
 _MARKETPLACE_CLIENT = "src/apm_cli/marketplace/client.py"
+_MARKETPLACE_REGISTRATION = "src/apm_cli/marketplace/registration.py"
+_MARKETPLACE_RECONCILE = "src/apm_cli/marketplace/reconcile.py"
 
 
 def _check_marketplace_source_admission(
@@ -285,6 +287,21 @@ def _check_marketplace_source_admission(
             ),
         ),
         (_MARKETPLACE_CLIENT, ("host = source.host",)),
+        (
+            _MARKETPLACE_REGISTRATION,
+            (
+                "def parse_registration_source(",
+                "identity = parse_marketplace_source(source_arg, host)",
+            ),
+        ),
+        (
+            _MARKETPLACE_COMMAND,
+            ("parsed = parse_registration_source(source, ref=explicit_ref, host=host)",),
+        ),
+        (
+            _MARKETPLACE_RECONCILE,
+            ("parsed = parse_registration_source(item.source, ref=item.ref)",),
+        ),
     )
     for path, literals in required:
         findings.extend(
@@ -316,6 +333,17 @@ def _check_marketplace_source_admission(
             (_MARKETPLACE_COMMAND,),
             re.compile(r"SCP_LIKE_RE|AuthResolver\.classify_host|is_valid_fqdn"),
             "Marketplace command must not reimplement source classification",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _RID_SOURCE_ADMISSION,
+            (_MARKETPLACE_COMMAND, _MARKETPLACE_RECONCILE),
+            re.compile(r"\b_?split_source_fragment_ref\(|\burl_names_remote_manifest\("),
+            "Marketplace SOURCE must be parsed through registration.parse_registration_source",
             exempt=False,
         )
     )

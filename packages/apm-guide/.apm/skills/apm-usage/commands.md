@@ -703,6 +703,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
+| `apm install -g` (with `marketplaces:` in `$APM_HOME/apm.yml`) | Reconcile the user manifest `marketplaces:` list (`name`, `source`, optional `ref`) before installing: register, update, or remove entries it added. Manual `apm marketplace add` registrations always win. Discovery only. See dependencies.md. | `--dry-run` previews without fetching or writing |
 
 ## Marketplace authoring
 

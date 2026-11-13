@@ -153,6 +153,7 @@ from ..install.mcp.conflicts import (
 from ..install.mcp.registry import resolve_registry_url as _resolve_registry_url
 from ..install.mcp.registry import validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry
 from ..install.mcp.registry import validate_registry_url as _validate_registry_url
+from ..marketplace.reconcile import reconcile_user_marketplaces_or_exit
 from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests patch commands.install._rich_success
     _rich_echo,
     _rich_error,
@@ -1444,9 +1445,7 @@ def install(  # noqa: PLR0913
             return
 
         # Resolve transport selection inputs.
-        from ..deps.transport_selection import (
-            ProtocolPreference,
-        )
+        from ..deps.transport_selection import ProtocolPreference
 
         if use_ssh and use_https:
             _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
@@ -1552,6 +1551,7 @@ def install(  # noqa: PLR0913
                 logger.progress("  apm install <org/repo> to auto-create + install")
             sys.exit(1)
 
+        reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
         outcome = None
         if packages:
             _validated_packages, outcome = _validate_and_add_packages_to_apm_yml(

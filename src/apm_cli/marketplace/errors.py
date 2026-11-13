@@ -25,6 +25,17 @@ class MarketplaceNotFoundError(MarketplaceError):
         )
 
 
+class ManualMarketplaceConflictError(MarketplaceError):
+    """Raised when a manifest entry targets a manually registered marketplace name."""
+
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(
+            f"Marketplace '{name}' was registered manually with 'apm marketplace add'; "
+            "the user manifest does not overwrite it."
+        )
+
+
 class PluginNotFoundError(MarketplaceError):
     """Raised when a plugin is not found in a marketplace."""
 

@@ -19,6 +19,12 @@ from apm_cli.utils.diagnostics import printable_ascii_text
 
 logger = logging.getLogger(__name__)
 
+# Registration ownership recorded in ``marketplaces.json`` (see
+# ``MarketplaceSource.origin``).
+ORIGIN_MANUAL = "manual"
+ORIGIN_MANIFEST = "manifest"
+MARKETPLACE_ORIGINS = (ORIGIN_MANUAL, ORIGIN_MANIFEST)
+
 
 # SCP-like git URL: e.g. git@host:org/repo.git -- reused canonical regex
 # from apm_cli.cache.url_normalize so dependency and marketplace SCP parsing
@@ -82,7 +88,7 @@ def url_names_remote_manifest(url: str) -> bool:
     """Return True when *url* is a direct hosted ``marketplace.json`` document.
 
     Single source of truth for the "is this a hosted marketplace.json URL"
-    decision, shared by the marketplace CLI (``_is_remote_marketplace_json_url``)
+    decision, shared by registration parsing (``parse_registration_source``)
     and ``MarketplaceSource.is_remote_manifest_url`` so the two predicates
     cannot drift (see #692 forward-compat constraint 1: the source-kind
     discriminator stays a derived, validated string). Matches Anthropic's
@@ -173,8 +179,17 @@ class MarketplaceSource:
     repo: str = ""
     host: str = "github.com"
     branch: str = ""  # Legacy alias for ref; if both given, ref wins
+    # Who owns the registration: ``manual`` (``apm marketplace add``) or
+    # ``manifest`` (the user manifest ``marketplaces:`` list, reconciled by
+    # ``apm install -g``). Ownership metadata, not part of source identity.
+    origin: str = field(default=ORIGIN_MANUAL, compare=False)
 
     def __post_init__(self) -> None:
+        if self.origin not in MARKETPLACE_ORIGINS:
+            raise ValueError(
+                f"Invalid marketplace origin {self.origin!r}; "
+                f"expected one of: {', '.join(MARKETPLACE_ORIGINS)}"
+            )
         # Reconcile ref / branch: ref is canonical. If only branch was set, copy it onto ref.
         if self.branch and self.branch != "main" and (not self.ref or self.ref == "main"):
             object.__setattr__(self, "ref", self.branch)
@@ -309,6 +324,9 @@ class MarketplaceSource:
             result["host"] = self.host
         if self.branch and self.branch != "main":
             result["branch"] = self.branch
+        # Absent means manual so pre-existing registries stay byte-identical.
+        if self.origin != ORIGIN_MANUAL:
+            result["origin"] = self.origin
         return result
 
     @classmethod
@@ -322,6 +340,10 @@ class MarketplaceSource:
         """
         url = data.get("url", "")
         ref = data.get("ref") or data.get("branch") or "main"
+        # Unknown origins degrade to manual so reconcile never removes them.
+        origin = data.get("origin", ORIGIN_MANUAL)
+        if origin not in MARKETPLACE_ORIGINS:
+            origin = ORIGIN_MANUAL
         return cls(
             name=data["name"],
             url=url,
@@ -331,6 +353,7 @@ class MarketplaceSource:
             repo=data.get("repo", ""),
             host=data.get("host", "github.com"),
             branch=data.get("branch", ""),
+            origin=origin,
         )
 
 

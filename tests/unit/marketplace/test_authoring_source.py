@@ -202,7 +202,7 @@ def test_directory_without_catalog_points_to_apm_yml(tmp_path, monkeypatch):
     write_catalog(tmp_path / "apm.yml")
     result = CliRunner().invoke(marketplace, ["add", str(tmp_path), "--name", "preview"])
     assert result.exit_code == 1
-    assert "pass the apm.yml file itself" in " ".join(result.output.split())
+    assert "use the path to the apm.yml file itself" in " ".join(result.output.split())
     assert registry.get_registered_marketplaces() == []
 
 

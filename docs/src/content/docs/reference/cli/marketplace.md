@@ -53,7 +53,15 @@ read; use `apm marketplace migrate` to fold them into `apm.yml`.
 
 ### `apm marketplace add`
 
-Register a marketplace from a source reference. Accepted forms:
+Register a marketplace from a source reference.
+
+**Declare instead of add.** To register the same marketplaces on every
+machine, list them under `marketplaces:` in the user manifest
+(`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and run
+`apm install -g`. Manual registrations always win a name conflict. See
+[Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+
+Accepted forms:
 
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
@@ -228,7 +236,9 @@ apm marketplace update awesome-agents  # refresh one
 
 ### `apm marketplace remove NAME`
 
-Unregister a marketplace.
+Unregister a marketplace. A marketplace declared in the user manifest's
+`marketplaces:` list is registered again by the next `apm install -g`;
+remove its entry from the user manifest to drop it for good.
 
 | Flag | Description |
 |---|---|
