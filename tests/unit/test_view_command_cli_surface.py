@@ -341,6 +341,7 @@ class TestDisplayMarketplacePlugin:
             patch("apm_cli.marketplace.client.fetch_or_cache", return_value=mock_manifest),
             patch(
                 "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+                autospec=True,
                 return_value=("org/repo#v2.0", MagicMock()),
             ),
         ):

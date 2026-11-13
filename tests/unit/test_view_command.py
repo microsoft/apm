@@ -73,13 +73,15 @@ def test_view_json_marketplace_details() -> None:
         ),
         patch(
             "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            autospec=True,
             return_value=("org/review#v2.0.0", None),
-        ),
+        ) as resolve,
     ):
         text = CliRunner().invoke(cli, ["view", "review@tools"])
         explicit_text = CliRunner().invoke(cli, ["view", "review@tools", "-f", "text"])
         result = CliRunner().invoke(cli, ["view", "review@tools", "--format", "json"])
 
+    resolve.assert_called_with("review", "tools")
     assert text.exit_code == explicit_text.exit_code == 0
     assert text.stdout == explicit_text.stdout
     assert "Plugin: review" in text.stdout
@@ -345,6 +347,7 @@ def test_view_json_sanitizes_marketplace_strings(structured_source: bool) -> Non
         ),
         patch(
             "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            autospec=True,
             return_value=(url, None),
         ),
     ):
@@ -419,6 +422,7 @@ def test_view_json_omits_cache_locations(tmp_path: Path, monkeypatch: pytest.Mon
         ),
         patch(
             "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            autospec=True,
             return_value=(cache_source, None),
         ),
     ):
