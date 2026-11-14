@@ -152,12 +152,18 @@ def discover(root: Path, manifest: Path, *, user_scope: bool = False) -> dict[st
                 }
             )
     supported: list[tuple[dict[str, Any], Path, Path]] = []
+    root_contexts = {root / name for name in catalog_root_context_markers()}
     for path, kind in _inventory(root, user_scope=user_scope):
         finding = {
             "path": path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path),
             "kind": kind,
             "status": "unsupported",
-            "reason": "Loose native content is not a package. Prepare a supported package manually.",
+            "reason": (
+                "Native context stays in place and is not adopted as an APM package; "
+                "it remains valid for its tool. Copies in other subdirectories are not inventoried."
+                if path in root_contexts
+                else "Loose native content is not a package. Prepare a supported package manually."
+            ),
             "dependency": None,
         }
         findings.append(finding)

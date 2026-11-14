@@ -74,6 +74,12 @@ rules, hooks, MCP configuration, and other unsupported files are reported
 without translation. See the [`apm init` reference](../../reference/cli/init/)
 for discovery and merge behavior.
 
+Discovery only reads the known target directories (such as `.claude/`) and the
+root files of the project; it does not walk the rest of the tree, so a nested
+file such as `demo-repo/CLAUDE.md` is not listed. A root `CLAUDE.md`,
+`AGENTS.md`, or `GEMINI.md` is reported as `unsupported`: it is not adopted as
+an APM package, but it is not invalid for its tool and stays in place untouched.
+
 Install through the normal target pipeline:
 
 ```bash
@@ -93,7 +99,15 @@ home-rooted references instead.
 They continue to work. APM-managed files coexist with manually-created ones.
 Discovery does not imply takeover.
 
+Keep your native instructions, declare and install supported packages next to
+them, and let `apm compile` handle only APM content (`.apm/` primitives and
+installed dependencies). If a project has only native files, `apm compile`
+reports `No APM content found to compile` and exits `1` without modifying them.
+
 Over time, you may choose to move manual configuration into APM packages for portability across repositories, but there is no deadline or requirement to do so. APM and manual configuration coexist indefinitely.
+
+Authoring APM copies of native files is optional. If you author them manually,
+you have two sources of truth to keep in sync.
 
 ## Rollback
 
