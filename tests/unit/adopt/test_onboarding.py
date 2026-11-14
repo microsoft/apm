@@ -7,6 +7,7 @@ import ntpath
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from apm_cli.adopt.discovery import discover
@@ -129,6 +130,48 @@ def test_unsupported_native_content_is_reported_without_values(workspace: Path) 
     assert "DO-NOT-PRINT" not in result.output
     assert "private instruction text" not in result.output
     assert {item["status"] for item in json.loads(result.output)["findings"]} == {"unsupported"}
+    assert snapshot(workspace) == before
+
+
+def test_root_context_guidance_agrees_across_formats_without_adoption(workspace: Path) -> None:
+    (workspace / "CLAUDE.md").write_text("PRIVATE-ROOT-CONTEXT")
+    (workspace / "AGENTS.md").write_text("PRIVATE-AGENTS-CONTEXT")
+    (workspace / "GEMINI.md").write_text("PRIVATE-GEMINI-CONTEXT")
+    (workspace / ".cursorrules").write_text("PRIVATE-CURSOR-RULES")
+    (workspace / ".claude").mkdir()
+    (workspace / ".claude/CLAUDE.md").write_text("PRIVATE-TARGET-CONTEXT")
+    (workspace / "sub").mkdir()
+    (workspace / "sub/CLAUDE.md").write_text("PRIVATE-NESTED-CONTEXT")
+    before = snapshot(workspace)
+    outputs = {fmt: invoke("--format", fmt) for fmt in ("text", "json", "yaml")}
+    for result in outputs.values():
+        assert result.exit_code == 0, result.output
+        assert "PRIVATE-" not in result.output
+    report = json.loads(outputs["json"].output)
+    assert set(report) == {"scope", "root", "manifest", "findings", "additions", "applied"}
+    findings = {item["path"]: item for item in report["findings"]}
+    assert set(findings) == {
+        ".claude/CLAUDE.md",
+        ".cursorrules",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md",
+    }
+    assert all(
+        set(item) == {"path", "kind", "status", "reason", "dependency"}
+        for item in findings.values()
+    )
+    assert {item["status"] for item in findings.values()} == {"unsupported"}
+    reason = findings["CLAUDE.md"]["reason"]
+    assert "not adopted as an APM package" in reason
+    assert "Copies outside known target directories such as .claude/ are not inventoried" in reason
+    assert findings["AGENTS.md"]["reason"] == findings["GEMINI.md"]["reason"] == reason
+    assert findings[".cursorrules"]["reason"] != reason
+    assert findings[".claude/CLAUDE.md"]["kind"] == "native"
+    assert findings[".claude/CLAUDE.md"]["reason"] == findings[".cursorrules"]["reason"]
+    assert yaml.safe_load(outputs["yaml"].output)["findings"] == list(findings.values())
+    assert f"unsupported: CLAUDE.md -- {reason}" in " ".join(outputs["text"].output.split())
+    assert invoke("--apply", "--yes").exit_code == 0
     assert snapshot(workspace) == before
 
 

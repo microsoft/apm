@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
+from ...compilation.root_context_protection import catalog_root_context_markers
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_catalog import (
@@ -677,6 +678,12 @@ def _validate_project(
             logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
             logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
             logger.progress("   3. Then create .instructions.md or .agent.md files")
+            root_contexts = ", ".join(catalog_root_context_markers())
+            logger.progress(
+                f" Existing root context files ({root_contexts}) are not APM content"
+                " and are never modified."
+            )
+            logger.progress(" To find local packages you can declare: apm init --discover")
 
         if not dry_run:  # Don't exit on dry-run to allow testing
             sys.exit(1)
