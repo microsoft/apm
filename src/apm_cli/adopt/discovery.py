@@ -160,7 +160,8 @@ def discover(root: Path, manifest: Path, *, user_scope: bool = False) -> dict[st
             "status": "unsupported",
             "reason": (
                 "Native context stays in place and is not adopted as an APM package; "
-                "it remains valid for its tool. Copies in other subdirectories are not inventoried."
+                "it remains valid for its tool. "
+                "Copies outside known target directories such as .claude/ are not inventoried."
                 if path in root_contexts
                 else "Loose native content is not a package. Prepare a supported package manually."
             ),

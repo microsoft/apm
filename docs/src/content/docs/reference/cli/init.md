@@ -41,7 +41,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 | Flag | Default | Description |
 |---|---|---|
 | `-y`, `--yes` | off | Skip interactive prompts. Plain `apm init --yes` keeps its existing behavior and overwrites an existing `apm.yml`; with `--discover --apply`, it consents to a merge instead. |
-| `--discover` | off | Report admissible existing skill and package directories without changing files. Unsupported loose native rules, hooks, MCP configuration, and similar files are reported but not translated. Only target directories and root files are read; nested files such as `sub/CLAUDE.md` are not inventoried. |
+| `--discover` | off | Report admissible existing skill and package directories without changing files. Unsupported loose native rules, hooks, MCP configuration, and similar files are reported but not translated. Discovery checks root files and known target directories (for example `.claude/`, including their subdirectories); it does not search the rest of the project tree, so a file such as `sub/CLAUDE.md` is not listed. |
 | `--format text\|json\|yaml` | `text` | Select discovery report format. Used with `--discover`. |
 | `--apply`, `--write` | off | After discovery, create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Requires consent unless `--yes` is set. |
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
@@ -152,8 +152,10 @@ the author and target harness remain responsible for compliance.
   remain unsupported; discovery never translates or executes content.
   `unsupported` means the file is not adopted as an APM package, not that it
   is invalid for its tool: a root `CLAUDE.md`, `AGENTS.md`, or `GEMINI.md`
-  stays in place untouched. Discovery is not recursive, so nested context files
-  such as `sub/CLAUDE.md` are not listed.
+  stays in place untouched. Discovery checks root files and known target
+  directories (for example `.claude/`, including their subdirectories); it does
+  not search the rest of the project tree, so a file such as `sub/CLAUDE.md` is
+  not listed.
 - **Structured reports:** JSON and YAML reports include `scope`, `root`,
   `manifest`, `findings`, `additions`, and `applied`. Each finding includes its
   path, kind, status, reason, and proposed dependency when applicable. Status

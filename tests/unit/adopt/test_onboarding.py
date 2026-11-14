@@ -138,6 +138,8 @@ def test_root_context_guidance_agrees_across_formats_without_adoption(workspace:
     (workspace / "AGENTS.md").write_text("PRIVATE-AGENTS-CONTEXT")
     (workspace / "GEMINI.md").write_text("PRIVATE-GEMINI-CONTEXT")
     (workspace / ".cursorrules").write_text("PRIVATE-CURSOR-RULES")
+    (workspace / ".claude").mkdir()
+    (workspace / ".claude/CLAUDE.md").write_text("PRIVATE-TARGET-CONTEXT")
     (workspace / "sub").mkdir()
     (workspace / "sub/CLAUDE.md").write_text("PRIVATE-NESTED-CONTEXT")
     before = snapshot(workspace)
@@ -148,7 +150,13 @@ def test_root_context_guidance_agrees_across_formats_without_adoption(workspace:
     report = json.loads(outputs["json"].output)
     assert set(report) == {"scope", "root", "manifest", "findings", "additions", "applied"}
     findings = {item["path"]: item for item in report["findings"]}
-    assert set(findings) == {".cursorrules", "AGENTS.md", "CLAUDE.md", "GEMINI.md"}
+    assert set(findings) == {
+        ".claude/CLAUDE.md",
+        ".cursorrules",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md",
+    }
     assert all(
         set(item) == {"path", "kind", "status", "reason", "dependency"}
         for item in findings.values()
@@ -156,9 +164,11 @@ def test_root_context_guidance_agrees_across_formats_without_adoption(workspace:
     assert {item["status"] for item in findings.values()} == {"unsupported"}
     reason = findings["CLAUDE.md"]["reason"]
     assert "not adopted as an APM package" in reason
-    assert "Copies in other subdirectories are not inventoried" in reason
+    assert "Copies outside known target directories such as .claude/ are not inventoried" in reason
     assert findings["AGENTS.md"]["reason"] == findings["GEMINI.md"]["reason"] == reason
     assert findings[".cursorrules"]["reason"] != reason
+    assert findings[".claude/CLAUDE.md"]["kind"] == "native"
+    assert findings[".claude/CLAUDE.md"]["reason"] == findings[".cursorrules"]["reason"]
     assert yaml.safe_load(outputs["yaml"].output)["findings"] == list(findings.values())
     assert f"unsupported: CLAUDE.md -- {reason}" in " ".join(outputs["text"].output.split())
     assert invoke("--apply", "--yes").exit_code == 0

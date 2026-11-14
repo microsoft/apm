@@ -326,7 +326,7 @@ def test_native_only_context_stays_in_place_through_init_discover_and_compile(
     assert [(item["path"], item["status"]) for item in findings] == [("CLAUDE.md", "unsupported")]
     assert yaml.safe_load(reports["yaml"].stdout)["findings"] == findings
     reason = findings[0]["reason"]
-    assert "Copies in other subdirectories are not inventoried" in reason
+    assert "Copies outside known target directories such as .claude/ are not inventoried" in reason
     assert f"unsupported: CLAUDE.md -- {reason}" in " ".join(reports["text"].stdout.split())
     assert_snapshot_set_unchanged(initialized, onboarding.artifacts())
 

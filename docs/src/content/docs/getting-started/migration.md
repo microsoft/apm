@@ -74,11 +74,12 @@ rules, hooks, MCP configuration, and other unsupported files are reported
 without translation. See the [`apm init` reference](../../reference/cli/init/)
 for discovery and merge behavior.
 
-Discovery only reads the known target directories (such as `.claude/`) and the
-root files of the project; it does not walk the rest of the tree, so a nested
-file such as `demo-repo/CLAUDE.md` is not listed. A root `CLAUDE.md`,
-`AGENTS.md`, or `GEMINI.md` is reported as `unsupported`: it is not adopted as
-an APM package, but it is not invalid for its tool and stays in place untouched.
+Discovery checks root files and known target directories (for example
+`.claude/`, including their subdirectories); it does not search the rest of the
+project tree, so a file such as `demo-repo/CLAUDE.md` is not listed. A root
+`CLAUDE.md`, `AGENTS.md`, or `GEMINI.md` is reported as `unsupported`: it is not
+adopted as an APM package, but it is not invalid for its tool and stays in place
+untouched.
 
 Install through the normal target pipeline:
 
