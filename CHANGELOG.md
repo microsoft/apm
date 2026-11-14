@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm init --discover` now explains that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` reported as `unsupported` stays in place and is not adopted as an APM package, and that copies in other subdirectories are not inventoried; `apm compile` with no APM content notes that native files are not APM content and points to `apm init --discover`. Statuses, report keys and exit codes are unchanged. -- by @AndresDvst (#TBD)
+- `apm init --discover` now explains that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` reported as `unsupported` stays in place and is not adopted as an APM package, and that copies in other subdirectories are not inventoried; `apm compile` with no APM content notes that native files are not APM content and points to `apm init --discover`. Statuses, report keys and exit codes are unchanged. -- by @AndresDvst (#3737)
 - A same-name MCP server whose definition differs from a dependency's is now reported as a conflict and `apm install` exits 1 on every JSON-config target (VS Code, Copilot, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity), as Claude and Codex already did; the user's entry is preserved and never claimed. (#3709)
 - `apm audit --ci` now fails when the current directory has no `apm.yml` instead of passing with nothing audited; run it from the project root. (#3709)
 - `apm.yml` with a duplicate top-level key (for example two `dependencies:` blocks after a merge) is now rejected with one error naming the key and both lines, before any file changes, instead of silently using the last block. (#3709)
