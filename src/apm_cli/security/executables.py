@@ -78,6 +78,7 @@ class ExecutableDeclaration:
     package_name: str
     is_transitive: bool = False
     parent_name: str | None = None
+    original_identity: str | None = None
     hook_count: int = 0
     mcp_count: int = 0
     lsp_count: int = 0
@@ -539,6 +540,7 @@ def scan_package_executables(
     manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
+    original_identity: str | None = None,
 ) -> ExecutableDeclaration:
     """Scan a materialised package directory for executable primitives.
 
@@ -636,6 +638,7 @@ def scan_package_executables(
         package_name=package_name,
         is_transitive=is_transitive,
         parent_name=parent_name,
+        original_identity=original_identity,
         hook_count=len(hook_files),
         mcp_count=mcp_count,
         lsp_count=lsp_count,

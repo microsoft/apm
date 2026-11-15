@@ -420,6 +420,179 @@ class TestApproveCmd:
             stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
             assert set(stored) == {"evil/repo#1.0"}
 
+    def test_approve_replaced_dependency_local_path_grants_source_key(self) -> None:
+        """apm approve for a replaced dependency grants the selected source key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            hooks_dir = local_pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+            Path("apm_modules").mkdir()
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_approve_replaced_dependency_by_source_key(self) -> None:
+        """apm approve <selected-source-key> also works for replaced dependencies."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            hooks_dir = local_pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+            Path("apm_modules").mkdir()
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["./local-hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_deny_replaced_dependency_by_original_identity(self) -> None:
+        """apm deny <original-identity> denies the selected source key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            hooks_dir = local_pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+            Path("apm_modules").mkdir()
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(deny_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["deny"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_approve_replaced_dependency_git_fork_grants_fork_key(self) -> None:
+        """apm approve for a fork-replaced dependency grants the fork approval key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            pkg = Path("apm_modules/acme/hooky")
+            pkg.mkdir(parents=True)
+            (pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.2.0"}))
+            hooks_dir = pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      git: https://github.com/myfork/hooky.git
+      ref: v1.2.0
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        git: https://github.com/myfork/hooky.git
+        ref: v1.2.0
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"myfork/hooky#v1.2.0"}
+
     def test_approve_recommended_bulk_accepts_org_set(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():

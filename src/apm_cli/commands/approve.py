@@ -218,13 +218,27 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     declarations = _scan_installed_packages(manifest)
     decl_key_map = {d.package_key: d for d in declarations}
     decl_name_map = {d.package_name: d for d in declarations}
+    decl_orig_map = {d.original_identity: d for d in declarations if d.original_identity}
 
     changed = 0
     for pkg in packages:
-        decl = decl_key_map.get(pkg) or decl_name_map.get(pkg)
+        decl = decl_key_map.get(pkg) or decl_name_map.get(pkg) or decl_orig_map.get(pkg)
         if decl is None:
             for d in declarations:
-                if d.package_key.startswith(pkg + "#") or d.package_name.startswith(pkg):
+                if (
+                    d.package_key.startswith(pkg + "#")
+                    or d.package_name.startswith(pkg)
+                    or (
+                        d.original_identity
+                        and (
+                            d.original_identity == pkg
+                            or d.original_identity.startswith(pkg + "#")
+                            or d.original_identity.startswith(pkg)
+                            or pkg.startswith(d.original_identity + "@")
+                            or pkg.startswith(d.original_identity + "#")
+                        )
+                    )
+                ):
                     decl = d
                     break
         if decl is None:
@@ -278,10 +292,24 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
     declarations = _scan_installed_packages(manifest)
     decl = None
     for d in declarations:
-        if package in (d.package_key, d.package_name):
+        if package in (d.package_key, d.package_name) or (
+            d.original_identity and package == d.original_identity
+        ):
             decl = d
             break
-        if d.package_key.startswith(package + "#") or d.package_name.startswith(package):
+        if (
+            d.package_key.startswith(package + "#")
+            or d.package_name.startswith(package)
+            or (
+                d.original_identity
+                and (
+                    d.original_identity.startswith(package + "#")
+                    or d.original_identity.startswith(package)
+                    or package.startswith(d.original_identity + "@")
+                    or package.startswith(d.original_identity + "#")
+                )
+            )
+        ):
             decl = d
             break
 
@@ -473,13 +501,27 @@ def _approve_packages(
     declarations = _scan_installed_packages(manifest)
     decl_map = {d.package_name: d for d in declarations}
     decl_key_map = {d.package_key: d for d in declarations}
+    decl_orig_map = {d.original_identity: d for d in declarations if d.original_identity}
 
     count = 0
     for pkg in packages:
-        decl = decl_key_map.get(pkg) or decl_map.get(pkg)
+        decl = decl_key_map.get(pkg) or decl_map.get(pkg) or decl_orig_map.get(pkg)
         if decl is None:
             for d in declarations:
-                if d.package_key.startswith(pkg + "#") or d.package_name.startswith(pkg):
+                if (
+                    d.package_key.startswith(pkg + "#")
+                    or d.package_name.startswith(pkg)
+                    or (
+                        d.original_identity
+                        and (
+                            d.original_identity == pkg
+                            or d.original_identity.startswith(pkg + "#")
+                            or d.original_identity.startswith(pkg)
+                            or pkg.startswith(d.original_identity + "@")
+                            or pkg.startswith(d.original_identity + "#")
+                        )
+                    )
+                ):
                     decl = d
                     break
 
@@ -529,7 +571,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             try:
                 package_dir = (
                     local_dependency_dirs[locked.get_unique_key()]
-                    if locked.source == "local"
+                    if locked.is_local_source
                     else locked.to_dependency_ref().get_install_path(apm_modules)
                 )
             except (OSError, ValueError):
@@ -550,12 +592,26 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         version = str(manifest_data.get("version", version))
                 except Exception:
                     manifest_data = {}
+
+            if locked.replacement is not None:
+                from ..security.executables import dependency_approval_key
+
+                dep_ref = locked.to_dependency_ref()
+                appr_id = dependency_approval_key(dep_ref)
+                version_for_scan = ""
+                orig_id = locked.get_unique_key()
+            else:
+                appr_id = locked.get_unique_key()
+                version_for_scan = version
+                orig_id = None
+
             declaration = scan_package_executables(
                 package_dir,
                 name,
-                version,
-                approval_identity=locked.get_unique_key(),
+                version_for_scan,
+                approval_identity=appr_id,
                 manifest_data=manifest_data,
+                original_identity=orig_id,
             )
             if declaration.has_executables:
                 results.append(declaration)
