@@ -351,6 +351,36 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         self.assertEqual(config["url"], "https://example.com/mcp")
 
     @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_with_type_sse(self, mock_get_path):
+        """v0.1 remote with type='sse' preserves sse transport type."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "sse-server",
+            "remotes": [{"type": "sse", "url": "https://example.com/sse"}],
+        }
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+
+        self.assertEqual(config["type"], "sse")
+        self.assertEqual(config["url"], "https://example.com/sse")
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_with_type_streamable_http(self, mock_get_path):
+        """v0.1 remote with type='streamable-http' maps to streamable-http."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "streamable-srv",
+            "remotes": [{"type": "streamable-http", "url": "https://example.com/stream"}],
+        }
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+
+        self.assertEqual(config["type"], "streamable-http")
+        self.assertEqual(config["url"], "https://example.com/stream")
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
     def test_format_server_config_remote_none_transport_type(self, mock_get_path):
         """Remote with transport_type=None defaults to http."""
         mock_get_path.return_value = self.temp_path

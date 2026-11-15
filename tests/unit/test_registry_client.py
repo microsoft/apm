@@ -762,6 +762,100 @@ class TestNormalizeV01Package(unittest.TestCase):
     def test_normalize_v0_1_server_returns_non_dict_unchanged(self):
         self.assertIsNone(SimpleRegistryClient._normalize_v0_1_server(None))
 
+    def test_normalize_v0_1_remote_streamable_http(self):
+        """v0.1 type='streamable-http' backfills legacy transport_type."""
+        remote = {"type": "streamable-http", "url": "https://example.com/mcp"}
+        normalized = SimpleRegistryClient._normalize_v0_1_remote(remote)
+        self.assertEqual(normalized["transport_type"], "streamable-http")
+        self.assertEqual(normalized["type"], "streamable-http")
+        self.assertEqual(normalized["url"], "https://example.com/mcp")
+
+    def test_normalize_v0_1_remote_modern_sse(self):
+        """v0.1 type='sse' backfills legacy transport_type."""
+        remote = {"type": "sse", "url": "https://example.com/sse"}
+        normalized = SimpleRegistryClient._normalize_v0_1_remote(remote)
+        self.assertEqual(normalized["transport_type"], "sse")
+        self.assertEqual(normalized["type"], "sse")
+
+    def test_normalize_v0_1_remote_legacy_sse(self):
+        """Legacy transport_type='sse' backfills spec type."""
+        remote = {"transport_type": "sse", "url": "https://example.com/legacy-sse"}
+        normalized = SimpleRegistryClient._normalize_v0_1_remote(remote)
+        self.assertEqual(normalized["type"], "sse")
+        self.assertEqual(normalized["transport_type"], "sse")
+
+    def test_normalize_v0_1_remote_preserves_both(self):
+        """When both type and transport_type are provided, both are preserved."""
+        remote = {
+            "type": "custom-spec",
+            "transport_type": "custom-legacy",
+            "url": "https://example.com",
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_remote(remote)
+        self.assertEqual(normalized["type"], "custom-spec")
+        self.assertEqual(normalized["transport_type"], "custom-legacy")
+
+    def test_normalize_v0_1_remote_missing_type(self):
+        """Remote without type or transport_type passes through without injecting either."""
+        remote = {"url": "https://example.com"}
+        normalized = SimpleRegistryClient._normalize_v0_1_remote(remote)
+        self.assertNotIn("type", normalized)
+        self.assertNotIn("transport_type", normalized)
+
+    def test_normalize_v0_1_remote_does_not_mutate_input(self):
+        """Normalizer returns a copy; input remote dict is unchanged."""
+        remote = {"type": "sse", "url": "https://example.com/sse"}
+        SimpleRegistryClient._normalize_v0_1_remote(remote)
+        self.assertNotIn("transport_type", remote)
+
+    def test_normalize_v0_1_remote_non_dict(self):
+        """Non-dict inputs pass through unchanged."""
+        self.assertIsNone(SimpleRegistryClient._normalize_v0_1_remote(None))
+        self.assertEqual(SimpleRegistryClient._normalize_v0_1_remote("string"), "string")
+
+    def test_normalize_v0_1_server_normalizes_remotes_list(self):
+        """Server normalizer processes each entry in remotes list."""
+        server = {
+            "name": "io.github.foo/bar",
+            "version": "1.0.0",
+            "remotes": [
+                {"type": "streamable-http", "url": "https://stream.example.com"},
+                {"transport_type": "sse", "url": "https://sse.example.com"},
+            ],
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertEqual(normalized["remotes"][0]["transport_type"], "streamable-http")
+        self.assertEqual(normalized["remotes"][0]["type"], "streamable-http")
+        self.assertEqual(normalized["remotes"][1]["transport_type"], "sse")
+        self.assertEqual(normalized["remotes"][1]["type"], "sse")
+
+    def test_normalize_v0_1_server_remotes_does_not_mutate_input(self):
+        """Server normalizer does not mutate input server's remotes list or items."""
+        server = {
+            "name": "io.github.foo/bar",
+            "remotes": [{"type": "sse", "url": "https://example.com/sse"}],
+        }
+        SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertNotIn("transport_type", server["remotes"][0])
+
+    def test_unwrap_server_list_normalizes_servers(self):
+        """_unwrap_server_list normalizes both packages and remotes for each entry."""
+        data = {
+            "servers": [
+                {
+                    "server": {
+                        "name": "io.github.test/server",
+                        "packages": [{"identifier": "pkg-a", "runtimeHint": "npx"}],
+                        "remotes": [{"type": "sse", "url": "https://example.com/sse"}],
+                    }
+                }
+            ]
+        }
+        servers = SimpleRegistryClient._unwrap_server_list(data)
+        self.assertEqual(len(servers), 1)
+        self.assertEqual(servers[0]["packages"][0]["name"], "pkg-a")
+        self.assertEqual(servers[0]["remotes"][0]["transport_type"], "sse")
+
 
 if __name__ == "__main__":
     unittest.main()

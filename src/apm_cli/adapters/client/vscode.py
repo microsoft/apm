@@ -507,7 +507,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             elif server_info.get("remotes"):
                 remote = self._select_remote_with_url(server_info["remotes"])
                 if remote:
-                    transport = (remote.get("transport_type") or "").strip()
+                    transport = (remote.get("transport_type") or remote.get("type") or "").strip()
                     # Default to "http" when transport_type is missing/empty,
                     # matching the Copilot adapter behavior (copilot.py:190-192).
                     if not transport:

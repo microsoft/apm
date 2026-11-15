@@ -535,8 +535,8 @@ class SimpleRegistryClient:
 
         return self._unwrap_server_list(data)
 
-    @staticmethod
-    def _unwrap_server_list(data: dict[str, Any]) -> list[dict[str, Any]]:
+    @classmethod
+    def _unwrap_server_list(cls, data: dict[str, Any]) -> list[dict[str, Any]]:
         """Strict v0.1 unwrap of the ``servers`` array.
 
         Each entry is expected to carry a nested ``server`` object per
@@ -553,7 +553,7 @@ class SimpleRegistryClient:
                     "Registry returned a non-spec list entry (missing 'server' key); "
                     "expected MCP Registry v0.1 response shape."
                 )
-            servers.append(item["server"])
+            servers.append(cls._normalize_v0_1_server(item["server"]))
         return servers
 
     # Map of v0.1 spec package field names (camelCase / renamed) to the
@@ -570,6 +570,12 @@ class SimpleRegistryClient:
         ("packageArguments", "package_arguments"),
         ("runtimeArguments", "runtime_arguments"),
         ("environmentVariables", "environment_variables"),
+    )
+
+    # Map of v0.1 spec remote field names to the legacy keys APM adapters
+    # consume (e.g. remote.get("transport_type")).
+    _V0_1_REMOTE_FIELD_ALIASES: tuple[tuple[str, str], ...] = (
+        ("type", "transport_type"),
     )
 
     @classmethod
@@ -591,12 +597,32 @@ class SimpleRegistryClient:
         return normalized
 
     @classmethod
+    def _normalize_v0_1_remote(cls, remote: dict[str, Any]) -> dict[str, Any]:
+        """Backfill legacy snake_case keys from v0.1 aliases for a remote.
+
+        Only writes the legacy key when the remote does not already
+        carry one, so registries that emit both shapes (or the legacy
+        shape only) are unaffected. Also backfills 'type' when only
+        'transport_type' is present so both spec and legacy keys exist.
+        """
+        if not isinstance(remote, dict):
+            return remote
+        normalized = dict(remote)
+        for v01_key, legacy_key in cls._V0_1_REMOTE_FIELD_ALIASES:
+            if legacy_key not in normalized and v01_key in normalized:
+                normalized[legacy_key] = normalized[v01_key]
+            elif v01_key not in normalized and legacy_key in normalized:
+                normalized[v01_key] = normalized[legacy_key]
+        return normalized
+
+    @classmethod
     def _normalize_v0_1_server(cls, server: dict[str, Any]) -> dict[str, Any]:
-        """Apply package-shape normalization to a server detail dict.
+        """Apply package- and remote-shape normalization to a server detail dict.
 
         Returns a shallow copy with each entry of ``packages`` normalized
-        via :meth:`_normalize_v0_1_package`. The input dict is not mutated,
-        matching the copy semantics of the sibling normalizer.
+        via :meth:`_normalize_v0_1_package` and each entry of ``remotes``
+        normalized via :meth:`_normalize_v0_1_remote`. The input dict is not
+        mutated, matching the copy semantics of the sibling normalizers.
         """
         if not isinstance(server, dict):
             return server
@@ -604,6 +630,9 @@ class SimpleRegistryClient:
         packages = normalized.get("packages")
         if isinstance(packages, list) and packages:
             normalized["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
+        remotes = normalized.get("remotes")
+        if isinstance(remotes, list) and remotes:
+            normalized["remotes"] = [cls._normalize_v0_1_remote(r) for r in remotes]
         return normalized
 
     def get_server(self, server_name: str, version: str = "latest") -> dict[str, Any]:

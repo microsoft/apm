@@ -569,6 +569,35 @@ class TestMcpShow:
 
         assert result.exit_code == 0
 
+    def test_show_server_with_v0_1_remote_type(self) -> None:
+        """Show renders deployment type and endpoint when remote only has v0.1 type."""
+        from apm_cli.commands.mcp import mcp
+
+        runner = CliRunner()
+        mock_console = MagicMock()
+
+        server_info = {
+            "name": "stream-server",
+            "description": "Stream MCP",
+            "version": "1.0.0",
+            "repository": {"url": "https://github.com/example/stream-mcp"},
+            "id": "12345678abcdef00",
+            "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}],
+        }
+
+        with (
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("apm_cli.commands.mcp._build_registry_with_diag") as mock_reg,
+        ):
+            mock_instance = MagicMock()
+            mock_instance.get_package_info.return_value = server_info
+            mock_reg.return_value = mock_instance
+
+            result = runner.invoke(mcp, ["show", "stream-server"])
+
+        assert result.exit_code == 0
+        mock_console.print.assert_called()
+
     def test_show_server_version_from_top_level_key(self) -> None:
         """Fallback to top-level 'version' when 'version_detail' absent."""
         from apm_cli.commands.mcp import mcp

@@ -444,7 +444,7 @@ def show(ctx, server_name, verbose):
         deployment_info = []
         if remotes:
             for remote in remotes:
-                transport_type = remote.get("transport_type", "unknown")
+                transport_type = remote.get("transport_type") or remote.get("type") or "unknown"
                 if transport_type == "sse":
                     deployment_info.append(" Remote SSE Endpoint")
         if packages:
@@ -468,7 +468,7 @@ def show(ctx, server_name, verbose):
             remote_table.add_column("Features", style="cyan", min_width=20)
 
             for remote in remotes:
-                transport_type = remote.get("transport_type", "unknown")
+                transport_type = remote.get("transport_type") or remote.get("type") or "unknown"
                 url = remote.get("url", "unknown")
 
                 # Describe features/limitations of remote endpoints
