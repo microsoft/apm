@@ -21,12 +21,14 @@ from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_u
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.deprecations import deprecation_message
+from ...core.deployment_ledger import DeploymentLedgerCodec
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
 from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
+from ...models.dependency.materialization import installed_package_path
 from ...models.manifest_io import InvalidManifestError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
@@ -48,6 +50,7 @@ from ._utils import (
     _get_package_display_info,
     _is_agent_plugin_root,
     _is_nested_under_package,
+    _tolerant_identity,
 )
 from .why import why as _why_cmd
 
@@ -272,8 +275,10 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
     # Host-blind logical key -> the identity ``apm deps tree`` and uninstall use.
     display_keys: dict[str, str] = {}
     declared_deps = []
-    # logical package key -> its key in the lockfile (the owner string ledger rows use)
-    owner_keys: dict[str, str] = {}
+    # materialized package path (relative to apm_modules) -> its exact lockfile
+    # key, the owner string ledger rows use; host-aware, so aliased packages that
+    # share an owner/repo on different hosts stay distinct
+    owner_by_path: dict[str, str] = {}
     inventory_lockfile = None
     try:
         apm_yml_path = manifest_file(apm_dir)
@@ -347,6 +352,14 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
             inventory_lockfile = lockfile
             for dep in lockfile.get_package_dependencies():
                 owner_key = dep.get_unique_key()
+                try:
+                    installed = installed_package_path(dep.to_dependency_ref(), apm_modules_path)
+                    owner_by_path[installed.relative_to(apm_modules_path).as_posix()] = owner_key
+                except (ValueError, OSError):
+                    # Read-only Targets lookup only: an entry whose path cannot be
+                    # resolved gets no owner (its Targets read ``unknown``) and
+                    # must not disturb the bookkeeping below or other packages.
+                    pass
                 # Local slots and explicit aliases retain their logical lockfile identity.
                 if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
@@ -356,8 +369,6 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
-                if dep_key:
-                    owner_keys.setdefault(dep_key, owner_key)
                 if dep_key and dep_key not in declared_sources:
                     declared_sources[dep_key] = _deps_list_source_label(
                         dep.host, lockfile_source=dep.source, host_type=dep.host_type
@@ -453,6 +464,12 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
     except Exception:
         selected_orphans, expected_ancestors = None, set()
 
+    # Scope-filtered owner -> records, built once so each package row is a lookup.
+    owner_index = (
+        DeploymentLedgerCodec.recorded_owner_index(inventory_lockfile, scope=scope)
+        if inventory_lockfile is not None
+        else None
+    )
     installed_packages = []
     orphaned_packages = []
     for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
@@ -477,12 +494,27 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
         try:
             version = "unknown"
             if has_apm_yml:
-                package = APMPackage.from_apm_yml(manifest_file(candidate))
-                version = package.version or "unknown"
+                manifest_path = manifest_file(candidate)
+                try:
+                    version = APMPackage.from_apm_yml(manifest_path).version or "unknown"
+                except ValueError:
+                    # Display surface: a manifest whose YAML parses but that the strict
+                    # parser rejects (for example a bad MCP transport) is still listed.
+                    # Only YAML that cannot be parsed at all keeps the read-failure path.
+                    identity = _tolerant_identity(candidate, manifest_path)
+                    if identity is None:
+                        raise
+                    version = identity["version"]
             else:
                 version = _agent_plugin_version(candidate) or version
             primitives = _count_primitives(candidate)
             mcps = package_mcp_count(candidate)
+            # None when there is nothing to read: no recorded evidence, or the
+            # package is not in the lockfile.
+            owner = owner_by_path.get(org_repo_name)
+            owned_records = (
+                None if owner_index is None or owner is None else owner_index.get(owner, ())
+            )
 
             if is_orphaned:
                 orphaned_packages.append(display_name)
@@ -497,9 +529,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
                     else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
                     "targets": package_targets(
-                        inventory_lockfile,
-                        owner_keys.get(logical_name),
-                        scope=scope,
+                        owned_records,
                         mcp_count=mcps.count,
                         has_primitives=any(count > 0 for count in primitives.values()),
                     ),
