@@ -1038,13 +1038,13 @@ def _scoped(value: str, scope: str, *, target: str = "claude") -> DeploymentReco
 
 
 def _owned_values(lockfile: LockFile, owner: str, scope: str) -> list[str]:
-    rows = DeploymentLedgerCodec.recorded_owner_records(lockfile, owner=owner, scope=scope)
-    assert rows is not None
-    return sorted(row.locator.value for row in rows)
+    index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope=scope)
+    assert index is not None
+    return sorted(row.locator.value for row in index.get(owner, ()))
 
 
-class TestRecordedOwnerRecords:
-    """``recorded_owner_records``: the per-owner view the deps listing reads."""
+class TestRecordedOwnerIndex:
+    """``recorded_owner_index``: the per-owner view of the recorded ledger, built in one pass."""
 
     @pytest.mark.parametrize(
         ("lockfile", "expected"),
@@ -1066,34 +1066,40 @@ class TestRecordedOwnerRecords:
                 id="a ledger not flagged as recorded is no evidence",
             ),
             pytest.param(
-                _owned_lockfile(_scoped(".claude/rules/a.md", "project")),
-                (),
-                id="a recorded ledger in which the owner holds no rows is empty",
+                _owned_lockfile(),
+                {},
+                id="a recorded ledger without rows is an empty index, not no evidence",
             ),
         ],
     )
     def test_distinguishes_no_evidence_from_a_recorded_ledger_without_rows(
-        self, lockfile: LockFile, expected: tuple[()] | None
+        self, lockfile: LockFile, expected: dict[str, tuple[DeploymentRecord, ...]] | None
     ) -> None:
-        rows = DeploymentLedgerCodec.recorded_owner_records(lockfile, owner="beta", scope="project")
-        assert rows == expected
+        index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope="project")
+        assert index == expected
 
-    def test_returns_only_the_rows_the_owner_holds_including_co_owned_rows(self) -> None:
-        def held(name: str, *owners: str) -> DeploymentRecord:
-            locator = _scoped(f".claude/rules/{name}.md", "project").locator
+    def test_credits_every_co_owner_and_only_rows_in_the_requested_scope(self) -> None:
+        def held(value: str, scope: str, *owners: str) -> DeploymentRecord:
+            locator = _scoped(value, scope).locator
             return _record(locator, owners=owners, active=owners[0])
 
         lockfile = _owned_lockfile(
-            held("solo", "alpha"), held("shared", "alpha", "beta"), held("theirs", "beta")
+            held(".claude/rules/solo.md", "project", "alpha"),
+            held(".claude/rules/shared.md", "project", "alpha", "beta"),
+            held(".claude/rules/user-only.md", "user", "beta"),
         )
-        assert _owned_values(lockfile, "alpha", "project") == [
-            ".claude/rules/shared.md",
-            ".claude/rules/solo.md",
-        ]
-        assert _owned_values(lockfile, "beta", "project") == [
-            ".claude/rules/shared.md",
-            ".claude/rules/theirs.md",
-        ]
+        index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope="project")
+        assert index is not None
+        assert {owner: [r.locator.value for r in rows] for owner, rows in index.items()} == {
+            "alpha": [".claude/rules/solo.md", ".claude/rules/shared.md"],
+            "beta": [".claude/rules/shared.md"],
+        }
+
+    def test_an_owner_without_rows_reads_as_holding_none_in_a_recorded_ledger(self) -> None:
+        lockfile = _owned_lockfile(_scoped(".claude/rules/a.md", "project"))
+        index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope="project")
+        assert index is not None and index.get("beta", ()) == ()
+        assert _owned_values(lockfile, "beta", "project") == []
 
     @pytest.mark.parametrize(
         ("path", "recorded_scope", "in_project", "in_user"),
@@ -1125,7 +1131,7 @@ class TestRecordedOwnerRecords:
 
 
 def test_recorded_target_names_keeps_its_strict_scope_comparison() -> None:
-    """Unlike ``recorded_owner_records``, a row for another scope is never counted here."""
+    """Unlike ``recorded_owner_index``, a row for another scope is never counted here."""
     lockfile = _owned_lockfile(_scoped(".claude/rules/a.md", "project"))
     names = DeploymentLedgerCodec.recorded_target_names
     assert names(lockfile, scope="project", supported_targets={"claude"}) == ("claude",)

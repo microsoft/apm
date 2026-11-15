@@ -34,7 +34,10 @@ from apm_cli.commands.deps._inventory import (
     package_targets,
     targets_legend,
 )
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLedger, DeploymentRecord
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.models.validation import PackageType, detect_package_type
 
 # Source stays printable ASCII (repo encoding rule), so Rich's box characters
 # are spelled as escapes.
@@ -108,6 +111,14 @@ def _lock(rows: Rows | None = None, **skilly_extra: object) -> LockFile:
     return LockFile.from_yaml(yaml.safe_dump(data, sort_keys=False))
 
 
+def _records_for(
+    lockfile: LockFile, owner: str = SKILLY, scope: str = "project"
+) -> tuple[DeploymentRecord, ...] | None:
+    """The owner's rows as the listing resolves them: ``None`` without recorded evidence."""
+    index = DeploymentLedgerCodec.recorded_owner_index(lockfile, scope=scope)
+    return None if index is None else index.get(owner, ())
+
+
 def _manifest(pkg_dir: Path, mcp: list[object] | None = None, name: str = "pkg") -> Path:
     pkg_dir.mkdir(parents=True, exist_ok=True)
     data: dict[str, object] = {"name": name, "version": "1.0.0", "description": "t"}
@@ -163,6 +174,43 @@ def _claude_plugin(root: Path) -> Path:
         json.dumps({"mcpServers": {"srv": {"command": "run-srv"}}}), encoding="utf-8"
     )
     normalize_plugin_directory(root, manifest)
+    return root
+
+
+def _plugin_with_metadata_only_manifest(root: Path) -> Path:
+    """A native Agent Plugin whose apm.yml carries only a name and version."""
+    _agent_plugin(root, {"one": {"type": "stdio", "command": "run-one"}})
+    (root / "apm.yml").write_text("name: native.plugin\nversion: 1.0.0\n", encoding="utf-8")
+    return root
+
+
+def _plugin_with_eligible_manifest(root: Path) -> Path:
+    """A plugin.json beside an apm.yml that declares dependencies (and one server)."""
+    _agent_plugin(
+        root, {"a": {"type": "stdio", "command": "a"}, "b": {"type": "stdio", "command": "b"}}
+    )
+    return _manifest(root, [GOOD_SERVER])
+
+
+def _eligible_manifest_with_broken_plugin_json(root: Path) -> Path:
+    """apm.yml that declares dependencies beside a plugin.json that is not JSON."""
+    _manifest(root, [GOOD_SERVER])
+    (root / "plugin.json").write_text("{not json", encoding="utf-8")
+    return root
+
+
+def _metadata_manifest_with_broken_plugin_json(root: Path) -> Path:
+    """A metadata-only apm.yml beside a plugin.json that is not JSON."""
+    root.mkdir(parents=True)
+    (root / "apm.yml").write_text("name: native.plugin\nversion: 1.0.0\n", encoding="utf-8")
+    (root / "plugin.json").write_text("{not json", encoding="utf-8")
+    return root
+
+
+def _plugin_with_metadata_manifest_and_broken_mcp_document(root: Path) -> Path:
+    """A valid plugin and matching metadata-only apm.yml; the MCP document is not JSON."""
+    _plugin_mcp_document(root, "{bad")
+    (root / "apm.yml").write_text("name: native.plugin\nversion: 1.0.0\n", encoding="utf-8")
     return root
 
 
@@ -378,33 +426,21 @@ def test_package_targets_reports_what_the_recorded_rows_support(
     rows: Rows, kwargs: dict[str, object], expected: TargetsResult
 ) -> None:
     options = {"owner": SKILLY, "scope": "project", **kwargs}
-    owner = options.pop("owner")
-    assert package_targets(_lock(rows), owner, **options) == expected
+    records = _records_for(_lock(rows), options.pop("owner"), options.pop("scope"))
+    assert package_targets(records, **options) == expected
 
 
-@pytest.mark.parametrize(
-    ("lockfile", "owner", "scope"),
-    [
-        pytest.param(
-            _lock(deployed_files=[".copilot/skills/hello/SKILL.md", ".claude/skills/hello/x"]),
-            SKILLY,
-            "project",
-            id="a legacy lockfile has no recorded deployments in the project scope",
-        ),
-        pytest.param(
-            _lock(deployed_files=[".copilot/skills/hello/SKILL.md", ".claude/skills/hello/x"]),
-            SKILLY,
-            "user",
-            id="a legacy lockfile has no recorded deployments in the user scope",
-        ),
-        pytest.param(None, SKILLY, "project", id="no lockfile"),
-        pytest.param(_lock([]), None, "project", id="no owner key"),
-    ],
-)
-def test_without_recorded_deployments_no_target_is_attributable(
-    lockfile: LockFile | None, owner: str | None, scope: str
-) -> None:
-    assert package_targets(lockfile, owner, scope=scope) == TargetsResult(UNAVAILABLE)
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_a_legacy_lockfile_has_no_recorded_deployments_in_either_scope(scope: str) -> None:
+    legacy = _lock(deployed_files=[".copilot/skills/hello/SKILL.md", ".claude/skills/hello/x"])
+    records = _records_for(legacy, scope=scope)
+    assert records is None
+    assert package_targets(records) == TargetsResult(UNAVAILABLE)
+
+
+def test_a_package_with_nothing_to_read_has_no_attributable_target() -> None:
+    # No lockfile, or a package that is not in it: the listing passes None.
+    assert package_targets(None) == TargetsResult(UNAVAILABLE)
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +475,21 @@ COUNT_CASES = [
     pytest.param(
         _claude_plugin, 1, id="a Claude plugin counts from the manifest install generates"
     ),
+    pytest.param(
+        _plugin_with_metadata_only_manifest,
+        1,
+        id="a metadata-only apm.yml does not hide the servers of the plugin install selects",
+    ),
+    pytest.param(
+        _plugin_with_eligible_manifest,
+        1,
+        id="an eligible apm.yml wins over plugin.json, as install selects it",
+    ),
+    pytest.param(
+        _eligible_manifest_with_broken_plugin_json,
+        1,
+        id="an eligible apm.yml still counts when plugin.json is broken, as install ignores it",
+    ),
     pytest.param(_skill_package, 0, id="a skill package declares no servers"),
     pytest.param(_hook_package, 0, id="a hook package declares no servers"),
 ]
@@ -449,6 +500,29 @@ def test_mcp_count_is_the_number_of_servers_install_would_admit(
     tmp_path: Path, build: Callable[[Path], Path], expected: int
 ) -> None:
     assert package_mcp_count(build(tmp_path / "pkg")) == McpResult(expected)
+
+
+@pytest.mark.parametrize(
+    ("build", "selected"),
+    [
+        (_plugin_with_metadata_only_manifest, PackageType.AGENT_PLUGIN),
+        (_plugin_with_eligible_manifest, PackageType.APM_PACKAGE),
+        (_eligible_manifest_with_broken_plugin_json, PackageType.APM_PACKAGE),
+        (_metadata_manifest_with_broken_plugin_json, PackageType.INVALID),
+        (_plugin_with_metadata_manifest_and_broken_mcp_document, PackageType.AGENT_PLUGIN),
+    ],
+    ids=[
+        "metadata-only apm.yml",
+        "eligible apm.yml",
+        "eligible apm.yml, broken plugin.json",
+        "metadata-only apm.yml, broken plugin.json",
+        "plugin, metadata-only apm.yml, broken mcp.json",
+    ],
+)
+def test_the_count_follows_the_package_format_install_selects(
+    tmp_path: Path, build: Callable[[Path], Path], selected: PackageType
+) -> None:
+    assert detect_package_type(build(tmp_path / "pkg"))[0] is selected
 
 
 _POSIX_PERMISSIONS = pytest.mark.skipif(
@@ -509,6 +583,14 @@ INSPECTION_FAILURES = [
     ),
     pytest.param(_plugin_mcp_directory, id="plugin mcp.json not a regular file (location invalid)"),
     pytest.param(lambda r: r, id="package directory missing (AgentPluginError)"),
+    pytest.param(
+        _metadata_manifest_with_broken_plugin_json,
+        id="metadata-only apm.yml with a broken plugin.json (install rejects the package)",
+    ),
+    pytest.param(
+        _plugin_with_metadata_manifest_and_broken_mcp_document,
+        id="plugin with a metadata-only apm.yml and a broken mcp.json (install admits the plugin)",
+    ),
     pytest.param(_empty_dir, id="directory of an unrecognised package type"),
 ]
 
@@ -827,10 +909,22 @@ LISTING_CASES = [
         id="a legacy lockfile shows unknown targets",
     ),
     pytest.param(
+        {"rows": None, "lock": {"deployed_files": [".claude/x/y.md"]}},
+        "0 unknown",
+        _legend(unattributable=True),
+        id="a legacy lockfile reads as no evidence even for a package with nothing to deploy",
+    ),
+    pytest.param(
         {"skills": 1, "rows": [], "count": McpResult(None)},
         "? unknown",
         _legend(unattributable=True),
         id="uninspectable content with no record shows ? and unknown",
+    ),
+    pytest.param(
+        {"skills": 1, "mcp": [{**GOOD_SERVER, "transport": "pigeon"}], "rows": []},
+        "? unknown",
+        _legend(unattributable=True),
+        id="a malformed MCP declaration keeps the package listed with ? MCPs",
     ),
     pytest.param(
         {"mcp": TWO_SERVERS, "rows": []},
@@ -879,11 +973,55 @@ def test_the_package_row_and_legend_reflect_the_recorded_evidence(
         assert legend in flat and flat.count("Targets: ") == 1
 
 
+@pytest.mark.parametrize(
+    ("manifest", "version"),
+    [
+        ("name: skilly\nversion: ''\n", "unknown"),
+        ("name: ''\nversion: 1.0.0\n", "1.0.0"),
+        ("name: skilly\nversion: 1.0\n", "unknown"),
+    ],
+    ids=["empty version", "empty name", "version that is not a string"],
+)
+def test_a_manifest_rejected_for_a_non_mcp_reason_is_listed_with_a_normal_mcp_count(
+    cwd: Path, manifest: str, version: str
+) -> None:
+    # The strict parser rejects these, the tolerant display read does not: the package
+    # stays listed and MCPs is "?" only when the MCP declarations themselves are unreadable.
+    pkg = _installed(cwd, "skilly", skills=1)
+    (pkg / "apm.yml").write_text(manifest, encoding="utf-8")
+    _write_project(cwd, [_dep(SKILLY)], _rows(("claude", ".claude/skills/s0")))
+    row = _row_text(_list(cwd, plain=True).output, "_local/skilly")
+    assert row.split()[1] == version
+    assert row.endswith(" 0 claude")
+
+
+def test_a_package_whose_yaml_cannot_be_parsed_keeps_the_read_failure_warning(cwd: Path) -> None:
+    # Unchanged contract: only a manifest the strict parser rejects but whose YAML parses
+    # is still listed; unparseable YAML is reported without a row.
+    pkg = _installed(cwd, "skilly", skills=1)
+    (pkg / "apm.yml").write_text("name: [unclosed\n", encoding="utf-8")
+    _write_project(cwd, [_dep(SKILLY)], _rows(("claude", ".claude/skills/s0")))
+    out = _list(cwd, plain=True).output
+    assert "Failed to inspect package _local/skilly" in out
+    assert not any(ln.startswith("_local/skilly") for ln in out.splitlines())
+
+
+def test_a_package_missing_from_the_lockfile_has_unknown_targets(cwd: Path) -> None:
+    _installed(cwd, "skilly", skills=1)
+    _installed(cwd, "stray", skills=1)
+    _installed(cwd, "empty")  # nothing to deploy: unknown, not a dash that reads as "not deployed"
+    _write_project(cwd, [_dep(SKILLY)], _rows(("claude", ".claude/skills/s0")))
+    out = _list(cwd, plain=True).output
+    assert _row_text(out, "_local/skilly").endswith(" 0 claude")
+    assert _row_text(out, "_local/stray").endswith(" 0 unknown")
+    assert _row_text(out, "_local/empty").endswith(" 0 unknown")
+
+
 def test_a_manifestless_skill_package_in_the_listing_declares_no_mcp_servers(cwd: Path) -> None:
     _skill_package(cwd / "apm_modules" / "acme" / "bare")
     manifest = {"name": "p", "version": "1", "dependencies": {"apm": ["acme/bare"]}}
     (cwd / "apm.yml").write_text(yaml.safe_dump(manifest))
-    assert " 0 " in f"{_row_text(_list(cwd, plain=True).output, 'acme/bare')} "
+    assert _row_text(_list(cwd, plain=True).output, "acme/bare").endswith(" 0 unknown")
 
 
 def test_all_scope_shows_differing_project_and_user_records(cwd: Path) -> None:
@@ -911,6 +1049,113 @@ def test_an_aliased_package_reads_its_own_records(cwd: Path) -> None:
     out = _list(cwd, plain=True).output
     row = next(ln for ln in out.splitlines() if "aliased" in ln or "my-alias" in ln)
     assert "claude" in row
+
+
+def _lock_owners(deps: list[dict[str, object]]) -> list[str]:
+    locked = LockFile.from_yaml(yaml.safe_dump({"lockfile_version": "1", "dependencies": deps}))
+    return list(locked.dependencies)
+
+
+def test_aliased_packages_with_one_owner_and_repo_on_two_hosts_keep_their_own_targets(
+    cwd: Path,
+) -> None:
+    deps = [
+        {
+            "repo_url": "acme/tool",
+            "host": "github.com",
+            "alias": "gh-tool",
+            "resolved_commit": "a" * 40,
+        },
+        {
+            "repo_url": "acme/tool",
+            "host": "gitlab.com",
+            "alias": "gl-tool",
+            "resolved_commit": "b" * 40,
+        },
+    ]
+    github_owner, gitlab_owner = _lock_owners(deps)
+    for alias in ("gh-tool", "gl-tool"):
+        _manifest(cwd / "apm_modules" / alias, name="tool")
+    declared = [
+        {"git": "https://github.com/acme/tool.git", "alias": "gh-tool"},
+        {"git": "https://gitlab.com/acme/tool.git", "alias": "gl-tool"},
+    ]
+    rows = _rows(("claude", ".claude/a", [github_owner]), ("codex", ".agents/b", [gitlab_owner]))
+    _write_project(cwd, deps, rows, manifest_deps=declared)
+    out = _list(cwd, plain=True).output
+    tails = sorted(_flat(ln).split()[-1] for ln in out.splitlines() if "tool" in ln)
+    assert tails == ["claude", "codex"]
+
+
+def test_a_package_materialized_with_different_letter_case_still_finds_its_targets(
+    cwd: Path,
+) -> None:
+    dep = {"repo_url": "acme/tool", "host": "github.com", "resolved_commit": "a" * 40}
+    (owner,) = _lock_owners([dep])
+    _manifest(cwd / "apm_modules" / "Acme" / "Tool", name="tool")
+    _write_project(cwd, [dep], _rows(("claude", ".claude/a", [owner])), manifest_deps=["acme/tool"])
+    out = _list(cwd, plain=True).output
+    row = next(ln for ln in out.splitlines() if "tool" in ln.lower())
+    assert _flat(row).endswith(" claude")
+
+
+class _ScanCountingRecords(dict):
+    """Records mapping that counts how many times the ledger is walked."""
+
+    scans = 0
+
+    def values(self):  # type: ignore[no-untyped-def]
+        type(self).scans += 1
+        return super().values()
+
+
+def test_the_ledger_is_scanned_once_per_listing_not_once_per_package(
+    cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    names = [f"p{i}" for i in range(6)]
+    for name in names:
+        _installed(cwd, name, skills=1)
+    rows = _rows(*[("claude", f".claude/skills/{n}", [f"./pkgs/{n}"]) for n in names])
+    _write_project(cwd, [_dep(f"./pkgs/{n}") for n in names], rows)
+
+    real_read = LockFile.read.__func__
+
+    def _read_with_counting_ledger(cls: type[LockFile], path: Path) -> LockFile | None:
+        lock = real_read(cls, path)
+        lock.deployment_ledger = DeploymentLedger(
+            records=_ScanCountingRecords(lock.deployment_ledger.records)
+        )
+        return lock
+
+    _ScanCountingRecords.scans = 0
+    monkeypatch.setattr(LockFile, "read", classmethod(_read_with_counting_ledger))
+    out = _list(cwd, plain=True).output
+    assert all(_row_text(out, f"_local/{n}").endswith(" claude") for n in names)
+    assert _ScanCountingRecords.scans == 1
+
+
+def test_a_lockfile_entry_whose_path_cannot_be_resolved_does_not_affect_other_rows(
+    cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.models.dependency.materialization import installed_package_path
+    from apm_cli.utils.path_security import PathTraversalError
+
+    names = ["bad", "good"]
+    for name in names:
+        _installed(cwd, name, skills=1)
+    rows = _rows(*[("claude", f".claude/skills/{n}", [f"./pkgs/{n}"]) for n in names])
+    _write_project(cwd, [_dep(f"./pkgs/{n}") for n in names], rows)
+
+    def _resolve(dependency: object, apm_modules_dir: Path) -> Path:
+        if "bad" in str(getattr(dependency, "local_path", "")):
+            raise PathTraversalError("unresolvable")
+        return installed_package_path(dependency, apm_modules_dir)
+
+    _patch(monkeypatch, "apm_cli.commands.deps.cli.installed_package_path", _resolve)
+    result = _list(cwd, plain=True)
+    assert result.exit_code == 0, result.output
+    assert _row_text(result.output, "_local/good").endswith(" claude")
+    assert _row_text(result.output, "_local/bad").endswith(" unknown")
 
 
 def test_listing_is_read_only_and_makes_no_network_calls(
@@ -943,7 +1188,7 @@ def test_a_real_local_path_install_records_the_targets_the_listing_reads(
 
     lock = LockFile.read(cwd / "apm.lock.yaml")
     owner = next(k for k, d in lock.dependencies.items() if d.local_path == "./pkgs/skilly")
-    assert package_targets(lock, owner, scope="project").targets == ("claude", "codex")
+    assert package_targets(_records_for(lock, owner)).targets == ("claude", "codex")
     # Listing discovery is untouched: the installed package is found where it always was.
     assert _row_text(_list(cwd, plain=True).output, "_local/skilly").endswith(" claude, codex")
 

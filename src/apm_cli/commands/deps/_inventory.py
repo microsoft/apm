@@ -22,11 +22,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from ...constants import APM_YML_FILENAME
+from ...core.scope import manifest_file
 from ...utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
-    from ...deps.lockfile import LockFile
+    from ...agent_plugins.ir import AgentPlugin
+    from ...core.deployment_state import DeploymentRecord
 
 # Ledger service rows for MCP servers use this locator target (the runtime is
 # the client the server was written to).
@@ -95,29 +96,28 @@ class McpResult:
 
 
 def package_targets(
-    lockfile: LockFile | None,
-    owner_key: str | None,
+    records: tuple[DeploymentRecord, ...] | None,
     *,
-    scope: str,
     mcp_count: int | None = 0,
     has_primitives: bool = False,
 ) -> TargetsResult:
-    """Return the recorded deployment targets owned by *owner_key*.
+    """Return the recorded deployment targets a package's own rows support.
+
+    A pure function of the package's already-resolved ledger rows.
 
     Args:
-        lockfile: The lockfile for the scope being listed, or ``None``.
-        owner_key: The package's key in ``lockfile.dependencies`` (the same
-            string ledger rows use as an owner), or ``None`` when the listed
-            package has no lockfile entry.
-        scope: ``"project"`` or ``"user"``; only rows in this scope count.
+        records: The rows the package holds in the listed scope, from
+            ``DeploymentLedgerCodec.recorded_owner_index``; ``()`` when the
+            ledger is recorded and the package holds none. ``None`` when there
+            is nothing to read: no recorded deployment evidence (a ledger
+            synthesized from legacy ``deployed_files`` is none), no lockfile, or
+            a package that is not in the lockfile.
         mcp_count: MCP servers the package declares (``None`` if they could
             not be read, which keeps MCP deployments from being ruled out).
         has_primitives: Whether the package ships any non-MCP primitive.
 
-    Rows come from ``DeploymentLedgerCodec.recorded_owner_records``, which
-    applies the canonical evidence gate (a ledger synthesized from legacy
-    ``deployed_files`` is not evidence) and the canonical scope test. A record
-    counts for every package in its ``owners``.
+    A record counts for every package in its ``owners``; the index applies that
+    and the canonical scope test before this function sees the rows.
 
     Shared roots: several targets can deploy into one directory (for example
     ``.agents/skills`` for Codex, agent-skills and Antigravity; see
@@ -137,12 +137,9 @@ def package_targets(
         The evidence level, the concrete targets credited to the package and,
         for a partial result, the causes (``NOTE_*``) behind the ``*`` marker.
     """
-    from ...core.deployment_ledger import UNATTRIBUTED_TARGET, DeploymentLedgerCodec
+    from ...core.deployment_ledger import UNATTRIBUTED_TARGET
     from ...integration.targets import KNOWN_TARGETS
 
-    if lockfile is None or owner_key is None:
-        return TargetsResult(TargetEvidence.UNAVAILABLE)
-    records = DeploymentLedgerCodec.recorded_owner_records(lockfile, owner=owner_key, scope=scope)
     if records is None:
         return TargetsResult(TargetEvidence.UNAVAILABLE)
 
@@ -198,17 +195,17 @@ def _manifest_mcp_count(manifest_path: Path) -> McpResult:
         raise ValueError(f"invalid MCP declaration in {manifest_path}") from exc
 
 
-def _native_mcp_count(package_dir: Path) -> McpResult:
-    """Count servers for a package that has no ``apm.yml``."""
-    from ...bundle.local_bundle import route_agent_plugin_package
+def _plugin_mcp_count(plugin: AgentPlugin) -> McpResult:
+    """Count the servers of a native Agent Plugin through its canonical loader."""
+    if any(item.code in _MCP_DOCUMENT_UNREADABLE_CODES for item in plugin.diagnostics):
+        return McpResult(None)
+    return McpResult(len(plugin.components.mcp_servers))
+
+
+def _unmanifested_mcp_count(package_dir: Path) -> McpResult:
+    """Count servers for a package that is neither a plugin nor has an ``apm.yml``."""
     from ...models.validation import PackageType, detect_package_type
 
-    detection = route_agent_plugin_package(package_dir)
-    if detection is not None and detection.plugin is not None:
-        plugin = detection.plugin
-        if any(item.code in _MCP_DOCUMENT_UNREADABLE_CODES for item in plugin.diagnostics):
-            return McpResult(None)
-        return McpResult(len(plugin.components.mcp_servers))
     package_type, _ = detect_package_type(package_dir)
     if package_type in {
         PackageType.SKILL_BUNDLE,
@@ -224,14 +221,16 @@ def package_mcp_count(package_dir: Path) -> McpResult:
 
     Follows the same package interpretation install uses, read-only:
 
+    * A native Agent Plugin -- the servers its canonical loader models, via
+      ``route_agent_plugin_package``, which applies install's format
+      precedence: an apm.yml that is only metadata does not outrank the
+      plugin, while one that declares dependencies does. A plugin whose whole
+      MCP document was disabled counts as unreadable; one invalid server is
+      simply not admitted.
     * ``apm.yml`` -- parsed through the canonical authored-MCP declarations.
       Claude and marketplace plugins are covered here: install folds their
       ``mcpServers`` / ``.mcp.json`` into the manifest it writes under
       ``apm_modules`` (``deps/plugin_parser.py``).
-    * A native Agent Plugin (no ``apm.yml``) -- the servers its canonical
-      loader models, via ``route_agent_plugin_package``. A plugin whose whole
-      MCP document was disabled counts as unreadable; one invalid server is
-      simply not admitted.
     * A package type that may legitimately have no ``apm.yml`` (skill bundle,
       Claude skill, hook package) declares none: ``0``.
 
@@ -248,11 +247,16 @@ def package_mcp_count(package_dir: Path) -> McpResult:
         failures are caught; other exceptions are programming errors and
         propagate.
     """
-    manifest_path = package_dir / APM_YML_FILENAME
+    from ...bundle.local_bundle import route_agent_plugin_package
+
+    manifest_path = manifest_file(package_dir)
     try:
+        detection = route_agent_plugin_package(package_dir)
+        if detection is not None and detection.plugin is not None:
+            return _plugin_mcp_count(detection.plugin)
         if manifest_path.is_file():
             return _manifest_mcp_count(manifest_path)
-        return _native_mcp_count(package_dir)
+        return _unmanifested_mcp_count(package_dir)
     except _INSPECTION_FAILURES:
         return McpResult(None)
 

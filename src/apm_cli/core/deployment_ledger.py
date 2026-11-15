@@ -907,7 +907,7 @@ class DeploymentLedgerCodec:
         ledger = DeploymentLedgerCodec._recorded_ledger(lockfile)
         if ledger is None:
             return ()
-        # Strict ``==`` on purpose, unlike :meth:`recorded_owner_records`, which uses
+        # Strict ``==`` on purpose, unlike :meth:`recorded_owner_index`, which uses
         # :meth:`locator_in_scope`. This method feeds ``resolve_audit_targets``;
         # switching it to the lenient test would change which targets an audit
         # resolves, so its behavior is intentionally left as it was.
@@ -922,33 +922,34 @@ class DeploymentLedgerCodec:
         )
 
     @staticmethod
-    def recorded_owner_records(
+    def recorded_owner_index(
         lockfile: LockFile,
         *,
-        owner: str,
         scope: str,
-    ) -> tuple[DeploymentRecord, ...] | None:
-        """Return the recorded deployment rows *owner* holds in *scope*.
+    ) -> dict[str, tuple[DeploymentRecord, ...]] | None:
+        """Group the recorded deployment rows in *scope* by owner, in one pass.
 
         Applies the same evidence gate as :meth:`recorded_target_names` and the
         canonical :meth:`locator_in_scope` scope test: a row whose scope was only
         inferred from its path is accepted in either scope (the rule file
         provenance uses), while a row recorded for a different scope is not.
         ``None`` means the lockfile carries no recorded deployment state (a
-        ledger inferred from legacy paths is not evidence), as opposed to an
-        empty tuple, which means the ledger is recorded and *owner* holds no
-        rows in *scope*.
-        Co-owners are credited: a row counts for every package in ``owners``.
+        ledger inferred from legacy paths is not evidence); a dict, possibly
+        empty, means the ledger is recorded. An owner missing from the dict
+        holds no rows in *scope*. Co-owners are credited: a row is listed under
+        every package in ``owners``. Build it once and look owners up, instead
+        of scanning the whole ledger per owner.
         """
         ledger = DeploymentLedgerCodec._recorded_ledger(lockfile)
         if ledger is None:
             return None
-        return tuple(
-            record
-            for record in ledger.records.values()
-            if owner in record.owners
-            and DeploymentLedgerCodec.locator_in_scope(record.locator, scope)
-        )
+        grouped: dict[str, list[DeploymentRecord]] = {}
+        for record in ledger.records.values():
+            if not DeploymentLedgerCodec.locator_in_scope(record.locator, scope):
+                continue
+            for owner in dict.fromkeys(record.owners):
+                grouped.setdefault(owner, []).append(record)
+        return {owner: tuple(records) for owner, records in grouped.items()}
 
     @staticmethod
     def _recorded_ledger(lockfile: LockFile) -> DeploymentLedger | None:
