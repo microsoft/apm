@@ -36,6 +36,13 @@ from .._helpers import (
     _standalone_installed_packages,
     resolve_requested_packages,
 )
+from ._inventory import (
+    format_mcps,
+    format_targets,
+    package_mcp_count,
+    package_targets,
+    targets_legend,
+)
 from ._utils import (
     _count_primitives,
     _get_package_display_info,
@@ -239,13 +246,14 @@ def _echo_tree_children(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
+def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
     """Resolve installed packages and orphan status for a single scope.
 
     Returns ``(installed_packages, orphaned_packages)`` where
     *installed_packages* is a list of dicts and *orphaned_packages* is a
     list of name strings, or ``(None, None)`` when no ``apm_modules``
-    directory exists.
+    directory exists. *scope* (``"project"`` or ``"user"``) selects which
+    recorded deployment rows feed each package's Targets column.
     """
     from ...deps.lockfile import LockFile, get_lockfile_path
 
@@ -264,6 +272,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Host-blind logical key -> the identity ``apm deps tree`` and uninstall use.
     display_keys: dict[str, str] = {}
     declared_deps = []
+    # logical package key -> its key in the lockfile (the owner string ledger rows use)
+    owner_keys: dict[str, str] = {}
+    inventory_lockfile = None
     try:
         apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
@@ -333,7 +344,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
+            inventory_lockfile = lockfile
             for dep in lockfile.get_package_dependencies():
+                owner_key = dep.get_unique_key()
                 # Local slots and explicit aliases retain their logical lockfile identity.
                 if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
@@ -343,6 +356,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
+                if dep_key:
+                    owner_keys.setdefault(dep_key, owner_key)
                 if dep_key and dep_key not in declared_sources:
                     declared_sources[dep_key] = _deps_list_source_label(
                         dep.host, lockfile_source=dep.source, host_type=dep.host_type
@@ -467,6 +482,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             else:
                 version = _agent_plugin_version(candidate) or version
             primitives = _count_primitives(candidate)
+            mcps = package_mcp_count(candidate)
 
             if is_orphaned:
                 orphaned_packages.append(display_name)
@@ -480,6 +496,14 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     if is_orphaned
                     else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
+                    "targets": package_targets(
+                        inventory_lockfile,
+                        owner_keys.get(logical_name),
+                        scope=scope,
+                        mcp_count=mcps.count,
+                        has_primitives=any(count > 0 for count in primitives.values()),
+                    ),
+                    "mcps": mcps,
                     "path": str(candidate),
                     "is_orphaned": is_orphaned,
                     "is_insecure": locked_dep is not None,
@@ -554,7 +578,10 @@ def _report_native_plugins(apm_dir, logger) -> None:
 
 def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
     """Display dependencies for a single scope (Project or Global)."""
-    installed_packages, orphaned_packages = _resolve_scope_deps(apm_dir, logger, insecure_only)
+    scope = "user" if scope_label == "Global" else "project"
+    installed_packages, orphaned_packages = _resolve_scope_deps(
+        apm_dir, logger, insecure_only, scope=scope
+    )
 
     if installed_packages is None:
         logger.progress(f"No APM dependencies installed ({scope_label} scope)")
@@ -594,6 +621,8 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         table.add_column("Agents", style="cyan", justify="center")
         table.add_column("Skills", style="yellow", justify="center")
         table.add_column("Hooks", style="red", justify="center")
+        table.add_column("MCPs", style="blue", justify="center")
+        table.add_column("Targets", style="green")
 
         for pkg in installed_packages:
             p = pkg["primitives"]
@@ -607,9 +636,14 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                 str(p.get("agents", 0)) if p.get("agents", 0) > 0 else "-",
                 str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-",
                 str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-",
+                format_mcps(pkg.get("mcps")),
+                format_targets(pkg.get("targets")),
             )
 
         console.print(table)
+        legend = targets_legend(pkg.get("targets") for pkg in installed_packages)
+        if legend:
+            console.print(legend, style="dim", markup=False, highlight=False)
 
         # Show orphaned packages warning -- routed through CommandLogger
         # so output goes through the central STATUS_SYMBOLS prefix path
@@ -627,17 +661,21 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         # Fallback text table
         if insecure_only:
             click.echo(f" Insecure APM Dependencies ({scope_label}):")
-            click.echo(
+            header = (
                 f"{'Package':<30} {'Version':<10} {'Source':<12} {'Origin':<18} "
-                f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
+                f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7} "
+                f"{'MCPs':>4} Targets"
             )
-            click.echo("-" * 117)
+            click.echo(header)
+            click.echo("-" * len(header))
         else:
             click.echo(f" APM Dependencies ({scope_label}):")
-            click.echo(
-                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
+            header = (
+                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} "
+                f"{'Agents':>7} {'Skills':>7} {'Hooks':>7} {'MCPs':>4} Targets"
             )
-            click.echo("-" * 98)
+            click.echo(header)
+            click.echo("-" * len(header))
 
         for pkg in installed_packages:
             p = pkg["primitives"]
@@ -650,15 +688,22 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             agents = str(p.get("agents", 0)) if p.get("agents", 0) > 0 else "-"
             skills = str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-"
             hooks = str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-"
+            mcps = format_mcps(pkg.get("mcps"))
+            targets = format_targets(pkg.get("targets"))
             if insecure_only:
                 click.echo(
                     f"{name:<30} {version:<10} {source:<12} {insecure_via:<18} "
-                    f"{prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
+                    f"{prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7} "
+                    f"{mcps:>4} {targets}"
                 )
             else:
                 click.echo(
-                    f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
+                    f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} "
+                    f"{agents:>7} {skills:>7} {hooks:>7} {mcps:>4} {targets}"
                 )
+        legend = targets_legend(pkg.get("targets") for pkg in installed_packages)
+        if legend:
+            click.echo(legend)
 
         # Show orphaned packages warning -- route through CommandLogger
         # for consistency with the rich branch above and with prune.py.

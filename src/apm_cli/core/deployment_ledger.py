@@ -904,10 +904,13 @@ class DeploymentLedgerCodec:
         supported_targets: Collection[str],
     ) -> tuple[str, ...]:
         """Project concrete target identities from recorded deployment state."""
-        ledger = lockfile.deployment_ledger
-        # A compatibility ledger inferred from paths is not installed target intent.
-        if not lockfile._deployments_present or ledger is None:
+        ledger = DeploymentLedgerCodec._recorded_ledger(lockfile)
+        if ledger is None:
             return ()
+        # Strict ``==`` on purpose, unlike :meth:`recorded_owner_records`, which uses
+        # :meth:`locator_in_scope`. This method feeds ``resolve_audit_targets``;
+        # switching it to the lenient test would change which targets an audit
+        # resolves, so its behavior is intentionally left as it was.
         return tuple(
             sorted(
                 {
@@ -917,6 +920,44 @@ class DeploymentLedgerCodec:
                 }
             )
         )
+
+    @staticmethod
+    def recorded_owner_records(
+        lockfile: LockFile,
+        *,
+        owner: str,
+        scope: str,
+    ) -> tuple[DeploymentRecord, ...] | None:
+        """Return the recorded deployment rows *owner* holds in *scope*.
+
+        Applies the same evidence gate as :meth:`recorded_target_names` and the
+        canonical :meth:`locator_in_scope` scope test: a row whose scope was only
+        inferred from its path is accepted in either scope (the rule file
+        provenance uses), while a row recorded for a different scope is not.
+        ``None`` means the lockfile carries no recorded deployment state (a
+        ledger inferred from legacy paths is not evidence), as opposed to an
+        empty tuple, which means the ledger is recorded and *owner* holds no
+        rows in *scope*.
+        Co-owners are credited: a row counts for every package in ``owners``.
+        """
+        ledger = DeploymentLedgerCodec._recorded_ledger(lockfile)
+        if ledger is None:
+            return None
+        return tuple(
+            record
+            for record in ledger.records.values()
+            if owner in record.owners
+            and DeploymentLedgerCodec.locator_in_scope(record.locator, scope)
+        )
+
+    @staticmethod
+    def _recorded_ledger(lockfile: LockFile) -> DeploymentLedger | None:
+        """Return the ledger only when it records deployments, not legacy inference."""
+        ledger = lockfile.deployment_ledger
+        # A compatibility ledger inferred from paths is not installed target intent.
+        if not lockfile._deployments_present or ledger is None:
+            return None
+        return ledger
 
     @staticmethod
     def legacy_deployed_file_claims(lockfile: LockFile) -> dict[str, str]:
