@@ -598,6 +598,16 @@ def _authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDepende
     return declarations
 
 
+def authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDependency]:
+    """Return a manifest's authored MCP declarations keyed by server name.
+
+    Public, read-only entry point to the canonical declaration parser install
+    uses; first declaration of a name wins. Raises ``ValueError`` for a
+    malformed ``dependencies`` block or an entry the MCP model rejects.
+    """
+    return _authored_mcp_declarations(manifest)
+
+
 def _get_server_configs(dependencies: list[Any] | tuple[Any, ...]) -> dict[str, dict[str, Any]]:
     """Project dependencies to their serialized server configurations."""
     configs: dict[str, dict[str, Any]] = {}
