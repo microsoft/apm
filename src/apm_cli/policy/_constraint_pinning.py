@@ -65,6 +65,11 @@ _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 # Literal version tag: ``v1.2.3`` / ``v1.2.3-rc.1`` / ``v1.2.3+meta``.
 _LITERAL_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([-+][0-9A-Za-z.\-+]+)?$")
 
+# Monorepo package release tag: ``<name>@X.Y.Z`` or ``@<scope>/<name>@X.Y.Z`` (issue #3731).
+_PACKAGE_AT_TAG_RE = re.compile(
+    r"^@?[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*@v?\d+\.\d+\.\d+([-+][0-9A-Za-z.\-+]+)?$"
+)
+
 # Placeholder the git-dependency tag layouts use for the package name.
 _NAME_PLACEHOLDER = "{name}"
 
@@ -204,6 +209,7 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     4. 40-char hex SHA             -> ``None``.
     5. Literal ``v\\d+\\.\\d+\\.\\d+`` tag -> ``None``.
     5a. ``{name}-v...`` / ``{name}--v...`` tag for this dep's own name -> ``None``.
+    5b. ``name@X.Y.Z`` / ``@scope/name@X.Y.Z`` release tag -> ``None``.
     6. Parses as semver range      -> range-shape check.
     7. Else                        -> ``BARE_BRANCH``.
     """
@@ -250,7 +256,12 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     if _is_package_literal_tag(spec, dep):
         return None
 
-    # 5b. Bare wildcard tokens ('*', 'x', 'X') -- handled before the
+    # 5b. Monorepo package release tag (``name@X.Y.Z``, ``@scope/name@X.Y.Z``)
+    #     -> pinned (issue #3731).
+    if _PACKAGE_AT_TAG_RE.match(spec):
+        return None
+
+    # 5c. Bare wildcard tokens ('*', 'x', 'X') -- handled before the
     # semver-range probe because the registry grammar rejects them as
     # standalone components, but they unambiguously express "any
     # version" and deserve a wildcard hint rather than a bare-branch one.

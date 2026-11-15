@@ -181,6 +181,13 @@ def test_classify_literal_tag_v_prefixed_returns_pinned_none():
     assert classify_unbounded_reason(_dep("v1.5.3")) is None
 
 
+def test_classify_package_at_version_tag_returns_pinned_none():
+    assert classify_unbounded_reason(_dep("shadcn@4.12.0")) is None
+    assert classify_unbounded_reason(_dep("@upstash/context7-mcp@4.4.4")) is None
+    assert classify_unbounded_reason(_dep("pkg@v1.2.3")) is None
+    assert classify_unbounded_reason(_dep("@scope/pkg@1.2.3-rc.1")) is None
+
+
 def test_classify_sha_returns_pinned_none():
     sha = "a" * 40
     assert classify_unbounded_reason(_dep(sha)) is None

@@ -52,6 +52,12 @@ def _dep(spec: str) -> DependencyReference:
         "acme/widget#widget-v1.2.0",
         "acme/widget#widget--v1.2.0",
         "https://github.com/acme/widget.git#widget-v1.2.0",
+        # Monorepo / Changeset package release tags (issue #3731)
+        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a@v1.1.0",
+        "upstash/context7/skills/context7-mcp#@upstash/context7-mcp@4.4.4",
+        "shadcn/ui#shadcn@4.12.0",
+        "acme/mono/packages/pkg-a#@scope/pkg-a@1.1.0-rc.1",
     ],
 )
 def test_package_qualified_literal_tag_for_own_name_is_pinned(spec):
@@ -74,7 +80,6 @@ def test_package_qualified_literal_tag_for_own_name_is_pinned(spec):
         "acme/mono/packages/pkg-a#release-pkg-a-v1.1.0",
         # layouts the resolver does not select from
         "acme/mono/packages/pkg-a#pkg-a_v1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
     ],
 )
 def test_other_names_and_near_misses_stay_bare_branch(spec):
