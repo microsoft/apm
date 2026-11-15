@@ -263,6 +263,37 @@ class AgentIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            if mapping.format_id == "codex_agent":
+                rendered_toml, links_resolved = self._render_codex_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                    resolve_links=self.resolve_links,
+                )
+                skip, adopted = self._check_adopt_or_skip(
+                    target_path,
+                    source_file,
+                    rel_path,
+                    managed_files,
+                    force,
+                    diagnostics,
+                    target_paths,
+                    expected_content=rendered_toml,
+                )
+                if skip:
+                    if adopted:
+                        files_adopted += 1
+                    else:
+                        files_skipped += 1
+                    continue
+
+                write_text_lf(target_path, rendered_toml)
+                total_links_resolved += links_resolved
+                files_integrated += 1
+                target_paths.append(target_path)
+                continue
+
             skip, adopted = self._check_adopt_or_skip(
                 target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
             )
@@ -273,20 +304,9 @@ class AgentIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            if mapping.format_id == "codex_agent":
-                links_resolved = self._write_codex_agent(
-                    source_file,
-                    target_path,
-                    diagnostics=diagnostics,
-                    package_name=package_info.package.name,
-                    resolve_links=self.resolve_links,
-                )
-            else:
-                if mapping.format_id == "opencode_agent":
-                    self._warn_opencode_frontmatter(
-                        source_file, diagnostics, package_info.package.name
-                    )
-                links_resolved = self.copy_agent(source_file, target_path)
+            if mapping.format_id == "opencode_agent":
+                self._warn_opencode_frontmatter(source_file, diagnostics, package_info.package.name)
+            links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -587,15 +607,15 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     @staticmethod
-    def _write_codex_agent(
+    def _render_codex_agent(
         source: Path,
         target: Path,
         *,
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
         resolve_links: ResolveLinks | None = None,
-    ) -> int:
-        """Transform an ``.agent.md`` file to Codex ``.toml`` format.
+    ) -> tuple[str, int]:
+        """Render an ``.agent.md`` file to Codex ``.toml`` format.
 
         Preserves ``name``, ``description``, and native model settings;
         uses the markdown body as ``developer_instructions``.
@@ -605,7 +625,7 @@ class AgentIntegrator(BaseIntegrator):
         *source* for the generated *target* before serialization (#2966).
 
         Returns:
-            int: Number of links resolved in ``developer_instructions``.
+            tuple[str, int]: Rendered TOML string and number of links resolved.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -721,7 +741,37 @@ class AgentIntegrator(BaseIntegrator):
             **model_settings,
             "developer_instructions": body.strip(),
         }
-        write_text_lf(target, _toml.dumps(doc))
+        return _toml.dumps(doc), links_resolved
+
+    @staticmethod
+    def _write_codex_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+        resolve_links: ResolveLinks | None = None,
+    ) -> int:
+        """Transform an ``.agent.md`` file to Codex ``.toml`` format and write it.
+
+        Preserves ``name``, ``description``, and native model settings;
+        uses the markdown body as ``developer_instructions``.
+
+        *resolve_links* is the shared :meth:`BaseIntegrator.resolve_links`
+        owner; it rewrites source-relative Markdown links in the body from
+        *source* for the generated *target* before serialization (#2966).
+
+        Returns:
+            int: Number of links resolved in ``developer_instructions``.
+        """
+        rendered, links_resolved = AgentIntegrator._render_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name=package_name,
+            resolve_links=resolve_links,
+        )
+        write_text_lf(target, rendered)
         return links_resolved
 
     # ------------------------------------------------------------------

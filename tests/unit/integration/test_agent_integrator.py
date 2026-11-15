@@ -1635,7 +1635,7 @@ class TestCodexAgentIntegration:
         reinstall = AgentIntegrator().integrate_agents_for_target(
             KNOWN_TARGETS["codex"], package_info, self.root, managed_files=managed
         )
-        assert reinstall.files_integrated == 1
+        assert reinstall.files_adopted == 1
         assert target.read_text(encoding="utf-8") == first
 
         source = package_dir / ".apm" / "agents" / "reviewer.agent.md"
@@ -1650,6 +1650,27 @@ class TestCodexAgentIntegration:
         instructions = tomllib.loads(target.read_text(encoding="utf-8"))["developer_instructions"]
         assert instructions.startswith("Updated: read [guide](")
         self._assert_guide_link_reaches(target, instructions, skill)
+
+    def test_codex_agent_adopt_identical_without_managed_files(self) -> None:
+        """Codex agent matching rendered TOML is adopted without managed_files."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, _ = self._linked_package()
+        package_info = self._create_package_info(package_dir)
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+
+        first = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root
+        )
+        assert first.files_integrated == 1
+        assert target.exists()
+
+        second = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root, managed_files=None
+        )
+        assert second.files_adopted == 1
+        assert second.files_integrated == 0
+        assert second.files_skipped == 0
 
     def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self) -> None:
         """A managed TOML written before #2966 is repaired by the next install."""
