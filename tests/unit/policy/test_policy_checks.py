@@ -570,6 +570,42 @@ class TestCompilationTarget:
         result = _check_compilation_target({"target": ["copilot"]}, policy)
         assert result.passed
 
+    # -- Plural targets key tests (issue #3732) -----------------------
+
+    def test_targets_plural_enforce_match(self):
+        """Plural targets list containing the enforced value passes."""
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
+        result = _check_compilation_target({"targets": ["claude", "copilot"]}, policy)
+        assert result.passed
+
+    def test_targets_plural_enforce_mismatch(self):
+        """Plural targets list missing the enforced value fails."""
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
+        result = _check_compilation_target({"targets": ["cursor", "copilot"]}, policy)
+        assert not result.passed
+        assert "enforced" in result.details[0]
+
+    def test_targets_plural_allow_match(self):
+        """Plural targets list with all items allowed passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(allow=["claude", "copilot", "cursor"])
+        )
+        result = _check_compilation_target({"targets": ["claude", "copilot"]}, policy)
+        assert result.passed
+
+    def test_targets_plural_allow_disallowed(self):
+        """Plural targets list with disallowed target fails."""
+        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["claude"]))
+        result = _check_compilation_target({"targets": ["claude", "cursor"]}, policy)
+        assert not result.passed
+        assert "cursor" in result.message
+
+    def test_targets_plural_empty(self):
+        """Plural targets key with empty list passes as unset target."""
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
+        result = _check_compilation_target({"targets": []}, policy)
+        assert result.passed
+
 
 # -- Check 12: compilation-strategy ---------------------------------
 

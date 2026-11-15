@@ -551,7 +551,8 @@ def _check_compilation_target(
             message="No compilation target restrictions configured",
         )
 
-    target = (raw_yml or {}).get("target")
+    raw = raw_yml or {}
+    target = raw.get("targets") or raw.get("target")
     if not target:
         return CheckResult(
             name="compilation-target",
