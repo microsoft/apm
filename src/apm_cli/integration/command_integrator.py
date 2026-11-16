@@ -69,6 +69,28 @@ _PRESERVED_COMMAND_KEYS_DISPLAY = frozenset(
     }
 )
 
+# Extra keys kept only on the Claude target.  Claude Code documents that
+# ``.claude/commands/*.md`` accept the skill frontmatter except ``name``
+# and ``paths`` (https://code.claude.com/docs/en/skills#frontmatter-reference).
+# ``arguments`` is handled separately because ``input`` also maps to it.
+# ``hooks`` is withheld on purpose: frontmatter hooks are not routed through
+# APM's executable consent yet (see #3067 and #3227).
+_CLAUDE_NATIVE_COMMAND_KEYS = frozenset(
+    {
+        "when_to_use",
+        "disable-model-invocation",
+        "user-invocable",
+        "disallowed-tools",
+        "effort",
+        "context",
+        "agent",
+        "background",
+        "shell",
+    }
+)
+
+_CLAUDE_WITHHELD_COMMAND_KEYS = frozenset({"hooks"})
+
 
 def _is_valid_input_name(name: str) -> bool:
     """Return True if *name* is a safe argument identifier."""
@@ -196,11 +218,15 @@ class CommandIntegrator(BaseIntegrator):
     def _transform_prompt_to_command(
         self,
         source: Path,
+        target_name: str | None = None,
     ) -> tuple[str, frontmatter.Post, list[str], list[str]]:
         """Transform a .prompt.md file into Claude command format.
 
         Args:
             source: Path to the .prompt.md file
+            target_name: Deployment target.  Only ``"claude"`` keeps the
+                Claude-native keys in ``_CLAUDE_NATIVE_COMMAND_KEYS`` and an
+                authored ``arguments``; other targets keep the shared subset.
 
         Returns:
             Tuple of (command_name, post, warnings, dropped_keys).
@@ -208,6 +234,7 @@ class CommandIntegrator(BaseIntegrator):
             command transformer does not preserve (e.g. ``author``,
             ``mcp``, ``parameters`` for Cursor-specific frontmatter).
         """
+        is_claude = target_name == "claude"
         warnings: list[str] = []
 
         post = load_frontmatter(source)
@@ -239,6 +266,11 @@ class CommandIntegrator(BaseIntegrator):
         elif "argumentHint" in post.metadata:
             claude_metadata["argument-hint"] = post.metadata["argumentHint"]
 
+        if is_claude:
+            for key in sorted(_CLAUDE_NATIVE_COMMAND_KEYS):
+                if key in post.metadata:
+                    claude_metadata[key] = post.metadata[key]
+
         # Map APM 'input' to Claude 'arguments' and 'argument-hint'
         input_names, rejected_names = _extract_input_names(post.metadata.get("input"))
         if rejected_names:
@@ -251,6 +283,9 @@ class CommandIntegrator(BaseIntegrator):
             claude_metadata["arguments"] = input_names
             if "argument-hint" not in claude_metadata:
                 claude_metadata["argument-hint"] = " ".join(f"<{name}>" for name in input_names)
+        elif is_claude and "arguments" in post.metadata:
+            # No 'input' mapping: keep the author's native Claude 'arguments'.
+            claude_metadata["arguments"] = post.metadata["arguments"]
 
         # Convert APM input references to Claude $name placeholders
         content = post.content
@@ -268,7 +303,12 @@ class CommandIntegrator(BaseIntegrator):
         # Compute keys present in source frontmatter but not preserved by
         # the shared command transformer.  Surfaced by integrate_command()
         # via diagnostics so users see the lossy transform at install time.
-        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS)
+        preserved = _PRESERVED_COMMAND_KEYS
+        if is_claude:
+            preserved = preserved | _CLAUDE_NATIVE_COMMAND_KEYS
+            if not input_names:
+                preserved = preserved | {"arguments"}
+        dropped_keys = sorted(set(post.metadata.keys()) - preserved)
 
         return (command_name, new_post, warnings, dropped_keys)
 
@@ -321,7 +361,9 @@ class CommandIntegrator(BaseIntegrator):
             decide whether to surface the one-shot passthrough notice.
         """
         # Transform to command format
-        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(source)
+        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(
+            source, target_name
+        )
 
         # Resolve context links in content
         post.content, links_resolved = self.resolve_links(post.content, source, target)
@@ -337,14 +379,32 @@ class CommandIntegrator(BaseIntegrator):
         # frontmatter; any other source key is silently discarded by the
         # transformer.  Warn so users see the lossy transform at install
         # time -- core "install adds, never silently mutates" contract.
-        if dropped_keys and diagnostics is not None:
-            preserved_list = ", ".join(sorted(_PRESERVED_COMMAND_KEYS_DISPLAY))
+        withheld_keys: list[str] = []
+        unsupported_keys = dropped_keys
+        display_keys = _PRESERVED_COMMAND_KEYS_DISPLAY
+        if target_name == "claude":
+            withheld_keys = [k for k in dropped_keys if k in _CLAUDE_WITHHELD_COMMAND_KEYS]
+            unsupported_keys = [k for k in dropped_keys if k not in _CLAUDE_WITHHELD_COMMAND_KEYS]
+            display_keys = display_keys | _CLAUDE_NATIVE_COMMAND_KEYS | {"arguments"}
+        if unsupported_keys and diagnostics is not None:
+            preserved_list = ", ".join(sorted(display_keys))
             diagnostics.warn(
                 message=(
                     f"{target_name.capitalize()} command {command_name}: "
                     f"frontmatter keys not supported for {target_name} commands "
-                    f"and were dropped: {', '.join(dropped_keys)}. "
+                    f"and were dropped: {', '.join(unsupported_keys)}. "
                     f"Supported keys: {preserved_list}."
+                ),
+                package=pkg_name,
+            )
+        if withheld_keys and diagnostics is not None:
+            diagnostics.warn(
+                message=(
+                    f"Claude command {command_name}: frontmatter "
+                    f"{', '.join(withheld_keys)} withheld. Claude Code supports "
+                    f"inline hooks on commands, but APM does not yet run them "
+                    f"through executable consent, so the command was deployed "
+                    f"without them and may not behave as authored."
                 ),
                 package=pkg_name,
             )

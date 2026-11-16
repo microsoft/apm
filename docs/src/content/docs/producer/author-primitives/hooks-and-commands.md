@@ -359,7 +359,13 @@ your-package/
 Frontmatter the command integrator preserves: `description`,
 `allowed-tools`, `model`, `argument-hint`, `input`. Other keys (for
 example `author`, `mcp`, `parameters`) are dropped during the
-transform and surfaced as install-time diagnostics.
+transform and surfaced as install-time diagnostics. For Claude, the
+command also keeps the fields Claude Code documents for command files
+(`when_to_use`, `disable-model-invocation`, `user-invocable`,
+`disallowed-tools`, `effort`, `context`, `agent`, `background`, `shell`,
+and `arguments` without `input`); inline `hooks` are withheld with a
+warning until APM routes them through executable consent. See
+[Prompts](../prompts/#frontmatter).
 
 ```markdown
 ---
