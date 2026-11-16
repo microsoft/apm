@@ -564,6 +564,11 @@ Review ${input:pr_url} focusing on ${input:focus_areas}.
 When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
+Claude commands also keep `when_to_use`, `disable-model-invocation`,
+`user-invocable`, `disallowed-tools`, `effort`, `context`, `agent`,
+`background`, `shell`, and an authored `arguments` when there is no `input:`.
+`name` and `paths` are dropped, and inline `hooks` are withheld with a warning
+because APM does not yet run frontmatter hooks through executable consent.
 
 For the `copilot` target, prompts deploy to `.github/prompts/<name>.prompt.md`.
 In VS Code, only Local harness sessions load prompt files; the Copilot harness

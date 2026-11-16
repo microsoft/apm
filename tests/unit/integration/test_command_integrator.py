@@ -1718,3 +1718,133 @@ class TestCursorCommandPanelFindings:
         assert any(i.severity == "critical" for i in sec_items), (
             f"expected critical security diagnostic, got: {[(i.severity, i.message) for i in sec_items]}"
         )
+
+
+class TestClaudeNativeCommandFrontmatter:
+    """Claude-target commands keep the frontmatter Claude Code documents (#3067)."""
+
+    _NATIVE_PROMPT = (
+        "---\n"
+        "description: d\n"
+        "disable-model-invocation: true\n"
+        "user-invocable: false\n"
+        "when_to_use: x\n"
+        "effort: low\n"
+        "disallowed-tools: [AskUserQuestion]\n"
+        "context: fork\n"
+        "agent: Explore\n"
+        "background: false\n"
+        "shell: powershell\n"
+        "---\n"
+        "Run it.\n"
+    )
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".claude").mkdir()
+        (temp_path / ".cursor").mkdir()
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _install(self, project, prompts, target_name):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(project, prompts)
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name],
+            pkg_info,
+            project,
+            diagnostics=diag,
+        )
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        return warnings
+
+    def test_claude_keeps_documented_command_keys(self, temp_project):
+        warnings = self._install(temp_project, {"p.prompt.md": self._NATIVE_PROMPT}, "claude")
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata == {
+            "description": "d",
+            "disable-model-invocation": True,
+            "user-invocable": False,
+            "when_to_use": "x",
+            "effort": "low",
+            "disallowed-tools": ["AskUserQuestion"],
+            "context": "fork",
+            "agent": "Explore",
+            "background": False,
+            "shell": "powershell",
+        }
+        assert not any("frontmatter keys not supported" in w for w in warnings), warnings
+
+    def test_claude_keeps_authored_arguments_without_input(self, temp_project):
+        self._install(
+            temp_project,
+            {"p.prompt.md": "---\ndescription: d\narguments: [issue, branch]\n---\n$issue\n"},
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata["arguments"] == ["issue", "branch"]
+
+    def test_claude_input_mapping_wins_over_authored_arguments(self, temp_project):
+        warnings = self._install(
+            temp_project,
+            {
+                "p.prompt.md": (
+                    "---\ndescription: d\ninput: [feature]\narguments: [other]\n---\n"
+                    "${input:feature}\n"
+                ),
+            },
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata["arguments"] == ["feature"]
+        assert any("were dropped: arguments" in w for w in warnings), warnings
+
+    def test_claude_still_drops_name_and_paths(self, temp_project):
+        warnings = self._install(
+            temp_project,
+            {"p.prompt.md": "---\ndescription: d\nname: other\npaths: ['*.py']\n---\nRun.\n"},
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata == {"description": "d"}
+        assert any(
+            "not supported for claude commands" in w and "name, paths" in w for w in warnings
+        ), warnings
+
+    def test_claude_withholds_inline_hooks_with_explicit_warning(self, temp_project):
+        warnings = self._install(
+            temp_project,
+            {
+                "p.prompt.md": (
+                    "---\ndescription: d\nhooks:\n  PreToolUse:\n"
+                    "    - matcher: Bash\n      hooks:\n"
+                    "        - type: command\n          command: ./check.sh\n"
+                    "---\nRun.\n"
+                ),
+            },
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert "hooks" not in post.metadata
+        assert any("hooks withheld" in w and "executable consent" in w for w in warnings), warnings
+        assert not any("frontmatter keys not supported" in w for w in warnings), warnings
+
+    def test_cursor_output_unchanged(self, temp_project):
+        warnings = self._install(temp_project, {"p.prompt.md": self._NATIVE_PROMPT}, "cursor")
+
+        post = frontmatter.load(temp_project / ".cursor" / "commands" / "p.md")
+        assert post.metadata == {"description": "d"}
+        assert any(
+            "not supported for cursor commands" in w and "disable-model-invocation" in w
+            for w in warnings
+        ), warnings

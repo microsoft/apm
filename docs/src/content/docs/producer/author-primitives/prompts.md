@@ -46,6 +46,17 @@ on lossy targets see a warning, not silent data loss.
 | `model` | string | Preferred model slug (Claude/Cursor only). |
 | `argument-hint` | string | Free-form hint shown in the picker; auto-derived from `input` when omitted. |
 
+On the `claude` target, `.claude/commands/<name>.md` also keeps the other
+fields Claude Code
+[documents for command files](https://code.claude.com/docs/en/skills#frontmatter-reference):
+`when_to_use`, `disable-model-invocation`, `user-invocable`,
+`disallowed-tools`, `effort`, `context`, `agent`, `background`, `shell`,
+and `arguments` when no `input` is set. `name` and `paths` are not
+supported on command files and are dropped. Inline `hooks` are withheld
+with a warning: Claude Code supports them, but APM does not yet run
+frontmatter hooks through executable consent, so the deployed command
+does not get them. Other targets keep only the five keys above.
+
 Reference inputs in the body with `${input:name}`. The compiler
 rewrites these per target (for example, `$name` for Claude
 commands).
