@@ -1954,3 +1954,52 @@ class TestBuildUnsupportedOrMissingError:
             is_github_host=False,
         )
         assert "v1.2.3" in msg
+
+
+def test_ado_download_sign_in_redirect_is_classified_not_followed() -> None:
+    """A sign-in 302 reaches the auth chain as auth_required; it is never followed."""
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.core.auth_outcome import AuthAttemptFailed, AuthOutcomeKind, classify_auth_outcome
+
+    host = _make_host()
+    delegate = DownloadDelegate(host)
+    host._resilient_get.side_effect = delegate.resilient_get
+    host.auth_resolver.http_authorization_headers.side_effect = (
+        AuthResolver.http_authorization_headers
+    )
+    outcomes: list[AuthOutcomeKind] = []
+
+    def _chain(_host, operation, **_kwargs):
+        try:
+            return operation(None, {})
+        except AuthAttemptFailed as failed:
+            outcome = classify_auth_outcome(host_kind="ado", response=failed.response)
+            outcomes.append(outcome.kind)
+            raise
+
+    host.auth_resolver.try_with_fallback.side_effect = _chain
+    sign_in = MagicMock(status_code=302)
+    sign_in.headers = {"Location": "https://app.vssps.visualstudio.com/_signin?realm=x"}
+    dep = MagicMock(
+        host="dev.azure.com",
+        port=None,
+        ado_organization="org",
+        ado_project="proj",
+        ado_repo="repo",
+        repo_url="org/proj/_git/repo",
+    )
+
+    with (
+        patch(
+            "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+            return_value=sign_in,
+        ) as request,
+        pytest.raises(RuntimeError, match="HTTP 302"),
+    ):
+        delegate.download_ado_file(dep, "apm.yml", ref="feature")
+
+    assert outcomes == [AuthOutcomeKind.AUTH_REQUIRED]
+    assert request.call_count == 1
+    assert request.call_args.kwargs["allow_redirects"] is False
+    assert urlparse(request.call_args.kwargs["url"]).hostname == "dev.azure.com"
+    assert request.call_args.kwargs.get("auth") is not None

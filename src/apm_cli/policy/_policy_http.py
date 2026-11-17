@@ -13,11 +13,7 @@ from collections.abc import Mapping
 
 import requests
 
-from ..utils.http_credentials import (
-    CredentialScopedSession,
-    RedirectRefusedError,
-    origin_bounded_request,
-)
+from ..utils.http_credentials import unfollowed_redirect_request
 
 POLICY_FETCH_TIMEOUT = 10
 
@@ -29,18 +25,10 @@ def policy_get(
     ambient_credentials: bool = True,
 ) -> requests.Response:
     """GET *url*; return the response, or the unfollowed redirect response."""
-    with CredentialScopedSession() as session:
-        try:
-            return origin_bounded_request(
-                session,
-                "GET",
-                url,
-                base_url=url,
-                headers=headers,
-                ambient_credentials=ambient_credentials,
-                timeout=POLICY_FETCH_TIMEOUT,
-            )
-        except RedirectRefusedError as refused:
-            if refused.response is None:
-                raise
-            return refused.response
+    return unfollowed_redirect_request(
+        "GET",
+        url,
+        headers=headers,
+        ambient_credentials=ambient_credentials,
+        timeout=POLICY_FETCH_TIMEOUT,
+    )

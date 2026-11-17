@@ -43,11 +43,7 @@ from apm_cli.utils.github_host import (
     iter_artifactory_boundary_candidates,
     sanitize_token_url_in_message,
 )
-from apm_cli.utils.http_credentials import (
-    CredentialScopedSession,
-    RedirectRefusedError,
-    origin_bounded_request,
-)
+from apm_cli.utils.http_credentials import unfollowed_redirect_request
 
 _ARTIFACTORY_BOUNDARY_UNRESOLVED = (
     "Artifactory host/path did not resolve to a reachable repository archive. "
@@ -133,15 +129,7 @@ def _head_probe(
     stay on the probed resource. 3xx is still existence proof -- the server
     confirmed the resource by issuing a redirect.
     """
-    with CredentialScopedSession() as session:
-        try:
-            return origin_bounded_request(
-                session, "HEAD", url, base_url=url, headers=headers, timeout=timeout, verify=verify
-            )
-        except RedirectRefusedError as refused:
-            if refused.response is None:
-                raise
-            return refused.response
+    return unfollowed_redirect_request("HEAD", url, headers=headers, timeout=timeout, verify=verify)
 
 
 def _proxy_probe_headers(

@@ -41,6 +41,7 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
+from ..utils.http_credentials import unfollowed_redirect_request
 from .artifactory_entry import _NoNetrcSession
 from .git_file_transport import (
     GitFileFetchResult,
@@ -136,7 +137,7 @@ class DownloadDelegate:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
-        allow_redirects: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """HTTP GET with selectable retries for transient HTTP failures.
 
@@ -150,8 +151,10 @@ class DownloadDelegate:
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
             allow_netrc: Whether Requests may use ambient netrc credentials.
-            allow_redirects: Whether Requests follows redirects. Auth-chain
-                callers disable it so a sign-in redirect reaches the classifier.
+            redirect_base: When set, every attempt goes through
+                ``origin_bounded_request`` bounded to this base URL; a redirect
+                outside it is returned unfollowed so the auth-outcome
+                classifier sees it. Auth-chain callers pass the request URL.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -161,16 +164,24 @@ class DownloadDelegate:
         """
         last_exc = None
         last_response = None
-        redirect_kwargs = {} if allow_redirects else {"allow_redirects": False}
         for attempt in range(max_retries):
             try:
-                if allow_netrc:
+                if redirect_base is not None:
+                    response = unfollowed_redirect_request(
+                        "GET",
+                        url,
+                        base_url=redirect_base,
+                        headers=headers,
+                        timeout=timeout,
+                        stream=stream,
+                        ambient_credentials=allow_netrc,
+                    )
+                elif allow_netrc:
                     response = requests.get(
                         url,
                         headers=headers,
                         timeout=timeout,
                         stream=stream,
-                        **redirect_kwargs,
                     )
                 else:
                     with _NoNetrcSession() as session:
@@ -179,7 +190,6 @@ class DownloadDelegate:
                             headers=headers,
                             timeout=timeout,
                             stream=stream,
-                            **redirect_kwargs,
                         )
 
                 throttle = github_throttle_error(response, "GitHub API")
@@ -656,7 +666,9 @@ class DownloadDelegate:
                     headers=resolver.http_authorization_headers(git_env),
                     timeout=30,
                     allow_netrc=False,
-                    allow_redirects=False,
+                    # Bounded to the request URL: no redirect is followed, and
+                    # a sign-in 3xx returns to the auth-outcome classifier.
+                    redirect_base=url,
                 )
                 if response.status_code != 200:
                     raise AuthAttemptFailed(response=response)

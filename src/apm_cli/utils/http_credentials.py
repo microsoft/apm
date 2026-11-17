@@ -344,3 +344,25 @@ def origin_bounded_request(
         _close_quietly(response)
         hops += 1
         current = target
+
+
+def unfollowed_redirect_request(
+    method: str,
+    url: str,
+    *,
+    base_url: str | None = None,
+    **kwargs: Any,
+) -> requests.Response:
+    """Run :func:`origin_bounded_request` on a fresh credential-scoped session.
+
+    *base_url* defaults to *url*, so no redirect is followed at all. A refused
+    redirect is returned as its unfollowed 3xx response instead of raised, so
+    an auth-outcome classifier or caller can inspect it.
+    """
+    with CredentialScopedSession() as session:
+        try:
+            return origin_bounded_request(session, method, url, base_url=base_url or url, **kwargs)
+        except RedirectRefusedError as refused:
+            if refused.response is None:
+                raise
+            return refused.response
