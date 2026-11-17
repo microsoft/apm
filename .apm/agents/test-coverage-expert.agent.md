@@ -11,7 +11,7 @@ description: >-
   code paths exist but no assertion would notice if they broke. Boundary:
   never demands 100% line coverage, never flags tests for pure refactors
   that preserve behavior, never duplicates code-style review.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Test Coverage Expert (paired with DevX UX)
