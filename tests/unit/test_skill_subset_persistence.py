@@ -626,6 +626,58 @@ class TestSkillSubsetConsistencyCheck:
         assert result.passed is False
         assert any("unverified" in detail for detail in result.details)
 
+    def test_transitive_target_subset_mismatch_fails(self, tmp_path: Path):
+        """A locked target_subset that disagrees with the declared merge fails (#3735)."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        self._package_with_skills(tmp_path, "alpha")
+        parent = tmp_path / "apm_modules" / "owner" / "parent"
+        parent.mkdir(parents=True)
+        (parent / "apm.yml").write_text(
+            "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - git: https://github.com/owner/repo.git\n      targets: [claude]\n",
+            encoding="utf-8",
+        )
+        manifest = self._make_manifest_mock([self._make_dep_ref("owner/parent")])
+        bundle = self._make_locked_dep()
+        bundle.target_subset = ["claude", "copilot"]
+        lock = self._make_lock_mock(
+            {"owner/repo": bundle, "owner/parent": LockedDependency(repo_url="owner/parent")}
+        )
+
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        assert result.passed is False
+        assert result.details == [
+            "owner/repo: declared targets ['claude'] != lockfile target_subset "
+            "['claude', 'copilot']"
+        ]
+
+    def test_marketplace_declaration_audits_under_its_locked_key(self, tmp_path: Path):
+        """A marketplace declaration's selection is checked against its locked entry."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        self._package_with_skills(tmp_path, "alpha", "beta")
+        declared = DependencyReference(
+            repo_url="_marketplace/mkt/tools",
+            is_marketplace=True,
+            marketplace_name="mkt",
+            marketplace_plugin_name="tools",
+            skill_subset=["alpha"],
+        )
+        locked = self._make_locked_dep(skill_subset=["alpha"])
+        locked.discovered_via = "mkt"
+        locked.marketplace_plugin_name = "tools"
+        manifest = self._make_manifest_mock([declared])
+
+        lock = self._make_lock_mock({"owner/repo": locked})
+        assert _check_skill_subset_consistency(manifest, lock, tmp_path).passed is True
+
+        locked.skill_subset = ["alpha", "beta"]
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        assert result.details == [
+            "owner/repo: declared skills ['alpha'] != lockfile skill_subset ['alpha', 'beta']"
+        ]
+
 
 # ============================================================================
 # get_existing_skill_subset — read persisted skills: from current_deps

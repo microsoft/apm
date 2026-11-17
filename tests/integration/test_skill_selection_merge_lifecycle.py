@@ -138,6 +138,26 @@ def test_root_skill_selection_merges_with_a_transitive_selection_and_audit_passe
         _assert_audit_green(world, project, env, "l4-audit")
 
 
+def test_dev_declaration_selection_merges_into_the_production_dependency(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A devDependencies edge still contributes its skills; production wins is_dev."""
+    world = _world(tmp_path, apm_binary_path)
+    bundle = world.publish("bundle", skills=_SKILLS).slug
+    project = world.project(
+        "consumer",
+        dependencies=[_edge(bundle, skills=["alpha"])],
+        dev_dependencies=[_edge(bundle, skills=["beta"])],
+    )
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="dev-install")
+        assert skill_dirs(project / _PROJECT_SKILLS) == ["alpha", "beta"]
+        entry = locked(project, bundle)
+        assert entry["skill_subset"] == ["alpha", "beta"]
+        assert not entry.get("is_dev")
+        _assert_audit_green(world, project, env, "dev-audit")
+
+
 def test_parents_restricting_different_targets_populate_both_harness_roots(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
