@@ -394,7 +394,9 @@ def test_each_ado_step_child_env_carries_only_its_own_credential(monkeypatch, pa
         seen.append((token, dict(env)))
         raise RuntimeError("fatal: Authentication failed (401)")
 
-    with pytest.raises(Exception, match="Tried in order"):
+    from apm_cli.core.auth_chain import AdoAuthChainExhaustedError
+
+    with pytest.raises(AdoAuthChainExhaustedError, match="Tried in order"):
         AuthResolver().try_with_fallback(
             "dev.azure.com",
             _rejected,
