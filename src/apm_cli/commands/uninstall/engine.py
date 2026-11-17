@@ -1017,15 +1017,16 @@ def _shrink_surviving_selections(
         locked = lockfile.get_dependency(key)
         if locked is None:
             continue
-        skills = list(selection.skill_subset or ())
-        targets = list(selection.target_subset or ())
-        if (
-            sorted(locked.skill_subset or ()) == skills
-            and sorted(locked.target_subset or ()) == targets
-        ):
+        try:
+            unchanged = locked.selection() == selection.lock_selection()
+        except ValueError:
+            unchanged = False  # invalid recorded pairing: rewrite it from the survivors
+        if unchanged:
             continue
-        locked.skill_subset = skills
-        locked.target_subset = targets
+        locked.skill_subset = list(selection.skill_subset or ())
+        locked.target_subset = list(selection.target_subset or ())
+        exact = selection.subset_pairings
+        locked.subset_pairings = exact.to_lock_records() if exact is not None else None
         changed.add(key)
         label = "local dependency" if _is_private_local_identity(key) else key
         logger.verbose_detail(f"    Updated selection of {label} to its surviving declarations")
@@ -1494,6 +1495,7 @@ def _sync_integrations_after_uninstall(
                     logger=logger,
                     scope=_rebuild_scope,
                     skill_subset=selection.skill_subset,
+                    skill_pairing=selection.skill_pairing,
                     allow_executables=_allow_executables,
                     trust_bin=False,
                     bin_skip_reason_override="not_retrusted_on_uninstall",

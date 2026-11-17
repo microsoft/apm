@@ -91,6 +91,7 @@ def _with_node_selection(dep_ref: DependencyReference, selection) -> DependencyR
         target_subset=targets,
         allow_insecure=selection.allow_insecure,
         selection_contributors=selection.contributors,
+        subset_pairings=selection.subset_pairings,
     )
     binding = dep_ref.replacement
     if binding is not None:

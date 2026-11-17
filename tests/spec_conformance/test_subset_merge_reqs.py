@@ -134,3 +134,57 @@ def test_proposed_lock_schema_matches_canonical_writer_output(records, valid) ->
         "dependencies": [{"repo_url": "owner/bundle", "subset_pairings": records}],
     }
     assert (list(validator.iter_errors(lock)) == []) is valid
+
+
+def _locked_bundle(**fields):
+    from apm_cli.deps.lockfile import LockedDependency
+
+    return LockedDependency(repo_url="owner/bundle", **fields)
+
+
+@pytest.mark.req("req-rs-018")
+def test_lock_entry_records_and_replays_the_exact_pairing() -> None:
+    """Clause 4: the lock codec writes subset_pairings and replays it to deploy."""
+    from apm_cli.deps.lockfile import LockedDependency
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    pairing = merge_edge_pairings(DIVERGENT_DIAMOND)
+    ref = DependencyReference(
+        repo_url="owner/bundle",
+        host="github.com",
+        skill_subset=list(pairing.skill_subset),
+        target_subset=list(pairing.target_subset),
+        subset_pairings=pairing,
+    )
+    entry = LockedDependency.from_dependency_ref(ref, "a" * 40, 1, None).to_dict()
+    assert entry["subset_pairings"] == pairing.to_lock_records()
+    assert LockedDependency.from_dict(entry).to_dependency_ref().subset_pairings == pairing
+
+
+@pytest.mark.req("req-rs-018")
+def test_frozen_rejects_changed_or_invalid_selections_before_deploy() -> None:
+    """Clauses 5 and 6: frozen names the dependency for a changed or invalid record."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.service import frozen_selection_changes
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    pairing = merge_edge_pairings(DIVERGENT_DIAMOND)
+    ref = DependencyReference(
+        repo_url="owner/bundle",
+        host="github.com",
+        skill_subset=list(pairing.skill_subset),
+        target_subset=list(pairing.target_subset),
+        subset_pairings=pairing,
+    )
+    flat = _locked_bundle(skill_subset=["alpha", "gamma"], target_subset=["claude", "copilot"])
+    key = flat.get_unique_key()
+    assert ref.get_unique_key() == key
+
+    product_lock = LockFile(dependencies={key: flat})
+    assert "selection for owner/bundle changed" in frozen_selection_changes([ref], product_lock)[0]
+
+    flat.subset_pairings = [{"skills": ["alpha"], "targets": ["claude"]}]
+    assert "invalid" in frozen_selection_changes([ref], product_lock)[0]
+
+    flat.subset_pairings = pairing.to_lock_records()
+    assert frozen_selection_changes([ref], product_lock) == []

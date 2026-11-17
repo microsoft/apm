@@ -479,6 +479,51 @@ def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "            skill_pairing=selection.skill_pairing,\n",
+            "",
+            id="deploy-drops-pairing",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "        skill_pairing=skill_pairing,\n",
+            "",
+            id="skill-integrator-drops-pairing",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "            subset_pairings=self._exact_pairing_or_none(),\n",
+            "",
+            id="lock-replay-drops-pairing",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/integrate.py",
+            "InstallService.enforce_frozen_selections(",
+            "InstallService.describe_frozen_selections(",
+            id="frozen-skips-selection-check",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "def _pairing_summary(",
+            "def merge_edge_pairings(edges):\n    return edges\n\n\ndef _pairing_summary(",
+            id="second-pairing-owner",
+        ),
+    ],
+)
+def test_skill_pairing_cannot_bypass_selection_owner(path: str, old: str, new: str) -> None:
+    """req-rs-018: every deploy, replay and frozen path keeps the exact pairing (#3763)."""
+    rule_id = "install-deployment-selection-merge"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
         (
             "src/apm_cli/policy/_constraint_pinning.py",
             "name = git_semver_package_name(dep)",

@@ -39,6 +39,7 @@ from ..models.dependency.replacement import (
     parse_replace_block,
     project_effective_reference,
 )
+from ..models.dependency.subsets import SkillTargetSelection
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,24 @@ def _copy_extension_map(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or not value:
         return {}
     return {str(key): item for key, item in value.items()}
+
+
+def _copy_subset_pairings(value: object) -> Any:
+    """Copy raw ``subset_pairings`` records without validating them.
+
+    Malformed values survive the round trip so audit and frozen install can
+    reject them through ``LockedDependency.selection()`` (req-rs-018).
+    """
+    if value is None or value == []:
+        return None
+    if isinstance(value, list):
+        return [
+            {key: list(item) if isinstance(item, list) else item for key, item in record.items()}
+            if isinstance(record, dict)
+            else record
+            for record in value
+        ]
+    return value
 
 
 class _ExistingLockfileUnset:
@@ -410,6 +429,9 @@ class LockedDependency:
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
     target_subset: list[str] = field(default_factory=list)  # Audit-only consumer target subset
+    # Exact per-edge skills x targets pairing (req-rs-018), recorded only when
+    # skill_subset x target_subset would over-select. Decode via ``selection()``.
+    subset_pairings: list[dict[str, list[str]]] | None = None
 
     # Registry resolver fields (design §6.1).
     # Populated when source == "registry"; absent otherwise. resolved_hash is
@@ -600,6 +622,8 @@ class LockedDependency:
             result["skill_subset"] = sorted(self.skill_subset)
         if self.target_subset:
             result["target_subset"] = sorted(self.target_subset)
+        if self.subset_pairings:
+            result["subset_pairings"] = _copy_subset_pairings(self.subset_pairings)
         if self.resolved_url:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
@@ -693,6 +717,7 @@ class LockedDependency:
             "allow_insecure",
             "skill_subset",
             "target_subset",
+            "subset_pairings",
             "resolved_url",
             "resolved_hash",
             "constraint",
@@ -745,6 +770,7 @@ class LockedDependency:
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
             target_subset=list(data.get("target_subset") or []),
+            subset_pairings=_copy_subset_pairings(data.get("subset_pairings")),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),
@@ -927,6 +953,11 @@ class LockedDependency:
             target_subset=sorted(dep_ref.target_subset)
             if isinstance(getattr(dep_ref, "target_subset", None), list)
             else [],
+            subset_pairings=(
+                dep_ref.subset_pairings.to_lock_records()
+                if getattr(dep_ref, "subset_pairings", None) is not None
+                else None
+            ),
             resolved_url=(
                 registry_resolution.resolved_url if registry_resolution is not None else None
             ),
@@ -983,6 +1014,7 @@ class LockedDependency:
             source=self.source,
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
+            subset_pairings=self._exact_pairing_or_none(),
         ).with_derived_provider_coordinates()
         if not effective or self.replacement is None:
             return dep
@@ -991,6 +1023,25 @@ class LockedDependency:
         if not selected.is_local:
             selected.reference = self.resolved_ref or selected.reference
         return selected
+
+    def selection(self) -> SkillTargetSelection:
+        """Decode this entry's skills x targets selection through the owner.
+
+        Raises ``ValueError`` for malformed ``subset_pairings`` or records
+        that disagree with the flat fields (invalid lock state, req-rs-018).
+        """
+        return SkillTargetSelection.from_lock_fields(
+            self.skill_subset, self.target_subset, self.subset_pairings
+        )
+
+    def _exact_pairing_or_none(self) -> SkillTargetSelection | None:
+        # Invalid records degrade to the flat product (what earlier writers
+        # deployed); audit and frozen install reject them via ``selection()``.
+        try:
+            pairing = self.selection()
+        except ValueError:
+            return None
+        return None if pairing.is_product else pairing
 
     def matches_replacement(self, dep: DependencyReference) -> bool:
         """Whether this pin belongs to the same root-selected source contract."""

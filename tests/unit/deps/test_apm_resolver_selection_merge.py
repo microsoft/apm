@@ -198,3 +198,37 @@ def test_merged_reference_keeps_download_annotations(tmp_path: Path) -> None:
     ref = _bundle_ref(resolver.resolve_dependencies(tmp_path))
     assert ref.skill_subset == ["alpha", "beta", "delta", "gamma"]
     assert ref.resolved_reference == f"resolved:{BUNDLE}"
+
+
+CROSS_PRODUCT = {
+    "org/a": [_edge(["alpha"], ["claude"])],
+    "org/b": [_edge(["gamma"], ["copilot"])],
+}
+
+
+@pytest.mark.parametrize("order", [["org/a", "org/b"], ["org/b", "org/a"]])
+def test_divergent_skills_and_targets_pair_per_edge(tmp_path: Path, order: list[str]) -> None:
+    """#3763: each skill reaches only the targets its own edge selected, in any order."""
+    from apm_cli.deps.lockfile import LockedDependency
+
+    ref = _bundle_ref(_resolve(tmp_path, order, CROSS_PRODUCT))
+    assert ref.skill_subset == ["alpha", "gamma"]
+    assert ref.target_subset == ["claude", "copilot"]
+    assert ref.subset_pairings.skills_for_target("claude") == ("alpha",)
+    assert ref.subset_pairings.skills_for_target("copilot") == ("gamma",)
+    locked = LockedDependency.from_dependency_ref(ref, "a" * 40, 2, "org/a").to_dict()
+    assert locked["subset_pairings"] == [
+        {"skills": ["alpha"], "targets": ["claude"]},
+        {"skills": ["gamma"], "targets": ["copilot"]},
+    ]
+    replayed = LockedDependency.from_dict(locked).to_dependency_ref()
+    assert replayed.subset_pairings == ref.subset_pairings
+
+
+def test_exact_product_records_no_pairings(tmp_path: Path) -> None:
+    graph = _resolve(
+        tmp_path,
+        ["org/a", "org/b"],
+        {"org/a": [_edge(["alpha"], ["claude"])], "org/b": [_edge(["gamma"], ["claude"])]},
+    )
+    assert _bundle_ref(graph).subset_pairings is None

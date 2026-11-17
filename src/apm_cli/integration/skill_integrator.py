@@ -56,8 +56,11 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from collections.abc import Set
+
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.models.dependency.subsets import SkillTargetSelection
     from apm_cli.models.validation import PackageType
 
 
@@ -1036,6 +1039,42 @@ class SkillIntegrator(BaseIntegrator):
         _, native_owners = SkillIntegrator._build_ownership_maps(lockfile_root)
         return {path.rsplit("/", 1)[-1]: owner for path, owner in native_owners.items()}
 
+    @staticmethod
+    def _skill_root_target_names(targets, skills_root) -> dict[Path, tuple[str, ...]]:
+        """Group skill-capable target names by the resolved skills root they share."""
+        grouped: dict[Path, list[str]] = {}
+        for target in targets:
+            if target.supports("skills"):
+                grouped.setdefault(skills_root(target).resolve(), []).append(target.name)
+        return {root: tuple(names) for root, names in grouped.items()}
+
+    @staticmethod
+    def _paired_name_filter(
+        name_filter: "Set[str] | None",
+        skill_pairing: "SkillTargetSelection | None",
+        target_names: tuple[str, ...],
+    ) -> "Set[str] | None":
+        """Narrow *name_filter* to the skills paired with one skills root's targets.
+
+        Without a pairing every target receives the whole filter. A root shared
+        by several targets receives the union of their paired skills, so a
+        shared directory never loses a skill one of its targets selected.
+        """
+        if skill_pairing is None:
+            return name_filter
+        selected = [
+            skill_pairing.skills_for_target(name)
+            for name in target_names
+            if skill_pairing.selects_target(name)
+        ]
+        if not selected:
+            return frozenset()
+        if any(skills is None for skills in selected):
+            return name_filter
+        paired = skill_subset_filter_tokens({name for skills in selected for name in skills})
+        paired = frozenset(paired or ())
+        return paired if name_filter is None else frozenset(name_filter) & paired
+
     def _promote_sub_skills_standalone(
         self,
         package_info,
@@ -1048,6 +1087,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
@@ -1088,6 +1128,9 @@ class SkillIntegrator(BaseIntegrator):
             if source_paths is not None
             else self._skill_names_in_directory(sub_skills_dir)
         )
+        root_targets = self._skill_root_target_names(
+            targets, lambda target: self._target_skills_root(target, project_root)
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1121,7 +1164,9 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
-                name_filter=name_filter,
+                name_filter=self._paired_name_filter(
+                    name_filter, skill_pairing, root_targets[resolved_root]
+                ),
                 link_rewriter=self,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
@@ -1385,6 +1430,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
@@ -1423,6 +1469,9 @@ class SkillIntegrator(BaseIntegrator):
             if source_plan is not None
             else skill_subset_filter_tokens(skill_subset)
         )
+        root_targets = self._skill_root_target_names(
+            targets, lambda target: project_root / target.skills_rel_root
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1456,7 +1505,9 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
-                name_filter=_name_filter,
+                name_filter=self._paired_name_filter(
+                    _name_filter, skill_pairing, root_targets[resolved_root]
+                ),
                 link_rewriter=self,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
@@ -1507,6 +1558,7 @@ class SkillIntegrator(BaseIntegrator):
         bin_skip_reason_override: str | None = None,
         trust_bin: bool | None = None,
         source_plan=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
     ) -> SkillIntegrationResult:
         """Deploy admitted native skills, bundles and promoted sub-skills.
 
@@ -1561,6 +1613,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skill_pairing=skill_pairing,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
                 source_paths=selection.children,
@@ -1681,6 +1734,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skill_pairing=skill_pairing,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
             ),

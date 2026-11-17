@@ -448,6 +448,18 @@ def _check_skill_subset_consistency(
                 f"{key}: declared targets {expected_targets} != lockfile target_subset "
                 f"{lock_targets}"
             )
+            continue
+        try:
+            locked_pairing = locked_dep.selection()
+        except ValueError as exc:
+            mismatches.append(f"{key}: invalid lockfile subset_pairings -- {exc}")
+            continue
+        if locked_pairing != selection.lock_selection():
+            mismatches.append(
+                f"{key}: declared skill-target pairing "
+                f"{_pairing_summary(selection.lock_selection())} != lockfile "
+                f"{_pairing_summary(locked_pairing)}"
+            )
 
     if not mismatches:
         return CheckResult(
@@ -462,6 +474,15 @@ def _check_skill_subset_consistency(
             f"{len(mismatches)} skill subset mismatch(es) -- regenerate lockfile (apm install)"
         ),
         details=mismatches,
+    )
+
+
+def _pairing_summary(pairing) -> str:
+    """Render a selection as ``targets: skills`` groups ('all' for an omitted axis)."""
+    return "; ".join(
+        f"{', '.join(p.targets) if p.targets else 'all targets'}: "
+        f"{', '.join(p.skills) if p.skills else 'all skills'}"
+        for p in pairing.pairings
     )
 
 

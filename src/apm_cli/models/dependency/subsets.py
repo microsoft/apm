@@ -68,13 +68,43 @@ class EdgeSelection:
 class NodeSelection:
     """The merged selection one dependency node carries.
 
-    ``contributors`` keeps every edge record, in discovery order, for
-    diagnostics; it is never persisted.
+    ``pairing`` is the exact per-target skill selection (req-rs-018);
+    ``skill_subset`` and ``target_subset`` are its flat projections. An edge
+    with an explicitly empty axis selects nothing and contributes no pairs;
+    when every edge is explicitly empty, ``pairing`` is ``None`` and the flat
+    fields keep the explicitly empty selection. ``contributors`` keeps every
+    edge record, in discovery order, for diagnostics; it is never persisted.
     """
 
-    skill_subset: tuple[str, ...] | None
-    target_subset: tuple[str, ...] | None
+    pairing: SkillTargetSelection | None
     contributors: tuple[EdgeSelection, ...]
+
+    @property
+    def skill_subset(self) -> tuple[str, ...] | None:
+        """Union of selected skills (``None`` = all)."""
+        if self.pairing is None:
+            return _merge_field(edge.skill_subset for edge in self.contributors)
+        return self.pairing.skill_subset
+
+    @property
+    def target_subset(self) -> tuple[str, ...] | None:
+        """Union of selected targets (``None`` = every effective target)."""
+        if self.pairing is None:
+            return _merge_field(edge.target_subset for edge in self.contributors)
+        return self.pairing.target_subset
+
+    @property
+    def subset_pairings(self) -> SkillTargetSelection | None:
+        """The exact pairing when the flat product would over-select, else ``None``."""
+        if self.pairing is None or self.pairing.is_product:
+            return None
+        return self.pairing
+
+    def lock_selection(self) -> SkillTargetSelection:
+        """Return the selection a lock entry records for this node."""
+        if self.pairing is not None:
+            return self.pairing
+        return SkillTargetSelection.from_lock_fields(self.skill_subset, self.target_subset)
 
     @property
     def alias(self) -> str | None:
@@ -114,9 +144,9 @@ def union_selection_names(*subsets: Iterable[str] | None) -> tuple[str, ...] | N
 def merge_edge_selections(edges: Iterable[EdgeSelection]) -> NodeSelection:
     """Merge every declaring edge's selection into the node's selection.
 
-    Per field: union of the declared names, where any unrestricted edge
-    (``None``) absorbs the field to ``None``. The result is a sorted tuple, so
-    the merge is commutative, associative and idempotent.
+    The union over edges of each edge's ``skills x targets`` product, where an
+    unrestricted axis (``None``) absorbs for that edge. The canonical result is
+    commutative, associative and idempotent (req-rs-018).
     """
     contributors = tuple(edges)
     if not contributors:
@@ -126,9 +156,15 @@ def merge_edge_selections(edges: Iterable[EdgeSelection]) -> NodeSelection:
         raise SelectionMergeError(
             f"Cannot merge {', '.join(unsupported)} selections with other declarations"
         )
+    # An explicitly empty axis (``()``) selects nothing: that edge pairs no
+    # skill with any target, unlike ``None``, which selects all.
+    selecting = [
+        (edge.skill_subset, edge.target_subset)
+        for edge in contributors
+        if edge.skill_subset != () and edge.target_subset != ()
+    ]
     return NodeSelection(
-        skill_subset=_merge_field(edge.skill_subset for edge in contributors),
-        target_subset=_merge_field(edge.target_subset for edge in contributors),
+        pairing=merge_edge_pairings(selecting) if selecting else None,
         contributors=contributors,
     )
 
@@ -360,6 +396,12 @@ class SkillTargetSelection:
         _absorb_raw(raw, _raw_from_pairings(other.pairings))
         return SkillTargetSelection(_canonicalize(raw))
 
+    def with_edge(
+        self, skills: Iterable[str] | None, targets: Iterable[str] | None
+    ) -> SkillTargetSelection:
+        """Return this selection plus one more ``skills x targets`` edge."""
+        return self.merge(merge_edge_pairings([(skills, targets)]))
+
     def to_lock_records(self) -> list[dict[str, list[str]]] | None:
         """Return ``subset_pairings`` records, or ``None`` when the flat fields suffice.
 
@@ -399,6 +441,16 @@ class SkillTargetSelection:
                 "run 'apm install' to regenerate the lockfile"
             )
         return selection
+
+
+def dependency_pairing(dep_ref: Any) -> SkillTargetSelection:
+    """Return the exact selection a resolved or replayed dependency carries."""
+    pairing = getattr(dep_ref, "subset_pairings", None)
+    if pairing is not None:
+        return pairing
+    return merge_edge_pairings(
+        [(getattr(dep_ref, "skill_subset", None), getattr(dep_ref, "target_subset", None))]
+    )
 
 
 def merge_edge_pairings(

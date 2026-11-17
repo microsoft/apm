@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from ..core.scope import InstallScope
     from ..install.context import InstallContext
     from ..integration.base_integrator import BaseIntegrator
+    from ..models.dependency.subsets import SkillTargetSelection
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -210,6 +211,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
     skill_subset: tuple | None,
+    skill_pairing: SkillTargetSelection | None = None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
     policy: Any = None,
@@ -246,6 +248,10 @@ def integrate_package_primitives(  # noqa: PLR0913
     *trust_bin*.  When *trust_bin* is ``True`` (``--trust-bin``), the
     trust-posture warning is suppressed.  When ``None`` (default), bin/
     deploys but a prominent warning is emitted.
+
+    *skill_pairing* (from ``effective_dependency_selection``) narrows the
+    skills each target receives when the flat ``skill_subset x targets``
+    product would over-select (req-rs-018).
 
     Returns a dict with integration counters and the list of deployed file paths.
 
@@ -630,6 +636,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         force=force,
         targets=projection_targets,
         skill_subset=skill_subset,
+        skill_pairing=skill_pairing,
         scope=scope,
         policy=policy,
         skip_bin=_skip_bin,
@@ -745,6 +752,7 @@ def integrate_local_content(  # noqa: PLR0913
         source_root = project_root
 
     local_info = build_project_local_package_info(source_root)
+    local_selection = effective_dependency_selection(None, ctx)
 
     return integrate_package_primitives(
         local_info,
@@ -765,7 +773,8 @@ def integrate_local_content(  # noqa: PLR0913
         package_name="_local",
         logger=logger,
         scope=scope,
-        skill_subset=effective_dependency_selection(None, ctx).skill_subset,
+        skill_subset=local_selection.skill_subset,
+        skill_pairing=local_selection.skill_pairing,
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,

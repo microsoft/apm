@@ -15,7 +15,7 @@ from typing import Any, NamedTuple
 
 from apm_cli.install import registry_wiring
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
-from apm_cli.models.dependency.subsets import union_selection_names
+from apm_cli.models.dependency.subsets import SkillTargetSelection, union_selection_names
 from apm_cli.utils.github_host import build_ssh_url
 
 GIT_PARENT_USER_SCOPE_ERROR = (
@@ -266,10 +266,16 @@ def effective_deploy_skill_subset(
 
 
 class EffectiveDependencySelection(NamedTuple):
-    """Skill and target selection one package deployment must honor."""
+    """Skill and target selection one package deployment must honor.
+
+    ``skill_pairing`` narrows ``skill_subset`` per target when the flat
+    ``skill_subset x target_subset`` product would over-select (req-rs-018);
+    ``None`` means every selected target receives every selected skill.
+    """
 
     skill_subset: builtins.tuple[str, ...] | None
     target_subset: builtins.list[str] | None
+    skill_pairing: SkillTargetSelection | None = None
 
 
 def effective_dependency_selection(
@@ -296,9 +302,20 @@ def effective_dependency_selection(
         persisted_subset=getattr(dep_ref, "skill_subset", None),
     )
     target_subset = getattr(dep_ref, "target_subset", None)
+    pairing = getattr(dep_ref, "subset_pairings", None)
+    if not isinstance(pairing, SkillTargetSelection):
+        pairing = None  # raw lock records are decoded via LockedDependency.selection()
+    cli_subset = getattr(ctx, "skill_subset", None)
+    if pairing is not None and getattr(ctx, "skill_subset_from_cli", False) and not cli_subset:
+        pairing = None  # --skill '*': every skill on every selected target
+    elif pairing is not None and cli_subset:
+        # The CLI overlay acts as one more edge over the dependency's targets.
+        pairing = pairing.with_edge(cli_subset, target_subset)
+        pairing = None if pairing.is_product else pairing
     return EffectiveDependencySelection(
         skill_subset,
         builtins.list(target_subset) if target_subset else None,
+        pairing,
     )
 
 

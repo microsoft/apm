@@ -24,12 +24,14 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
     from apm_cli.deps.lockfile import LockFile
@@ -287,6 +289,26 @@ class InstallService:
             scope=scope_name,
             working_directory=str(pkg_path) if pkg_path is not None else None,
         )
+
+    @staticmethod
+    def enforce_frozen_selections(deps_to_install: Iterable[Any], lockfile: LockFile) -> None:
+        """Refuse a frozen install whose resolved selections differ (req-rs-018).
+
+        Runs before any deployment, so neither the recorded nor the resolved
+        selection is deployed.
+        """
+        from apm_cli.install.errors import FrozenInstallError
+
+        changes = frozen_selection_changes(deps_to_install, lockfile)
+        if changes:
+            raise FrozenInstallError(
+                "--frozen: dependency selections differ from apm.lock.yaml.",
+                reasons=[f"  - {reason}" for reason in changes],
+                tip=(
+                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
+                    "or --global if specified, then commit apm.lock.yaml."
+                ),
+            )
 
     @staticmethod
     def reject_frozen_mutation(frozen: bool, operation: str) -> None:
@@ -718,6 +740,36 @@ _FROZEN_REPAIR_TIP = (
 )
 
 
+def frozen_selection_changes(deps_to_install: Iterable[Any], committed: LockFile) -> list[str]:
+    """Name each locked dependency whose resolved selection differs (req-rs-018).
+
+    Runs before any deployment so ``--frozen`` never deploys either selection.
+    A recorded ``subset_pairings`` value that is malformed or disagrees with
+    the flat fields is reported as invalid lock state.
+    """
+    from apm_cli.models.dependency.subsets import dependency_pairing
+
+    marketplace_index = committed.marketplace_index()
+    reasons: dict[str, str] = {}
+    for dep_ref in deps_to_install:
+        key = dep_ref.get_unique_key()
+        locked = committed.get_dependency(key, marketplace_index=marketplace_index)
+        if locked is None:
+            continue
+        try:
+            recorded = locked.selection()
+        except ValueError as exc:
+            reasons[key] = f"selection for {key} is invalid in apm.lock.yaml ({exc})"
+            continue
+        if recorded != dependency_pairing(dep_ref):
+            reasons[key] = (
+                f"selection for {key} changed: the skills and targets its declaring "
+                "manifests request differ from apm.lock.yaml; run 'apm install' and "
+                "commit apm.lock.yaml"
+            )
+    return [reasons[key] for key in sorted(reasons)]
+
+
 def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, str]:
     """Name each locked dependency whose resolved skill or target selection changed."""
     changed: dict[str, str] = {}
@@ -736,6 +788,17 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
                     "apm.lock.yaml"
                 )
                 break
+        else:
+            # Same unions, but the per-target pairing can still differ (req-rs-018).
+            try:
+                same = locked.selection() == dependency.selection()
+            except ValueError:
+                same = False
+            if not same:
+                changed[key] = (
+                    f"selection for {key} changed: the skills paired with each target "
+                    "differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml"
+                )
     return changed
 
 

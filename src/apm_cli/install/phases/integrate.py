@@ -737,6 +737,7 @@ def run(ctx: InstallContext) -> None:
     if ctx.frozen and ctx.existing_lockfile is not None:
         from apm_cli.install.service import InstallService
 
+        InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
         InstallService.enforce_hydrated_mcp(
             ctx.apm_package,
             ctx.existing_lockfile,
