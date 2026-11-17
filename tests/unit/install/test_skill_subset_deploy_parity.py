@@ -111,6 +111,18 @@ class TestEffectiveDependencySelection:
         ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
         assert effective_dependency_selection(dep_ref, ctx) == (("alpha", "beta"), None)
 
+    def test_lockfile_records_the_selection_the_owner_deploys(self):
+        from apm_cli.install.phases.lockfile import LockfileBuilder
+
+        bundle = SimpleNamespace(package_type="skill_bundle", skill_subset=["alpha"])
+        other = SimpleNamespace(package_type="apm_package", skill_subset=["keep"])
+        ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
+        lockfile = SimpleNamespace(dependencies={"bundle": bundle, "other": other})
+        LockfileBuilder(ctx)._attach_skill_subset_override(lockfile)
+        assert bundle.skill_subset == list(effective_dependency_selection(bundle, ctx)[0])
+        assert bundle.skill_subset == ["alpha", "beta"]
+        assert other.skill_subset == ["keep"]
+
     def test_first_party_content_has_no_selection(self):
         ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
         assert effective_dependency_selection(None, ctx) == (None, None)
