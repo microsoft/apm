@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm uninstall` (project and `-g`) no longer redeploys every skill of a surviving package that selects skills with `skills:`; survivors are rebuilt with the same selection `apm install` deploys, so every deployed skill is recorded in `apm.lock.yaml`. Skill directories left behind by earlier versions are not tracked by APM; delete them manually. (#3784)
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
 
 ### Changed
 
