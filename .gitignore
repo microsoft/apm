@@ -80,7 +80,7 @@ apm_modules/
 build/tmp/
 scout-pipeline-result.png
 .copilot/
-# Released-version upgrade fixtures carry real ~/.copilot state.
+# Upgrade fixtures replay real Copilot user homes written by tagged releases.
 !tests/fixtures/upgrade_0361/**/.copilot/
 # Cursor MCP config (may contain auth tokens)
 .cursor/mcp.json

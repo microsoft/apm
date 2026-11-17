@@ -83,7 +83,7 @@ def _entry(scene: HarnessScene, harness: str, name: str, *, user: bool) -> dict:
     return scene.servers(harness, user=user).get(key) or {}
 
 
-def _assert_healed(scene: HarnessScene, *, user: bool, frozen: bool = False) -> None:
+def _assert_healed(scene: HarnessScene, *, user: bool, claims: bool = True) -> None:
     targets = _targets(user)
     for harness in ("copilot", "claude", "vscode"):
         if harness not in targets:
@@ -100,10 +100,9 @@ def _assert_healed(scene: HarnessScene, *, user: bool, frozen: bool = False) -> 
         entry = _entry(scene, "antigravity", name, user=user)
         assert entry.get("serverUrl") == url and "httpUrl" not in entry, (name, entry)
     antigravity = scene.servers("antigravity", user=user)
-    # --frozen never writes apm.lock.yaml (req-lk-006): the dropped claim lands
-    # on the next non-frozen install, so only the native removal is checked.
-    for name in () if frozen else ("heal-sse", _REGISTRY_NAME):
-        assert "antigravity" not in scene.claimed_runtimes(name, user=user), name
+    for name in ("heal-sse", _REGISTRY_NAME):
+        if claims:
+            assert "antigravity" not in scene.claimed_runtimes(name, user=user), name
     # Stale APM-owned SSE entries are removed once SSE is unsupported there.
     assert not {"heal-sse", "heal-registry"} & antigravity.keys(), antigravity
     # The Hermes row (transport: sse, cwd) lands with #3749, which restores
@@ -114,6 +113,15 @@ def _snapshot(scene: HarnessScene, *, user: bool) -> dict[str, bytes | None]:
     native = scene.native_bytes(_targets(user), user=user)
     lock = scene.manifest_root(user) / "apm.lock.yaml"
     return {**native, "lock": lock.read_bytes() if lock.exists() else None}
+
+
+def _lock_bytes(scene: HarnessScene, *, user: bool) -> bytes | None:
+    path = scene.manifest_root(user) / "apm.lock.yaml"
+    return path.read_bytes() if path.exists() else None
+
+
+class _AuditAfterGlobalUpdate(Exception):
+    """Known gap #3781: ``audit --ci`` after ``update -g`` misses apm_modules."""
 
 
 def _audit(scene: HarnessScene, *, user: bool, extra: tuple[str, ...] = ("--no-policy",)):
@@ -138,33 +146,38 @@ def _command(kind: str, *, user: bool) -> tuple[str, ...]:
 @pytest.mark.parametrize("label", ["v0.35.1", "v0.36.0"])
 @pytest.mark.parametrize("user", [False, True], ids=["project", "user"])
 def test_upgrade_rewrites_apm_owned_entries_into_the_current_shape(
-    scene: HarnessScene, label: str, kind: str, user: bool
+    scene: HarnessScene, label: str, kind: str, user: bool, request: pytest.FixtureRequest
 ) -> None:
+    if user and kind == "update":
+        request.applymarker(
+            pytest.mark.xfail(strict=True, reason="#3781", raises=_AuditAfterGlobalUpdate)
+        )
     _seed(scene, label, user=user)
     frozen = kind == "install-frozen"
-    lock = scene.manifest_root(user) / "apm.lock.yaml"
-    lock_before = lock.read_bytes()
+    lock_before = _lock_bytes(scene, user=user)
 
     result = scene.run(*_command(kind, user=user))
 
     assert result.returncode == 0, describe(result)
-    _assert_healed(scene, user=user, frozen=frozen)
-    if frozen:
-        assert lock.read_bytes() == lock_before, "--frozen rewrote apm.lock.yaml"
+    # Audit straight after the upgrade command (a later install re-materializes
+    # apm_modules, see #3781); --frozen keeps the claim until the next install.
+    audit = None if frozen else _audit(scene, user=user)
+    _assert_healed(scene, user=user, claims=not frozen)
     warnings = warning_segments(result)
     assert any("antigravity" in seg.lower() and "heal-sse" in seg for seg in warnings), warnings
-    if user and kind == "update":
-        pytest.xfail("pre-existing: 'apm update -g' then 'audit --ci' misses apm_modules")
-    audit = _audit(scene, user=user)
-    assert audit.returncode == 0, describe(audit)
     if frozen:
-        # The first non-frozen install records what --frozen could not.
+        # --frozen never writes apm.lock.yaml (req-lk-006); the claim drops on the next install.
+        assert _lock_bytes(scene, user=user) == lock_before, "--frozen rewrote apm.lock.yaml"
         scene.ok(*_command("install", user=user))
         _assert_healed(scene, user=user)
+        audit = _audit(scene, user=user)
     before = _snapshot(scene, user=user)
     again = scene.run(*_command("install", user=user))
     assert again.returncode == 0, describe(again)
     assert _snapshot(scene, user=user) == before, "second install rewrote healed state"
+    if user and kind == "update" and audit.returncode != 0:
+        raise _AuditAfterGlobalUpdate(describe(audit))
+    assert audit.returncode == 0, describe(audit)
 
 
 def test_foreign_entry_in_a_retired_shape_is_never_taken_over(scene: HarnessScene) -> None:
@@ -264,10 +277,17 @@ def test_heal_under_a_permissive_transport_policy_is_not_blocked(
         fixture.publish({_POLICY_PROJECT: _policy(["stdio", "http", "sse", "streamable-http"])})
         verdict_before = _transport_verdict(scene, fixture)
 
+        lock_before = _lock_bytes(scene, user=False)
+
         result = _governed_install(scene, fixture, *(("--frozen",) if frozen else ()))
 
         assert result.returncode == 0, describe(result)
-        _assert_healed(scene, user=False, frozen=frozen)
+        _assert_healed(scene, user=False, claims=not frozen)
+        if frozen:
+            assert _lock_bytes(scene, user=False) == lock_before, "--frozen rewrote the lockfile"
+            follow_up = _governed_install(scene, fixture)
+            assert follow_up.returncode == 0, describe(follow_up)
+            _assert_healed(scene, user=False)
         assert _transport_verdict(scene, fixture) == verdict_before is True
 
 
@@ -360,14 +380,12 @@ def test_upgrade_removes_a_stale_codex_sse_entry(
 ) -> None:
     """v0.36.0 wrote registry SSE remotes into Codex; Codex cannot use SSE."""
     _seed(scene, label, user=False, tree="project-codex")
+    lock_before = _lock_bytes(scene, user=False)
     command = {
         "install": ("install", "--no-policy", "--target", "codex"),
         "update": ("update", "--yes", "--target", "codex"),
         "install-frozen": ("install", "--no-policy", "--frozen", "--target", "codex"),
     }[kind]
-
-    lock = scene.project / "apm.lock.yaml"
-    lock_before = lock.read_bytes()
 
     result = scene.run(*command)
 
@@ -375,17 +393,16 @@ def test_upgrade_removes_a_stale_codex_sse_entry(
     servers = scene.servers("codex", user=False)
     assert "heal-registry" not in servers, servers
     assert servers.get("heal-http", {}).get("url") == _HTTP, servers
-    if kind == "install-frozen":
-        assert lock.read_bytes() == lock_before, "--frozen rewrote apm.lock.yaml"
-    else:
-        assert "codex" not in scene.claimed_runtimes(_REGISTRY_NAME, user=False)
     warnings = warning_segments(result)
     assert any("codex" in seg.lower() and "heal-registry" in seg for seg in warnings), warnings
+    if kind == "install-frozen":
+        # --frozen never writes apm.lock.yaml (req-lk-006); the claim drops on the next install.
+        assert _lock_bytes(scene, user=False) == lock_before, "--frozen rewrote apm.lock.yaml"
+        scene.ok("install", "--no-policy", "--target", "codex")
+        assert "heal-registry" not in scene.servers("codex", user=False)
+    assert "codex" not in scene.claimed_runtimes(_REGISTRY_NAME, user=False)
     audit = _audit(scene, user=False)
     assert audit.returncode == 0, describe(audit)
-    if kind == "install-frozen":
-        scene.ok("install", "--no-policy", "--target", "codex")
-        assert "codex" not in scene.claimed_runtimes(_REGISTRY_NAME, user=False)
     before = scene.native_bytes(("codex",), user=False)
     scene.ok("install", "--no-policy", "--target", "codex")
     assert scene.native_bytes(("codex",), user=False) == before

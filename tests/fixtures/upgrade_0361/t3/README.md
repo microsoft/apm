@@ -29,8 +29,5 @@ git worktree add --detach ./.rt-v0360 2769573f40
 git worktree remove ./.rt-v0351 ./.rt-v0360
 ```
 
-`--version` pins both the CLI's reported version and the lockfile's
-`apm_version` (which comes from `importlib.metadata`; an editable install
-otherwise reports the virtualenv's package metadata). The repository
-`.gitignore` re-includes `tests/fixtures/upgrade_0361/**/.copilot/` so the
-generated `~/.copilot` state is tracked.
+`--version` pins the reported `apm_version` (an editable install otherwise
+reports the virtualenv's package metadata).
