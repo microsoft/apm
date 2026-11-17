@@ -2505,7 +2505,7 @@ those edges:
    so that replay, audit, and removal can reconstruct each target's
    skills without re-reading manifests. `skill_subset` records the
    union of selected skill names and `target_subset` the union of
-   selected targets; each is omitted when an edge selects all on that
+   selected targets; each is omitted when any edge selects all on that
    axis. When those two fields, read as a product, would select a pair
    that no edge selects, the entry MUST also carry `subset_pairings` in
    the canonical form below. Writers MUST omit `subset_pairings` when
@@ -2526,22 +2526,30 @@ those edges:
 **Canonical `subset_pairings` form.** Each element is a mapping with
 optional `skills` and `targets` keys, each a non-empty list sorted in
 ascending code-point order; an omitted key means all on that axis. The
-union of the elements' products equals the derived selection. If an edge
-omits its target subset, the first element has no `targets` key and
-carries the skills every target receives. Each further element carries
+union of the elements' products equals the derived selection. When the
+derived selection includes skills that apply to every target (because
+at least one edge omits its target subset), the first element has no
+`targets` key and carries those skills. Each further element carries
 one complete skill set that some target receives when that set differs
 from the first element's skills (or every distinct set, when there is
 no such first element), with the sorted list of exactly the targets
-that receive it. Elements with a `targets` key are ordered by their
-`targets` lists. Two equal selections therefore serialize to identical
-bytes.
+that receive it. Elements with a `targets` key are ordered
+lexicographically by their `targets` lists (element-wise ascending
+code-point comparison; a shorter list sorts before a longer list it
+prefixes). Two equal selections therefore canonicalize to identical
+data structures. Vendor-extension keys ([req-ext-001](#req-ext-001))
+inside `subset_pairings` elements are not part of the canonical form:
+writers MUST NOT emit them, and readers MUST treat their presence as a
+malformed value under clause 5.
 
 The derived target union is item (b) of [req-tg-008](#req-tg-008);
 items (a) and (c) still narrow it, and within the resulting effective
 target intersection each target receives only the skills paired with
 it. A `skills:` subset narrows skills only. This requirement does not
 change dependency identity ([req-rs-016](#req-rs-016)), deduplication,
-or `resolved_by` ([req-rs-010](#req-rs-010)).
+or `resolved_by` ([req-rs-010](#req-rs-010)). Per-dependency subset
+selection support follows the optional-feature disclosure in
+[Section 11.2](#112-how-to-claim-conformance).
 
 Example (informative): `acme/a` declares `acme/bundle` with
 `skills: [alpha]` and `targets: [claude]`, and `acme/b` declares it with
@@ -4013,7 +4021,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 1 | Dependency confusion                        | [req-pl-005](#req-pl-005), [req-pl-006](#req-pl-006), [req-pl-007](#req-pl-007) | Governance-only   |
 | 2 | Typosquatting                               | [req-mf-009](#req-mf-009), [req-pl-005](#req-pl-005), [req-pl-007](#req-pl-007) | Governance-only   |
 | 3 | Token leakage across hosts                  | [req-sc-003](#req-sc-003), [req-sc-005](#req-sc-005), [req-sc-007](#req-sc-007), [req-sc-008](#req-sc-008), [req-sc-013](#req-sc-013) | Consumer-default  |
-| 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
+| 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001); [req-rs-018](#req-rs-018) for subset-selection scope (re-derived outside frozen mode, rejected under frozen install) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
 | 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
@@ -4603,9 +4611,11 @@ The schemas below define this specification's normative structural contract.
 
 > **Planned.** Amendment 0.1.48 selects a corrected manifest resource;
 > amendment 0.1.46 selects an independent lockfile resource that adds manifest
-> extensions to the 0.1.41 lockfile contract. Both use distinct `$id` URLs.
-> The earlier v0.1 and 0.1.41 manifest resources and the 0.1.41 lockfile
-> resource remain available with unchanged IDs and bytes.
+> extensions to the 0.1.41 lockfile contract, and amendment 0.1.60 selects a
+> further lockfile resource that adds `target_subset` and `subset_pairings`
+> ([req-rs-018](#req-rs-018)) to the 0.1.46 contract. All use distinct `$id`
+> URLs. The earlier v0.1 and 0.1.41 manifest resources and the 0.1.41 and
+> 0.1.46 lockfile resources remain available with unchanged IDs and bytes.
 > Human approval and the public comment period under
 > [Section 9.3](#93-amendment-process) remain pending; listing these URLs does
 > not establish approval or publication.
@@ -4613,7 +4623,7 @@ The schemas below define this specification's normative structural contract.
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
 | Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.48.schema.json`](/apm/specs/schemas/manifest-v0.1.48.schema.json) (JSON Schema 2020-12; proposed). |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.46.schema.json`](/apm/specs/schemas/lockfile-v0.1.46.schema.json) (JSON Schema 2020-12). |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.60.schema.json`](/apm/specs/schemas/lockfile-v0.1.60.schema.json) (JSON Schema 2020-12; proposed). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Proposed replacement manifest | [`schemas/manifest-source-replacements-v1.schema.json`](/apm/specs/schemas/manifest-source-replacements-v1.schema.json), distinct opt-in candidate, not ratified. |
 | Proposed replacement lock version 3 | [`schemas/lockfile-source-replacements-v1.schema.json`](/apm/specs/schemas/lockfile-source-replacements-v1.schema.json), distinct candidate, not ratified. |
@@ -4900,7 +4910,7 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.57 (proposed) | 2026-11-12 | Spec-citation fold for PR #3377 (closes the #3252 Mode-B silent-extension gate on MCP install and ownership). Added [req-mf-026](#req-mf-026) (Section 4.5, consumer MUST): a project-scoped Claude Code `.mcp.json` keeps `${VAR}` references (with `${env:VAR}` written as `${VAR}`) in `command`, `args`, `env`, `url` and `headers` instead of resolved values, and keeps static values and `${VAR:-default}` as declared. An existing entry holding values where the rendered server has references is replaced only when the consumer can show it wrote it (recorded native write hash, or exact expansion of the declared references from the current environment); otherwise it is left unchanged, the install fails, and the diagnostic names the affected fields. Diagnostics name variables and fields, never values. User scope keeps install-time resolution. The Section 4.5 dispatch matrix rows for `${VAR}` and `${env:VAR}` point to the new requirement. Under Section 9.2 this changes generated bytes for the Claude Code project target only. Sections 4.5, 4.9, 11.3.2 and Appendix C are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 136 -> 137 (132 MUST, 5 SHOULD). |
 | 0.1.58 (proposed) | 2026-11-12 | Amendment for accepted issue #1744 in PR #2030. Added [req-tg-018](#req-tg-018) (Section 8.5.10, consumer MUST): at project and user scope, a Cursor instruction whose normalized `applyTo` is exactly one universal `**` pattern (scalar, padded scalar, or single-item sequence) emits `alwaysApply: true` with no `globs`; every other non-empty set, including `**` mixed with scoped patterns, keeps `globs` and never `alwaysApply`; absent, empty, or null `applyTo` emits neither key. Under Section 9.2 this changes generated bytes for the Cursor target only: rules previously emitted as `globs: **` are replaced on reinstall. No source frontmatter field, scoped-glob serialization, or other target changes. Sections 1.3, 8.7, 11.3.2 and Appendix C, the requirements manifest and conformance test binding are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.59 (proposed) | 2026-11-12 | Amendment for accepted issue #3509 in PR #3606. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place with clause (g): a `dependencies.allow` or `dependencies.deny` pattern whose first segment contains U+002E and does not begin with it is host-qualified and matches only when the dependency's effective host (written host, or the implementation-default host), after port and trailing-dot removal and ASCII case folding, equals the named host. Hostless patterns still match every host; `dependencies.require` is unchanged. Updated the Section 6.3.1 table, the source-replacement policy sentence, the Section 10.8 note and the requirements-manifest notes. No new normative statement; count unchanged at 138 (133 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
-| 0.1.60 (proposed) | 2026-11-17 | Amendment for accepted issue #3763. Added [req-rs-018](#req-rs-018) (new Section 7.4.1, consumer MUST): when several edges reach one dependency, its deployment selection is the union over edges of each edge's `skills` x `targets` product; omitting an axis selects all for that edge; the result and its lock entry are independent of declaration order, discovery order and depth, with no first-wins or last-wins choice; `skill_subset` and `target_subset` record the unions and a new optional `subset_pairings` lock field records the exact per-target selection in a canonical form, only when the two flat fields would over-select; a malformed or inconsistent `subset_pairings` value is invalid lock state; and frozen install fails, naming the dependency, when the derived selection differs from the recorded one. Under Section 9.2 this defines previously unspecified merge behaviour, not behavior-neutral errata: a consumer that kept one edge's subsets, or unioned each field independently, now deploys different skills for divergent diamonds, and a frozen install over a lock written by such a consumer fails until the lock is regenerated when the selections differ. Locks whose flat fields are already exact are unchanged byte for byte. `subset_pairings` is additive and optional, `lockfile_version` is unchanged, and the published lockfile schemas already admit additional entry properties, so no schema revision is selected; older readers that preserve the unknown field without implementing it fall back to the flat product. Added the `target_subset` and `subset_pairings` rows to the Section 5.2 field table. Sections 1.3, 4.3.2, 5.2, 7.11, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
+| 0.1.60 (proposed) | 2026-11-17 | Amendment for accepted issue #3763. Added [req-rs-018](#req-rs-018) (new Section 7.4.1, consumer MUST): when several edges reach one dependency, its deployment selection is the union over edges of each edge's `skills` x `targets` product; omitting an axis selects all for that edge; the result and its lock entry are independent of declaration order, discovery order and depth, with no first-wins or last-wins choice; `skill_subset` and `target_subset` record the unions and a new optional `subset_pairings` lock field records the exact per-target selection in a canonical form, only when the two flat fields would over-select; a malformed or inconsistent `subset_pairings` value is invalid lock state; and frozen install fails, naming the dependency, when the derived selection differs from the recorded one. Under Section 9.2 this defines previously unspecified merge behavior, not behavior-neutral errata: a consumer that kept one edge's subsets, or unioned each field independently, now deploys different skills for divergent diamonds, and a frozen install over a lock written by such a consumer fails until the lock is regenerated when the selections differ. Locks whose flat fields are already exact are unchanged byte for byte. `subset_pairings` is additive and optional and `lockfile_version` is unchanged. The fields are typed in the distinct proposed `lockfile-v0.1.60.schema.json` (Appendix A); earlier schema bytes and IDs are unchanged, and since their entries admit additional properties, new lockfiles still validate against them. Older readers that preserve the unknown field without implementing it fall back to the flat product. Added the `target_subset` and `subset_pairings` rows to the Section 5.2 field table and req-rs-018 to the Section 10.11 lockfile-tampering row. Sections 1.3, 4.3.2, 5.2, 7.11, 10.11, 11.3.2, Appendices A and C, the requirements manifest and conformance coverage are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
 0.1.60 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises

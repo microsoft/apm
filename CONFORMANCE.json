@@ -1501,7 +1501,7 @@
       "keyword": "MUST",
       "section": "7.4.1",
       "status": "active",
-      "test_count": 12,
+      "test_count": 18,
       "tests": [
         "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges0-claude-None]",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges1-cursor-expected1]",
@@ -1514,6 +1514,12 @@
         "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records2]",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records3]",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_lock_record_matches_section_7_4_1_example",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_proposed_lock_schema_matches_canonical_writer_output[records0-True]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_proposed_lock_schema_matches_canonical_writer_output[records1-True]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_proposed_lock_schema_matches_canonical_writer_output[records2-False]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_proposed_lock_schema_matches_canonical_writer_output[records3-False]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_proposed_lock_schema_matches_canonical_writer_output[records4-False]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_proposed_lock_schema_types_the_pairing_fields_only",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_selection_and_lock_record_are_order_independent"
       ]
     },

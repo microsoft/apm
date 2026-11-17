@@ -5,8 +5,10 @@ from __future__ import annotations
 import itertools
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from apm_cli.models.dependency.subsets import SkillTargetSelection, merge_edge_pairings
+from tests.spec_conformance._helpers import load_schema
 
 pytestmark = pytest.mark.unit
 
@@ -97,3 +99,38 @@ def test_entry_without_pairings_denotes_the_flat_product() -> None:
     selection = SkillTargetSelection.from_lock_fields(["alpha", "gamma"], ["claude", "copilot"])
     assert _deploys(selection, "alpha", "copilot")
     assert selection != merge_edge_pairings(DIVERGENT_DIAMOND)
+
+
+@pytest.mark.req("req-rs-018")
+def test_proposed_lock_schema_types_the_pairing_fields_only() -> None:
+    """The 0.1.60 resource adds target_subset and subset_pairings to the 0.1.46 contract."""
+    previous = load_schema("lockfile-v0.1.46.schema.json")
+    proposed = load_schema("lockfile-v0.1.60.schema.json")
+    Draft202012Validator.check_schema(proposed)
+    assert proposed["$id"] != previous["$id"]
+    entry = proposed["$defs"]["entry"]["properties"]
+    assert entry.pop("target_subset") == entry["skill_subset"]
+    entry.pop("subset_pairings")
+    proposed["$id"], proposed["title"] = previous["$id"], previous["title"]
+    assert proposed == previous
+
+
+@pytest.mark.req("req-rs-018")
+@pytest.mark.parametrize(
+    ("records", "valid"),
+    [
+        (merge_edge_pairings(DIVERGENT_DIAMOND).to_lock_records(), True),
+        (merge_edge_pairings([(None, ["claude"]), (["alpha"], None)]).to_lock_records(), True),
+        ([{"skills": ["alpha"], "targets": ["claude"]}], False),
+        ([{"skills": ["alpha"], "x-note": "v"}, {"targets": ["claude"]}], False),
+        ([{"skills": []}, {"targets": ["claude"]}], False),
+    ],
+)
+def test_proposed_lock_schema_matches_canonical_writer_output(records, valid) -> None:
+    """Writer output validates; single products, extension keys and empty axes do not."""
+    validator = Draft202012Validator(load_schema("lockfile-v0.1.60.schema.json"))
+    lock = {
+        "lockfile_version": "2",
+        "dependencies": [{"repo_url": "owner/bundle", "subset_pairings": records}],
+    }
+    assert (list(validator.iter_errors(lock)) == []) is valid

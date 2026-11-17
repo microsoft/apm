@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.46 amendment selects [`lockfile-v0.1.46.schema.json`](/apm/specs/schemas/lockfile-v0.1.46.schema.json), adding manifest extensions without changing earlier schema bytes. See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
+> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.46 and 0.1.60 amendments select [`lockfile-v0.1.60.schema.json`](/apm/specs/schemas/lockfile-v0.1.60.schema.json), adding manifest extensions and per-edge subset pairings without changing earlier schema bytes. See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 `apm.lock.yaml` is the pinned record of every resolved dependency and every
 file APM deployed into the workspace. It is the source of truth for
