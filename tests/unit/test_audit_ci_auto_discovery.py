@@ -302,6 +302,17 @@ class TestMaskedPrivateRepoHint:
         assert ".github-private" not in result.stderr
 
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_hint_shown_in_verbose_warn_mode(self, mock_discover, runner, tmp_path):
+        _setup_project_with_unmanaged_file(tmp_path)
+        mock_discover.return_value = self._absent_with_hint()
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift", "--verbose"])
+
+        assert result.exit_code == 0, result.output
+        assert "[i] foo/.github-private returned 404." in result.stderr.splitlines()
+
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
     def test_hint_in_block_error(self, mock_discover, runner, tmp_path):
         _setup_project_with_unmanaged_file(tmp_path)
         apm_yml = (tmp_path / "apm.yml").read_text() + ("policy:\n  fetch_failure_default: block\n")
