@@ -225,15 +225,35 @@ _REJECTED_PHRASES = (
     "terminal prompts disabled",
     "invalid username or password",
 )
-# Status-anchored only: a bare "401" may be part of a repository URL.
-_REJECTED_STATUS_RE = re.compile(
-    r"(?:\bhttp(?: error)?|returned error:|status(?: code)?[=: ]+)\s*401\b",
-    re.IGNORECASE,
+# Status-anchored only, with a separator: a bare or glued "401" (team-401,
+# http401) may be part of a repository URL.
+_STATUS_PREFIX = (
+    r"(?:\bhttp(?: error)?\s+|returned error:\s*|\bstatus(?: code)?\s*[=:]\s*|\bstatus\s+)"
 )
-_FORBIDDEN_STATUS_RE = re.compile(
-    r"(?:\bhttp(?: error)?|returned error:|status(?: code)?[=: ]+)\s*403\b",
-    re.IGNORECASE,
-)
+_REJECTED_STATUS_RE = re.compile(_STATUS_PREFIX + r"401\b", re.IGNORECASE)
+_FORBIDDEN_STATUS_RE = re.compile(_STATUS_PREFIX + r"403\b", re.IGNORECASE)
+# A proxy challenge is about the proxy credential, never the host credential.
+_PROXY_SIGNAL_RE = re.compile(r"proxy|\b407\b", re.IGNORECASE)
+_URL_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
+
+
+def _names_other_host(text: str, host: str | None, port: int | None) -> bool:
+    """Return whether *text* names a URL on a host other than the requested one."""
+    if not host:
+        return False
+    for match in _URL_RE.finditer(text):
+        try:
+            parsed = urlsplit(match.group(0))
+            other_port = parsed.port
+        except ValueError:
+            return True
+        if (parsed.hostname or "").lower() != host.lower():
+            return True
+        if other_port is not None and other_port != port and other_port not in (80, 443):
+            return True
+    return False
+
+
 _PUBLIC_GITHUB_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403|404)\b",
 )
@@ -392,6 +412,8 @@ def _classify_text(
     *,
     credential_presented: bool,
     public_github_anonymous: bool,
+    host: str | None = None,
+    port: int | None = None,
 ) -> AuthOutcome:
     detail = sanitize_diagnostic_detail(text)
     lowered = text.lower()
@@ -409,11 +431,14 @@ def _classify_text(
         if _PUBLIC_GITHUB_STATUS_RE.search(lowered):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         return AuthOutcome(AuthOutcomeKind.OTHER, detail)
-    # Any not-found or 403 signal makes a rejection ambiguous: never verified.
+    # A 403, not-found, proxy signal, or a URL on another host makes a
+    # rejection ambiguous: never verified.
     ambiguous = (
         bool({403, 404} & set(statuses))
         or _FORBIDDEN_STATUS_RE.search(text) is not None
         or _NOT_FOUND_RE.search(text) is not None
+        or _PROXY_SIGNAL_RE.search(text) is not None
+        or _names_other_host(text, host, port)
     )
     if any(status in {401, 403} for status in statuses):
         return AuthOutcome(
@@ -481,6 +506,8 @@ def classify_auth_outcome(
         statuses,
         credential_presented=credential_presented,
         public_github_anonymous=public_github_anonymous,
+        host=getattr(host_info, "host", None),
+        port=getattr(host_info, "port", None),
     )
 
 

@@ -575,7 +575,7 @@ For GitHub, a fine-grained PAT with read-only `Contents` permission on the repos
 When the Azure DevOps chain uses a credential from `git credential fill`, APM reports the result back to your credential helper, as Git does: `git credential approve` after the request succeeded, `git credential reject` after Azure DevOps refused that credential with HTTP 401. Limits:
 
 - Only the credential the helper returned for that repository's host and path is reported, using the exact description the helper returned. `ADO_APM_PAT`, Azure CLI bearer tokens, `gh` tokens, and GitHub, GitLab, or generic hosts are never reported.
-- A 403, a sign-in redirect or page, a not-found, throttle, network, or TLS failure is never reported, so an ambiguous answer never erases a credential.
+- A 403, a sign-in redirect or page, a proxy challenge, a not-found, throttle, network, or TLS failure, or an error naming another host is never reported, so an ambiguous answer never erases a credential.
 - Each report happens at most once per host, port, and path per run. A secret that already worked on a host in this run is never rejected for another path on that host.
 - Reports are non-interactive, time out after at most 10 seconds, and never fail the command.
 
