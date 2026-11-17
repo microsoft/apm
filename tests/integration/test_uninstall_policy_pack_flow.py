@@ -1368,9 +1368,18 @@ class TestDiscoverPolicyWithChain:
 
     def test_local_file_no_extends(self, tmp_path: Path) -> None:
         """Local policy file without extends returns found outcome."""
-        from apm_cli.policy.discovery import discover_policy_with_chain
+        from apm_cli.policy.discovery import PolicyFetchResult, discover_policy_with_chain
+        from apm_cli.policy.parser import load_policy
 
-        _make_policy_file(tmp_path, _POLICY_WITH_DENY)
+        policy_path = _make_policy_file(tmp_path, _POLICY_WITH_DENY)
+        policy, _ = load_policy(policy_path)
+        assert policy.extends is None
+        leaf = PolicyFetchResult(
+            policy=policy,
+            source=f"file:{policy_path}",
+            outcome="found",
+            cached=False,
+        )
 
         with patch(
             "apm_cli.policy.discovery.read_project_policy_hash_pin",
@@ -1378,16 +1387,14 @@ class TestDiscoverPolicyWithChain:
         ):
             with patch(
                 "apm_cli.policy.discovery.discover_policy",
-                return_value=MagicMock(
-                    outcome="found",
-                    policy=MagicMock(extends=None),
-                    cached=False,
-                    found=True,
-                ),
+                return_value=leaf,
             ) as mock_discover:
-                discover_policy_with_chain(tmp_path)
+                result = discover_policy_with_chain(tmp_path)
 
         assert mock_discover.called
+        assert result.outcome == "found"
+        assert result.policy is policy
+        assert result.error is None
 
     def test_malformed_project_pin_returns_hash_mismatch(self, tmp_path: Path) -> None:
         """Malformed policy.hash in apm.yml returns hash_mismatch."""

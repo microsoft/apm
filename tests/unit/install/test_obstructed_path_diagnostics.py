@@ -10,8 +10,11 @@ import pytest
 from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationResult
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import materialize_project_target_profiles
+from apm_cli.utils import file_ops
 from apm_cli.utils.file_ops import describe_path_obstruction
 from apm_cli.utils.path_security import PathTraversalError
+
+pytestmark = pytest.mark.windows_compat
 
 _REMEDY = "Move it aside, then run the command again."
 
@@ -39,6 +42,51 @@ def test_file_in_place_of_parent_directory_is_named(tmp_path: Path) -> None:
     message = describe_path_obstruction(raised.value, tmp_path)
 
     assert message == f".claude/rules is a file that blocks an APM-managed path. {_REMEDY}"
+
+
+def test_windows_directory_open_error_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows opens a directory as a file with EACCES rather than EISDIR.
+    monkeypatch.setattr(file_ops.sys, "platform", "win32")
+    blocked = tmp_path / ".claude/rules/alpha.md"
+    blocked.mkdir(parents=True)
+    error = PermissionError(errno.EACCES, "Permission denied", str(blocked))
+
+    assert describe_path_obstruction(error, tmp_path) == (
+        f".claude/rules/alpha.md is a directory that blocks an APM-managed path. {_REMEDY}"
+    )
+
+
+def test_windows_file_parent_error_is_named(tmp_path: Path) -> None:
+    # Windows reports a file standing in for a parent as ERROR_PATH_NOT_FOUND (ENOENT).
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude/rules").write_text("user notes\n", encoding="ascii")
+    error = FileNotFoundError(
+        errno.ENOENT, "No such file or directory", str(tmp_path / ".claude/rules/alpha.md")
+    )
+
+    assert describe_path_obstruction(error, tmp_path) == (
+        f".claude/rules is a file that blocks an APM-managed path. {_REMEDY}"
+    )
+
+
+def test_posix_permission_error_on_directory_keeps_its_own_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(file_ops.sys, "platform", "linux")
+    denied = tmp_path / ".claude/rules"
+    denied.mkdir(parents=True)
+
+    assert describe_path_obstruction(OSError(errno.EACCES, "denied", str(denied)), tmp_path) is None
+
+
+def test_missing_path_without_file_ancestor_keeps_its_own_text(tmp_path: Path) -> None:
+    missing = tmp_path / ".claude/rules/alpha.md"
+
+    assert (
+        describe_path_obstruction(OSError(errno.ENOENT, "missing", str(missing)), tmp_path) is None
+    )
 
 
 def test_other_errors_keep_their_own_text(tmp_path: Path) -> None:
