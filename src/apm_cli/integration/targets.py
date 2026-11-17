@@ -1620,7 +1620,12 @@ class TargetRootObstructedError(PathTraversalError):
 
 
 def _validate_project_target_root(project_root: Path, profile: TargetProfile) -> Path:
-    """Return a contained project target root without following symlinks."""
+    """Return a contained project target root without following symlinks.
+
+    Every primitive deploy directory (``<root>/<subdir>``, honouring a
+    mapping's ``deploy_root``) is checked as well, so integrators never
+    write through a linked subdirectory such as ``.github/prompts``.
+    """
     deploy_path = profile.deploy_path(project_root)
     if profile.resolved_deploy_root is not None:
         return deploy_path
@@ -1628,6 +1633,21 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
         raise PathTraversalError(
             f"Refusing deployment through symlinked target root: {profile.root_dir}"
         )
+    for mapping in profile.primitives.values():
+        primitive_rel = Path(mapping.deploy_root or profile.root_dir, mapping.subdir)
+        try:
+            linked = has_symlink_component(
+                project_root, project_root / primitive_rel, raise_on_error=True
+            )
+        except OSError:
+            # An obstructed component (for example a file in place of the
+            # root) is reported by the obstructed-path diagnostics instead.
+            continue
+        if linked:
+            raise PathTraversalError(
+                "Refusing deployment through symlinked target directory: "
+                f"{primitive_rel.as_posix()}"
+            )
     return ensure_path_within(deploy_path, project_root)
 
 

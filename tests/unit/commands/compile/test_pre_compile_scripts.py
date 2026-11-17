@@ -169,7 +169,11 @@ def test_untrusted_scripts_for_other_events_add_no_notice(isolated: Path, monkey
 def test_org_deny_all_suppresses_scripts(isolated: Path, monkeypatch) -> None:
     project = _project(isolated)
     _commit_instruction(project)
-    policy = SimpleNamespace(policy=SimpleNamespace(executables=SimpleNamespace(deny_all=True)))
+    policy = SimpleNamespace(
+        policy=SimpleNamespace(executables=SimpleNamespace(deny_all=True)),
+        outcome="found",
+        source="org",
+    )
     with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=policy):
         result = _compile(project, monkeypatch)
     assert result.exit_code == 0, result.output
@@ -186,6 +190,8 @@ def test_org_deny_all_suppresses_scripts_through_real_policy_discovery(
     leaf = SimpleNamespace(
         policy=SimpleNamespace(extends=None, executables=SimpleNamespace(deny_all=True)),
         cached=False,
+        outcome="found",
+        source="org",
     )
     with (
         patch("apm_cli.policy.discovery.discover_policy_with_chain", _REAL_DISCOVER_WITH_CHAIN),

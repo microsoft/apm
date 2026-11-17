@@ -966,7 +966,9 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     hard failure. Discovery is invoked by the caller only when drift was
     actually detected, keeping the no-drift common path free of extra work.
     """
-    if os.environ.get("APM_POLICY_DISABLE"):
+    from ..policy.discovery import policy_disabled_by_env
+
+    if policy_disabled_by_env():
         return False
     try:
         from ..policy.discovery import discover_policy_with_chain

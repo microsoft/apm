@@ -36,6 +36,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ..utils.http_credentials import CredentialScopedSession
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
@@ -62,7 +63,7 @@ _CACHE_TTL_SECONDS = 3600  # 1 hour
 _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
-_HTTP_SESSION = requests.Session()
+_HTTP_SESSION = CredentialScopedSession()
 _HTTP_SESSION.max_redirects = 5
 
 # Candidate locations for marketplace.json in a repository (priority order)

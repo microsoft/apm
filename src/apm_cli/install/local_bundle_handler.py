@@ -280,29 +280,23 @@ def install_local_bundle(
         deployed_hashes = result.get("deployed_file_hashes", {})
         skipped = result.get("skipped", 0)
 
-        # Issue #1207 D2.b: surface a compile hint when any instruction was
-        # staged into ``apm_modules/<slug>/.apm/instructions/`` because the
-        # resolved target lacks a native ``instructions`` primitive
-        # (opencode, codex, gemini).  Without this, users would see files
-        # under ``apm_modules/`` and wonder why they aren't visible to
-        # their AGENTS.md / GEMINI.md.
-        staged_instructions = [
-            f
-            for f in deployed
-            if (
-                f.replace("\\", "/").startswith("apm_modules/")
-                and "/.apm/instructions/" in f.replace("\\", "/")
-            )
-        ]
+        # Issue #1207 D2.b: instructions staged into
+        # ``apm_modules/<slug>/.apm/instructions/`` for targets without a
+        # native ``instructions`` primitive (opencode, codex, gemini) are
+        # compile input, never deployment claims (#3705). Surface a compile
+        # hint so users know why they are not visible to AGENTS.md / GEMINI.md.
+        staged_instructions = result.get("staged_files", [])
         # Issue #1207 D2.c: legacy Claude bundle MCP metadata is routed through
         # MCPIntegrator.install. Native Agent Plugins fail at the deployment boundary.
         bundle_mcp_present = bool(bundle_mcp_deps)
 
         if dry_run:
-            logger.dry_run_notice(f"Would deploy {len(deployed)} file(s) from local bundle")
+            logger.dry_run_notice(
+                f"Would deploy {len(deployed) + len(staged_instructions)} file(s) from local bundle"
+            )
             # IM5: surface the file list in default mode (not just verbose)
             # so users see WHICH files would deploy.
-            for f in deployed:
+            for f in (*deployed, *staged_instructions):
                 logger.tree_item(f)
             return
 
@@ -331,7 +325,7 @@ def install_local_bundle(
             )
 
         # Persist into project lockfile -- never mutate apm.yml (per design).
-        if deployed:
+        if deployed or staged_instructions:
             from ..deps.lockfile import migrate_lockfile_if_needed
 
             migrate_lockfile_if_needed(project_root)
@@ -339,7 +333,9 @@ def install_local_bundle(
             lockfile = LockFile.read(lockfile_path) or LockFile()
             from ..core.deployment_ledger import DeploymentLedgerCodec
 
-            DeploymentLedgerCodec.record_local_bundle_files(lockfile, deployed, deployed_hashes)
+            DeploymentLedgerCodec.record_local_bundle_files(
+                lockfile, deployed, deployed_hashes, staged=staged_instructions
+            )
 
             # Auto-migrate legacy per-client skill paths (#737).
             # After deploying new .agents/skills/ files, detect and clean up
@@ -400,7 +396,7 @@ def install_local_bundle(
 
             lockfile.write(lockfile_path)
 
-        msg = f"Installed {len(deployed)} file(s) from local bundle"
+        msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
         if skipped:
             msg += f" ({skipped} skipped)"
         logger.success(msg)

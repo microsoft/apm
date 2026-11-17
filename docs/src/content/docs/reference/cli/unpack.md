@@ -81,6 +81,7 @@ apm unpack bundle.zip --force
 - **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack` and have no equivalent `install` path.
 - **Additive writes only.** Files not listed in the bundle's lockfile are left alone; the bundle never deletes project files.
 - **Overwrite on collision.** When a bundle file shares a path with a local file, the bundle file wins.
+- **Managed destinations only.** Every `deployed_files` entry must land under a known integration directory (`.github/`, `.claude/`, `.agents/`, ...) of the output directory, with no symlinked path component. Any other entry fails the unpack before a file is written. Bundle paths that run through a symlink are skipped.
 - **Security scan.** Bundle contents are scanned before deployment. Critical hidden-character findings block extraction unless `--force` is passed (exit code `1`). Non-critical warnings are surfaced with a hint to run [`apm audit`](../audit/).
 - **Verification.** By default, every entry in the bundle's `deployed_files` must exist inside the archive. `--skip-verify` disables this check; missing files are then reported as skipped.
 - **Target mismatch warning.** If the bundle was packed for a different harness target than the output project's detected target, `apm unpack` warns and -- with `--verbose` -- suggests the `apm pack --target` command the publisher should run.

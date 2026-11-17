@@ -1072,6 +1072,41 @@ def is_valid_fqdn(hostname: str) -> bool:
     return bool(re.match(pattern, hostname))
 
 
+_PARSER_DEPENDENT_URL_CHARS_RE = re.compile(r"[\\\x00-\x20\x7f]")
+
+
+def has_parser_dependent_url_chars(url: str) -> bool:
+    """Return whether *url* holds characters that URL parsers read differently.
+
+    ``urllib`` keeps a backslash inside the authority, while WHATWG URL
+    parsers (used by Node/Electron MCP clients) read it as a path separator,
+    so the two can resolve different hosts for the same string. Whitespace
+    and control characters are dropped or rejected inconsistently as well.
+    """
+    return bool(_PARSER_DEPENDENT_URL_CHARS_RE.search(url))
+
+
+def unambiguous_https_hostname(url: str | None) -> str | None:
+    """Return the lower-case host of an absolute ``https`` URL, else ``None``.
+
+    The host is returned only when every common URL parser agrees on it: the
+    scheme is ``https``, the authority has no userinfo, and the string has no
+    parser-dependent characters. Callers deciding whether a credential may
+    accompany a URL use this as the single host source.
+    """
+    if not isinstance(url, str) or not url or has_parser_dependent_url_chars(url):
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        hostname = parsed.hostname
+        parsed.port  # noqa: B018 - raises ValueError for a malformed port
+    except ValueError:
+        return None
+    if parsed.scheme.lower() != "https" or not hostname or "@" in parsed.netloc:
+        return None
+    return hostname.lower()
+
+
 def sanitize_token_url_in_message(message: str, host: str | None = None) -> str:
     """Sanitize occurrences of token-bearing https URLs for the given host in message.
 

@@ -13,6 +13,8 @@ See the [CNCF definition of an adopter](https://github.com/cncf/toc/blob/main/FA
 | EPAM | Consultancy, Contributor, End-User Organization | Production | Uses, actively contributes to, and consults on APM. |
 | Grupo Universal | End-User Organization | Production | Uses APM to package and distribute agent skills, prompts and MCP configurations across internal agent DevOps projects. |
 | Sopra Steria | End-User Organization | Production | Uses APM. |
+| Supermodular | Consultancy, Contributor, End-User Organization | Production | Uses APM internally and at customers to package and distribute agent skills and agents. Contributed `apm auth` for git host credentials. |
+| WTW | End-User Organization | Production | Uses APM. |
 
 Type and adoption level are optional. Blank fields mean that the information
 is not publicly specified, not that usage is absent.

@@ -558,21 +558,32 @@ class MCPClientAdapter(ABC):
             return config_path.is_symlink()
         return has_symlink_component(self.project_root, config_path)
 
+    def _is_project_config_path(self, config_path: Path) -> bool:
+        """Return whether *config_path* is a project file rather than a home config."""
+        if self.user_scope:
+            return False
+        root = Path(os.path.abspath(self.project_root))
+        return Path(os.path.abspath(config_path)).is_relative_to(root)
+
     def _write_json_config(self, config_path: Path, config: dict, *, shared: bool = False) -> None:
         """Atomically write *config* as JSON and keep the file owner-only.
 
         Entries can carry env values resolved at install time. ``shared``
         marks a committed project config file: it keeps its existing or
-        umask mode instead. A project-scope path that is, or is reached
+        umask mode instead; paths outside the project stay owner-only. A
+        project-scope path that is, or is reached
         through, a symbolic link is refused with ``OSError``.
         """
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
-        if shared:
+        if shared and self._is_project_config_path(config_path):
             atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
             return
+        if config_path.is_file():
+            # Tighten first: the atomic write keeps an existing file's mode.
+            os.chmod(config_path, 0o600)
         atomic_write_text(config_path, payload, new_file_mode=0o600)
         os.chmod(config_path, 0o600)
 
