@@ -938,12 +938,12 @@ Flags:
 - `--json` / `-o json` switches to JSON output.
 - `--check` exits non-zero (1) when no usable policy is found (anything other than `outcome=found`). Use this for CI pre-checks that must fail when org policy is unreachable or misconfigured. Default behaviour (without `--check`) remains exit-0.
 
-When auto-discovery finds no policy on GitHub, the report includes a `Hint` (JSON `discovery_hint`): GitHub answers 404 for a private `.github-private` repository the credential cannot read, so grant `Contents: read` on it if your org publishes policy there. `apm install` and `apm audit` stay silent about this in default mode; the hint also appears with `--verbose` and in the fail-closed error under `policy.fetch_failure_default: block`.
-
 ```shell
 $ apm policy status --check          # exits 1 if outcome != "found"
 $ apm policy status --check --json   # exit 1 + JSON body for CI tooling
 ```
+
+An `absent` report can carry a `Hint` (JSON `discovery_hint`) about `.github-private`; see `absent` in [Discovery outcomes](#discovery-outcomes).
 
 ### 9.8. `apm audit --ci` auto-discovery
 
@@ -966,7 +966,7 @@ Each row maps a `PolicyFetchResult.outcome` to its exit impact, severity, the me
 | Outcome | Exit | Severity | Primary message | Remediation |
 |---------|------|----------|-----------------|-------------|
 | `found` | `0` (or `1` if checks fail under `block`) | info / block | `Policy: <source> (cached, fetched Nm ago) -- enforcement=<level>` | None; enforcement applied. Under `block`, fix violations or use `--no-policy` for one-off bypass. |
-| `absent` | `0` | info | `No org policy found for <host_org>` | None required. To publish one, see section 11. |
+| `absent` | `0` | info (`--verbose` only) | `No org policy found for <host_org>` | None required. To publish one, see section 11. If your org keeps policy in a private `.github-private`, grant the credential `Contents: read` on it: GitHub answers 404 for a repository it cannot read. On github.com, `*.ghe.com` and the `GITHUB_HOST` host, `--verbose`, `apm policy status` and the `fetch_failure_default: block` error show this as a hint. |
 | `cached_stale` | `0` (enforcement still applies) | warn | `Policy: <source> (cached, fetched Nm ago) -- enforcement=<level>` plus refresh-error warning | Restore network reachability or run with `--no-cache` once connectivity returns. |
 | `cache_miss_fetch_fail` | `0` | warn | `Could not fetch org policy (<error>) -- policy enforcement skipped for this invocation` | Retry, check VPN/firewall/`gh auth status`/`GITHUB_APM_PAT`. Fail-open by design (CEO-ratified); CI will still fail for the same violation. |
 | `garbage_response` | `0` | warn | `Could not fetch org policy (invalid YAML body from <source>) -- policy enforcement skipped for this invocation` | Likely a captive portal or auth wall returning HTML. Restore direct connectivity, then re-run. |
