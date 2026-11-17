@@ -28,7 +28,7 @@ the registry resolver entirely.
 By default `apm pack` writes a Claude Code plugin directory under `./build/`:
 
 ```
-build/<your-package>/
+build/<your-package>-<version>/
 +-- plugin.json
 +-- agents/
 +-- skills/
@@ -44,11 +44,10 @@ The success line tells you exactly what to share:
 
 ```
 $ apm pack
-[+] Packed 7 file(s) -> build/my-pkg
-[>] Plugin bundle ready -- contains plugin.json plus plugin-native
-    directories (agents/, skills/, commands/, ...) and an embedded
-    apm.lock.yaml for install-time integrity verification.
-[i] Share with: apm install build/my-pkg
+[*] Packed 7 file(s) -> build/my-pkg-1.0.0
+[i] Claude plugin bundle ready -- contains plugin.json plus plugin-native
+    directories and an embedded apm.lock.yaml.
+[i] Share with: apm install build/my-pkg-1.0.0
 ```
 
 Pass `--format agent-plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---format-agent-plugin)

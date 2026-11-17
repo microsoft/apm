@@ -297,7 +297,7 @@ ref, and package subdirectory.
 For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
 
-The same `apm pack` run also produces a bundle to `./build/<name>/`
+The same `apm pack` run also produces a bundle to `./build/<name>-<version>/`
 when `apm.yml` declares a `dependencies:` mapping, including an empty
 mapping (`dependencies: {}`). Marketplace projects with an omitted or null
 `dependencies:` value produce only `marketplace.json`. See

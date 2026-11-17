@@ -20,11 +20,11 @@ set -euo pipefail
 VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
 
 apm pack --check-versions --check-clean --json > gate-report.json
-apm pack --check-versions --strict-metadata --json > pack-report.json
+apm pack --archive --check-versions --strict-metadata --json > pack-report.json
 
 for f in build/*.zip .claude-plugin/marketplace.json; do
   [ -f "$f" ] || continue
-  sha256sum "$f" > "${f}.sha256"
+  (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
 done
 
 gh release create "$VERSION" \
@@ -115,10 +115,10 @@ artifact format.
       - run: pip install apm-cli
       - run: |
           apm pack --check-versions --check-clean --json > gate-report.json
-          apm pack --check-versions --strict-metadata --json > pack-report.json
+          apm pack --archive --check-versions --strict-metadata --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
-            sha256sum "$f" > "${f}.sha256"
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
           done
           gh release create "${GITHUB_REF_NAME}" \
             build/*.zip build/*.zip.sha256 \
@@ -139,11 +139,11 @@ release:
   script:
     - pip install apm-cli
     - apm pack --check-versions --check-clean --json > gate-report.json
-    - apm pack --check-versions --strict-metadata --json > pack-report.json
+    - apm pack --archive --check-versions --strict-metadata --json > pack-report.json
     - |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
-        sha256sum "$f" > "${f}.sha256"
+        (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
       done
     - |
       glab release create "$CI_COMMIT_TAG" \
@@ -164,10 +164,10 @@ pipeline {
         sh '''
           pip install apm-cli
           apm pack --check-versions --check-clean --json > gate-report.json
-          apm pack --check-versions --strict-metadata --json > pack-report.json
+          apm pack --archive --check-versions --strict-metadata --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
-            sha256sum "$f" > "${f}.sha256"
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
           done
           gh release create "${TAG_NAME}" \
             build/*.zip build/*.zip.sha256 \
@@ -192,11 +192,11 @@ steps:
     inputs: { versionSpec: "3.12" }
   - script: pip install apm-cli
   - script: apm pack --check-versions --check-clean --json > gate-report.json
-  - script: apm pack --check-versions --strict-metadata --json > pack-report.json
+  - script: apm pack --archive --check-versions --strict-metadata --json > pack-report.json
   - script: |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
-        sha256sum "$f" > "${f}.sha256"
+        (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
       done
   - script: |
       gh release create "$(Build.SourceBranchName)" \

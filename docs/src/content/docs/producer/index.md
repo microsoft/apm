@@ -18,7 +18,7 @@ Five steps, in order. Each links to the page that owns it:
 | 1 | [Author primitives](./author-primitives/) | Skills, prompts, instructions, agents, hooks, commands, MCP under `.apm/`        |
 | 2 | [Compile your package](./compile/)        | `apm compile` writes deterministic per-target output you can git-diff            |
 | 3 | [Preview and validate](./preview-and-validate/) | `apm preview` and `apm view` confirm what consumers will receive                 |
-| 4 | [Pack a bundle](./pack-a-bundle/)         | `apm pack` produces a `.zip` you can ship offline or to a marketplace        |
+| 4 | [Pack a bundle](./pack-a-bundle/)         | `apm pack` produces a bundle (a `.zip` with `--archive`) you can ship offline or to a marketplace |
 | 5 | [Publish to a marketplace](./publish-to-a-marketplace/) | Others install your package with `apm install <owner>/<repo>`                  |
 
 You don't need a marketplace to start. Step 4 is enough for internal teams; the marketplace step is for public discovery.
@@ -60,7 +60,7 @@ my-package/
   README.md                  # rendered on the marketplace listing
 ```
 
-`apm compile` deterministically transforms `.apm/` into per-target output. `apm pack` zips the result and, when an `apm.yml` declares a `marketplace:` block, writes the marketplace artifact alongside the bundle. Consumers reach it with `apm marketplace add`. There is no separate "build pipeline" -- the CLI is the build pipeline.
+`apm compile` deterministically rolls instructions in `.apm/` into per-target context files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, at the root and, with the distributed strategy, in subdirectories). `apm pack` bundles your package and, when an `apm.yml` declares a `marketplace:` block, writes the marketplace artifact alongside the bundle. Consumers reach it with `apm marketplace add`. There is no separate "build pipeline" -- the CLI is the build pipeline.
 
 ## Compatible with the consumer ramp
 
