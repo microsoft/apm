@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 import requests
@@ -213,3 +214,17 @@ def test_ado_server_chain_skips_azure_cli(monkeypatch) -> None:
     assert [a.step for a in attempts.snapshot()] == ["ADO_APM_PAT", "git credential fill"]
     assert "az CLI bearer" not in str(raised.value)
     assert raised.value.attempts is attempts
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (MagicMock(), AuthOutcomeKind.OTHER),
+        (b"fatal: Authentication failed", AuthOutcomeKind.AUTH_REQUIRED),
+    ],
+    ids=["mock", "bytes"],
+)
+def test_classifier_never_raises_on_foreign_error_objects(error, expected) -> None:
+    """Classification reads non-exception errors as text instead of raising."""
+    outcome = classify_auth_outcome(host_info=MagicMock(), error=error)
+    assert outcome.kind is expected

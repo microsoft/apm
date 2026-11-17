@@ -15,7 +15,7 @@ same way.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -210,6 +210,29 @@ _PUBLIC_GITHUB_STATUS_RE = re.compile(
 _NOT_FOUND_RE = re.compile(r"\bTF401019\b|repository not found|\b404\b", re.IGNORECASE)
 
 
+def _cause_chain(error: object) -> Iterator[BaseException]:
+    """Yield *error* and its causes; tolerate objects that are not exceptions."""
+    current = error if isinstance(error, BaseException) else None
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        nxt = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+        current = nxt if isinstance(nxt, BaseException) else None
+
+
+def _normalize_error(error: object) -> BaseException | str | None:
+    """Coerce any non-exception, non-text *error* into text for classification."""
+    if error is None or isinstance(error, (BaseException, str)):
+        return error
+    if isinstance(error, bytes):
+        return error.decode("utf-8", errors="replace")
+    try:
+        return str(error)
+    except Exception:
+        return ""
+
+
 def _flatten_error(error: BaseException | str | None) -> tuple[str, list[int], list[Any]]:
     """Collect text, HTTP status codes, and responses across the cause chain."""
     if error is None:
@@ -219,10 +242,7 @@ def _flatten_error(error: BaseException | str | None) -> tuple[str, list[int], l
     parts: list[str] = []
     statuses: list[int] = []
     responses: list[Any] = []
-    current: BaseException | None = error
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
+    for current in _cause_chain(error):
         response = getattr(current, "response", None)
         if response is not None:
             responses.append(response)
@@ -236,9 +256,8 @@ def _flatten_error(error: BaseException | str | None) -> tuple[str, list[int], l
             value = getattr(current, name, None)
             if isinstance(value, bytes):
                 value = value.decode("utf-8", errors="replace")
-            if value:
-                parts.append(str(value))
-        current = current.__cause__ or current.__context__
+            if isinstance(value, str) and value:
+                parts.append(value)
     return " ".join(parts), statuses, responses
 
 
@@ -247,14 +266,7 @@ def _is_throttle_error(error: BaseException | str | None) -> bool:
         return False
     from apm_cli.deps.github_rate_limit import GitHubThrottleError
 
-    current: BaseException | None = error
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, GitHubThrottleError):
-            return True
-        current = current.__cause__ or current.__context__
-    return False
+    return any(isinstance(current, GitHubThrottleError) for current in _cause_chain(error))
 
 
 def _transport_kind(error: BaseException | str | None) -> AuthOutcomeKind | None:
@@ -264,15 +276,11 @@ def _transport_kind(error: BaseException | str | None) -> AuthOutcomeKind | None
         import requests
     except ImportError:  # pragma: no cover - requests is a hard dependency
         return None
-    current: BaseException | None = error
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
+    for current in _cause_chain(error):
         if isinstance(current, requests.exceptions.SSLError):
             return AuthOutcomeKind.TLS
         if isinstance(current, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
             return AuthOutcomeKind.NETWORK
-        current = current.__cause__ or current.__context__
     return None
 
 
@@ -380,7 +388,7 @@ def classify_auth_outcome(
     host_info: Any = None,
     host_kind: str | None = None,
     response: Any = None,
-    error: BaseException | str | None = None,
+    error: object = None,
     credential_presented: bool = False,
     public_github_anonymous: bool = False,
 ) -> AuthOutcome:
@@ -391,8 +399,12 @@ def classify_auth_outcome(
     ``public_github_anonymous`` applies only to the anonymous-first
     github.com leg, where a 404 may hide a private repository.
     Connectivity, TLS, and throttle signals always win over auth phrases.
+    ``error`` may be any object; non-exception values are read as text.
     """
-    kind_name = host_kind or getattr(host_info, "kind", None) or "generic"
+    error = _normalize_error(error)
+    kind_name = host_kind or getattr(host_info, "kind", None)
+    if not isinstance(kind_name, str) or not kind_name:
+        kind_name = "generic"
     if _is_throttle_error(error):
         return AuthOutcome(AuthOutcomeKind.THROTTLED, sanitize_diagnostic_detail(str(error)))
     transport = _transport_kind(error)
