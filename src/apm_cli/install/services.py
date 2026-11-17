@@ -27,6 +27,7 @@ from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .package_resolution import effective_dependency_selection
 from .project_package import build_project_local_package_info
 
 if TYPE_CHECKING:
@@ -209,7 +210,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     package_name: str = "",
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
-    skill_subset: tuple | None = None,
+    skill_subset: tuple | None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
     policy: Any = None,
@@ -764,6 +765,7 @@ def integrate_local_content(  # noqa: PLR0913
         package_name="_local",
         logger=logger,
         scope=scope,
+        skill_subset=effective_dependency_selection(None, ctx).skill_subset,
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,

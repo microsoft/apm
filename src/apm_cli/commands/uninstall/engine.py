@@ -1136,6 +1136,7 @@ def _sync_integrations_after_uninstall(
     packages just removed from the selected profile only.
     """
     from ...core.deployment_ledger import DeploymentMaterializationSession
+    from ...install.package_resolution import effective_dependency_selection
     from ...install.services import (
         IntegratorBundle,
         integrate_package_primitives,
@@ -1195,7 +1196,7 @@ def _sync_integrations_after_uninstall(
             continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
-            dep_ref.target_subset,
+            effective_dependency_selection(dep_ref).target_subset,
             pkg_info,
             None,
             dep_ref.get_identity(),
@@ -1419,6 +1420,8 @@ def _sync_integrations_after_uninstall(
         for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
             dep_key = dep_ref.get_unique_key()
             deployed_files = package_deployed_files.setdefault(dep_key, [])
+            # Survivors redeploy exactly the selection install deployed (#3760).
+            selection = effective_dependency_selection(dep_ref)
 
             try:
                 integration_result = integrate_package_primitives(
@@ -1432,6 +1435,7 @@ def _sync_integrations_after_uninstall(
                     package_name=dep_ref.get_identity(),
                     logger=logger,
                     scope=_rebuild_scope,
+                    skill_subset=selection.skill_subset,
                     allow_executables=_allow_executables,
                     trust_bin=False,
                     bin_skip_reason_override="not_retrusted_on_uninstall",

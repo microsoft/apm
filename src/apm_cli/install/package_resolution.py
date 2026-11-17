@@ -11,7 +11,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from apm_cli.install import registry_wiring
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
@@ -267,6 +267,43 @@ def effective_deploy_skill_subset(
     if cli_subset:
         merged.update(cli_subset)
     return builtins.tuple(sorted(merged)) or None
+
+
+class EffectiveDependencySelection(NamedTuple):
+    """Skill and target selection one package deployment must honor."""
+
+    skill_subset: builtins.tuple[str, ...] | None
+    target_subset: builtins.list[str] | None
+
+
+def effective_dependency_selection(
+    dep_ref: Any | None,
+    ctx: Any | None = None,
+) -> EffectiveDependencySelection:
+    """Return the effective deploy selection for one dependency (#3760).
+
+    This is the single owner every ``prepare_package_deployment`` and
+    ``integrate_package_primitives`` caller routes through: install
+    preflight and deploy, audit replay and uninstall survivor
+    re-integration. ``None`` in either field means "no restriction".
+
+    *dep_ref* ``None`` is first-party project content, which has no
+    selection. *ctx* carries the install invocation's CLI ``--skill``
+    overlay; lifecycle paths without an install context (uninstall,
+    audit replay) pass ``None`` and deploy exactly the persisted selection.
+    """
+    if dep_ref is None:
+        return EffectiveDependencySelection(None, None)
+    skill_subset = effective_deploy_skill_subset(
+        skill_subset_from_cli=bool(getattr(ctx, "skill_subset_from_cli", False)),
+        cli_subset=getattr(ctx, "skill_subset", None),
+        persisted_subset=getattr(dep_ref, "skill_subset", None),
+    )
+    target_subset = getattr(dep_ref, "target_subset", None)
+    return EffectiveDependencySelection(
+        skill_subset,
+        builtins.list(target_subset) if target_subset else None,
+    )
 
 
 def cli_skill_subset(
