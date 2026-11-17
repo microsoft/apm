@@ -136,6 +136,7 @@ class DownloadDelegate:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        allow_redirects: bool = True,
     ) -> requests.Response:
         """HTTP GET with selectable retries for transient HTTP failures.
 
@@ -149,6 +150,8 @@ class DownloadDelegate:
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
             allow_netrc: Whether Requests may use ambient netrc credentials.
+            allow_redirects: Whether Requests follows redirects. Auth-chain
+                callers disable it so a sign-in redirect reaches the classifier.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -158,6 +161,7 @@ class DownloadDelegate:
         """
         last_exc = None
         last_response = None
+        redirect_kwargs = {} if allow_redirects else {"allow_redirects": False}
         for attempt in range(max_retries):
             try:
                 if allow_netrc:
@@ -166,6 +170,7 @@ class DownloadDelegate:
                         headers=headers,
                         timeout=timeout,
                         stream=stream,
+                        **redirect_kwargs,
                     )
                 else:
                     with _NoNetrcSession() as session:
@@ -174,6 +179,7 @@ class DownloadDelegate:
                             headers=headers,
                             timeout=timeout,
                             stream=stream,
+                            **redirect_kwargs,
                         )
 
                 throttle = github_throttle_error(response, "GitHub API")
@@ -650,6 +656,7 @@ class DownloadDelegate:
                     headers=resolver.http_authorization_headers(git_env),
                     timeout=30,
                     allow_netrc=False,
+                    allow_redirects=False,
                 )
                 if response.status_code != 200:
                     raise AuthAttemptFailed(response=response)

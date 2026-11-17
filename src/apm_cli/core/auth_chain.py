@@ -141,20 +141,32 @@ class AuthAttemptLog:
         return "; ".join(clauses)
 
 
-def ado_helper_path(path: str | None) -> str | None:
+def ado_helper_path(path: str | None, host: str | None = None) -> str | None:
     """Return the repository path Git sends for an Azure DevOps remote.
 
     ``org/project/repo`` becomes ``org/project/_git/repo`` so a helper with
     ``credential.useHttpPath`` (GCM sets it for dev.azure.com) sees the same
-    path it stored when Git cloned that repository.
+    path it stored when Git cloned that repository. Legacy
+    ``<org>.visualstudio.com`` hosts carry the organization in the hostname,
+    so their Git path is ``project/_git/repo``.
     """
     if not path:
         return None
     segments = [segment for segment in path.strip("/").split("/") if segment]
-    if "_git" in segments or len(segments) != 3:
-        return "/".join(segments) or None
-    org, project, repo = segments
-    return f"{org}/{project}/_git/{repo}"
+    host_name = (host or "").lower()
+    legacy_org = (
+        host_name[: -len(".visualstudio.com")] if host_name.endswith(".visualstudio.com") else ""
+    )
+    if legacy_org and len(segments) >= 3 and segments[0].lower() == legacy_org:
+        segments = segments[1:]
+    if "_git" not in segments:
+        if len(segments) == 3:
+            org, project, repo = segments
+            segments = [org, project, "_git", repo]
+        elif legacy_org and len(segments) == 2:
+            project, repo = segments
+            segments = [project, "_git", repo]
+    return "/".join(segments) or None
 
 
 def authorization_headers(git_env: dict[str, str] | None) -> dict[str, str]:
@@ -367,7 +379,7 @@ def run_ado_chain(
 
     if not resolver._allow_external_fallback:
         raise last_exc
-    helper_path = ado_helper_path(path)
+    helper_path = ado_helper_path(path, host_info.host)
     path_suffix = f" (path={helper_path})" if helper_path else ""
     log(f"trying git credential fill for {display}{path_suffix}")
     credential = resolver._helper_credential(host_info, helper_path)

@@ -765,6 +765,9 @@ def _fetch_ado_rest(
             auth=AttemptAuth(git_env),
             timeout=30,
             stream=True,
+            # A sign-in redirect is the auth signal; the classifier sees the
+            # original 3xx and the chain escalates instead of following it.
+            allow_redirects=False,
         )
         try:
             if resp.status_code == 404:

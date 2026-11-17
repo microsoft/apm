@@ -189,6 +189,30 @@ def test_download_signin_page_escalates_to_helper_basic_with_username(
     assert fill.paths() == ["contoso/proj/_git/repo"]
 
 
+def test_download_never_follows_the_signin_redirect(
+    ado_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sign-in redirect itself is the auth signal; its target is never contacted."""
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+    _provider, fill = ado_environment
+
+    def _handler(request: requests.PreparedRequest) -> requests.Response:
+        if urlparse(request.url).hostname != "dev.azure.com":
+            raise requests.exceptions.ConnectionError("sign-in host must not be contacted")
+        if request.headers.get("Authorization") == HELPER_AUTHORIZATION:
+            return _response(request, 200, b"# skill\n", {"Content-Type": "text/plain"})
+        return _response(request, 302, headers={"Location": SIGNIN_LOCATION})
+
+    seen = _install_http(monkeypatch, _handler)
+    downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+    dep_ref = DependencyReference.parse("dev.azure.com/contoso/proj/repo")
+
+    assert downloader.download_raw_file(dep_ref, "SKILL.md", "main") == b"# skill\n"
+    assert {urlparse(request.url).hostname for request in seen} == {"dev.azure.com"}
+    assert fill.paths() == ["contoso/proj/_git/repo"]
+
+
 def test_download_ignores_ambient_netrc_for_ado(
     ado_environment, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

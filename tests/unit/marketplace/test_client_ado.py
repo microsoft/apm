@@ -494,3 +494,37 @@ def test_fetch_ado_rest_raises_is_swallowed_into_fallback() -> None:
 
     assert result == _MANIFEST
     git_fallback.assert_called_once()
+
+
+def test_fetch_ado_signin_redirect_escalates_without_following() -> None:
+    """A 302 to the ADO sign-in host is classified, never followed."""
+    bearer_provider = MagicMock()
+    bearer_provider.is_available.return_value = True
+    bearer_provider.get_bearer_token.return_value = "jwt-fallback"
+    redirect_flags: list[object] = []
+
+    def fake_get(url, headers=None, timeout=None, **kwargs):
+        redirect_flags.append(kwargs.get("allow_redirects"))
+        auth = _effective_headers(headers, kwargs).get("Authorization", "")
+        if auth == "Bearer jwt-fallback":
+            return _fake_response(200, text=json.dumps(_MANIFEST))
+        resp = _fake_response(302, text="")
+        resp.headers = {"Location": "https://app.vssps.visualstudio.com/_signin?realm=x"}
+        return resp
+
+    with (
+        patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=False),
+        patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=bearer_provider),
+        patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
+        patch("apm_cli.marketplace.client._fetch_git") as git_fallback,
+    ):
+        result = _fetch_ado(
+            _ado_source(),
+            "marketplace.json",
+            host_info=AuthResolver.classify_host("dev.azure.com"),
+            auth_resolver=AuthResolver(),
+        )
+
+    assert result == _MANIFEST
+    assert redirect_flags == [False, False]
+    git_fallback.assert_not_called()

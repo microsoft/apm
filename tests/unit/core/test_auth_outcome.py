@@ -132,6 +132,45 @@ def test_ado_helper_path_matches_the_git_remote_path() -> None:
     assert ado_helper_path(None) is None
 
 
+@pytest.mark.parametrize("path", ["contoso/Platform/tools", "contoso/Platform/_git/tools"])
+def test_legacy_visualstudio_helper_path_drops_the_host_org(path: str) -> None:
+    """Git stores ``Platform/_git/tools`` for https://contoso.visualstudio.com/Platform/_git/tools."""
+    assert ado_helper_path(path, "contoso.visualstudio.com") == "Platform/_git/tools"
+
+
+def test_tenant_lookup_runs_once_under_concurrency(monkeypatch) -> None:
+    """Parallel diagnostics share one ``az account show`` call."""
+    import threading
+    import time
+
+    from apm_cli.core.azure_cli import AzureCliBearerProvider
+
+    provider = AzureCliBearerProvider(az_command="/fixture/az")
+    calls: list[int] = []
+
+    def _slow_lookup() -> str:
+        calls.append(1)
+        time.sleep(0.05)
+        return "tenant-0000"
+
+    monkeypatch.setattr(provider, "_lookup_tenant_id", _slow_lookup)
+    barrier = threading.Barrier(6)
+    results: list[str | None] = []
+
+    def _worker() -> None:
+        barrier.wait()
+        results.append(provider.get_current_tenant_id())
+
+    threads = [threading.Thread(target=_worker) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert results == ["tenant-0000"] * 6
+    assert len(calls) == 1
+
+
 def test_helper_credential_keeps_username_and_request_scope(monkeypatch) -> None:
     def _fill(args, *_a, **kwargs):
         return subprocess.CompletedProcess(

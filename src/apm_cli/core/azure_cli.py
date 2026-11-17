@@ -112,6 +112,7 @@ class AzureCliBearerProvider:
         self._last_error: AzureCliBearerError | None = None
         self._tenant_cached = False
         self._tenant_id: str | None = None
+        self._tenant_lock = threading.Lock()
 
     # -- public API ---------------------------------------------------------
 
@@ -184,14 +185,12 @@ class AzureCliBearerProvider:
         on any failure -- this method never raises. The answer is cached for
         the life of the provider (one ``az`` call per process).
         """
-        with self._lock:
-            if self._tenant_cached:
-                return self._tenant_id
-        tenant = self._lookup_tenant_id()
-        with self._lock:
-            self._tenant_cached = True
-            self._tenant_id = tenant
-        return tenant
+        # Singleflight: concurrent diagnostics wait for one ``az`` call.
+        with self._tenant_lock:
+            if not self._tenant_cached:
+                self._tenant_id = self._lookup_tenant_id()
+                self._tenant_cached = True
+            return self._tenant_id
 
     def _lookup_tenant_id(self) -> str | None:
         """Run ``az account show`` once; never raises."""
@@ -224,6 +223,7 @@ class AzureCliBearerProvider:
         with self._lock:
             self._cache.clear()
             self._last_error = None
+        with self._tenant_lock:
             self._tenant_cached = False
             self._tenant_id = None
 
