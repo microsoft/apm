@@ -432,30 +432,42 @@ class TestMcpDenylist:
 
 
 class TestMcpTransport:
+    """Check 9 judges canonical effective transports supplied by the owner."""
+
     def test_pass_no_restrictions(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "sse"}])
-        policy = McpPolicy()
-        result = _check_mcp_transport(mcp, policy)
+        result = _check_mcp_transport({"srv": frozenset({"sse"})}, McpPolicy())
         assert result.passed
 
     def test_pass_allowed_transport(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "stdio"}])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio", "sse"]))
-        result = _check_mcp_transport(mcp, policy)
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio", "sse")))
+        result = _check_mcp_transport({"srv": frozenset({"stdio"})}, policy)
         assert result.passed
 
     def test_fail_disallowed_transport(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "http"}])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-        result = _check_mcp_transport(mcp, policy)
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
+        result = _check_mcp_transport({"srv": frozenset({"streamable-http"})}, policy)
         assert not result.passed
-        assert "http" in result.details[0]
+        assert result.details == ["srv: transport 'streamable-http' not in allowed [stdio]"]
 
-    def test_skip_no_transport_set(self):
-        mcp = _make_mcp_deps(["plain-server"])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-        result = _check_mcp_transport(mcp, policy)
-        assert result.passed
+    def test_package_and_remote_both_checked(self):
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio", "streamable-http")))
+        result = _check_mcp_transport({"srv": frozenset({"stdio", "sse"})}, policy)
+        assert not result.passed
+        assert result.details == ["srv: transport 'sse' not in allowed [stdio, streamable-http]"]
+
+    def test_unresolved_transport_fails_with_remedy(self):
+        from apm_cli.mcp_transport import UnresolvedTransport
+
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
+        result = _check_mcp_transport(
+            {"srv": UnresolvedTransport("MCP registry https://r.example is unreachable")},
+            policy,
+        )
+        assert not result.passed
+        detail = result.details[0]
+        assert detail.startswith("srv: effective transport unknown (MCP registry")
+        assert "unreachable" in detail
+        assert "declare `transport:`" in detail
 
 
 # -- Check 10: mcp-self-defined -------------------------------------

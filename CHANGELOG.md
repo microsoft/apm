@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)
+- Org policy `mcp.transport.allow` now checks the transport APM actually writes: registry MCP servers are looked up in their registry and checked on what install would write (a package counts as `stdio`, a server with both is checked on both, and a declared `transport:` only narrows the check when the server offers it), and `http` matches `streamable-http`. `apm install`, `apm install --mcp`, `apm update` and `apm audit --ci` agree (audit now also checks dev MCP servers, as install does), install writes the registry data policy checked, and a blocked server is rejected before any write. Release note: this can newly block installs of registry servers whose transport is not allowed, or that cannot be resolved; declare `transport:` for the server in `apm.yml` or update the policy. (#3788)
+- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 
 ## [0.36.0] - 2026-11-17
 

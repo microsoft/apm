@@ -232,7 +232,16 @@ mcp:
       - streamable-http
 ```
 
-Valid values: `stdio`, `sse`, `http`, `streamable-http`.
+Valid values: `stdio`, `streamable-http`, `sse`. `http` is an alias of `streamable-http`; APM folds it when the policy is parsed, so `[stdio, http]` and `[stdio, streamable-http]` are the same policy, and `extends:` intersects the canonical names.
+
+The check judges the transport APM will actually write, not only the `transport:` in `apm.yml`:
+
+- A self-defined server (`registry: false`) is checked against its declared `transport:`, offline.
+- A registry server is looked up in the same MCP registry install uses (its `registry:` URL, else `MCP_REGISTRY_URL` or `apm config set mcp-registry-url`). A remote counts as its registry transport; a package counts as `stdio`.
+- A registry server that offers both a package and a remote is checked on both, because harnesses differ in which one they write. To pick one, declare `transport:` for that server in `apm.yml`. A declared `transport:` only narrows the check when the server offers it; otherwise the transport install writes is checked.
+- If APM cannot resolve a registry server (registry unreachable or server not found), its declared `transport:` is checked. Without one, the check fails with `effective transport unknown` and the reason; declare `transport:` for the server to check it offline.
+
+The lookup only happens when `mcp.transport.allow` is set. `apm install`, `apm install --mcp`, `apm update` and `apm audit --ci` reach the same verdict, and a blocked server is rejected before any MCP config or `apm.yml` write.
 
 ### `self_defined`
 
@@ -483,7 +492,7 @@ There are 21 policy checks.
 |-------|-----------|
 | `mcp-allowlist` | MCP server names match the allow list |
 | `mcp-denylist` | No MCP server matches the deny list |
-| `mcp-transport` | MCP transport values are in the allowed list |
+| `mcp-transport` | Effective MCP transports (declared, or resolved from the registry) are in the allowed list |
 | `mcp-self-defined` | Self-defined MCP servers comply with policy |
 
 **Compilation:**
@@ -818,7 +827,7 @@ $ apm install
 [x] Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
 
 [!] Policy
-    contrib/sketchy-mcp -- transport `http` not in mcp.transport.allow=[stdio]
+    contrib/sketchy-mcp -- transport 'streamable-http' not in allowed [stdio]
 $ echo $?
 1
 ```
@@ -994,7 +1003,7 @@ When `enforcement=block`, any of the following exit `1` and abort before integra
 | `denylist` | `dependencies.deny` match | `Policy violation: <dep> -- Blocked by org policy at <source> -- remove <dep> from apm.yml, contact admin to update policy, or use --no-policy for one-off bypass` | Remove the dep from `apm.yml`, request an org-policy update, or `--no-policy` for one-off local debugging. |
 | `allowlist` | Dep not in non-empty `dependencies.allow` | `Policy violation: <dep> -- not in dependencies.allow` | Add the dep to the org allowlist or switch to an approved package. |
 | `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <required-dep> -- required by org policy but not declared in apm.yml` (or `... required >=X but apm.yml pins <Y>`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
-| `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <mcp-server> -- transport <t> not in mcp.transport.allow=[<list>]` | Switch the server to an allowed transport, or request `mcp.transport.allow` updates. |
+| `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <mcp-server> -- transport '<t>' not in allowed [<list>]` or `effective transport unknown (<reason>)` | Switch the server to an allowed transport, declare `transport:` for it in `apm.yml`, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: target <t> -- not in compilation.target.allow=[<list>]` | Re-run with `--target <allowed>`, or update `targets:` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |
 | `pinned-constraint` | `require_pinned_constraint: true` and a dep declares an unbounded ref | `Policy violation: N dependency(ies) use unbounded constraints (hint: pin to a semver range, literal tag, or SHA)` plus per-dep `<dep>: <reason>` | Pin each listed dep to a semver range with an upper bound (`^1.2.3`, `>=1.0,<2.0`), a literal tag (`v1.5.3`), or a 40-char SHA. Roll out under `enforcement: warn` first to size the fleet impact. |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or pass `--trust-transitive-mcp` only as a reviewed break-glass CLI choice. |

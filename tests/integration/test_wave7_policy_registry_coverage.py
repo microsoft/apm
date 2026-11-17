@@ -416,28 +416,20 @@ class TestCheckMcpDenylist:
 class TestCheckMcpTransport:
     def test_no_transport_restrictions(self):
         policy = McpPolicy(transport=McpTransportPolicy(allow=None))
-        result = _check_mcp_transport([_mcp("my-server")], policy)
+        result = _check_mcp_transport({}, policy)
         assert result.passed
         assert "No MCP transport restrictions" in result.message
 
     def test_allowed_transport_passes(self):
         policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        mcp = MCPDependency(name="my-server", transport="stdio")
-        result = _check_mcp_transport([mcp], policy)
+        result = _check_mcp_transport({"my-server": frozenset({"stdio"})}, policy)
         assert result.passed
 
     def test_disallowed_transport_fails(self):
         policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        mcp = MCPDependency(name="my-server", transport="sse")
-        result = _check_mcp_transport([mcp], policy)
+        result = _check_mcp_transport({"my-server": frozenset({"sse"})}, policy)
         assert not result.passed
         assert "1 MCP transport violation" in result.message
-
-    def test_no_transport_on_mcp_passes(self):
-        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        mcp = MCPDependency(name="my-server", transport=None)
-        result = _check_mcp_transport([mcp], policy)
-        assert result.passed  # None transport is not checked
 
 
 class TestCheckMcpSelfDefined:

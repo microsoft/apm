@@ -273,6 +273,17 @@
       "guards": ["install-deployment-policy-remote-origin-owner"]
     },
     {
+      "id": "policy-mcp-transport-projection",
+      "decision": "Org policy mcp.transport.allow evaluated on the effective canonical MCP transport (stdio, streamable-http, sse), with the allow list canonicalized once at parse",
+      "owner": "integration/mcp_transport_resolution.py (resolve_effective_mcp_transports) projecting through the mcp-remote-transport-normalization owner mcp_transport.py (canonical_transport_names, server_write_transports)",
+      "selectors": [
+        "src/apm_cli/integration/mcp_transport_resolution.py",
+        "src/apm_cli/policy/parser.py",
+        "src/apm_cli/policy/policy_checks.py"
+      ],
+      "guards": ["install-deployment-policy-mcp-transport-projection"]
+    },
+    {
       "id": "skills-root-derivation",
       "decision": "Target skills-root derivation",
       "owner": "integration/targets.py (TargetProfile.skills_rel_root, TargetProfile.skills_deploy_path)",

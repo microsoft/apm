@@ -38,6 +38,10 @@ from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import 
     check_policy_remote_origin_owner,
     check_require_hashes_enforcement,
 )
+from scripts.architecture_linter.checks.install_policy_mcp_transport import (
+    RULE_POLICY_MCP_TRANSPORT,
+    check_policy_mcp_transport_projection,
+)
 from scripts.architecture_linter.checks.install_policy_plugin_and_approval import (
     RULE_APPROVAL_OUTCOME,
     RULE_AUDIT_POLICY_DISCOVERY,
@@ -113,6 +117,15 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "Policy discovery reads and parses the git remote through one owner (policy/_remote.py)."
         ),
         check=check_policy_remote_origin_owner,
+    ),
+    Rule(
+        id=RULE_POLICY_MCP_TRANSPORT,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_MCP_TRANSPORT,),
+        description=(
+            "Policy mcp.transport.allow judges canonical effective transports from the owner."
+        ),
+        check=check_policy_mcp_transport_projection,
     ),
     Rule(
         id=RULE_POLICY_DISABLE_SWITCH,

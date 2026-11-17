@@ -239,7 +239,7 @@ class TestMcpPolicy(unittest.TestCase):
         # transport
         self.assertIsNotNone(policy.mcp.transport.allow)
         self.assertIn("stdio", policy.mcp.transport.allow)
-        self.assertIn("http", policy.mcp.transport.allow)
+        self.assertEqual(policy.mcp.transport.allow, ("stdio", "streamable-http"))
         # self_defined
         self.assertEqual(policy.mcp.self_defined, "warn")
         # trust_transitive

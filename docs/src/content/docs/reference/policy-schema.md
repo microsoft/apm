@@ -159,7 +159,7 @@ Rules over MCP server references, including transitive ones declared by deep dep
 |--------------------|-----------------------|---------|--------------------------------------------------------------------------------------|
 | `allow`            | list or null          | `null`  | Same null/empty/list semantics as `dependencies.allow`.                              |
 | `deny`             | list                  | `[]`    | Always wins.                                                                         |
-| `transport.allow`  | list or null          | `null`  | Allowed transports: `stdio`, `sse`, `http`, `streamable-http`. `null` = no opinion. |
+| `transport.allow`  | list or null          | `null`  | Allowed transports: `stdio`, `streamable-http`, `sse` (`http` is an alias of `streamable-http`). Checked against the effective transport APM writes, including registry servers. `null` = no opinion. |
 | `self_defined`     | enum                  | `warn`  | `allow` / `warn` / `deny` -- treatment of MCP servers defined inline in `apm.yml`.   |
 | `trust_transitive` | boolean               | `false` | When `false`, transitive MCP servers must be explicitly allow-listed.                |
 

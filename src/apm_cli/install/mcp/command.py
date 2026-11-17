@@ -57,8 +57,14 @@ def run_mcp_policy_preflight(
     no_policy: bool,
     logger,
     target_decision: EffectiveTargetDecision,
+    registry_url: str | None = None,
+    registry_source: str | None = None,
 ) -> None:
-    """Run policy checks for a direct MCP install before any persistent write."""
+    """Run policy checks for a direct MCP install before any persistent write.
+
+    The registry override is active so the transport check resolves a
+    registry server against the same registry the install will query.
+    """
     from ...models.dependency.mcp import MCPDependency
     from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
 
@@ -75,15 +81,20 @@ def run_mcp_policy_preflight(
         url=url,
     )
     try:
-        run_policy_preflight(
-            project_root=Path.cwd(),
-            mcp_deps=[dependency],
-            no_policy=no_policy,
-            logger=logger,
-            dry_run=logger.dry_run,
-            effective_target=target_decision.canonical_targets,
-            effective_target_source=target_decision.source,
-        )
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_source == "flag",
+            source=registry_source,
+        ):
+            run_policy_preflight(
+                project_root=Path.cwd(),
+                mcp_deps=[dependency],
+                no_policy=no_policy,
+                logger=logger,
+                dry_run=logger.dry_run,
+                effective_target=target_decision.canonical_targets,
+                effective_target_source=target_decision.source,
+            )
     except PolicyBlockError:
         logger.render_summary()
         raise click.exceptions.Exit(1) from None
