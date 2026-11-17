@@ -652,6 +652,92 @@ class TestSkillSubsetConsistencyCheck:
             "['claude', 'copilot']"
         ]
 
+    def _parent_declaring(self, tmp_path: Path, declaration: str) -> Path:
+        parent = tmp_path / "apm_modules" / "owner" / "parent"
+        parent.mkdir(parents=True)
+        (parent / "apm.yml").write_text(
+            "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n" + declaration,
+            encoding="utf-8",
+        )
+        return parent
+
+    @pytest.mark.parametrize(
+        "root_skills",
+        [None, ["alpha"], "undeclared"],
+        ids=["absorbed", "narrowed", "only-unreadable-parent"],
+    )
+    def test_unreadable_declaration_is_conclusive_only_when_absorbed(
+        self, tmp_path: Path, root_skills
+    ):
+        """An incomplete walk proves "all" only through an unrestricted edge (#3735)."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        self._package_with_skills(tmp_path, "alpha", "beta")
+        self._parent_declaring(tmp_path, "    - broken: [\n")
+        declared = [self._make_dep_ref("owner/parent")]
+        if root_skills != "undeclared":
+            declared.insert(0, self._make_dep_ref("owner/repo", skill_subset=root_skills))
+        manifest = self._make_manifest_mock(declared)
+        lock = self._make_lock_mock(
+            {
+                "owner/repo": self._make_locked_dep(
+                    skill_subset=None if root_skills == "undeclared" else root_skills
+                ),
+                "owner/parent": LockedDependency(repo_url="owner/parent"),
+            }
+        )
+
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        if root_skills is None:
+            assert result.passed is True
+        else:
+            assert result.details == [
+                "owner/repo: selection unverified -- the manifests that declare it "
+                "could not all be read"
+            ]
+
+    def test_transitive_marketplace_declaration_maps_to_its_locked_entry(self, tmp_path: Path):
+        """A parent's marketplace declaration reaches the locked package (#3735)."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        self._package_with_skills(tmp_path, "alpha", "beta")
+        self._parent_declaring(tmp_path, "    - name: tools\n      marketplace: mkt\n")
+        locked = self._make_locked_dep()
+        locked.discovered_via = "mkt"
+        locked.marketplace_plugin_name = "tools"
+        manifest = self._make_manifest_mock(
+            [
+                self._make_dep_ref("owner/repo", skill_subset=["alpha"]),
+                self._make_dep_ref("owner/parent"),
+            ]
+        )
+        lock = self._make_lock_mock(
+            {"owner/repo": locked, "owner/parent": LockedDependency(repo_url="owner/parent")}
+        )
+
+        # The parent's unrestricted marketplace edge absorbs the root's [alpha].
+        assert _check_skill_subset_consistency(manifest, lock, tmp_path).passed is True
+
+    def test_aliased_diamond_reads_the_locked_alias_location(self, tmp_path: Path):
+        """An edge with another alias still finds the node where the lock put it (#3735)."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        for name in ("alpha", "beta"):
+            skill = tmp_path / "apm_modules" / "bun-a" / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+        declared = DependencyReference.parse_from_dict(
+            {"git": "owner/repo", "alias": "bun-b", "skills": ["alpha"]}
+        )
+        locked = self._make_locked_dep(skill_subset=["alpha"])
+        locked.alias = "bun-a"
+        manifest = self._make_manifest_mock([declared])
+
+        result = _check_skill_subset_consistency(
+            manifest, self._make_lock_mock({"owner/repo": locked}), tmp_path
+        )
+        assert result.passed is True, result.details
+
     def test_marketplace_declaration_audits_under_its_locked_key(self, tmp_path: Path):
         """A marketplace declaration's selection is checked against its locked entry."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency

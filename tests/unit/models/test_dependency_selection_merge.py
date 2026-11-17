@@ -92,6 +92,14 @@ def test_unsupported_mode_fails_clearly() -> None:
         merge_edge_selections([edge, EdgeSelection((), ("beta",), None)])
 
 
+def test_explicitly_empty_selection_never_widens() -> None:
+    empty = EdgeSelection(("org/a",), (), None)
+    assert merge_edge_selections([empty, empty]).skill_subset == ()
+    assert merge_edge_selections([empty, EdgeSelection((), ("beta",), None)]).skill_subset == (
+        "beta",
+    )
+
+
 def test_union_names_ignores_unrestricted_inputs() -> None:
     assert union_selection_names(None, ("b",), ("a", "b")) == ("a", "b")
     assert union_selection_names(None, ()) is None

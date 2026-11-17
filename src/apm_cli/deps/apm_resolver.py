@@ -92,6 +92,11 @@ def _with_node_selection(dep_ref: DependencyReference, selection) -> DependencyR
         allow_insecure=selection.allow_insecure,
         selection_contributors=selection.contributors,
     )
+    binding = dep_ref.replacement
+    if binding is not None:
+        # The lockfile records a replaced node through its original request,
+        # so the original carries the node's merged selection too.
+        binding.original = replace(binding.original, skill_subset=skills, target_subset=targets)
     # Download callbacks annotate the node reference with non-field state
     # (for example ``resolved_reference``); keep it on the merged reference.
     declared = {item.name for item in fields(dep_ref)}

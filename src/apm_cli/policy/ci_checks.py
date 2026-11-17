@@ -425,12 +425,18 @@ def _check_skill_subset_consistency(
         selection = declared.selections.get(key)
         expected_skills = list(selection.skill_subset or ()) if selection else []
         expected_targets = list(selection.target_subset or ()) if selection else []
-        if selection is None or not declared.complete:
-            if lock_skills or lock_targets or expected_skills or expected_targets:
-                mismatches.append(
-                    f"{key}: selection unverified -- the manifests that declare it could "
-                    "not all be read"
-                )
+        # An unrestricted declaration absorbs any declaration the walk could
+        # not read, so only then is an incomplete walk still conclusive.
+        absorbed = (
+            selection is not None
+            and selection.skill_subset is None
+            and selection.target_subset is None
+        )
+        if selection is None or (not declared.complete and not absorbed):
+            mismatches.append(
+                f"{key}: selection unverified -- the manifests that declare it could "
+                "not all be read"
+            )
             continue
         if lock_skills != expected_skills:
             mismatches.append(

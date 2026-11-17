@@ -246,3 +246,23 @@ def test_actual_resolver_frozen_fork_does_not_reuse_same_ref_upstream_pin(tmp_pa
     )
     assert not graph.is_valid()
     assert "selected replacement source" in "\n".join(graph.resolution_errors)
+
+
+def test_replaced_diamond_locks_the_merged_selection(tmp_path: Path) -> None:
+    """A replaced node records the union of every edge's skills (#3735)."""
+    factory = LocalPackageFactory(tmp_path)
+    factory.create("local-base")
+    nested = LocalPackageFactory(tmp_path / "nested")
+    nested.create("parent", dependencies=({"git": _UPSTREAM, "skills": ["beta"]},))
+    consumer = factory.create(
+        "consumer",
+        dependencies=({"git": _UPSTREAM, "skills": ["alpha"]}, "../nested/parent"),
+    )
+    _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local-base"}}])
+
+    graph = APMDependencyResolver(read_only=True).resolve_dependencies(consumer.root)
+    assert graph.is_valid(), graph.resolution_errors
+    node = graph.dependency_tree.get_node("example/base")
+    locked = LockedDependency.from_dependency_ref(node.dependency_ref, None, 1, None)
+    assert locked.skill_subset == ["alpha", "beta"]
+    assert locked.to_dependency_ref().skill_subset == ["alpha", "beta"]

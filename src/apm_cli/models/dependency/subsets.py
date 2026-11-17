@@ -135,7 +135,8 @@ def _merge_field(values: Iterable[tuple[str, ...] | None]) -> tuple[str, ...] | 
     collected = list(values)
     if any(value is None for value in collected):
         return None
-    return union_selection_names(*collected)
+    # An explicitly empty selection stays empty; it never widens to "all".
+    return tuple(sorted({str(name) for value in collected for name in value}))
 
 
 def _normalized(subset: Iterable[object] | None) -> tuple[str, ...] | None:

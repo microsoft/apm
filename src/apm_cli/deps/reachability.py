@@ -126,6 +126,28 @@ class DeclaredSelections:
 _WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...]]
 
 
+def _locked_marketplace_form(
+    ref: DependencyReference,
+    lockfile: LockFile,
+    marketplace_index: dict,
+) -> DependencyReference:
+    """Return the locked coordinates a marketplace declaration resolved to.
+
+    The walk is offline, so it cannot ask the marketplace again; the lockfile's
+    discovery association names the package install materialized. The edge's
+    own selection and alias are kept.
+    """
+    locked = lockfile.get_dependency(ref.get_unique_key(), marketplace_index=marketplace_index)
+    if locked is None:
+        return ref
+    return replace(
+        locked.to_dependency_ref(),
+        skill_subset=ref.skill_subset,
+        target_subset=ref.target_subset,
+        alias=ref.alias,
+    )
+
+
 def _join_local(anchor: Path, local_path: str) -> Path:
     """Resolve *local_path* against *anchor*; absolute paths bypass it.
 
@@ -254,8 +276,12 @@ def compute_forward_reachable_keys(
     edge_selections: dict[str, list[EdgeSelection]] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
+    marketplace_index = lockfile.marketplace_index()
+
     while queue or dev_queue:
         ref, anchor, parent_repo_url, is_dev, chain = (queue or dev_queue).popleft()
+        if ref.is_marketplace:
+            ref = _locked_marketplace_form(ref, lockfile, marketplace_index)
         try:
             ref = replacement_index.bind(
                 ref,
@@ -305,8 +331,16 @@ def compute_forward_reachable_keys(
                     )
             manifest_dir = real_dir
         else:
+            locked = lockfile.dependencies.get(ref.get_unique_key())
+            # Several edges may alias one node; it is materialized where the
+            # locked alias put it, not where this edge's alias would.
+            path_ref = (
+                replace(ref, alias=locked.alias)
+                if locked is not None and locked.alias != ref.alias
+                else ref
+            )
             try:
-                install_path = installed_package_path(ref, apm_modules_dir)
+                install_path = installed_package_path(path_ref, apm_modules_dir)
             except ValueError as exc:
                 # Unresolved marketplace ref or an install path that
                 # escapes apm_modules_dir (PathTraversalError, a ValueError
@@ -393,28 +427,13 @@ def declared_node_selections(
     shrink survivors' selections; ``apm audit`` uses it as the expected value
     for every locked dependency.
     """
-    marketplace_index = lockfile.marketplace_index()
-
-    def locked_form(ref: DependencyReference) -> DependencyReference:
-        if not ref.is_marketplace:
-            return ref
-        locked = lockfile.get_dependency(ref.get_unique_key(), marketplace_index=marketplace_index)
-        if locked is None:
-            return ref
-        return replace(
-            locked.to_dependency_ref(),
-            skill_subset=ref.skill_subset,
-            target_subset=ref.target_subset,
-            alias=ref.alias,
-        )
-
     walk = compute_forward_reachable_keys(
         lockfile,
         project_root,
         apm_modules_dir,
-        [locked_form(ref) for ref in direct_refs],
+        list(direct_refs),
         frozenset(dep.get_unique_key() for dep in lockfile.get_package_dependencies()),
-        dev_refs=[locked_form(ref) for ref in dev_refs],
+        dev_refs=dev_refs,
     )
     return DeclaredSelections(
         selections={
