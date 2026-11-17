@@ -130,12 +130,14 @@ class TestHermesConfigPath(unittest.TestCase):
         expected = (fake_home / ".hermes" / "config.yaml").resolve(strict=False)
         self.assertEqual(path, expected)
 
-    def test_hermes_home_override(self):
-        adapter = HermesClientAdapter()
-        with patch.dict("os.environ", {"HERMES_HOME": "/custom/hermes"}):
-            path = Path(adapter.get_config_path())
-        expected = Path("/custom/hermes").expanduser().resolve(strict=False) / "config.yaml"
-        self.assertEqual(path, expected)
+
+@pytest.mark.windows_compat
+def test_hermes_home_override(tmp_path, monkeypatch):
+    # A tmp_path root is absolute on every OS; a POSIX literal is relative on Windows.
+    custom = tmp_path / "custom" / "hermes"
+    monkeypatch.setenv("HERMES_HOME", str(custom))
+    path = Path(HermesClientAdapter().get_config_path())
+    assert path == custom.resolve(strict=False) / "config.yaml"
 
 
 class TestHermesUpdateConfig(unittest.TestCase):
@@ -323,6 +325,7 @@ def hermes(tmp_path, monkeypatch) -> HermesClientAdapter:
     return HermesClientAdapter()
 
 
+@pytest.mark.windows_compat
 def test_stdio_render_keeps_cwd_and_passthrough_keys(hermes) -> None:
     assert hermes.render_server_config(_info(_STDIO)) == {
         "command": "node",
@@ -335,6 +338,7 @@ def test_stdio_render_keeps_cwd_and_passthrough_keys(hermes) -> None:
     }
 
 
+@pytest.mark.windows_compat
 def test_sse_render_sets_transport_and_keeps_auth(hermes) -> None:
     # Denylisted aliases (serverUrl, enabled) never reach the entry.
     assert hermes.render_server_config(_info(_SSE)) == {
@@ -345,6 +349,7 @@ def test_sse_render_sets_transport_and_keeps_auth(hermes) -> None:
     }
 
 
+@pytest.mark.windows_compat
 def test_streamable_http_render_has_no_transport_key(hermes) -> None:
     assert hermes.render_server_config(_info(_HTTP)) == {
         "url": "https://http.example.invalid/mcp",
@@ -353,12 +358,14 @@ def test_streamable_http_render_has_no_transport_key(hermes) -> None:
     }
 
 
+@pytest.mark.windows_compat
 def test_registry_sse_remote_sets_transport(hermes) -> None:
     info = {"name": "srv", "id": "", "remotes": [{"type": "sse", "url": "https://r.invalid"}]}
     rendered = hermes.render_server_config(info)
     assert rendered == {"url": "https://r.invalid", "transport": "sse", "enabled": True}
 
 
+@pytest.mark.windows_compat
 def test_write_preserves_unrelated_keys_and_foreign_servers(hermes, tmp_path) -> None:
     path = tmp_path / "hermes-home" / "config.yaml"
     path.parent.mkdir()
@@ -378,6 +385,7 @@ def test_write_preserves_unrelated_keys_and_foreign_servers(hermes, tmp_path) ->
     assert data["mcp_servers"]["fidelity-sse"]["transport"] == "sse"
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize("declaration", [_STDIO, _SSE], ids=["stdio-cwd", "sse"])
 def test_v036_write_heals_and_foreign_edit_is_preserved(hermes, declaration) -> None:
     from apm_cli.install.mcp.ownership import (

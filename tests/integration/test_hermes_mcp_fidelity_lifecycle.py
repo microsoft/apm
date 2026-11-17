@@ -18,7 +18,12 @@ import yaml
 from tests.integration._harness_output_kit import HarnessScene, describe
 from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.windows_compat,
+]
 
 _SSE_URL = "https://sse.example.invalid/sse"
 _HTTP_URL = "https://http.example.invalid/mcp"
