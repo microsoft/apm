@@ -33,6 +33,13 @@ DUAL_SERVER = {
     "packages": [{"registry_name": "npm", "name": "dual-server"}],
     "remotes": [{"type": "sse", "url": "https://dual.example/sse"}],
 }
+MULTI_REMOTE_SERVER = {
+    "name": "io.example/multi-remote",
+    "remotes": [
+        {"type": "sse", "url": "https://multi.example/sse"},
+        {"type": "streamable-http", "url": "https://multi.example/mcp"},
+    ],
+}
 
 
 class _FakeClient:
@@ -173,10 +180,24 @@ class TestDeclaredTransport:
         effective = resolution.resolve_effective_mcp_transports([dep])
         assert effective == {DUAL_SERVER["name"]: frozenset({"stdio"})}
 
+    def test_undeclared_multi_remote_server_is_judged_on_the_written_remote(self, fake_registry):
+        fake_registry["servers"][MULTI_REMOTE_SERVER["name"]] = MULTI_REMOTE_SERVER
+        dep = MCPDependency.from_string(MULTI_REMOTE_SERVER["name"])
+        result = run_dependency_policy_checks(
+            [], policy=_policy("stdio", "streamable-http"), mcp_deps=[dep]
+        )
+        assert _transport_check(result).details == [
+            "io.example/multi-remote: transport 'sse' not in allowed [stdio, streamable-http]"
+        ]
+
     @pytest.mark.parametrize("declared", ["http", "streamable-http"])
-    def test_declared_http_alias_matches_registry_remote(self, fake_registry, declared):
-        fake_registry["servers"][HTTP_SERVER["name"]] = HTTP_SERVER
-        dep = MCPDependency.from_dict({"name": HTTP_SERVER["name"], "transport": declared})
+    def test_declared_http_alias_picks_allowed_remote(self, fake_registry, declared):
+        """The documented remedy: `transport:` picks an allowed remote, `http` included."""
+        fake_registry["servers"][MULTI_REMOTE_SERVER["name"]] = MULTI_REMOTE_SERVER
+        dep = MCPDependency.from_dict({"name": MULTI_REMOTE_SERVER["name"], "transport": declared})
+        assert resolution.resolve_effective_mcp_transports([dep]) == {
+            MULTI_REMOTE_SERVER["name"]: frozenset({"streamable-http"})
+        }
         result = run_dependency_policy_checks(
             [], policy=_policy("stdio", "streamable-http"), mcp_deps=[dep]
         )

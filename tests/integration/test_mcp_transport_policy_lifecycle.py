@@ -83,7 +83,7 @@ class _Project:
         leaf.parent.mkdir(parents=True)
         dump_yaml({"name": "transport-leaf", "extends": "org/apm-policy.yml"}, leaf)
 
-    def write_manifest(self, mcp: list[str] | None = None) -> bytes:
+    def write_manifest(self, mcp: list[str | dict[str, str]] | None = None) -> bytes:
         manifest: dict[str, object] = {
             "name": "consumer",
             "version": "1.0.0",
@@ -229,3 +229,16 @@ def test_unreachable_registry_blocks_with_remedy(tmp_path: Path, apm_binary_path
     audit, checks = project.audit("transport-policy-unreachable-audit")
     assert audit.returncode == 1, audit.stdout + audit.stderr
     assert "is unreachable" in checks["mcp-transport"]["details"][0]
+
+    # audit --ci does not judge a declared registry transport offline either.
+    project.write_manifest([{"name": _SSE_NAME, "transport": "http"}])
+    declared_audit, checks = project.audit("transport-policy-unreachable-declared-audit")
+    assert checks["mcp-transport"]["passed"] is False, declared_audit.stdout
+    assert "effective transport unknown" in checks["mcp-transport"]["details"][0]
+
+    # enforcement: warn downgrades the unknown transport to a reported warning.
+    dump_yaml(dict(_POLICY, enforcement="warn"), project.root / "org" / "apm-policy.yml")
+    warned, checks = project.audit("transport-policy-unreachable-warn-audit")
+    assert checks["mcp-transport"]["passed"] is True, warned.stdout
+    assert checks["mcp-transport"]["message"].endswith("(enforcement: warn)")
+    assert "effective transport unknown" in checks["mcp-transport"]["details"][0]
