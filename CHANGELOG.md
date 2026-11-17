@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `apm init --discover` now explains that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` reported as `unsupported` stays in place and is not adopted as an APM package, and that copies outside known target directories such as `.claude/` are not inventoried; `apm compile` with no APM content notes that native files are not APM content and points to `apm init --discover`. Statuses, report keys and exit codes are unchanged. -- by @AndresDvst (#3737)
+
 ## [0.36.0] - 2026-11-17
 
 **Upgrade notes:** APM now requires Python 3.11 or newer for `pip`, `pipx` and `uv` installs; the standalone installers and prebuilt binaries are unaffected. After upgrading, run `apm install` once and commit the re-rendered files and `apm.lock.yaml` (export local edits with `apm export-patch` first), because `apm install --frozen` now fails closed when a deployed file differs from its locked hash (#3654). Packages that relied on `*-<target>-hooks.json` or `hooks-<target>.json` filenames to route hooks must declare the target in a package `apm.yml` instead, or consumers can narrow the dependency with `targets:`; see "Migrating from filename routing" in the hooks guide (#3613). Hostless policy patterns whose first segment contains a dot, such as `my.group/**`, are now read as hosts; rewrite them with their host, for example `gitlab.com/my.group/**` (#3606). Transitive MCP servers that set their own registry, env, headers, args or URL now need `--trust-transitive-mcp` on each `apm install` or `apm update`, because consent is no longer carried in the lockfile; and `ARTIFACTORY_APM_TOKEN` is only sent when `PROXY_REGISTRY_URL` is set, so set `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_TOKEN` (#3716).

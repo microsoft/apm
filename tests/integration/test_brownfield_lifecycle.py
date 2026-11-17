@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.models.dependency import DependencyReference
@@ -294,3 +295,62 @@ def test_global_declaration_reports_matching_install_scope(
         {"home": {".apm/apm.yml", ".apm/.apm-lifecycle.lock", *_DEPLOYMENT_ROOT_LOCK_PATHS}},
     )
     assert _declared_local_paths(onboarding.isolated.home / ".apm") == [str(source)]
+
+
+def test_native_only_context_stays_in_place_through_init_discover_and_compile(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Native context is listed, never adopted, copied or disclosed, and compile stays exit 1."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
+    root = isolated.work_root / "native-only"
+    (root / "demo-repo").mkdir(parents=True)
+    native = {
+        "CLAUDE.md": b"# Root memory\r\nPRIVATE-ROOT-CONTEXT\r\n",
+        "CLAUDE.local.md": b"PRIVATE-LOCAL-CONTEXT\n",
+        "demo-repo/CLAUDE.md": b"PRIVATE-NESTED-CONTEXT\n",
+    }
+    for relative, payload in native.items():
+        (root / relative).write_bytes(payload)
+    onboarding = _Onboarding(isolated, root, root, ApmLifecycleRunner((str(apm_binary_path),)))
+    onboarding.run(("init", "--yes"), "native-init")
+    assert (root / "apm.yml").is_file()
+    initialized = onboarding.artifacts()
+
+    reports = {
+        fmt: onboarding.run(("init", "--discover", "--format", fmt), f"native-discover-{fmt}")
+        for fmt in ("text", "json", "yaml")
+    }
+    for result in reports.values():
+        assert "PRIVATE-" not in result.stdout + result.stderr
+    findings = json.loads(reports["json"].stdout)["findings"]
+    assert [(item["path"], item["status"]) for item in findings] == [("CLAUDE.md", "unsupported")]
+    assert yaml.safe_load(reports["yaml"].stdout)["findings"] == findings
+    reason = findings[0]["reason"]
+    assert "Copies outside known target directories such as .claude/ are not inventoried" in reason
+    assert f"unsupported: CLAUDE.md -- {reason}" in " ".join(reports["text"].stdout.split())
+    assert_snapshot_set_unchanged(initialized, onboarding.artifacts())
+
+    onboarding.run(_APPLY, "native-apply")
+    applied = onboarding.artifacts()
+    assert_only_snapshot_paths_changed(
+        initialized,
+        applied,
+        {"home": {".apm/.apm-lifecycle.lock", *_DEPLOYMENT_ROOT_LOCK_PATHS}},
+    )
+    onboarding.run(_APPLY, "native-repeat-apply")
+    assert_snapshot_set_unchanged(applied, onboarding.artifacts())
+
+    compiled = onboarding.runner.run(
+        ("compile", "--validate"),
+        scenario_id="onboarding-native-compile",
+        cwd=root,
+        env=isolated.subprocess_env(),
+    )
+    output = " ".join((compiled.stdout + compiled.stderr).split())
+    assert compiled.returncode == 1, output
+    assert "No APM content found to compile" in output
+    assert "root context files (" in output
+    assert "CLAUDE.md" in output
+    assert "are not APM content and are never modified" in output
+    assert_snapshot_set_unchanged(applied, onboarding.artifacts())
+    assert {relative: (root / relative).read_bytes() for relative in native} == native

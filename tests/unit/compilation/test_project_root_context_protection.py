@@ -95,6 +95,30 @@ def test_partial_compile_reports_generated_and_retained_outputs(
     assert "retained 1 hand-authored context file" in " ".join(result.output.split())
 
 
+def test_validate_without_apm_content_explains_native_context_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native root files are not APM content; the exit stays 1 and the file stays."""
+    (tmp_path / "apm.yml").write_text(
+        "name: native-only\nversion: 1.0.0\ntargets: [claude]\n", encoding="utf-8"
+    )
+    (tmp_path / "CLAUDE.md").write_text(_MANUAL_CLAUDE, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile", "--validate"])
+
+    output = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert "No APM content found to compile" in output
+    assert "root context files (" in output
+    assert "CLAUDE.md" in output
+    assert "are not APM content and are never modified" in output
+    assert "apm init --discover" in output
+    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == _MANUAL_CLAUDE
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["CLAUDE.md", "apm.yml"]
+
+
 def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
     """Watch mode must not hide a protected-root result."""
     logger = Mock()
