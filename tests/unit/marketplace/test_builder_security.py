@@ -7,13 +7,19 @@ and override precedence.
 from __future__ import annotations
 
 import textwrap
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from apm_cli.marketplace.builder import (
     BuildOptions,
     MarketplaceBuilder,
+    ResolvedPackage,
     _subtract_plugin_root,
 )
 from apm_cli.marketplace.errors import BuildError, MarketplaceYmlError
@@ -263,3 +269,92 @@ def test_override_precedence_curator_wins(tmp_path: Path) -> None:
     plugin = doc["plugins"][0]
     assert plugin["description"] == "mine"
     assert plugin["version"] == "2.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Metadata enrichment keeps the GitHub credential on its origin (#3726)
+# ---------------------------------------------------------------------------
+
+
+class _MetadataOrigin(ThreadingHTTPServer):
+    daemon_threads = True
+    location: str | None = None
+    seen: list[dict[str, str]]
+
+
+class _MetadataHandler(BaseHTTPRequestHandler):
+    server: _MetadataOrigin
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        """Keep test output silent."""
+
+    def do_GET(self) -> None:
+        self.server.seen.append({k.lower(): v for k, v in self.headers.items()})
+        if self.server.location:
+            self.send_response(302)
+            self.send_header("Location", self.server.location)
+            body = b""
+        else:
+            self.send_response(200)
+            body = b"description: from the other origin\nversion: 9.9.9\n"
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@contextmanager
+def _metadata_origin(location: str | None = None) -> Iterator[_MetadataOrigin]:
+    server = _MetadataOrigin(("127.0.0.1", 0), _MetadataHandler)
+    server.location = location
+    server.seen = []
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_metadata_fetch_does_not_follow_redirect_to_another_origin(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "marketplace.yml",
+        """\
+        name: acme-tools
+        description: x
+        version: 1.0.0
+        owner:
+          name: ACME
+        packages:
+          - name: tool
+            source: acme/tool
+            ref: v1.0.0
+        """,
+    )
+    builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
+    package = ResolvedPackage(
+        name="tool",
+        source_repo="acme/tool",
+        subdir=None,
+        ref="v1.0.0",
+        sha="a" * 40,
+        requested_version=None,
+        tags=(),
+        is_prerelease=False,
+    )
+    with _metadata_origin() as other:
+        # ``localhost`` and ``127.0.0.1`` are distinct origins.
+        landing = f"http://localhost:{other.server_address[1]}/landing"
+        with _metadata_origin(landing) as api:
+            builder._host = "ghes.example.test"
+            builder._host_info = SimpleNamespace(
+                kind="ghes", api_base=f"http://127.0.0.1:{api.server_address[1]}/api/v3"
+            )
+            builder._github_token = "metadata-origin-sentinel"
+            outcome = builder._fetch_remote_metadata_outcome(package)
+
+    assert api.seen[0]["authorization"] == "token metadata-origin-sentinel"
+    assert all("authorization" not in headers for headers in other.seen)
+    assert other.seen == []
+    assert outcome.status == "failed"

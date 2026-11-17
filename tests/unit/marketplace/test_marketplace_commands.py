@@ -360,7 +360,7 @@ class TestMarketplaceAdd:
         requests_seen: list[str] = []
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 requests_seen.append(url)
                 return Response()
@@ -417,7 +417,7 @@ class TestMarketplaceAdd:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 return Response()
 
