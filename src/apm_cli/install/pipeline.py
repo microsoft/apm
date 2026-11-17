@@ -60,6 +60,7 @@ from .errors import (
     DirectDependencyError,
     FrozenInstallError,
     InstallFailureAlreadyRendered,
+    RequiredIntegrationError,
 )
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
@@ -383,6 +384,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     transaction: InstallTransaction | None = None,
     frozen: bool = False,
     trust_transitive_mcp: bool = False,
+    require_lsp_targets: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -554,6 +556,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         lockfile_only=lockfile_only,
         trust_bin=trust_bin,
         transaction=transaction,
+        require_lsp_targets=require_lsp_targets,
     )
 
     # ------------------------------------------------------------------
@@ -980,7 +983,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # the typed exception lets the caller render the policy message
         # as-is.
         raise
-    except (DirectDependencyError, FrozenInstallError):
+    except (DirectDependencyError, FrozenInstallError, RequiredIntegrationError):
         # #946: same pattern -- surface the message as-is instead of
         # double-wrapping it through the generic RuntimeError below.
         raise

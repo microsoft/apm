@@ -906,3 +906,110 @@ class TestOpenCodeLspIntegration:
             self._run(tmp_path, runtime="cursor", explicit_target="cursor")
 
         assert "--target copilot, --target claude or --target opencode" in str(exc_info.value)
+
+
+class TestLspCapabilityPreflight:
+    """Declared LSP with no capable target fails before any target write (#3727)."""
+
+    def _ctx(self, tmp_path, *, target="cursor", require=True):
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/lsp-kit")
+        package_dir = dep_ref.get_install_path(tmp_path / "apm_modules")
+        package_dir.mkdir(parents=True)
+        (package_dir / "apm.yml").write_text(
+            "name: lsp-kit\nversion: 1.0.0\ndependencies:\n  lsp:\n"
+            "    - name: kit-lsp\n      command: kit-ls\n"
+            "      extensionToLanguage:\n        .kit: kit\n",
+            encoding="utf-8",
+        )
+        root = MagicMock()
+        root.get_lsp_dependencies.return_value = []
+        root.scripts = {}
+        root.target = None
+        return SimpleNamespace(
+            require_lsp_targets=require,
+            lockfile_only=False,
+            apm_modules_dir=tmp_path / "apm_modules",
+            apm_package=root,
+            dependency_graph=None,
+            deps_to_install=[dep_ref],
+            project_root=tmp_path,
+            scope=InstallScope.PROJECT,
+            target_decision=EffectiveTargetDecision(target, "--target flag"),
+            target_override=target,
+        )
+
+    def test_transitive_lsp_without_capable_target_fails(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with (
+            patch("apm_cli.install.template._effective_allow", return_value=None),
+            pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
+        ):
+            preflight_lsp_targets(self._ctx(tmp_path))
+
+    def test_capable_target_passes(self, tmp_path) -> None:
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with patch("apm_cli.install.template._effective_allow", return_value=None):
+            preflight_lsp_targets(self._ctx(tmp_path, target="opencode"))
+
+    def test_untrusted_lsp_package_does_not_trip_the_gate(self, tmp_path) -> None:
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with patch("apm_cli.install.template._effective_allow", return_value={"other/pkg": {}}):
+            preflight_lsp_targets(self._ctx(tmp_path))
+
+    def test_callers_without_lsp_integration_skip_the_gate(self, tmp_path) -> None:
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        preflight_lsp_targets(self._ctx(tmp_path, require=False))
+
+    def test_service_integration_fails_before_any_mcp_write(self, tmp_path) -> None:
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.install.service_integration import run_service_integrations
+
+        context = SimpleNamespace(
+            project_root=tmp_path,
+            scope=InstallScope.PROJECT,
+            install_mode=InstallMode.ALL,
+            logger=_mock_logger(),
+            runtime=None,
+            exclude=None,
+            trust_transitive_mcp=False,
+            no_policy=True,
+            verbose=False,
+            force=False,
+            exec_allow_map=None,
+            exec_allow_resolved=True,
+        )
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("kit-lsp")]
+        package.scripts = {}
+        package.target = None
+        with (
+            patch("apm_cli.install.mcp.run_mcp_integration", return_value=(0, {})) as run_mcp,
+            pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
+        ):
+            run_service_integrations(
+                context,
+                apm_package=package,
+                mcp_deps=[],
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=None,
+                old_mcp_servers=set(),
+                old_mcp_configs={},
+                old_mcp_provenance={},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=True,
+                diagnostics=None,
+                explicit_target="cursor",
+                target_decision=EffectiveTargetDecision("cursor", "--target flag"),
+            )
+
+        run_mcp.assert_not_called()
+        assert list(tmp_path.iterdir()) == []

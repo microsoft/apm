@@ -116,6 +116,9 @@ class _LSPTargetSpec:
     # even with --force. A same-name server APM does not manage is a
     # collision that only --force overrides.
     shared_config: bool = False
+    # Shown once when APM creates the servers key, for a harness where that
+    # key has a side effect beyond the servers APM writes.
+    servers_key_created_note: str | None = None
 
     def user_root(self) -> Path:
         """Return the runtime's user root through the harness user-root owner."""
@@ -160,6 +163,7 @@ class _PreparedTargetConfig:
     path: Path
     content: str
     changed: builtins.set
+    created_servers_key: bool = False
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -209,6 +213,12 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
         entry_translator=_opencode_entry,
         created_defaults=(("$schema", _OPENCODE_SCHEMA_URL),),
         shared_config=True,
+        # https://opencode.ai/docs/lsp/: "If `lsp` is omitted, all LSP servers
+        # are disabled." "Use an object to keep built-ins enabled".
+        servers_key_created_note=(
+            "OpenCode enables its built-in language servers when the config has an "
+            "'lsp' object; set \"disabled\": true on a built-in server to turn it off"
+        ),
     ),
 }
 
@@ -469,9 +479,12 @@ class LSPIntegrator:
             )
             if claude_root or find_runtime_binary("claude") is not None:
                 candidates.append("claude")
-            if (project_root_path / ".opencode").is_dir() or find_runtime_binary(
-                "opencode"
-            ) is not None:
+            opencode_root = (
+                user_root_exists("opencode")
+                if user_scope
+                else (project_root_path / ".opencode").is_dir()
+            )
+            if opencode_root or find_runtime_binary("opencode") is not None:
                 candidates.append("opencode")
 
         if exclude:
@@ -568,8 +581,7 @@ class LSPIntegrator:
                 root = home
             elif root.is_symlink():
                 raise PathTraversalError(
-                    "Refusing deployment through a symlinked path component: "
-                    f"{root.as_posix()}"
+                    f"Refusing deployment through a symlinked path component: {root.as_posix()}"
                 )
         else:
             root = project_root
@@ -685,6 +697,7 @@ class LSPIntegrator:
                 )
             config[key] = value
         servers_key = spec.servers_key(user_scope=user_scope)
+        created_servers_key = servers_key is not None and servers_key not in config
 
         if servers_key is None:
             existing = config
@@ -732,6 +745,7 @@ class LSPIntegrator:
             path=config_path,
             content=json.dumps(config, indent=2) + "\n",
             changed=changed,
+            created_servers_key=created_servers_key,
         )
 
     @staticmethod
@@ -1042,6 +1056,8 @@ class LSPIntegrator:
                         logger.progress(
                             "  |-- run /reload-plugins or restart Claude Code to activate"
                         )
+                    if prepared.created_servers_key and spec.servers_key_created_note:
+                        logger.progress(spec.servers_key_created_note)
                 if runtime == "claude" and not user_scope:
                     legacy_path = project_root_path / ".lsp.json"
                     if legacy_path.exists():

@@ -164,6 +164,12 @@ APM does not write an `enabledPlugins` entry.
 }
 ```
 
+Adding an `lsp` object also turns on OpenCode's built-in language servers,
+because OpenCode disables all of them when `lsp` is omitted
+([OpenCode LSP docs](https://opencode.ai/docs/lsp/)). APM prints an `[i]` line
+when it creates the key. To keep a built-in server off, set
+`"disabled": true` on it, for example `"lsp": { "typescript": { "disabled": true } }`.
+
 ### OpenCode limitations
 
 OpenCode's `lsp` schema is narrower than the APM manifest, so APM translates
@@ -272,7 +278,10 @@ LSP integration writes configuration for supported runtimes and leaves
 the manifest schema runtime-neutral. Target selection follows the same
 effective decision as package and MCP installation: `--target` >
 `apm.yml targets:` > `apm config set target ...` > auto-detect. If LSP
-work is declared but no effective target supports LSP, or a native config
+work is declared but no effective target supports LSP, `apm install` and
+`apm update` exit non-zero before writing anything to the targets: no skills
+are deployed and `apm.lock.yaml`, `.gitignore` and MCP configs are unchanged
+(packages may already be downloaded to `apm_modules/`). If a native config
 write fails, install exits non-zero with a next step instead of reporting
 success.
 

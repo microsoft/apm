@@ -4,6 +4,7 @@ Mirrors the MCP integration pattern with runtime-neutral target selection.
 """
 
 import builtins
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,9 +13,12 @@ if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.context import InstallContext
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.lsp import LSPDependency
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+_log = logging.getLogger(__name__)
 
 _PROJECT_LSP_OWNER = "project:."
 _PACKAGE_LSP_OWNER_PREFIX = "package:"
@@ -24,6 +28,104 @@ _RESERVED_LSP_OWNER_PREFIXES = (
     _PACKAGE_LSP_OWNER_PREFIX,
     _BUNDLE_LSP_OWNER_PREFIX,
 )
+
+
+def require_lsp_capable_target(target_runtimes: list[str] | None, *, bundle: bool = False) -> None:
+    """Refuse declared LSP servers that no selected target can configure (#3727).
+
+    The single authority for the LSP capability gap. Install and update call
+    it from a preflight (:func:`preflight_lsp_targets`, or
+    :meth:`PreparedLspIntegration.require_capable_target`) before any target
+    write, so a failed install deploys no skills and changes no lockfile or
+    ``.gitignore``. It gates; it never rolls back.
+    """
+    if target_runtimes:
+        return
+    from apm_cli.install.errors import RequiredIntegrationError
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+    hint = LSPIntegrator.target_choice_hint()
+    if bundle:
+        raise RequiredIntegrationError(
+            "Bundle lsp.json cannot be configured because the resolved target set has "
+            f"no LSP-compatible runtime. Select {hint}."
+        )
+    raise RequiredIntegrationError(
+        "LSP dependencies are declared, but no effective target supports "
+        f"LSP configuration. Choose {hint}, then retry."
+    )
+
+
+def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
+    """Return whether the root or a resolved package declares a trusted LSP server.
+
+    Reads each downloaded package manifest; a package whose LSP executables
+    are not approved is skipped, as transitive LSP collection skips it later.
+    """
+    from types import SimpleNamespace
+
+    from apm_cli.install.exec_gate import check_executable_approval
+    from apm_cli.install.template import _effective_allow
+    from apm_cli.models.apm_package import APMPackage
+
+    if ctx.apm_package.get_lsp_dependencies():
+        return True
+    graph = ctx.dependency_graph
+    dependencies = (
+        graph.flattened_dependencies.get_installation_list()
+        if graph is not None
+        else ctx.deps_to_install
+    )
+    allow_map = None
+    allow_resolved = False
+    for dep_ref in dependencies:
+        manifest = dep_ref.get_install_path(ctx.apm_modules_dir) / "apm.yml"
+        try:
+            declared = (
+                manifest.is_file() and APMPackage.from_apm_yml(manifest).get_lsp_dependencies()
+            )
+        except Exception:
+            _log.debug("Skipping unreadable package manifest %s", manifest, exc_info=True)
+            continue
+        if not declared:
+            continue
+        if not allow_resolved:
+            allow_map, allow_resolved = _effective_allow(ctx), True
+        package_info = SimpleNamespace(dependency_ref=dep_ref)
+        if check_executable_approval(dep_ref.get_unique_key(), package_info, allow_map)[4]:
+            return True
+    return False
+
+
+def preflight_lsp_targets(ctx: "InstallContext") -> None:
+    """Fail an install before its first target write when LSP has no capable target.
+
+    The pipeline runs this after packages are downloaded (their manifests are
+    readable) and before the integrate phase deploys anything (#3727).
+    """
+    if getattr(ctx, "require_lsp_targets", False) is not True or ctx.lockfile_only:
+        return
+    if not _graph_declares_trusted_lsp(ctx):
+        return
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.models.apm_package import canonical_package_target_config
+
+    decision = ctx.target_decision
+    apm_config = {
+        "scripts": ctx.apm_package.scripts or {},
+        **canonical_package_target_config(ctx.apm_package),
+    }
+    require_lsp_capable_target(
+        LSPIntegrator.resolve_target_runtimes(
+            project_root=ctx.project_root,
+            user_scope=ctx.scope is InstallScope.USER,
+            apm_config=apm_config,
+            explicit_target=decision.value if decision is not None else ctx.target_override,
+            target_decision=decision,
+            scope=ctx.scope,
+        )
+    )
 
 
 def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
@@ -135,13 +237,8 @@ def run_owned_lsp_integration(
     for names in new_targets.values():
         names.difference_update(old_owned)
     supported_target_runtimes = LSPIntegrator.supported_target_runtimes(target_runtimes)
-    if dependencies and not supported_target_runtimes:
-        from apm_cli.install.errors import RequiredIntegrationError
-
-        raise RequiredIntegrationError(
-            "Bundle lsp.json cannot be configured because the resolved target set has "
-            f"no LSP-compatible runtime. Select {LSPIntegrator.target_choice_hint()}."
-        )
+    if dependencies:
+        require_lsp_capable_target(supported_target_runtimes, bundle=True)
     for runtime in supported_target_runtimes:
         new_targets.setdefault(runtime, set()).update(
             LSPIntegrator.expressible_server_names(dependencies, runtime)
@@ -253,6 +350,14 @@ class PreparedLspIntegration:
 
     dependencies: list["LSPDependency"]
     target_runtimes: list[str] | None
+
+    def require_capable_target(self) -> None:
+        """Fail before the caller writes MCP or LSP config when no target fits.
+
+        ``target_runtimes`` is ``None`` when LSP is not being installed.
+        """
+        if self.dependencies and self.target_runtimes is not None:
+            require_lsp_capable_target(self.target_runtimes)
 
 
 def prepare_lsp_integration(
@@ -448,13 +553,8 @@ def run_lsp_integration(  # noqa: PLR0913
             )
 
         if lsp_deps:
-            if not target_runtimes and fail_on_write_error:
-                from apm_cli.install.errors import RequiredIntegrationError
-
-                raise RequiredIntegrationError(
-                    "LSP dependencies are declared, but no effective target supports "
-                    f"LSP configuration. Choose {LSPIntegrator.target_choice_hint()}, then retry."
-                )
+            if fail_on_write_error:
+                require_lsp_capable_target(target_runtimes)
             lsp_count = LSPIntegrator.install(
                 lsp_deps,
                 project_root=project_root,

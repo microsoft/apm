@@ -54,6 +54,10 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
 )
+from scripts.architecture_linter.checks.install_lsp_capability_gate import (
+    GUARD_LSP_CAPABILITY_GATE,
+    check_lsp_capability_gate,
+)
 from scripts.architecture_linter.checks.install_lsp_plugin import (
     GUARD_CONSUMER_MANIFEST_REWRITE,
     GUARD_EXECUTABLE_TRUST,
@@ -236,6 +240,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LSP_LIFECYCLE,
         "LSP collection and reconciliation route through install/lsp/integration.py.",
         check_lsp_lifecycle,
+    ),
+    _rule(
+        GUARD_LSP_CAPABILITY_GATE,
+        "Declared LSP without a capable target fails before any target write.",
+        check_lsp_capability_gate,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,

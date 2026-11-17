@@ -927,6 +927,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-lsp-capability-gate",
+        rule_id="install-deployment-lsp-capability-gate",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="    preflight_lsp_targets(ctx)\n",
+        new="",
+        intent="The integrate phase deploys packages without the LSP capability gate.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",

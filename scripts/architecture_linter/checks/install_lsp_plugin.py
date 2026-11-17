@@ -144,7 +144,8 @@ def check_lsp_target_contract(provider: FactsProvider) -> tuple[Violation, ...]:
             _LSP_INTEGRATOR: (
                 "def _prepare_target_config(",
                 "prepared_targets.append((runtime, spec, prepared))",
-                "parts = spec.user_relative_path if user_scope else spec.project_relative_path",
+                "root = spec.user_root()",
+                "relative = Path(*spec.project_relative_path)",
                 "return BaseIntegrator.resolve_deploy_path(",
                 "allowed_prefixes=(relative_path,)",
                 "locked_dependency_approval_keys(locked_dependency)",

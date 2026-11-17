@@ -1942,6 +1942,7 @@ def _install_apm_packages(ctx, outcome):
                 refresh=ctx.refresh,
                 trust_bin=ctx.trust_bin,
                 transaction=ctx.transaction,
+                require_lsp_targets=ctx.install_mode is InstallMode.ALL,
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(
@@ -1975,9 +1976,9 @@ def _install_apm_packages(ctx, outcome):
             raise
         except click.UsageError:
             raise
-        except CopilotSettingsCollisionError as e:
-            # Dependencies installed cleanly; only the Copilot settings merge
-            # collided. Surface the already-actionable message verbatim (no
+        except (CopilotSettingsCollisionError, RequiredIntegrationError) as e:
+            # A Copilot settings merge collision or the LSP capability gate.
+            # Surface the already-actionable message verbatim (no
             # "Failed to install..." prefix) and keep the raw decoder detail,
             # when present, behind --verbose.
             logger.error(str(e))

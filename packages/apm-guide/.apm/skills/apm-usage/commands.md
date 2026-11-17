@@ -424,6 +424,11 @@ same personal-scope plugin shape at
 `$CLAUDE_CONFIG_DIR/skills/apm-lsp/.claude-plugin/plugin.json` (default
 `~/.claude/...`); global Copilot LSP installs write
 `$COPILOT_HOME/lsp-config.json` (default `~/.copilot/lsp-config.json`).
+`--target opencode` writes the `lsp` key of `opencode.json` (global:
+`~/.config/opencode/opencode.json`); creating that key also enables
+OpenCode's built-in language servers. Declared LSP servers with no
+LSP-capable target (for example `--target cursor`) fail before any target
+write.
 
 For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
 `$COPILOT_HOME/mcp-config.json` with `--global` (or

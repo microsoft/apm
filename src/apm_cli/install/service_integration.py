@@ -84,17 +84,42 @@ def run_service_integrations(
             user_scope=ctx.scope is InstallScope.USER,
         )
 
+    from apm_cli.install.lsp.integration import prepare_lsp_integration
+    from apm_cli.models.apm_package import canonical_package_target_config
+
     apm_modules_path = get_modules_dir(ctx.scope)
+    apm_config = {
+        "scripts": apm_package.scripts or {},
+        **canonical_package_target_config(apm_package),
+    }
+    selected_target = target_decision.value if target_decision else explicit_target
+    # Declared LSP without a capable target fails here, before any MCP or LSP
+    # write (#3727).
+    prepared_lsp = prepare_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        project_root=ctx.project_root,
+        should_install=should_install_lsp,
+        existing_lock=existing_lock,
+        diagnostics=diagnostics,
+        executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
+        no_policy=ctx.no_policy,
+        user_scope=ctx.scope is InstallScope.USER,
+        runtime=ctx.runtime,
+        exclude=ctx.exclude,
+        target_context=(apm_config, selected_target, ctx.scope),
+        target_decision=target_decision,
+        logger=ctx.logger,
+    )
+    prepared_lsp.require_capable_target()
     prepared_mcp = None
-    prepared_lsp = None
     if getattr(ctx, "frozen", False) is True:
-        from apm_cli.install.lsp.integration import prepare_lsp_integration
         from apm_cli.install.mcp.integration import prepare_mcp_integration
         from apm_cli.install.service import InstallService
         from apm_cli.integration.lsp_integrator import LSPIntegrator
         from apm_cli.integration.mcp_integrator import MCPIntegrator
         from apm_cli.integration.mcp_integrator_install import _resolve_target_runtimes
-        from apm_cli.models.apm_package import canonical_package_target_config
 
         prepared_mcp = prepare_mcp_integration(
             apm_package=apm_package,
@@ -110,28 +135,6 @@ def run_service_integrations(
             project_root=ctx.project_root,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             no_policy=ctx.no_policy,
-        )
-        apm_config = {
-            "scripts": apm_package.scripts or {},
-            **canonical_package_target_config(apm_package),
-        }
-        selected_target = target_decision.value if target_decision else explicit_target
-        prepared_lsp = prepare_lsp_integration(
-            apm_package=apm_package,
-            apm_modules_path=apm_modules_path,
-            lock_path=lock_path,
-            project_root=ctx.project_root,
-            should_install=should_install_lsp,
-            existing_lock=existing_lock,
-            diagnostics=diagnostics,
-            executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
-            no_policy=ctx.no_policy,
-            user_scope=ctx.scope is InstallScope.USER,
-            runtime=ctx.runtime,
-            exclude=ctx.exclude,
-            target_context=(apm_config, selected_target, ctx.scope),
-            target_decision=target_decision,
-            logger=ctx.logger,
         )
         mcp_targets = (
             _resolve_target_runtimes(
