@@ -4,8 +4,9 @@ An install selects where skills land: the converged ``.agents/skills`` root
 (default) or each client's own root (``--legacy-skill-paths`` /
 ``APM_LEGACY_SKILL_PATHS``). Nothing persists that choice except the deployed
 paths the lockfile records, so every later flagless rebuild of recorded
-deployments (audit drift replay, uninstall cleanup and survivor
-re-integration) recovers the layout from those paths here.
+deployments (audit drift replay, uninstall survivor re-integration) recovers
+the layout from those paths here, and cleanup of recorded paths recognises
+both layouts.
 """
 
 from __future__ import annotations
@@ -25,7 +26,8 @@ def _records_legacy_skill_layout(profile: TargetProfile, recorded: tuple[str, ..
     mapping = profile.primitives.get("skills")
     if mapping is None or mapping.deploy_root is None:
         return False
-    prefix = f"{profile.root_dir}/{mapping.subdir}/".replace("\\", "/")
+    legacy = _targets.apply_legacy_skill_paths([profile])[0]
+    prefix = f"{legacy.skills_rel_root}/".replace("\\", "/")
     return any(path.startswith(prefix) for path in recorded)
 
 
@@ -54,6 +56,22 @@ def resolve_skill_layout(
         else profile
         for profile in profiles
     ]
+
+
+def with_every_skill_layout(targets: Iterable[TargetProfile]) -> list[TargetProfile]:
+    """Return *targets* plus the per-client skill layout of each converged target.
+
+    Cleanup of recorded skill paths must recognise both layouts: a lockfile
+    can hold paths from either, while a rebuild picks exactly one.
+    """
+    profiles = list(targets)
+    converged = [
+        profile
+        for profile in profiles
+        if (mapping := profile.primitives.get("skills")) is not None
+        and mapping.deploy_root is not None
+    ]
+    return profiles + _targets.apply_legacy_skill_paths(converged)
 
 
 def recorded_deployed_paths(lockfile: LockFile | None) -> tuple[str, ...]:
@@ -89,4 +107,5 @@ __all__ = [
     "recorded_deployed_paths",
     "resolve_reintegration_targets",
     "resolve_skill_layout",
+    "with_every_skill_layout",
 ]

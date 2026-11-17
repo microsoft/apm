@@ -31,6 +31,7 @@ _BLIND_RESOLVER = "resolve_targets"
 
 # Modules that rebuild or clean recorded skill deployments without the flag.
 REBUILD_MODULES: tuple[str, ...] = (
+    "src/apm_cli/commands/export_patch.py",
     "src/apm_cli/commands/uninstall/cli.py",
     "src/apm_cli/commands/uninstall/engine.py",
     "src/apm_cli/install/audit_replay.py",

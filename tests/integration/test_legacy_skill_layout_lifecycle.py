@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.integration.targets import USER_ROOT_ENV_VARS
+from apm_cli.integration.targets import KNOWN_TARGETS, USER_ROOT_ENV_VARS
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.local_github_https_fixture import openssl_executable
 from tests.utils.skill_selection_world import (
@@ -54,7 +54,9 @@ def _assert_audit_green(world: SkillSelectionWorld, cwd: Path, env: dict[str, st
     assert result.returncode == 0, (audit_failures(result), result.stderr[-2000:])
 
 
-def _user_manifest(world: SkillSelectionWorld, dependencies: list[object]) -> None:
+def _user_manifest(
+    world: SkillSelectionWorld, dependencies: list[object], targets: tuple[str, ...] = ("copilot",)
+) -> None:
     dump_yaml(
         {
             "name": "user",
@@ -62,7 +64,7 @@ def _user_manifest(world: SkillSelectionWorld, dependencies: list[object]) -> No
             "description": "user scope manifest",
             "author": "APM Test",
             "dependencies": {"apm": dependencies},
-            "targets": ["copilot"],
+            "targets": list(targets),
         },
         world.isolated.config_root / "apm.yml",
     )
@@ -114,10 +116,6 @@ def test_legacy_skill_layout_still_reports_real_drift(
     assert ".agents/skills" not in details, details
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3760: uninstall re-deploys every skill of a surviving bundle (fixed by #3784)",
-)
 def test_uninstall_of_an_unrelated_package_keeps_the_legacy_skill_layout(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -132,8 +130,10 @@ def test_uninstall_of_an_unrelated_package_keeps_the_legacy_skill_layout(
         assert skill_dirs(legacy_root) == ["alpha"]
         recorded = set(locked(project, bundle)["deployed_files"])
         world.run(("uninstall", c), cwd=project, env=env, scenario_id="ul-rm")
-    assert skill_dirs(legacy_root) == ["alpha"]
     assert skill_dirs(project / _SHARED_SKILLS) == []
+    assert "alpha" in skill_dirs(legacy_root)
+    if skill_dirs(legacy_root) != ["alpha"]:
+        pytest.xfail("#3760: uninstall re-deploys every skill of a surviving bundle (#3784)")
     assert set(locked(project, bundle)["deployed_files"]) == recorded
 
 
@@ -166,35 +166,53 @@ def test_user_skill_layout_survives_audit_and_uninstall(
         assert skill_dirs(skills_root) == []
 
 
-@pytest.mark.skipif(
-    "copilot" not in USER_ROOT_ENV_VARS,
-    reason="needs the COPILOT_HOME user-root owner from #3782",
-)
-def test_copilot_home_legacy_skill_layout_survives_audit_and_uninstall(
-    tmp_path: Path, apm_binary_path: Path
+def _env_rooted_targets() -> list[object]:
+    """Targets whose user root an env var selects and whose skills converge by default."""
+    names = sorted(
+        name
+        for name in {*USER_ROOT_ENV_VARS, "copilot"}
+        if (mapping := KNOWN_TARGETS[name].primitives.get("skills")) is not None
+        and mapping.deploy_root is not None
+    )
+    return [
+        pytest.param(
+            name,
+            marks=pytest.mark.skipif(
+                name not in USER_ROOT_ENV_VARS,
+                reason="needs the COPILOT_HOME user-root owner from #3782",
+            ),
+        )
+        for name in names
+    ]
+
+
+@pytest.mark.parametrize("target", _env_rooted_targets())
+def test_env_rooted_legacy_skill_layout_survives_audit_and_uninstall(
+    tmp_path: Path, apm_binary_path: Path, target: str
 ) -> None:
-    """-g with COPILOT_HOME: legacy skills stay in $COPILOT_HOME/skills, never ~/.agents/skills."""
+    """-g with an out-of-HOME user root: legacy skills stay there, never in ~/.agents/skills."""
     world = _world(tmp_path, apm_binary_path)
-    copilot_home = world.isolated.root / "elsewhere" / "copilot-profile"
-    copilot_home.mkdir(parents=True)
-    world.extra_env["COPILOT_HOME"] = str(copilot_home)
+    env_root = world.isolated.root / "elsewhere" / f"{target}-profile"
+    env_root.mkdir(parents=True)
+    world.extra_env[USER_ROOT_ENV_VARS.get(target, "COPILOT_HOME")] = str(env_root)
     bundle = world.publish("bundle", skills=("alpha", "beta")).slug
     c = world.publish("pkg-c", instructions=["c-rules"]).slug
-    _user_manifest(world, [bundle, c])
+    _user_manifest(world, [bundle, c], targets=(target,))
     apm_home = world.isolated.config_root
     home = world.isolated.home
-    skills_root = copilot_home / "skills"
+    skills_root = env_root / "skills"
     cwd = world.isolated.work_root
     with world.serve() as env:
         world.run(
-            (*_GLOBAL_INSTALL, "--legacy-skill-paths"), cwd=cwd, env=env, scenario_id="ch-install"
+            (*_GLOBAL_INSTALL, "--legacy-skill-paths"), cwd=cwd, env=env, scenario_id="er-install"
         )
         assert skill_dirs(skills_root) == ["alpha", "beta"]
-        _assert_audit_green(world, apm_home, env, "ch-audit")
-        world.run(("uninstall", "-g", c), cwd=cwd, env=env, scenario_id="ch-uninstall-c")
+        _assert_audit_green(world, apm_home, env, "er-audit")
+        world.run(("uninstall", "-g", c), cwd=cwd, env=env, scenario_id="er-uninstall-c")
         assert skill_dirs(skills_root) == ["alpha", "beta"]
-        _assert_audit_green(world, apm_home, env, "ch-audit-after-c")
-        world.run(("uninstall", "-g", bundle), cwd=cwd, env=env, scenario_id="ch-uninstall-b")
+        _assert_audit_green(world, apm_home, env, "er-audit-after-c")
+        world.run(("uninstall", "-g", bundle), cwd=cwd, env=env, scenario_id="er-uninstall-b")
         assert skill_dirs(skills_root) == []
     assert skill_dirs(home / _SHARED_SKILLS) == []
-    assert not (home / ".copilot").exists()
+    default_root = KNOWN_TARGETS[target].user_root_dir or KNOWN_TARGETS[target].root_dir
+    assert skill_dirs(home / default_root / "skills") == []

@@ -448,6 +448,20 @@ class TestDefaultSkillRouting:
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
 
 
+def _converged_skill_profiles():
+    """Yield (profile, legacy profile) for every scope with a distinct legacy skill root."""
+    from apm_cli.integration.targets import apply_legacy_skill_paths
+
+    for name, base in sorted(KNOWN_TARGETS.items()):
+        for user_scope in (False, True):
+            profile = None if base.user_root_resolver else base.for_scope(user_scope=user_scope)
+            if profile is None or profile.primitives.get("skills") is None:
+                continue
+            legacy = apply_legacy_skill_paths([profile])[0]
+            if legacy.skills_rel_root != profile.skills_rel_root:
+                yield pytest.param(profile, legacy, id=f"{name}-{user_scope}")
+
+
 class TestRecordedSkillLayout:
     """Re-integration recovers the skill layout the install recorded (#3773)."""
 
@@ -513,6 +527,14 @@ class TestRecordedSkillLayout:
         )
         targets = resolve_audit_targets(tmp_path, lockfile=lock)
         assert self._roots(targets) == {"copilot": expected}
+
+    @pytest.mark.parametrize(("profile", "legacy"), list(_converged_skill_profiles()))
+    def test_every_converged_target_recovers_its_recorded_layout(self, profile, legacy):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        for root in (legacy.skills_rel_root, profile.skills_rel_root):
+            recovered = resolve_skill_layout([profile], recorded_paths=[f"{root}/alpha/SKILL.md"])
+            assert recovered[0].skills_rel_root == root
 
 
 class TestGrokCloudTarget:

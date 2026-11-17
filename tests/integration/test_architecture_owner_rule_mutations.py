@@ -1076,8 +1076,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-skill-layout",
         rule_id="install-deployment-skill-layout",
         path="src/apm_cli/commands/uninstall/engine.py",
-        old="_resolved_targets = resolve_reintegration_targets(",
-        new="_resolved_targets = resolve_targets(",
+        old="_base_targets = resolve_reintegration_targets(",
+        new="_base_targets = resolve_targets(",
         intent="Uninstall rebuilds survivors without recovering the recorded skill layout.",
     ),
     MutationCase(
