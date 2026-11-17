@@ -28,6 +28,7 @@ from apm_cli.deps.download_strategies import DownloadDelegate
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.policy.discovery import (
+    PolicyFetchResult,
     _compute_hash_normalized,
     _split_hash_pin,
     _verify_hash_pin,
@@ -254,10 +255,15 @@ class TestPolicyDiscovery:
     def test_discover_policy_with_chain_no_git(self, tmp_path: Path) -> None:
         """discover_policy_with_chain fails gracefully when not a git repo."""
         project_root = tmp_path
+        # A real PolicyFetchResult: a bare MagicMock auto-creates truthy
+        # ``policy`` / ``ancestry_parents`` attributes and would wrongly drive
+        # the chain walker.
         with patch("apm_cli.policy.discovery.discover_policy") as mock_discover:
-            mock_discover.return_value = MagicMock(outcome="absent")
+            mock_discover.return_value = PolicyFetchResult(outcome="absent")
             result = discover_policy_with_chain(project_root)
-            assert result is not None
+            assert result.outcome == "absent"
+            assert result.policy is None
+            assert result.chain_sources == []
 
 
 class TestPolicyChecks:

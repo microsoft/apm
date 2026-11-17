@@ -19,6 +19,7 @@ from apm_cli.drift import (
     detect_config_drift,
     detect_orphans,
     detect_ref_change,
+    revision_pin_mismatch,
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -193,6 +194,43 @@ class TestDetectRefChange(unittest.TestCase):
         locked = _LockedDep(source="local", local_path="./packages/foo", resolved_ref=None)
         dep = DependencyReference.parse("./packages/foo")
         self.assertFalse(detect_ref_change(dep, locked))
+
+    # --- full-SHA manifest pins ---
+
+    def test_sha_pin_with_divergent_locked_commit_is_ref_change(self):
+        pin = "a" * 40
+        locked = _LockedDep(resolved_ref=pin, resolved_commit="b" * 40)
+        self.assertTrue(detect_ref_change(_dep(reference=pin), locked))
+
+    def test_sha_pin_with_matching_locked_commit_is_unchanged(self):
+        pin = "A" * 40
+        locked = _LockedDep(resolved_ref=pin, resolved_commit="a" * 40)
+        self.assertFalse(detect_ref_change(_dep(reference=pin), locked))
+
+
+class TestRevisionPinMismatch(unittest.TestCase):
+    """Tests for revision_pin_mismatch()."""
+
+    def test_non_sha_reference_is_never_a_pin_mismatch(self):
+        locked = _LockedDep(resolved_ref="v1.0.0", resolved_commit="b" * 40)
+        self.assertIsNone(revision_pin_mismatch("v1.0.0", locked))
+        self.assertIsNone(revision_pin_mismatch("abc1234", locked))
+        self.assertIsNone(revision_pin_mismatch(None, locked))
+
+    def test_matching_commit_ignores_case_and_whitespace(self):
+        locked = _LockedDep(resolved_commit="ab" * 20)
+        self.assertIsNone(revision_pin_mismatch(" " + "AB" * 20 + " ", locked))
+
+    def test_divergent_or_missing_commit_reports_both_values(self):
+        pin = "a" * 40
+        reason = revision_pin_mismatch(pin, _LockedDep(resolved_commit="b" * 40))
+        self.assertEqual(
+            reason, f"manifest commit '{pin}' != lockfile resolved_commit '{'b' * 40}'"
+        )
+        missing = revision_pin_mismatch(pin, _LockedDep(resolved_commit=None))
+        self.assertEqual(
+            missing, f"manifest commit '{pin}' != lockfile resolved_commit '(missing)'"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -107,6 +107,9 @@ def run_service_integrations(
             diagnostics=diagnostics,
             allow_pending=False,
             active_package_keys=active_package_keys,
+            project_root=ctx.project_root,
+            executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
+            no_policy=ctx.no_policy,
         )
         apm_config = {
             "scripts": apm_package.scripts or {},
@@ -184,6 +187,7 @@ def run_service_integrations(
         scope=ctx.scope,
         prepared=prepared_mcp,
         active_package_keys=active_package_keys,
+        executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
     )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

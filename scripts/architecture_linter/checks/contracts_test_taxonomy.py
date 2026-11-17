@@ -771,9 +771,8 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         plan, re.compile(r"^def lockfile_satisfies_manifest\("), re.compile(r"^def ")
     )
     if (
-        not _body_has(plan_body, "is_full_revision_pin(reference)")
+        not _body_has(plan_body, "revision_pin_mismatch(dep.reference, locked_dep)")
         or not _body_has(plan_body, "detect_ref_change(dep, locked_dep)")
-        or not _body_has(plan_body, "locked_dep.resolved_commit")
         or _body_has(plan_body, "is_insecure")
     ):
         findings.append(_summary(rule_id, _INSTALL_PLAN, frozen_identity_message))

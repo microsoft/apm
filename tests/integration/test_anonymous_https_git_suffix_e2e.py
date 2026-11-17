@@ -16,6 +16,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
     clear_apm_yml_cache,
 )
+from tests.utils.git_link_fixture import git
 
 pytestmark = [
     pytest.mark.integration,
@@ -123,6 +124,10 @@ def test_generic_anonymous_https_clone_url_keeps_git_suffix_end_to_end(
             encoding="utf-8",
         )
         (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+        # A real clone leaves a checkout whose links resolve from Git objects (#3457).
+        git("init", "-q", "-b", "main", "--template=", str(target))
+        git("-C", str(target), "add", "-A")
+        git("-C", str(target), "commit", "-q", "-m", "fake clone")
         return _FakeRepo()
 
     monkeypatch.setattr(

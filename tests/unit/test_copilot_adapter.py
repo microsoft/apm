@@ -176,6 +176,34 @@ class TestCopilotGithubServerValidation(unittest.TestCase):
             adapter._is_github_server("github-copilot-mcp-server", "https://example.com/mcp")
         )
 
+    def test_is_github_server_requires_host_every_parser_agrees_on(self):
+        adapter = self._adapter()
+        for url in (
+            "https://other.example.com\\@api.githubcopilot.com/mcp/",
+            "https://other.example.com\\@github.com/",
+            "https://user@api.githubcopilot.com/mcp/",
+            "//api.githubcopilot.com/mcp/",
+        ):
+            with self.subTest(url=url):
+                self.assertFalse(adapter._is_github_server("github", url))
+
+    def test_update_config_writes_owner_only_file_outside_the_project(self):
+        adapter = self._adapter()
+        root = Path(tempfile.mkdtemp())
+        adapter._project_root = root / "project"
+        try:
+            config_path = root / "home" / "mcp.json"
+            config_path.parent.mkdir()
+            config_path.write_text("{}", encoding="utf-8")
+            config_path.chmod(0o644)
+            with patch.object(adapter, "get_config_path", return_value=str(config_path)):
+                adapter.update_config({"srv": {"url": "https://example.com/mcp"}})
+            if os.name != "nt":
+                self.assertEqual(config_path.stat().st_mode & 0o777, 0o600)
+            self.assertIn("srv", json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"])
+        finally:
+            shutil.rmtree(root)
+
     def test_remote_poisoned_allowlisted_name_does_not_inject_authorization_header(self):
         adapter = self._adapter()
         server_info = {

@@ -87,6 +87,12 @@ Steps APM runs:
    so [drift detection](../drift-and-secure-by-default/) can audit the
    deployed files later.
 
+For Codex, Gemini and OpenCode, which have no native instructions folder,
+bundle instructions are staged under `apm_modules/<bundle>/.apm/instructions/`
+for `apm compile` to merge into `AGENTS.md`. Staged files are recorded in
+`local_staged_files`, not as deployed files, so `apm audit --ci` does not
+check them. `apm prune` removes the staging.
+
 `apm.yml` is never touched. Re-running the same command re-deploys (use
 `--force` to overwrite locally-edited files).
 If executable trust blocks bundle MCP, LSP, or canvas content, copy the exact
@@ -128,6 +134,11 @@ proceeds with what it can deploy.
 
 A bundle packed with `pack.target: all` is target-agnostic and installs
 cleanly into any harness layout.
+
+Bundle files are copied, not re-rendered. Where a target needs a different
+file format, APM skips the file and prints one `[!]` warning per file
+naming it: Codex agents (`.codex/agents/*.toml`) and Gemini commands
+(`.gemini/commands/*.toml`). Install from source to get those primitives.
 
 ## Legacy `--format apm` bundles are rejected
 
