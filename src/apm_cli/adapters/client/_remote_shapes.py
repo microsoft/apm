@@ -293,7 +293,7 @@ def remote_shape_of(adapter: Any) -> RemoteShape:
 def active_remote_shape(adapter: Any) -> ShapeSpec:
     """Shape an adapter renders with now: its own row, or a retired shape while
     ``legacy_managed_renders`` reproduces an earlier APM render."""
-    override = getattr(adapter, "_remote_shape_override", None)
+    override = adapter._remote_shape_override
     return override if isinstance(override, ShapeSpec) else remote_shape_of(adapter)
 
 
@@ -358,7 +358,7 @@ def skip_unsupported_remote(
     comparisons never print the warning a second time.
     """
     message = unsupported_remote_message(adapter, server_name, transport)
-    if getattr(adapter, "_comparison_render_depth", 0):
+    if adapter._comparison_render_depth:
         raise UnsupportedRemoteTransportError(message)
     if warn is None:
         _rich_warning(message, symbol="warning")

@@ -389,8 +389,14 @@ def require_removable_mcp_connections(
     names: set[str],
     stored_configs: dict[str, dict],
     native_hashes: dict[str, str] | None = None,
+    proven_owned: Mapping[str, dict] | None = None,
 ) -> set[str]:
-    """Refuse removal when recorded names do not prove unchanged native content."""
+    """Refuse removal when recorded names do not prove unchanged native content.
+
+    *proven_owned* maps a name to the native entry this owner already proved
+    APM wrote (``managed_unsupported_connection``); it is removable only while
+    the native entry is still exactly that content.
+    """
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.install.errors import RequiredIntegrationError
 
@@ -398,7 +404,8 @@ def require_removable_mcp_connections(
     conflicts = [
         name
         for name in sorted(names)
-        if compare_native_mcp_connection(
+        if not _still_proven(client, name, existing, stored_configs, proven_owned)
+        and compare_native_mcp_connection(
             client,
             name,
             requested_info=None,
@@ -421,6 +428,20 @@ def require_removable_mcp_connections(
     return {
         _native_config_key(client, name, stored_config=stored_configs.get(name)) for name in names
     }
+
+
+def _still_proven(
+    client: Any,
+    name: str,
+    existing: Mapping[str, Any],
+    stored_configs: dict[str, dict],
+    proven_owned: Mapping[str, dict] | None,
+) -> bool:
+    proven = (proven_owned or {}).get(name)
+    if proven is None:
+        return False
+    key = _native_config_key(client, name, stored_config=stored_configs.get(name))
+    return client.json_identical(existing.get(key), proven)
 
 
 def retain_deferred_mcp_claims(

@@ -310,6 +310,13 @@ class MCPClientAdapter(ABC):
     # other adapters keep their written entry until the declaration changes.
     refreshes_environment_renders: bool = False
 
+    # Render-time state owned by ``_remote_shapes``: a retired shape while
+    # ``legacy_managed_renders`` reproduces an earlier APM render, and the
+    # nesting depth of comparison renders (which raise instead of warning on
+    # an unsupported transport).
+    _remote_shape_override: Any = None
+    _comparison_render_depth: int = 0
+
     @staticmethod
     def _merge_extra(config: dict, server_info: dict) -> dict:
         """Merge harness-specific ``_extra`` keys from server_info into config.
@@ -403,7 +410,7 @@ class MCPClientAdapter(ABC):
         """Render one native server entry for exact baseline comparisons."""
         # A comparison render reports an unsupported transport by raising,
         # so only the install itself warns about the skip.
-        self._comparison_render_depth = getattr(self, "_comparison_render_depth", 0) + 1
+        self._comparison_render_depth += 1
         try:
             rendered = self._format_server_config(
                 server_info,

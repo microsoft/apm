@@ -262,8 +262,13 @@ def test_frozen_replay_skips_a_registry_sse_server_its_harness_refuses(
         assert any(_REGISTRY_NAME in seg and harness in seg.lower() for seg in warnings), warnings
 
 
-def test_frozen_replay_still_refuses_an_unrecorded_supported_target(scene: HarnessScene) -> None:
-    """A Codex target the lockfile never claimed fails --frozen when Codex supports the server."""
+def test_frozen_deferred_pair_that_turns_out_supported_is_refused(scene: HarnessScene) -> None:
+    """--frozen defers an unrecorded Codex pair (transport unknown offline), then refuses it.
+
+    The registry remote declares no transport in apm.yml, so the structural
+    pre-check defers (server, codex); once the registry payload shows Codex
+    supports it, the MCP stage raises the same frozen error and writes nothing.
+    """
     registry = scene.start_registry(
         registry_document(_REGISTRY_NAME, _URL, transport="streamable-http")
     )

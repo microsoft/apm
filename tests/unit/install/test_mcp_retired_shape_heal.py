@@ -110,3 +110,23 @@ def test_removal_accepts_a_retired_self_defined_entry(tmp_path: Path) -> None:
     client = ClientFactory.create_client("antigravity", project_root=tmp_path)
     stored = {"name": "sd", "registry": False, "transport": "http", "url": _URL}
     assert require_removable_mcp_connections(client, {"sd"}, {"sd": stored}) == {"sd"}
+
+
+def test_removal_accepts_a_proven_entry_only_while_unchanged(tmp_path: Path) -> None:
+    from apm_cli.install.errors import RequiredIntegrationError
+    from apm_cli.install.mcp.ownership import require_removable_mcp_connections
+
+    (tmp_path / ".codex").mkdir()
+    config = tmp_path / ".codex" / "config.toml"
+    config.write_text(f'[mcp_servers.heal]\nurl = "{_URL}"\n', encoding="utf-8")
+    client = ClientFactory.create_client("codex", project_root=tmp_path)
+    stored = {"io.example/heal": _REGISTRY}
+    proven = {"io.example/heal": {"url": _URL}}
+
+    assert require_removable_mcp_connections(
+        client, {"io.example/heal"}, stored, proven_owned=proven
+    ) == {"heal"}
+    with pytest.raises(RequiredIntegrationError):
+        require_removable_mcp_connections(
+            client, {"io.example/heal"}, stored, proven_owned={"io.example/heal": {"url": "x"}}
+        )

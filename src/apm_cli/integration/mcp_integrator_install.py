@@ -577,7 +577,6 @@ def _skip_unsupported_remote_transport(
     from apm_cli.install.mcp.ownership import (
         is_frozen_unrecorded_mcp_pair,
         managed_unsupported_connection,
-        mcp_native_hash,
     )
 
     try:
@@ -616,8 +615,7 @@ def _skip_unsupported_remote_transport(
             logger=logger,
             scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
             stored_configs={name: stored_config} if isinstance(stored_config, dict) else {},
-            # Ownership is proven above; hand the remover the matching fingerprint.
-            native_hashes={runtime: {name: mcp_native_hash(client.managed_server_config(native))}},
+            proven_owned={name: native},
         )
     claims.discard(name)
     if native_hashes is not None:
