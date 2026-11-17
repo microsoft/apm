@@ -1945,7 +1945,7 @@ class TestFormatServerConfig:
             "remotes": [{"url": "https://example.com/sse", "transport_type": "sse", "headers": []}],
         }
         config = adapter._format_server_config(server_info)
-        assert config["type"] == "http"
+        assert config["type"] == "sse"
 
     def test_missing_transport_defaults_to_http(self) -> None:
         """Missing transport_type defaults to http."""

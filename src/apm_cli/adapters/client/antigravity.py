@@ -27,6 +27,7 @@ Ref: https://antigravity.google/docs/mcp
 
 from pathlib import Path
 
+from ._remote_shapes import remote_shape_row
 from .gemini import GeminiClientAdapter
 
 
@@ -39,6 +40,8 @@ class AntigravityClientAdapter(GeminiClientAdapter):
     display name.  Antigravity writes MCP servers to a dedicated
     ``mcp_config.json`` rather than ``settings.json``.
     """
+
+    remote_shape = remote_shape_row("antigravity")
 
     supports_user_scope: bool = True
     target_name: str = "antigravity"
