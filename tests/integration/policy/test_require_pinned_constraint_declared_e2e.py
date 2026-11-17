@@ -391,7 +391,9 @@ def test_unbounded_declarations_stay_blocked(scenario, apm_binary_path, name, re
     [
         ("dist-tag", "release@next"),
         ("slash-at-tag", "feature/x@1.2.3"),
+        ("multi-slash-at-tag", "a/b/c@1.2.3"),
         ("at-range", "pkg-a@^1.2.0"),
+        ("at-partial", "pkg-a@1.x"),
     ],
 )
 def test_non_exact_package_release_tags_stay_violations(
