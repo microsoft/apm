@@ -469,10 +469,10 @@ class BaseIntegrator:
         Conservative by design
         ----------------------
         Only fires when the deployed bytes match the source content (modulo
-        CRLF->LF normalization). Format-transforming targets
-        (``codex_agent``, ``cursor_rules``, ``claude_rules``,
-        ``windsurf_rules``, ``gemini_command``, ...) won't match -- they
-        keep the existing skip behavior. This means we never silently
+        CRLF->LF normalization). Format-transforming writers (Codex/Kiro
+        agents, link-rewritten agents, rules, prompts) must not use this
+        raw-source comparison; they render first and pass the rendered text
+        to :meth:`_check_adopt_or_skip` as ``expected_content``. This means we never silently
         adopt content that *might* have come from somewhere else; we only
         adopt files that are demonstrably the package's own content already
         on disk.

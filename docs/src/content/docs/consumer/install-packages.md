@@ -151,7 +151,7 @@ targets:
 For the full reach map of which primitive lands where on each
 harness, see [Primitives and targets](../../concepts/primitives-and-targets/).
 
-Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf (`.windsurf/rules/`), and Kiro (`.kiro/steering/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them.
+Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf (`.windsurf/rules/`), and Kiro (`.kiro/steering/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them. Agents work the same way, including converted ones (Codex `.toml`, Kiro agents, and agents whose relative links APM rewrote): an agent file that already matches what APM would write is adopted, not reported as skipped, even when no lockfile records it (for example a global install of agents in `~/.apm/agents/`).
 
 ## What to commit
 

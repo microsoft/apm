@@ -2108,6 +2108,100 @@ class TestKiroAgentIntegration:
         assert user_invocable_warnings == []
 
 
+class TestRenderedAgentAdoption:
+    """Render, then adopt (#3722): every agent writer adopts its own earlier output.
+
+    ``managed_files=None`` models a user-scope install with no lockfile entry
+    for the file, where content adoption is the only idempotency path. Each
+    target transforms the source (Codex TOML, Kiro frontmatter filter, link
+    rewrite for verbatim-copy targets), so a raw-source comparison never
+    matches and the second install used to report the file as skipped.
+    """
+
+    _SOURCE = (
+        "---\nname: reviewer\ndescription: Review code\ntools:\n- read\n---\n"
+        "Use the [guide skill](../skills/guide/SKILL.md#usage) first.\n"
+    )
+
+    @staticmethod
+    def _package(root: Path) -> PackageInfo:
+        package_dir = root / "apm_modules" / "owner" / "pkg"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        skill = package_dir / ".apm" / "skills" / "guide" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: guide\ndescription: Guide\n---\nGuide.\n", encoding="utf-8")
+        (agents_dir / "reviewer.agent.md").write_text(
+            TestRenderedAgentAdoption._SOURCE, encoding="utf-8"
+        )
+        return PackageInfo(
+            package=APMPackage(name="pkg", version="1.0.0", package_path=package_dir),
+            install_path=package_dir,
+            resolved_reference=ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="abc123",
+                ref_name="main",
+            ),
+            installed_at=datetime.now().isoformat(),
+        )
+
+    @pytest.mark.parametrize("target_name", ["codex", "kiro", "copilot", "claude"])
+    def test_rendered_agent_is_adopted_without_managed_files(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        (tmp_path / target.root_dir).mkdir(parents=True, exist_ok=True)
+        package_info = self._package(tmp_path)
+
+        first = AgentIntegrator().integrate_agents_for_target(target, package_info, tmp_path)
+        assert first.files_integrated == 1
+        deployed = first.target_paths[0]
+        written = deployed.read_bytes()
+        # The writer transforms the source, so raw-source identity cannot adopt it.
+        assert written != self._SOURCE.encode("utf-8")
+
+        second = AgentIntegrator().integrate_agents_for_target(
+            target, package_info, tmp_path, managed_files=None
+        )
+        assert (second.files_adopted, second.files_skipped, second.files_integrated) == (1, 0, 0)
+        assert second.target_paths == [deployed]
+        assert deployed.read_bytes() == written
+
+    @pytest.mark.parametrize("target_name", ["codex", "kiro", "copilot"])
+    def test_foreign_agent_content_is_still_skipped(self, tmp_path: Path, target_name: str) -> None:
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        (tmp_path / target.root_dir).mkdir(parents=True, exist_ok=True)
+        package_info = self._package(tmp_path)
+        deployed = (
+            AgentIntegrator()
+            .integrate_agents_for_target(target, package_info, tmp_path)
+            .target_paths[0]
+        )
+        deployed.write_text("user edit\n", encoding="utf-8")
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            target, package_info, tmp_path, managed_files=None
+        )
+        assert (result.files_adopted, result.files_skipped) == (0, 1)
+        assert deployed.read_text(encoding="utf-8") == "user edit\n"
+
+    def test_legacy_multi_target_entry_adopts_rewritten_links(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        package_info = self._package(tmp_path)
+        first = AgentIntegrator().integrate_package_agents(package_info, tmp_path)
+        assert first.files_integrated == 1
+        assert len(first.target_paths) == 2
+
+        second = AgentIntegrator().integrate_package_agents(package_info, tmp_path)
+        assert (second.files_adopted, second.files_skipped, second.files_integrated) == (2, 0, 0)
+        assert sorted(second.target_paths) == sorted(first.target_paths)
+
+
 # ==================================================================
 # Windsurf no longer exposes an 'agents' primitive (it deploys SKILL.md
 # directly via the 'skills' primitive). Tests that exercised the

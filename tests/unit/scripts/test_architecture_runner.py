@@ -628,6 +628,7 @@ install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
+install-deployment-agent-render-then-adopt
 install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
