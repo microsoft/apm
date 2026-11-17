@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Registry installs, lockfile replays and `apm publish` now follow a gateway redirect that stays on the configured registry origin and under its URL path (for example a `307` from a gateway that decodes `%2F`), keeping the method and body for `307`/`308` and at most 3 hops; any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. Registry publish now follows redirects only within the configured registry origin, and marketplace metadata fetches use the shared credential-scoped HTTP owner. Reported with a prototype by @ashky23. (closes #3726, #3785)
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794)
+
 ### Changed
 
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
