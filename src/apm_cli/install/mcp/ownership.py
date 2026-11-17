@@ -44,6 +44,11 @@ def frozen_unrecorded_mcp_pairs(pairs: frozenset[tuple[str, str]]) -> Iterator[N
         _frozen_unrecorded_pairs.reset(token)
 
 
+def current_frozen_unrecorded_mcp_pairs() -> frozenset[tuple[str, str]]:
+    """The pairs the current ``--frozen`` install deferred (empty otherwise)."""
+    return _frozen_unrecorded_pairs.get()
+
+
 def is_frozen_unrecorded_mcp_pair(name: str, runtime: str) -> bool:
     """Whether the current ``--frozen`` install must not configure *name* for *runtime*."""
     return (name, runtime) in _frozen_unrecorded_pairs.get()
@@ -262,9 +267,9 @@ def compare_native_mcp_connection(
                 native,
                 baseline_info,
                 current=legacy_baseline,
-                proven=native_hash is not None
-                and isinstance(native, dict)
-                and mcp_native_hash(client.managed_server_config(native)) == native_hash,
+                fingerprint=None
+                if native_hash is None or not isinstance(native, dict)
+                else mcp_native_hash(client.managed_server_config(native)) == native_hash,
                 render_env=render_env,
             )
             if retired_shape and not matches_baseline:
@@ -303,8 +308,8 @@ def managed_unsupported_connection(
     requested_info: dict | None,
     stored_config: dict | None,
     native_hash: str | None,
-) -> dict | None:
-    """Return the APM-written native entry for a transport *client* now refuses.
+) -> str | None:
+    """Return the native key of an APM-written entry for a transport *client* now refuses.
 
     The entry is APM's when the lockfile fingerprint matches it or it equals an
     earlier APM render of the same declaration; anything else (including a
@@ -315,15 +320,17 @@ def managed_unsupported_connection(
     from apm_cli.models.dependency.mcp import MCPDependency
 
     existing = MCPConflictDetector(client).get_existing_server_configs()
-    native = existing.get(
-        _native_config_key(client, name, requested_info=requested_info, stored_config=stored_config)
+    key = _native_config_key(
+        client, name, requested_info=requested_info, stored_config=stored_config
     )
+    native = existing.get(key)
     if not isinstance(native, dict):
         return None
-    if native_hash is not None and mcp_native_hash(client.managed_server_config(native)) == (
-        native_hash
-    ):
-        return native
+    if native_hash is not None:
+        # A recorded fingerprint is the proof: a mismatch means the entry was
+        # edited after APM wrote it, so no earlier render can claim it.
+        matches = mcp_native_hash(client.managed_server_config(native)) == native_hash
+        return key if matches else None
     info = requested_info
     try:
         if isinstance(stored_config, dict):
@@ -334,7 +341,7 @@ def managed_unsupported_connection(
     except (TypeError, ValueError):
         return None
     if any(client.matches_managed_server_config(native, render) for render in legacy):
-        return native
+        return key
     return None
 
 
@@ -344,28 +351,33 @@ def _in_retired_shape(
     info: dict | None,
     *,
     current: dict | None,
-    proven: bool,
+    fingerprint: bool | None,
     render_env: dict,
 ) -> bool:
     """Return whether *native* is an APM render in a remote shape since retired.
 
-    Recognized when *native* equals a legacy render of the same declaration
-    (``client.legacy_managed_renders``), or when the lockfile fingerprint proves
-    APM wrote *native* (*proven*) and it carries a legacy render's remote keys.
+    *fingerprint* is ``True``/``False`` when the lockfile recorded a fingerprint
+    that does or does not match *native*, ``None`` when none was recorded. With
+    a match, *native* qualifies when it carries a legacy render's remote keys;
+    without a fingerprint, only when it equals a legacy render of the same
+    declaration (``client.legacy_managed_renders``). A mismatching fingerprint
+    means the entry was edited after APM wrote it, so it never qualifies.
     Other differences (for example an env value) never count, so a fingerprinted
     entry that differs only through the environment is not churned.
     """
+    if fingerprint is False:
+        return False
     if info is None or current is None or not isinstance(native, dict):
         return False
     if client.matches_managed_server_config(native, current):
         return False
     for legacy in client.legacy_managed_renders(info, **render_env):
-        if client.matches_managed_server_config(native, legacy):
+        if fingerprint is None and client.matches_managed_server_config(native, legacy):
             return True
         shape_keys = {
             key for key in current.keys() | legacy.keys() if current.get(key) != legacy.get(key)
         }
-        if proven and all(native.get(key) == legacy.get(key) for key in shape_keys):
+        if fingerprint and all(native.get(key) == legacy.get(key) for key in shape_keys):
             return True
     return False
 
@@ -389,14 +401,8 @@ def require_removable_mcp_connections(
     names: set[str],
     stored_configs: dict[str, dict],
     native_hashes: dict[str, str] | None = None,
-    proven_owned: Mapping[str, dict] | None = None,
 ) -> set[str]:
-    """Refuse removal when recorded names do not prove unchanged native content.
-
-    *proven_owned* maps a name to the native entry this owner already proved
-    APM wrote (``managed_unsupported_connection``); it is removable only while
-    the native entry is still exactly that content.
-    """
+    """Refuse removal when recorded names do not prove unchanged native content."""
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.install.errors import RequiredIntegrationError
 
@@ -404,8 +410,7 @@ def require_removable_mcp_connections(
     conflicts = [
         name
         for name in sorted(names)
-        if not _still_proven(client, name, existing, stored_configs, proven_owned)
-        and compare_native_mcp_connection(
+        if compare_native_mcp_connection(
             client,
             name,
             requested_info=None,
@@ -428,20 +433,6 @@ def require_removable_mcp_connections(
     return {
         _native_config_key(client, name, stored_config=stored_configs.get(name)) for name in names
     }
-
-
-def _still_proven(
-    client: Any,
-    name: str,
-    existing: Mapping[str, Any],
-    stored_configs: dict[str, dict],
-    proven_owned: Mapping[str, dict] | None,
-) -> bool:
-    proven = (proven_owned or {}).get(name)
-    if proven is None:
-        return False
-    key = _native_config_key(client, name, stored_config=stored_configs.get(name))
-    return client.json_identical(existing.get(key), proven)
 
 
 def retain_deferred_mcp_claims(

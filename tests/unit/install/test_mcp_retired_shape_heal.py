@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -63,6 +64,7 @@ def _compare(tmp_path: Path, native: dict, *, managed: bool, fingerprint: str | 
             False,
             NativeMcpConnectionState.CONFLICT,
         ),
+        (_RETIRED, True, "mismatch", NativeMcpConnectionState.CONFLICT),
     ],
     ids=[
         "fingerprint-retired",
@@ -71,12 +73,16 @@ def _compare(tmp_path: Path, native: dict, *, managed: bool, fingerprint: str | 
         "current",
         "env-only-no-churn",
         "unrecognized",
+        "edited-after-write-keeps-user-shape",
     ],
 )
 def test_retired_shape_heal_matrix(
-    tmp_path: Path, native: dict, managed: bool, fingerprinted: bool, expected
+    tmp_path: Path, native: dict, managed: bool, fingerprinted, expected
 ) -> None:
-    fingerprint = mcp_native_hash(native) if fingerprinted else None
+    if fingerprinted == "mismatch":
+        fingerprint = mcp_native_hash(_CURRENT)
+    else:
+        fingerprint = mcp_native_hash(native) if fingerprinted else None
     assert _compare(tmp_path, native, managed=managed, fingerprint=fingerprint) is expected
 
 
@@ -112,21 +118,50 @@ def test_removal_accepts_a_retired_self_defined_entry(tmp_path: Path) -> None:
     assert require_removable_mcp_connections(client, {"sd"}, {"sd": stored}) == {"sd"}
 
 
-def test_removal_accepts_a_proven_entry_only_while_unchanged(tmp_path: Path) -> None:
-    from apm_cli.install.errors import RequiredIntegrationError
-    from apm_cli.install.mcp.ownership import require_removable_mcp_connections
+def _antigravity_with(tmp_path: Path, servers: dict) -> Path:
+    (tmp_path / ".agents").mkdir(exist_ok=True)
+    path = tmp_path / ".agents" / "mcp_config.json"
+    path.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+    return path
 
-    (tmp_path / ".codex").mkdir()
-    config = tmp_path / ".codex" / "config.toml"
-    config.write_text(f'[mcp_servers.heal]\nurl = "{_URL}"\n', encoding="utf-8")
-    client = ClientFactory.create_client("codex", project_root=tmp_path)
-    stored = {"io.example/heal": _REGISTRY}
-    proven = {"io.example/heal": {"url": _URL}}
 
-    assert require_removable_mcp_connections(
-        client, {"io.example/heal"}, stored, proven_owned=proven
-    ) == {"heal"}
-    with pytest.raises(RequiredIntegrationError):
-        require_removable_mcp_connections(
-            client, {"io.example/heal"}, stored, proven_owned={"io.example/heal": {"url": "x"}}
-        )
+def _skip(tmp_path: Path, claims: dict, hashes: dict, logger) -> bool:
+    from apm_cli.integration.mcp_integrator_install import _skip_unsupported_remote_transport
+
+    return _skip_unsupported_remote_transport(
+        "antigravity",
+        "io.example/heal",
+        dict(_INFO),
+        logger,
+        project_root=tmp_path,
+        user_scope=False,
+        stored_config=_REGISTRY,
+        managed_target_servers=claims,
+        native_hashes=hashes,
+        registry_info=True,
+    )
+
+
+def test_unsupported_skip_removes_only_the_verified_apm_key(tmp_path: Path) -> None:
+    mine = {"url": "https://mine.invalid"}
+    path = _antigravity_with(tmp_path, {"heal": {"httpUrl": _URL}, "io.example/heal": mine})
+    claims = {"antigravity": {"io.example/heal"}}
+    logger = MagicMock()
+
+    assert _skip(tmp_path, claims, {}, logger)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["mcpServers"] == {"io.example/heal": mine}
+    assert claims == {"antigravity": set()}
+    logger.warning.assert_called_once()
+
+
+def test_unsupported_skip_keeps_an_entry_edited_after_apm_wrote_it(tmp_path: Path) -> None:
+    path = _antigravity_with(tmp_path, {"heal": {"httpUrl": _URL}})
+    before = path.read_bytes()
+    claims = {"antigravity": {"io.example/heal"}}
+    hashes = {"antigravity": {"io.example/heal": mcp_native_hash({"httpUrl": "https://old"})}}
+
+    assert _skip(tmp_path, claims, hashes, MagicMock())
+
+    assert path.read_bytes() == before
+    assert claims == {"antigravity": set()}

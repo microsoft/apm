@@ -7,6 +7,7 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
+import copy
 import logging
 import re
 from enum import Enum
@@ -596,31 +597,107 @@ def _skip_unsupported_remote_transport(
     claims = (managed_target_servers or {}).get(runtime, set())
     if name not in claims:
         return True
-    native = managed_unsupported_connection(
+    key = managed_unsupported_connection(
         client,
         name,
         requested_info=server_info if registry_info else None,
         stored_config=stored_config,
         native_hash=(native_hashes or {}).get(runtime, {}).get(name),
     )
-    if native is not None:
-        from apm_cli.core.scope import InstallScope
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        MCPIntegrator.remove_stale(
-            {name},
-            runtime=runtime,
-            project_root=project_root,
-            user_scope=user_scope,
-            logger=logger,
-            scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
-            stored_configs={name: stored_config} if isinstance(stored_config, dict) else {},
-            proven_owned={name: native},
-        )
+    if key is not None:
+        _remove_native_entry(client, key, logger)
+    # Reached only after a successful removal (cleanup failures raise).
     claims.discard(name)
     if native_hashes is not None:
         native_hashes.get(runtime, {}).pop(name, None)
     return True
+
+
+def _remove_native_entry(client: Any, key: str, logger: Any) -> None:
+    """Remove exactly *key* from *client*'s native MCP config, failing loudly."""
+    from apm_cli.adapters.client._remote_shapes import remote_shape_of
+    from apm_cli.integration.mcp_integrator import _clean_json_mcp_config, _clean_toml_mcp_config
+
+    path = Path(client.get_config_path())
+    label = f"{remote_shape_of(client).label} MCP config"
+    if path.suffix == ".toml":
+        _clean_toml_mcp_config(
+            path, {key}, label, logger=logger, use_rich=False, fail_on_write_error=True
+        )
+        return
+    _clean_json_mcp_config(
+        path,
+        {key},
+        logger,
+        label,
+        servers_key=client.mcp_servers_key,
+        trailing_newline=client.json_config_trailing_newline,
+        fail_on_write_error=True,
+    )
+
+
+def _resolve_frozen_deferred_pairs(
+    mcp_deps: list,
+    target_runtimes: list[str],
+    *,
+    project_root: Any,
+    user_scope: bool,
+) -> None:
+    """Refuse, before any native write, a deferred ``--frozen`` pair its harness can load.
+
+    ``InstallService.enforce_frozen_services`` defers an unrecorded pair whose
+    transport only the registry payload can decide; this resolves every such
+    pair against its overlaid payload so a refused replay changes nothing.
+    """
+    from apm_cli.adapters.client._remote_shapes import unsupported_remote_transport
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import current_frozen_unrecorded_mcp_pairs
+    from apm_cli.install.service import frozen_services_error, frozen_unrecorded_reason
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.registry.operations import MCPServerOperations
+
+    pairs = {pair for pair in current_frozen_unrecorded_mcp_pairs() if pair[1] in target_runtimes}
+    if not pairs:
+        return
+    deferred_names = {name for name, _runtime in pairs}
+    infos: dict[str, dict] = {}
+    groups: dict[str | None, list] = {}
+    for dep in mcp_deps:
+        name = dep.name if hasattr(dep, "name") else dep
+        if name not in deferred_names:
+            continue
+        if getattr(dep, "is_self_defined", False):
+            infos[name] = MCPIntegrator._build_self_defined_info(dep)
+        else:
+            groups.setdefault(_registry_group_key(dep), []).append(dep)
+    for registry_url, deps in groups.items():
+        names = [dep.name if hasattr(dep, "name") else dep for dep in deps]
+        fetched = MCPServerOperations(registry_url=registry_url).batch_fetch_server_info(names)
+        cache = {name: copy.deepcopy(info) for name, info in fetched.items() if info}
+        for dep in deps:
+            if hasattr(dep, "name"):
+                MCPIntegrator._apply_overlay(cache, dep)
+        infos.update(cache)
+    reasons = []
+    for name, runtime in sorted(pairs):
+        info = infos.get(name)
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+        if info is None or unsupported_remote_transport(client, info) is None:
+            reasons.append(frozen_unrecorded_reason("MCP", name, runtime))
+    if reasons:
+        raise frozen_services_error(reasons)
+
+
+def _registry_group_key(dep: Any) -> str | None:
+    """Normalized per-dependency registry URL; ``None`` for the default registry."""
+    dep_registry = getattr(dep, "registry", None)
+    if not isinstance(dep_registry, str):
+        return None
+    from apm_cli.registry.client import normalize_mcp_registry_url
+
+    return normalize_mcp_registry_url(dep_registry)
 
 
 def _ascii_names(names: list[str]) -> str:
@@ -1788,6 +1865,9 @@ def run_mcp_install(  # noqa: PLR0913
         console=console,
         logger=logger,
     )
+    _resolve_frozen_deferred_pairs(
+        mcp_deps, target_runtimes, project_root=project_root, user_scope=user_scope
+    )
     claude_targeted = "claude" in target_runtimes
     if claude_targeted:
         # Claude's diagnostics cover every server of this run, so they are
@@ -1875,13 +1955,7 @@ def run_mcp_install(  # noqa: PLR0913
             # the default group (key=None).  Only str values trigger routing.
             registry_groups: builtins.dict[str | None, list] = {}
             for dep in registry_deps:
-                dep_registry = getattr(dep, "registry", None)
-                if isinstance(dep_registry, str):
-                    from apm_cli.registry.client import normalize_mcp_registry_url
-
-                    key = normalize_mcp_registry_url(dep_registry)
-                else:
-                    key = None
+                key = _registry_group_key(dep)
                 if key not in registry_groups:
                     registry_groups[key] = []
                 registry_groups[key].append(dep)

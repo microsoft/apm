@@ -280,3 +280,21 @@ def test_frozen_deferred_pair_that_turns_out_supported_is_refused(scene: Harness
     assert result.returncode != 0, describe(result)
     assert "ownership is not recorded" in flat(result.stdout + result.stderr), describe(result)
     assert _SHORT_NAME not in scene.servers("codex", user=False)
+
+
+def test_refused_frozen_replay_changes_no_native_config(scene: HarnessScene) -> None:
+    """A deferred pair refused after the registry lookup leaves every native file untouched."""
+    registry = scene.start_registry(
+        registry_document(_REGISTRY_NAME, _URL, transport="streamable-http")
+    )
+    scene.write_manifest([{"name": _REGISTRY_NAME, "registry": registry}], user=False)
+    scene.ok("install", "--no-policy", "--target", "copilot")
+    copilot = scene.config_path("copilot", user=False)
+    copilot.write_text('{"mcpServers": {}}', encoding="utf-8")
+    before = scene.native_bytes(("copilot", "codex"), user=False)
+
+    result = scene.run("install", "--no-policy", "--frozen", "--target", "copilot,codex")
+
+    assert result.returncode != 0, describe(result)
+    assert "ownership is not recorded" in flat(result.stdout + result.stderr), describe(result)
+    assert scene.native_bytes(("copilot", "codex"), user=False) == before

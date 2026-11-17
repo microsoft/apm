@@ -781,7 +781,6 @@ class MCPIntegrator:
         fail_on_write_error: bool = False,
         stored_configs: builtins.dict | None = None,
         native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
-        proven_owned: builtins.dict[str, builtins.dict] | None = None,
     ) -> None:
         """Remove MCP server entries that are no longer required by any dependency.
 
@@ -906,11 +905,7 @@ class MCPIntegrator:
             ):
                 return
             verified_keys = require_removable_mcp_connections(
-                codex_client,
-                stale_names,
-                stored_configs or {},
-                (native_hashes or {}).get("codex"),
-                proven_owned,
+                codex_client, stale_names, stored_configs or {}, (native_hashes or {}).get("codex")
             )
             _clean_toml_mcp_config(
                 codex_cfg,
@@ -1077,7 +1072,6 @@ class MCPIntegrator:
                     stale_names,
                     stored_configs or {},
                     (native_hashes or {}).get("claude"),
-                    proven_owned,
                 )
             if claude_project_enabled:
                 _clean_claude_config(
@@ -1117,11 +1111,7 @@ class MCPIntegrator:
                 "claude", project_root=project_root_path, user_scope=True
             )
             verified_keys = require_removable_mcp_connections(
-                user_client,
-                stale_names,
-                stored_configs or {},
-                (native_hashes or {}).get("claude"),
-                proven_owned,
+                user_client, stale_names, stored_configs or {}, (native_hashes or {}).get("claude")
             )
             _clean_claude_config(
                 claude_cfg,
