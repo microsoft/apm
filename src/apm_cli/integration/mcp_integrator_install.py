@@ -360,22 +360,9 @@ def _install_registry_group(  # noqa: PLR0913
             # Batch fetch server info once
             if verbose:
                 logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
-            server_info_cache = {
-                name: registry_server_cache[name]
-                for name in servers_to_install
-                if name in registry_server_cache
-            }
-            unresolved_servers = [
-                name for name in servers_to_install if name not in server_info_cache
-            ]
-            if unresolved_servers:
-                server_info_cache.update(operations.batch_fetch_server_info(unresolved_servers))
-
-            # Apply overlays
-            for server_name in servers_to_install:
-                dep = group_dep_map.get(server_name)
-                if dep:
-                    MCPIntegrator._apply_overlay(server_info_cache, dep)
+            server_info_cache = _overlaid_server_infos(
+                operations, servers_to_install, group_dep_map, known=registry_server_cache
+            )
 
             # Collect env and runtime variables
             shared_env_vars = operations.collect_environment_variables(
@@ -671,13 +658,13 @@ def _resolve_frozen_deferred_pairs(
         else:
             groups.setdefault(_registry_group_key(dep), []).append(dep)
     for registry_url, deps in groups.items():
-        names = [dep.name if hasattr(dep, "name") else dep for dep in deps]
-        fetched = MCPServerOperations(registry_url=registry_url).batch_fetch_server_info(names)
-        cache = {name: copy.deepcopy(info) for name, info in fetched.items() if info}
-        for dep in deps:
-            if hasattr(dep, "name"):
-                MCPIntegrator._apply_overlay(cache, dep)
-        infos.update(cache)
+        infos.update(
+            _overlaid_server_infos(
+                MCPServerOperations(registry_url=registry_url),
+                [dep.name if hasattr(dep, "name") else dep for dep in deps],
+                {dep.name: dep for dep in deps if hasattr(dep, "name")},
+            )
+        )
     reasons = []
     for name, runtime in sorted(pairs):
         info = infos.get(name)
@@ -688,6 +675,32 @@ def _resolve_frozen_deferred_pairs(
             reasons.append(frozen_unrecorded_reason("MCP", name, runtime))
     if reasons:
         raise frozen_services_error(reasons)
+
+
+def _overlaid_server_infos(
+    operations: Any,
+    names: list[str],
+    dep_map: dict[str, Any],
+    *,
+    known: dict[str, dict] | None = None,
+) -> dict[str, dict]:
+    """Registry server info for *names*, fetched once and overlaid per declaration.
+
+    The one fetch-then-overlay step every registry install path uses. Entries
+    are deep copies, so overlaying never mutates a cached registry payload.
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    infos = {name: (known or {})[name] for name in names if name in (known or {})}
+    unresolved = [name for name in names if name not in infos]
+    if unresolved:
+        infos.update(operations.batch_fetch_server_info(unresolved))
+    infos = {name: copy.deepcopy(info) for name, info in infos.items()}
+    for name in names:
+        dep = dep_map.get(name)
+        if dep:
+            MCPIntegrator._apply_overlay(infos, dep)
+    return infos
 
 
 def _registry_group_key(dep: Any) -> str | None:

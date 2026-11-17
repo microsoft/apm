@@ -165,3 +165,19 @@ def test_unsupported_skip_keeps_an_entry_edited_after_apm_wrote_it(tmp_path: Pat
 
     assert path.read_bytes() == before
     assert claims == {"antigravity": set()}
+
+
+def test_unsupported_skip_keeps_the_claim_when_removal_fails(tmp_path: Path) -> None:
+    from apm_cli.install.errors import RequiredIntegrationError
+
+    path = _antigravity_with(tmp_path, {"heal": {"httpUrl": _URL}})
+    claims = {"antigravity": {"io.example/heal"}}
+    path.parent.chmod(0o500)  # readable, not writable: the rewrite fails
+    try:
+        with pytest.raises(RequiredIntegrationError):
+            _skip(tmp_path, claims, {}, MagicMock())
+    finally:
+        path.parent.chmod(0o700)
+
+    assert claims == {"antigravity": {"io.example/heal"}}
+    assert "heal" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
