@@ -40,6 +40,7 @@ from apm_cli.integration.mcp_config_view import (
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.mcp_transport import canonical_remote_transport
 from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -482,7 +483,7 @@ class MCPIntegrator:
         if dep.transport in ("http", "sse", "streamable-http"):
             # Build as a remote endpoint
             remote = {
-                "transport_type": dep.transport,
+                "transport": canonical_remote_transport({"transport": dep.transport}),
                 "url": dep.url or "",
             }
             if dep.headers:
@@ -531,6 +532,21 @@ class MCPIntegrator:
         return info
 
     @staticmethod
+    def _canonicalize_remote_transports(info: dict) -> None:
+        """Record each remote's canonical transport under ``transport`` (in place).
+
+        Registry payloads are normalized at ingestion; this keeps server info
+        that reached the overlay another way on the same canonical key.
+        """
+        for remote in info.get("remotes") or []:
+            if not isinstance(remote, dict):
+                continue
+            try:
+                remote["transport"] = canonical_remote_transport(remote)
+            except ValueError:
+                continue  # the rendering adapter reports it with its own label
+
+    @staticmethod
     def _apply_overlay(server_info_cache: dict, dep) -> None:
         """Apply MCPDependency overlay fields onto cached server_info (in-place).
 
@@ -543,12 +559,22 @@ class MCPIntegrator:
 
         dep.apply_opencode_enabled(info)
 
+        MCPIntegrator._canonicalize_remote_transports(info)
+
         # Transport overlay: select matching transport from available options
         if dep.transport:
             if dep.transport in ("http", "sse", "streamable-http"):
                 # User prefers remote transport  -- remove packages to force remote path
                 if info.get("remotes"):
                     info.pop("packages", None)
+                    declared = canonical_remote_transport({"transport": dep.transport})
+                    matching = [
+                        remote
+                        for remote in info["remotes"]
+                        if isinstance(remote, dict) and remote.get("transport") == declared
+                    ]
+                    if matching:
+                        info["remotes"] = matching
             elif dep.transport == "stdio":
                 # User prefers stdio  -- remove remotes to force package path
                 if info.get("packages"):

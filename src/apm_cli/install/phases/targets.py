@@ -550,9 +550,9 @@ def run(ctx: InstallContext) -> None:
     # per-client root_dir instead of the converged .agents/ directory.
     # ------------------------------------------------------------------
     if ctx.legacy_skill_paths:
-        from apm_cli.integration.targets import apply_legacy_skill_paths
+        from apm_cli.integration.skill_layout import resolve_skill_layout
 
-        _targets = apply_legacy_skill_paths(_targets)
+        _targets = resolve_skill_layout(_targets, legacy_skill_paths=True)
 
     # ------------------------------------------------------------------
     # Initialize integrators

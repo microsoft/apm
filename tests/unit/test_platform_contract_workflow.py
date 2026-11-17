@@ -263,10 +263,9 @@ def _assert_publication_gates(workflow: dict) -> None:
         "needs.release-plan.outputs.mode == 'promoted' && "
         "needs.integration-tests.result == 'skipped'"
     ) in condition
+    push_tag = "github.event_name == 'push' && github.ref_type == 'tag'"
     for job_id in ("deploy-docs", "gh-aw-compat", "build-pypi-distributions"):
-        assert workflow_job(workflow, job_id)["if"].startswith(
-            "github.event_name == 'push' && github.ref_type == 'tag'"
-        ), job_id
+        assert push_tag in " ".join(workflow_job(workflow, job_id)["if"].split()), job_id
 
 
 INTEGRATION_LANES = {
@@ -660,3 +659,105 @@ def test_network_lane_opts_into_network_integration_tests() -> None:
     job = workflow_job(workflow, "integration-network")
     step = workflow_step(job, "Run network-dependent integration tests")
     assert effective_env(workflow, job, step)["APM_RUN_INTEGRATION_TESTS"] == "1"
+
+
+# Jobs a publishing run can legitimately skip: integration on a promoted tag,
+# tag recovery on a tag push. Anything downstream of them must not rely on
+# the implicit success(), which turns a skipped ancestor into a skip.
+SKIPPABLE_ON_PUBLISH = ("integration-tests", "recover-tag")
+PUBLICATION_JOBS = ("deploy-docs", "gh-aw-compat", "build-pypi-distributions", "publish-pypi")
+PRE_FIX_CONDITIONS = {
+    "deploy-docs": "github.event_name == 'push' && github.ref_type == 'tag' && "
+    "needs.create-release.outputs.is_prerelease != 'true'",
+    "gh-aw-compat": "github.event_name == 'push' && github.ref_type == 'tag'",
+    "build-pypi-distributions": "github.event_name == 'push' && github.ref_type == 'tag' && "
+    "needs.create-release.outputs.is_private_repo != 'true'",
+    "publish-pypi": None,
+}
+
+
+def _needs(job: dict) -> list[str]:
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _ancestors(workflow: dict, job_id: str) -> set[str]:
+    seen: set[str] = set()
+    stack = _needs(workflow_job(workflow, job_id))
+    while stack:
+        need = stack.pop()
+        if need not in seen:
+            seen.add(need)
+            stack.extend(_needs(workflow_job(workflow, need)))
+    return seen
+
+
+def _condition(job: dict) -> str:
+    text = " ".join(str(job.get("if", "")).split())
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text
+
+
+def _assert_downstream_jobs_use_explicit_status(workflow: dict) -> None:
+    for job_id in workflow["jobs"]:
+        if not set(SKIPPABLE_ON_PUBLISH) & _ancestors(workflow, job_id):
+            continue
+        condition = _condition(workflow_job(workflow, job_id))
+        assert condition.startswith(("always()", "!cancelled()")), (
+            f"{job_id} relies on implicit success() behind a skippable job"
+        )
+    for job_id in PUBLICATION_JOBS:
+        job = workflow_job(workflow, job_id)
+        condition = _condition(job)
+        assert condition.startswith("!cancelled()"), job_id
+        for need in _needs(job):
+            assert f"needs.{need}.result == 'success'" in condition, (job_id, need)
+
+
+def test_publication_jobs_survive_skipped_upstream_jobs() -> None:
+    """A promoted tag skips integration; docs, GH-AW and PyPI must still run."""
+    _assert_downstream_jobs_use_explicit_status(_workflow())
+
+
+@pytest.mark.parametrize("job_id", PUBLICATION_JOBS)
+def test_implicit_success_publication_gate_is_rejected(job_id: str) -> None:
+    workflow = deepcopy(_workflow())
+    job = workflow_job(workflow, job_id)
+    if PRE_FIX_CONDITIONS[job_id] is None:
+        job.pop("if")
+    else:
+        job["if"] = PRE_FIX_CONDITIONS[job_id]
+
+    with pytest.raises(AssertionError):
+        _assert_downstream_jobs_use_explicit_status(workflow)
+
+
+def test_tag_recovery_builds_from_a_verified_stable_tag_only() -> None:
+    """publish-existing-tag runs no validation and publishes only the named tag."""
+    workflow = _workflow()
+    plan = workflow_job(workflow, "release-plan")
+    assert plan["if"] == "github.event.action != 'publish-existing-tag'"
+    recover = workflow_job(workflow, "recover-tag")
+    assert " ".join(recover["if"].split()) == (
+        "github.event_name == 'repository_dispatch' && "
+        "github.event.action == 'publish-existing-tag'"
+    )
+    assert recover["permissions"] == {"contents": "read"}
+    step = workflow_step(recover, "Verify the tag is a published stable release missing from PyPI")
+    assert step["env"]["TAG"] == "${{ github.event.client_payload.tag }}"
+    assert "${{" not in step["run"], "payload must reach the script through env only"
+    for check in (
+        '[[ ! "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]',
+        "repos/$REPOSITORY/releases/tags/$TAG",
+        '"$state" != "false false"',
+        "https://pypi.org/pypi/apm-cli/$version/json",
+        '"$code" != "404"',
+    ):
+        assert check in step["run"], check
+    builder = workflow_job(workflow, "build-pypi-distributions")
+    checkout = workflow_step(builder, "Checkout code")
+    assert checkout["with"]["ref"] == "${{ needs.recover-tag.outputs.tag || github.ref }}"
+    assert "needs.recover-tag.result == 'success'" in _condition(builder)
+    create = workflow_job(workflow, "create-release")
+    assert "github.event_name == 'push'" in create["if"]

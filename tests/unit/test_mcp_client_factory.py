@@ -161,7 +161,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         server_config = config["mcp_servers"]["my_server"]
         self.assertEqual(server_config["command"], "npx")
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.adapters.client._remote_shapes._rich_warning")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
     def test_configure_mcp_server_sse_remote_rejected(self, mock_find_server, mock_warn):
         """SSE remotes are rejected with a warning that points to streamable-http."""

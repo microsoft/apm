@@ -47,19 +47,21 @@ def test_merge_gate_executes_base_commit_script() -> None:
 
 
 def test_secret_bearing_manual_runs_use_default_branch_dispatch() -> None:
-    for name, event_type in (
-        ("build-release.yml", "manual-build-release"),
-        ("ci-runtime.yml", "manual-runtime-inference"),
+    for name, event_types in (
+        ("build-release.yml", ["manual-build-release", "publish-existing-tag"]),
+        ("ci-runtime.yml", ["manual-runtime-inference"]),
     ):
         workflow = load_workflow(ROOT / ".github" / "workflows" / name)
         assert "workflow_dispatch" not in workflow["on"]
-        assert workflow["on"]["repository_dispatch"]["types"] == [event_type]
+        assert workflow["on"]["repository_dispatch"]["types"] == event_types
 
 
 def test_pypi_publisher_only_downloads_and_publishes() -> None:
     workflow = load_workflow(ROOT / ".github" / "workflows" / "build-release.yml")
     builder = workflow_job(workflow, "build-pypi-distributions")
     assert builder["permissions"] == {"contents": "read"}
+    uv = workflow_step(builder, "Install uv")
+    assert uv["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
     sync = workflow_step(builder, "Install locked build dependencies")
     assert sync["run"] == "uv sync --frozen --extra dev"
     build = workflow_step(builder, "Build Python package")

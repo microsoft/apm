@@ -57,16 +57,21 @@ _RESERVED_EXTRA_KEYS = _KNOWN_DICT_KEYS - {"extra"}
 # ``bearer_token_env_var`` or ``env_http_headers`` rather than ``http_headers``;
 # all three alias that one modeled field, so a transitive dependency must not
 # reach an Authorization header through passthrough that ``headers`` modeling
-# never sees. The literal below is pinned verbatim by the architecture guard
-# ``mutation_writes.mcp_passthrough_denylist``: keep it comment-free and sorted.
+# never sees. ``httpUrl`` (Gemini) and ``serverUrl`` (Antigravity) are harness
+# names of the modeled ``url``; passthrough must not add a second endpoint
+# beside the one APM renders. The literal below is pinned verbatim by the
+# architecture guard ``mutation_writes.mcp_passthrough_denylist``: keep it
+# comment-free and sorted.
 _HARNESS_EXTRA_ALIASES = frozenset(
     {
         "bearer_token_env_var",
         "enabled",
         "env_http_headers",
         "environment",
+        "httpUrl",
         "http_headers",
         "id",
+        "serverUrl",
     }
 )
 _EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | _HARNESS_EXTRA_ALIASES

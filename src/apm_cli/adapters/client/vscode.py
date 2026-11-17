@@ -11,9 +11,11 @@ import re
 from pathlib import Path
 
 from ...core.docker_args import DockerArgsProcessor
+from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .base import (
     _ENV_VAR_RE,
     _INPUT_VAR_RE,
@@ -35,6 +37,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
     a repository-level .vscode/mcp.json file, following the format specified
     in the VSCode documentation.
     """
+
+    remote_shape = remote_shape_row("vscode")
 
     target_name: str = "vscode"
     mcp_servers_key: str = "servers"
@@ -507,17 +511,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
             elif server_info.get("remotes"):
                 remote = self._select_remote_with_url(server_info["remotes"])
                 if remote:
-                    transport = (remote.get("transport_type") or "").strip()
-                    # Default to "http" when transport_type is missing/empty,
-                    # matching the Copilot adapter behavior (copilot.py:190-192).
-                    if not transport:
-                        transport = "http"
-                    elif transport not in ("sse", "http", "streamable-http"):
-                        raise ValueError(
-                            f"Unsupported remote transport '{transport}' for VS Code. "
-                            f"Server: {server_info.get('name', 'unknown')}. "
-                            f"Supported transports: http, sse, streamable-http."
-                        )
+                    server_name = server_info.get("name", "unknown")
+                    transport = canonical_remote_transport(
+                        remote, runtime_label="VS Code", server_name=server_name
+                    )
+                    shape = active_remote_shape(self)
+                    if not shape.supports(transport):
+                        return skip_unsupported_remote(self, server_name, transport), input_vars
                     headers = remote.get("headers", {})
                     # Normalize header list format to dict
                     if isinstance(headers, list):
@@ -532,8 +532,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     )
                     headers = self._translate_env_vars_for_vscode(headers)
                     server_config = {
-                        "type": transport,
-                        "url": remote["url"].strip(),
+                        **shape.render(transport, remote["url"].strip()),
                         "headers": headers,
                     }
                     input_vars.extend(

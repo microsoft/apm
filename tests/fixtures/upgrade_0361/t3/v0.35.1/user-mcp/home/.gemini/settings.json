@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "heal-registry": {
+      "httpUrl": "https://registry-sse.example.invalid/sse"
+    },
+    "heal-sse": {
+      "url": "https://sse.example.invalid/sse"
+    },
+    "heal-http": {
+      "httpUrl": "https://http.example.invalid/mcp"
+    },
+    "heal-streamable": {
+      "httpUrl": "https://streamable.example.invalid/mcp"
+    },
+    "heal-stdio": {
+      "command": "node",
+      "cwd": "/srv/heal-fixture",
+      "args": [
+        "server.js"
+      ]
+    }
+  }
+}

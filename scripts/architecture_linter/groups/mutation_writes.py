@@ -16,6 +16,12 @@ from scripts.architecture_linter.checks.mutation_hook_membership import (
 from scripts.architecture_linter.checks.mutation_hook_membership import (
     RULES as _HOOK_MEMBERSHIP_RULES,
 )
+from scripts.architecture_linter.checks.mutation_mcp_remote_transport import (
+    COLLECTORS as _MCP_REMOTE_COLLECTORS,
+)
+from scripts.architecture_linter.checks.mutation_mcp_remote_transport import (
+    RULES as _MCP_REMOTE_RULES,
+)
 from scripts.architecture_linter.checks.mutation_mcp_target_and_scope import (
     COLLECTORS as _MCP_SCOPE_COLLECTORS,
 )
@@ -27,10 +33,16 @@ from scripts.architecture_linter.checks.onboarding import RULES as _ONBOARDING_R
 RULES = (
     _HOOK_CONTRACT_RULES
     + _MCP_SCOPE_RULES
+    + _MCP_REMOTE_RULES
     + _HOOK_MEMBERSHIP_RULES
     + _ONBOARDING_RULES
     + _AUDIT_RULES
 )
-COLLECTORS = _HOOK_CONTRACT_COLLECTORS + _MCP_SCOPE_COLLECTORS + _HOOK_MEMBERSHIP_COLLECTORS
+COLLECTORS = (
+    _HOOK_CONTRACT_COLLECTORS
+    + _MCP_SCOPE_COLLECTORS
+    + _MCP_REMOTE_COLLECTORS
+    + _HOOK_MEMBERSHIP_COLLECTORS
+)
 
 __all__ = ["COLLECTORS", "RULES"]

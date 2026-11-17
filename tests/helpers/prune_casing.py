@@ -29,7 +29,9 @@ class CaseSensitiveMaterializationReader:
         return (path / name for name in sorted(self.children[parts]))
 
     def samefile(self, left: Path, right: Path) -> bool:
-        return left.absolute() == right.absolute()
+        # Compare spellings exactly: WindowsPath equality is case-insensitive,
+        # which would collapse distinct case-variant directories on Windows.
+        return left.absolute().parts == right.absolute().parts
 
     def invalidate(self, *paths: Path) -> None:
         return None
