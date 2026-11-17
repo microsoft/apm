@@ -524,6 +524,17 @@ For the fast path, dispatch `manual-build-release` on the `main` commit, wait
 for it to finish green, then tag that commit. Nothing publishes without a
 green full validation of the exact SHA.
 
+If a published stable release never reached PyPI, re-publish it from its tag
+without re-running validation:
+
+```bash
+gh api repos/microsoft/apm/dispatches -f event_type=publish-existing-tag \
+  -F 'client_payload[tag]=vX.Y.Z'
+```
+
+The run refuses a tag that is not a published stable GitHub release, or whose
+version is already on PyPI.
+
 **Full-run lanes:**
 - **Linux x86_64 and arm64**: hermetic integration (`not live and not
   requires_github_token and not requires_network_integration`) split across

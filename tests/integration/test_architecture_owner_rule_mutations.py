@@ -1081,6 +1081,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local copying bypasses the canonical single-file admission authority.",
     ),
     MutationCase(
+        guard_id="install-deployment-skill-layout",
+        rule_id="install-deployment-skill-layout",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="_base_targets = resolve_reintegration_targets(",
+        new="_base_targets = resolve_targets(",
+        intent="Uninstall rebuilds survivors without recovering the recorded skill layout.",
+    ),
+    MutationCase(
         guard_id="install-deployment-skill-preflight",
         rule_id="install-deployment-skill-preflight",
         path="src/apm_cli/install/phases/integrate.py",
