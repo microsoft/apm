@@ -93,6 +93,19 @@ The leading `/v1/` path segment is the API version. Future breaking changes ship
 - **List queries are idempotent.** `GET /versions` MUST return the same set of versions on identical inputs.
 
 
+### 1.7 Redirects
+
+The client follows a redirect only when it stays inside the configured registry:
+
+- The response is `301`, `302`, `303`, `307` or `308` with a `Location` header.
+- The target keeps the base URL's scheme, host and port, and its path stays at or under the base path. Dot segments, percent-encoded dots and slashes, and doubled slashes are resolved before the check.
+- At most 3 hops. HTTPS never downgrades to HTTP, and a `Location` with user info is refused.
+- `307` and `308` keep the method and body, so a publish `PUT` is re-sent to the new path. `301`, `302` and `303` are followed only for `GET` and `HEAD`.
+
+Credentials are re-sent only on those hops. Any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. The lockfile `resolved_url` keeps the canonical, pre-redirect URL.
+
+Gateways in front of a registry should pass `%2F` through unchanged. In Envoy that is `path_with_escaped_slashes_action: KEEP_UNCHANGED`, which is also Envoy's default. A gateway set to redirect to the decoded path (`UNESCAPE_AND_REDIRECT`) still works when the redirect stays on the registry origin, at the cost of one extra round trip per request.
+
 ---
 
 ## 2. Authentication
@@ -408,6 +421,7 @@ For client implementers (informational):
 - [ ] Verify sha256 against `versions[].digest` before extraction.
 - [ ] Reject `..`, absolute paths, symlinks, and hardlinks during extraction.
 - [ ] Persist `resolved_url` in the lockfile (not the registry name) — it's the trust anchor for re-installs.
+- [ ] Follow redirects only inside the base URL's origin and path ([section 1.7](#17-redirects)); never re-send credentials anywhere else.
 - [ ] On `401/403`, surface a remediation message pointing at `APM_REGISTRY_TOKEN_<NAME>`.
 
 ---
@@ -458,4 +472,5 @@ A conformance test suite for server implementers SHOULD exercise:
 
 ## Changelog
 
+- Clients follow same-origin redirects under the base path, up to 3 hops ([section 1.7](#17-redirects)).
 - Initial release — `versions`, `download`, `publish`. tar.gz + zip both supported. RFC 7807 errors. Bearer auth. Immutable versions.

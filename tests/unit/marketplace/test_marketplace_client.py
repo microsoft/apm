@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -205,7 +206,7 @@ class TestFetchMarketplace:
         seen_calls: list[tuple[dict, bool]] = []
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 parsed = urlparse(url)
                 assert (parsed.scheme, parsed.hostname, parsed.path) == (
                     "https",
@@ -264,7 +265,7 @@ class TestFetchMarketplace:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 seen_headers.append(headers or {})
                 assert stream is True
                 return Response()
@@ -295,7 +296,7 @@ class TestFetchMarketplace:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 return Response()
 
@@ -317,9 +318,9 @@ class TestFetchMarketplace:
                 self.cookies = Cookies()
                 self.calls: list[str] = []
 
-            def get(self, url, **kwargs):
+            def request(self, method, url, **kwargs):
                 self.calls.append(url)
-                return object()
+                return SimpleNamespace(status_code=200, headers={})
 
         session = Session()
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", session, raising=False)
@@ -328,6 +329,40 @@ class TestFetchMarketplace:
         assert client_mod._http_get("https://two.example.test") is not None
         assert session.calls == ["https://one.example.test", "https://two.example.test"]
         assert session.cookies.clear_count == 4
+
+    def test_http_get_keeps_credentials_on_the_request_origin(self, monkeypatch):
+        """Same-origin hops keep the credential; other origins never see it."""
+        hops = iter(
+            [
+                SimpleNamespace(status_code=301, headers={"Location": "/repos/1/contents"}),
+                SimpleNamespace(
+                    status_code=302, headers={"Location": "https://cdn.example.test/blob"}
+                ),
+                SimpleNamespace(status_code=200, headers={}),
+            ]
+        )
+        seen: list[tuple[str | None, str | None]] = []
+
+        class Session:
+            cookies = None
+
+            def request(self, method, url, headers=None, **kwargs):
+                assert kwargs["allow_redirects"] is False
+                seen.append((urlparse(url).hostname, (headers or {}).get("Authorization")))
+                return next(hops)
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        client_mod._http_get(
+            "https://api.example.test/repos/o/r/contents",
+            headers={"Authorization": "token marketplace-sentinel"},
+        )
+
+        assert seen == [
+            ("api.example.test", "token marketplace-sentinel"),
+            ("api.example.test", "token marketplace-sentinel"),
+            ("cdn.example.test", None),
+        ]
 
     def test_fetch_remote_marketplace_url_streams_without_content_length(self, monkeypatch):
         source_url = "https://catalog.example.com/marketplace.json"
@@ -356,7 +391,7 @@ class TestFetchMarketplace:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 seen_calls.append({"url": url, "timeout": timeout, "stream": stream})
                 return Response()
 
@@ -397,7 +432,7 @@ class TestFetchMarketplace:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 return Response()
 
