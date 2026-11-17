@@ -1039,8 +1039,15 @@ class TestPluginNetworkE2E:
     def test_lockfile_preserved_on_sequential_install(
         self, apm_binary_path: Path, temp_project: Path
     ) -> None:
-        """Sequential installs preserve ownership through scoped plugin removal."""
-        skill_ref = self.SKILL_REF
+        """Sequential installs preserve ownership through scoped plugin removal.
+
+        The plugin's own sub-skill nests inside the plugin's package directory,
+        so declaring both is rejected (#3699) without touching the lockfile; an
+        independent skill is the sequential second install instead.
+        """
+        import yaml
+
+        lockfile_path = temp_project / "apm.lock.yaml"
 
         # Install plugin
         r1 = subprocess.run(
@@ -1051,10 +1058,30 @@ class TestPluginNetworkE2E:
             timeout=300,
         )
         assert r1.returncode == 0, f"First install failed:\n{r1.stderr}"
+        lockfile_after_plugin = lockfile_path.read_bytes()
 
-        # Install skill separately
+        # The plugin's own sub-skill would be installed inside the plugin.
+        nested = subprocess.run(
+            [apm_binary_path, "install", self.SKILL_REF],
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=300,
+            env={**os.environ, "COLUMNS": "400"},
+        )
+        nested_output = " ".join((nested.stdout + nested.stderr).split())
+        assert nested.returncode != 0, f"Nested sub-skill install must fail:\n{nested_output}"
+        assert (
+            f"{self.PLUGIN_PATH} and its subdirectory package {self.SKILL_PATH} "
+            "cannot both be declared in apm.yml"
+        ) in nested_output
+        assert lockfile_path.read_bytes() == lockfile_after_plugin, (
+            "A rejected install must leave the lockfile untouched"
+        )
+
+        # Install an independent skill separately
         r2 = subprocess.run(
-            [apm_binary_path, "install", skill_ref],
+            [apm_binary_path, "install", self.MIXED_SKILL_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -1063,21 +1090,19 @@ class TestPluginNetworkE2E:
         assert r2.returncode == 0, f"Second install failed:\n{r2.stderr}"
 
         # Lockfile should contain BOTH entries
-        import yaml
-
-        lockfile = yaml.safe_load((temp_project / "apm.lock.yaml").read_text())
+        lockfile = yaml.safe_load(lockfile_path.read_text())
         dep_keys = {_locked_dependency_key(d) for d in lockfile["dependencies"]}
         plugin_key = self.PLUGIN_PATH
         assert plugin_key in dep_keys, (
             f"Plugin missing from lockfile after sequential install. Keys: {dep_keys}"
         )
-        assert self.SKILL_PATH in dep_keys, (
+        assert self.MIXED_SKILL_PATH in dep_keys, (
             f"Skill missing from lockfile after sequential install. Keys: {dep_keys}"
         )
         plugin_dep = _locked_dependency(lockfile, plugin_key)
         plugin_deployed_files = plugin_dep.get("deployed_files", [])
         plugin_deployed_paths = _existing_deployed_file_paths(temp_project, plugin_deployed_files)
-        skill_dep = _locked_dependency(lockfile, self.SKILL_PATH)
+        skill_dep = _locked_dependency(lockfile, self.MIXED_SKILL_PATH)
         skill_contents = _deployed_skill_contents(temp_project, skill_dep)
 
         # deps tree should show both
@@ -1091,7 +1116,7 @@ class TestPluginNetworkE2E:
         assert tree.returncode == 0, f"Deps tree failed:\n{tree.stdout}\n{tree.stderr}"
         combined = tree.stdout + tree.stderr
         assert "mock-marketplace-plugin" in combined, "Plugin missing from deps tree"
-        assert "test-skill" in combined, "Skill missing from deps tree"
+        assert "devx-ux" in combined, "Skill missing from deps tree"
 
         # Verify cleanup for the files that were actually deployed.
         r3 = subprocess.run(

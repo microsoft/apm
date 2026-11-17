@@ -21,7 +21,7 @@ function sanitizeForPrompt(str) {
 
 // Validate that a model identifier is safe for interpolation inside a double-quoted string.
 // Accepts alphanumeric chars, dots, dashes, underscores, forward slashes, and colons --
-// covering IDs like "claude-opus-4.6", "org/model:tag", "gpt-5.4-mini".
+// covering IDs like "claude-opus-5.5", "org/model:tag", "gpt-5.4-mini".
 // Rejects anything containing whitespace, quotes, or other shell-significant characters.
 // Returns empty string for any value that does not match, suppressing the model clause.
 function sanitizeModel(str) {

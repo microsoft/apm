@@ -4,7 +4,7 @@ description: >-
   Expert on Python design patterns, modularization, and scalable architecture
   for the APM CLI codebase. Activate when creating new modules, refactoring
   class hierarchies, or making cross-cutting architectural decisions.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Python Architect
