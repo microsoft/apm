@@ -200,3 +200,38 @@ def test_uninstall_unrelated_package_keeps_survivor_target_selection(
     assert ".claude/skills/alpha/SKILL.md" in locked, _evidence(removed)
     assert not any(path.startswith(".agents/") for path in locked), _evidence(removed)
     run(("audit", "--ci"), "audit")
+
+
+def test_uninstall_unrelated_package_keeps_legacy_layout_skill_selection(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """--legacy-skill-paths survivors also keep only their selected skill (#3760 x #3773)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    for name, write in (("bundle", _write_bundle), ("pkg-c", _write_unrelated)):
+        (isolated.work_root / name).mkdir()
+        write(isolated.work_root / name)
+    project = isolated.work_root / "project"
+    project.mkdir()
+    _write_manifest(project / "apm.yml", "../bundle", "../pkg-c")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    def run(args: tuple[str, ...], scenario_id: str) -> CommandResult:
+        result = runner.run(
+            args,
+            scenario_id=f"uninstall-legacy-selection-{scenario_id}",
+            cwd=project,
+            env=isolated.subprocess_env(),
+        )
+        assert result.returncode == 0, _evidence(result)
+        return result
+
+    installed = run(("install", "--legacy-skill-paths"), "install")
+    assert _deployed_skill_dirs(project, ".github/skills") == {"alpha"}, _evidence(installed)
+    removed = run(("uninstall", "../pkg-c"), "uninstall")
+    assert _deployed_skill_dirs(project, ".github/skills") == {"alpha"}, _evidence(removed)
+    assert _deployed_skill_dirs(project) == set(), _evidence(removed)
+    locked = _locked_files(project / "apm.lock.yaml")
+    assert ".github/skills/alpha/SKILL.md" in locked, _evidence(removed)
+    assert not any(path.startswith(".agents/") for path in locked), _evidence(removed)
+    run(("audit", "--ci"), "audit")
