@@ -1497,6 +1497,28 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-rs-018",
+      "keyword": "MUST",
+      "section": "7.4.1",
+      "status": "active",
+      "test_count": 12,
+      "tests": [
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges0-claude-None]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges1-cursor-expected1]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges2-copilot-expected2]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_entry_without_pairings_denotes_the_flat_product",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_exact_pairing_never_crosses_edges",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_exact_product_omits_subset_pairings",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records0]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records1]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records2]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records3]",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_lock_record_matches_section_7_4_1_example",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_selection_and_lock_record_are_order_independent"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-sc-001",
       "keyword": "MUST",
       "section": "10.4",
@@ -1923,7 +1945,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 103,
+      "active": 104,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1947,5 +1969,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 138
+  "total_requirements": 139
 }

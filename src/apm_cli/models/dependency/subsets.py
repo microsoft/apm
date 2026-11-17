@@ -3,14 +3,16 @@
 One dependency node can be declared by several edges (the project's
 ``apm.yml`` and any number of parent packages). Each edge may narrow the node
 with ``skills:`` and ``targets:``. :func:`merge_edge_selections` is the single
-owner of the selection the node carries: a per-field union in which an
-unrestricted edge (``None``) absorbs every narrowing, returned as a sorted
-tuple so the result never depends on traversal order (#3735).
+owner of the selection the node carries: the union over edges of each edge's
+``skills x targets`` product (:func:`merge_edge_pairings`), in which an
+unrestricted axis (``None``) absorbs every narrowing for that edge. The
+canonical result never depends on traversal order (#3735, #3763,
+OpenAPM req-rs-018).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -257,3 +259,264 @@ def _levenshtein_distance(left: str, right: str) -> int:
             )
         previous = current
     return previous[-1]
+
+
+# ---------------------------------------------------------------------------
+# Per-edge skills x targets pairing (OpenAPM req-rs-018)
+#
+# Several dependency edges (manifest entries) can reach one dependency node.
+# Each edge selects ``skills x targets``, where ``None`` on an axis means
+# "all". The node selection is the union over edges of those products, so a
+# skill reaches a target only when one edge pairs them. The canonical form
+# below is a pure function of that meaning, which makes the merge
+# commutative, associative, and idempotent (order-independent).
+# ---------------------------------------------------------------------------
+
+SUBSET_PAIRINGS_LOCK_FIELD = "subset_pairings"
+_PAIRING_RECORD_KEYS = frozenset({"skills", "targets"})
+_EVERY_TARGET = None
+
+_SkillSet = frozenset[str] | None
+_RawPairing = dict[str | None, _SkillSet]
+
+
+@dataclass(frozen=True)
+class SubsetPairing:
+    """One canonical ``skills x targets`` product; ``None`` on an axis means all."""
+
+    skills: tuple[str, ...] | None
+    targets: tuple[str, ...] | None
+
+    def to_lock_record(self) -> dict[str, list[str]]:
+        """Return the lockfile mapping; an omitted axis means all."""
+        record: dict[str, list[str]] = {}
+        if self.skills is not None:
+            record["skills"] = list(self.skills)
+        if self.targets is not None:
+            record["targets"] = list(self.targets)
+        return record
+
+
+@dataclass(frozen=True)
+class SkillTargetSelection:
+    """Canonical per-target skill selection of one dependency node.
+
+    Build instances with :func:`merge_edge_pairings` or
+    :meth:`from_lock_fields`; direct construction is validated to be
+    canonical so equal selections always compare (and serialize) equal.
+    """
+
+    pairings: tuple[SubsetPairing, ...]
+
+    def __post_init__(self) -> None:
+        if not self.pairings:
+            raise ValueError("A dependency selection needs at least one pairing")
+        if _canonicalize(_raw_from_pairings(self.pairings)) != self.pairings:
+            raise ValueError("Subset pairings are not in canonical form")
+
+    @property
+    def skill_subset(self) -> tuple[str, ...] | None:
+        """Flat union of selected skills (``None`` = all) for any target."""
+        return _sorted_names(_union_all(_names(p.skills) for p in self.pairings))
+
+    @property
+    def target_subset(self) -> tuple[str, ...] | None:
+        """Flat union of selected targets (``None`` = every effective target)."""
+        if any(p.targets is None for p in self.pairings):
+            return None
+        return tuple(sorted({t for p in self.pairings for t in p.targets or ()}))
+
+    @property
+    def is_product(self) -> bool:
+        """True when ``skill_subset x target_subset`` encodes the selection exactly."""
+        return len(self.pairings) == 1
+
+    def selects_target(self, target: str) -> bool:
+        """Return whether any edge selected *target*."""
+        return any(p.targets is None or target in p.targets for p in self.pairings)
+
+    def skills_for_target(self, target: str) -> tuple[str, ...] | None:
+        """Return the skills selected for *target* (``None`` = all skills).
+
+        Raises ``KeyError`` when no edge selected *target*; callers check
+        :meth:`selects_target` first so "nothing" is never read as "all".
+        """
+        covering = [
+            _names(p.skills) for p in self.pairings if p.targets is None or target in p.targets
+        ]
+        if not covering:
+            raise KeyError(target)
+        return _sorted_names(_union_all(covering))
+
+    def merge(self, other: SkillTargetSelection) -> SkillTargetSelection:
+        """Return the union of two node selections."""
+        raw = _raw_from_pairings(self.pairings)
+        _absorb_raw(raw, _raw_from_pairings(other.pairings))
+        return SkillTargetSelection(_canonicalize(raw))
+
+    def to_lock_records(self) -> list[dict[str, list[str]]] | None:
+        """Return ``subset_pairings`` records, or ``None`` when the flat fields suffice.
+
+        Omitting the field for products keeps lockfiles byte-identical to
+        earlier writers whenever pairing cannot change the deployment.
+        """
+        if self.is_product:
+            return None
+        return [pairing.to_lock_record() for pairing in self.pairings]
+
+    @classmethod
+    def from_lock_fields(
+        cls,
+        skill_subset: Iterable[str] | None,
+        target_subset: Iterable[str] | None,
+        records: object = None,
+    ) -> SkillTargetSelection:
+        """Decode a lock entry's selection.
+
+        Without ``subset_pairings`` (any lockfile written before exact
+        pairing), the selection is the product of the flat fields, which is
+        exactly what those writers deployed. With records, the flat fields
+        MUST equal the records' projections; a mismatch (stale or tampered
+        state) raises ``ValueError``.
+        """
+        if records is None:
+            return merge_edge_pairings([(skill_subset, target_subset)])
+        selection = merge_edge_pairings(_parse_lock_records(records))
+        recorded_skills = _sorted_names(_names(_normalize_axis(skill_subset, "skill_subset")))
+        recorded_targets = _sorted_names(_names(_normalize_axis(target_subset, "target_subset")))
+        if (selection.skill_subset, selection.target_subset) != (
+            recorded_skills,
+            recorded_targets,
+        ):
+            raise ValueError(
+                f"{SUBSET_PAIRINGS_LOCK_FIELD} disagree with skill_subset/target_subset; "
+                "run 'apm install' to regenerate the lockfile"
+            )
+        return selection
+
+
+def merge_edge_pairings(
+    edges: Iterable[tuple[Iterable[str] | None, Iterable[str] | None]],
+) -> SkillTargetSelection:
+    """Merge per-edge ``(skill_subset, target_subset)`` selections exactly.
+
+    ``None`` or an empty collection on an axis means "all" for that edge,
+    matching ``DependencyReference`` and lockfile conventions. The result
+    deploys a skill to a target only when one edge selects both.
+    """
+    raw: _RawPairing = {}
+    seen = False
+    for skills, targets in edges:
+        seen = True
+        skill_set = _names(_normalize_axis(skills, "skills"))
+        target_set = _names(_normalize_axis(targets, "targets"))
+        edge_raw: _RawPairing = {}
+        for target in target_set if target_set is not None else (_EVERY_TARGET,):
+            edge_raw[target] = skill_set
+        _absorb_raw(raw, edge_raw)
+    if not seen:
+        raise ValueError("A dependency selection needs at least one edge")
+    return SkillTargetSelection(_canonicalize(raw))
+
+
+def _normalize_axis(values: Iterable[object] | None, axis: str) -> tuple[str, ...] | None:
+    if values is None:
+        return None
+    if isinstance(values, str):
+        raise ValueError(f"'{axis}' must be a list of names, not a string")
+    names: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Each entry in '{axis}' must be a non-empty string")
+        names.append(value.strip())
+    return tuple(names) or None
+
+
+def _names(values: Iterable[str] | None) -> _SkillSet:
+    return None if values is None else frozenset(values)
+
+
+def _sorted_names(values: _SkillSet) -> tuple[str, ...] | None:
+    return None if values is None else tuple(sorted(values))
+
+
+def _union(left: _SkillSet, right: _SkillSet) -> _SkillSet:
+    if left is None or right is None:
+        return None
+    return left | right
+
+
+def _union_all(values: Iterable[_SkillSet]) -> _SkillSet:
+    result: _SkillSet = frozenset()
+    for value in values:
+        result = _union(result, value)
+        if result is None:
+            return None
+    return result
+
+
+def _absorb_raw(into: _RawPairing, other: _RawPairing) -> None:
+    for target, skills in other.items():
+        into[target] = _union(into[target], skills) if target in into else skills
+
+
+def _raw_from_pairings(pairings: Iterable[SubsetPairing]) -> _RawPairing:
+    raw: _RawPairing = {}
+    for pairing in pairings:
+        targets = pairing.targets if pairing.targets is not None else (_EVERY_TARGET,)
+        _absorb_raw(raw, dict.fromkeys(targets, _names(pairing.skills)))
+    return raw
+
+
+def _canonicalize(raw: _RawPairing) -> tuple[SubsetPairing, ...]:
+    """Group targets by their effective skill set; drop targets equal to the wildcard."""
+    has_everywhere = _EVERY_TARGET in raw
+    everywhere = raw.get(_EVERY_TARGET)
+    grouped: dict[_SkillSet, list[str]] = {}
+    for target, skills in raw.items():
+        if target is _EVERY_TARGET:
+            continue
+        effective = _union(skills, everywhere) if has_everywhere else skills
+        if has_everywhere and effective == everywhere:
+            continue
+        grouped.setdefault(effective, []).append(target)
+    concrete = sorted(
+        (
+            SubsetPairing(_sorted_names(skills), tuple(sorted(targets)))
+            for skills, targets in grouped.items()
+        ),
+        key=lambda pairing: pairing.targets or (),
+    )
+    if not has_everywhere:
+        return tuple(concrete)
+    return (SubsetPairing(_sorted_names(everywhere), None), *concrete)
+
+
+def _parse_lock_records(
+    records: object,
+) -> list[tuple[tuple[str, ...] | None, tuple[str, ...] | None]]:
+    if not isinstance(records, list) or not records:
+        raise ValueError(f"'{SUBSET_PAIRINGS_LOCK_FIELD}' must be a non-empty list")
+    edges: list[tuple[tuple[str, ...] | None, tuple[str, ...] | None]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError(f"Each '{SUBSET_PAIRINGS_LOCK_FIELD}' entry must be a mapping")
+        unknown = set(record) - _PAIRING_RECORD_KEYS
+        if unknown:
+            raise ValueError(
+                f"Unknown '{SUBSET_PAIRINGS_LOCK_FIELD}' keys: {', '.join(sorted(map(str, unknown)))}"
+            )
+        axes = []
+        for axis in ("skills", "targets"):
+            if axis not in record:
+                axes.append(None)
+                continue
+            value = record[axis]
+            if not isinstance(value, list) or not value:
+                raise ValueError(
+                    f"'{SUBSET_PAIRINGS_LOCK_FIELD}' {axis} must be a non-empty list; "
+                    "omit it to select all"
+                )
+            axes.append(_normalize_axis(value, axis))
+        edges.append((axes[0], axes[1]))
+    return edges

@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **138 normative statements (133 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **139 normative statements (134 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -545,7 +545,7 @@ and MUST NOT use both on the same entry.
 | `ref`    | no                                      | Branch, tag, semver range, or commit SHA (git form).                  |
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
 | `alias`  | no                                      | Local install-directory override; see [req-mf-025](#req-mf-025).        |
-| `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
+| `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)); merged across edges per [req-rs-018](#req-rs-018). |
 
 <a id="req-mf-025"></a>
 **[req-mf-025]** A conforming **consumer** implementation that supports
@@ -1058,7 +1058,9 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
 | `resolved_by`             | `repo_url` of the parent that pulled this transitive dep.                       |
 | `package_type`            | One of `apm_package`, `skill_bundle`, etc.                                      |
-| `skill_subset`            | Selected skill names for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
+| `skill_subset`            | Selected skill names for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)); the union over all declaring edges per [req-rs-018](#req-rs-018). |
+| `target_subset`           | Consumer-side per-dependency target subset; the union over all declaring edges per [req-rs-018](#req-rs-018). |
+| `subset_pairings`         | Optional exact per-target skill selection, present only when `skill_subset` x `target_subset` would over-select. See [req-rs-018](#req-rs-018). |
 | `deployed_files`          | Project-relative paths the consumer wrote for this entry.                       |
 | `deployed_file_hashes`    | `path -> <algo>:<hex>` for the files in `deployed_files`.                       |
 | `source`                  | `local` for path deps, `registry` for registry deps; absent for git.            |
@@ -2469,6 +2471,94 @@ dependencies:
     depth: 3
 ```
 
+#### 7.4.1 Per-edge subset merging
+
+Several **edges** can reach one dependency identity: a root manifest
+entry plus transitive manifest entries, or several transitive entries.
+Each edge can narrow what the consumer deploys from that dependency
+with an object-form `skills:` subset ([Section 4.3.2](#432-object-form))
+and a consumer-side per-dependency target subset (item (b) of
+[req-tg-008](#req-tg-008)). An edge's **selection** is the product of
+its skill set and its target set. An omitted skill subset selects every
+selectable skill; an omitted target subset selects every target.
+
+<a id="req-rs-018"></a>
+**[req-rs-018]** A conforming **consumer** implementation that supports
+per-dependency skill or target subsets MUST derive the deployment
+selection of a dependency reached by more than one edge from all of
+those edges:
+
+1. **Exact pairing.** A selectable skill is selected for a target if
+   and only if at least one edge selects both that skill and that
+   target. The consumer MUST NOT deploy a skill into a target that no
+   single edge pairs with it, even when one edge selects the skill and
+   another edge selects the target. It MUST NOT omit a skill-target
+   pair that any edge selects.
+2. **All absorbs.** An edge that omits an axis selects everything on
+   that axis for that edge. A narrower selection on another edge MUST
+   NOT reduce it.
+3. **Order independence.** The derived selection, and the lock entry
+   that records it, MUST be identical for every manifest declaration
+   order, edge discovery order, and edge depth. The consumer MUST NOT
+   substitute a first-wins or last-wins choice among edges.
+4. **Lock recording.** The lock entry MUST record the derived selection
+   so that replay, audit, and removal can reconstruct each target's
+   skills without re-reading manifests. `skill_subset` records the
+   union of selected skill names and `target_subset` the union of
+   selected targets; each is omitted when an edge selects all on that
+   axis. When those two fields, read as a product, would select a pair
+   that no edge selects, the entry MUST also carry `subset_pairings` in
+   the canonical form below. Writers MUST omit `subset_pairings` when
+   the product of the two fields is exact.
+5. **Consistency.** A reader MUST treat a malformed `subset_pairings`
+   value, or one whose skill and target unions differ from
+   `skill_subset` and `target_subset`, as invalid lock state: a
+   non-frozen install re-derives the selection, while frozen install
+   and audit fail with a diagnostic naming the dependency. An entry
+   without `subset_pairings` denotes the product of its two flat
+   fields.
+6. **Frozen replay.** Under frozen install, when the selection derived
+   from the current manifests differs from the recorded selection, the
+   consumer MUST fail before deployment with a diagnostic naming the
+   dependency and stating that its subset selection changed. It MUST
+   NOT deploy either selection.
+
+**Canonical `subset_pairings` form.** Each element is a mapping with
+optional `skills` and `targets` keys, each a non-empty list sorted in
+ascending code-point order; an omitted key means all on that axis. The
+union of the elements' products equals the derived selection. If an edge
+omits its target subset, the first element has no `targets` key and
+carries the skills every target receives. Each further element carries
+one complete skill set that some target receives when that set differs
+from the first element's skills (or every distinct set, when there is
+no such first element), with the sorted list of exactly the targets
+that receive it. Elements with a `targets` key are ordered by their
+`targets` lists. Two equal selections therefore serialize to identical
+bytes.
+
+The derived target union is item (b) of [req-tg-008](#req-tg-008);
+items (a) and (c) still narrow it, and within the resulting effective
+target intersection each target receives only the skills paired with
+it. A `skills:` subset narrows skills only. This requirement does not
+change dependency identity ([req-rs-016](#req-rs-016)), deduplication,
+or `resolved_by` ([req-rs-010](#req-rs-010)).
+
+Example (informative): `acme/a` declares `acme/bundle` with
+`skills: [alpha]` and `targets: [claude]`, and `acme/b` declares it with
+`skills: [gamma]` and `targets: [copilot]`. `alpha` deploys only for
+`claude` and `gamma` only for `copilot`:
+
+```yaml
+- repo_url: github.com/acme/bundle
+  skill_subset: [alpha, gamma]
+  target_subset: [claude, copilot]
+  subset_pairings:
+    - skills: [alpha]
+      targets: [claude]
+    - skills: [gamma]
+      targets: [copilot]
+```
+
 ### 7.5 Lockfile replay semantics
 
 <a id="req-rs-004"></a>
@@ -2743,7 +2833,7 @@ This section's normative statements are:
   [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
   [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
   [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
-  [req-rs-017](#req-rs-017).
+  [req-rs-017](#req-rs-017), [req-rs-018](#req-rs-018).
 - Producer: [req-pr-004](#req-pr-004).
 - Producer (SHOULD): [req-pr-005](#req-pr-005).
 
@@ -4197,7 +4287,7 @@ conformance statement identifying:
 [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
 [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
 [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
-[req-rs-017](#req-rs-017),
+[req-rs-017](#req-rs-017), [req-rs-018](#req-rs-018),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007),
@@ -4694,6 +4784,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rs-015](#req-rs-015)                | MUST    | 7.5     | consumer    |
 | [req-rs-016](#req-rs-016)                | MUST    | 7.2     | consumer    |
 | [req-rs-017](#req-rs-017)                | MUST    | 7.7     | consumer    |
+| [req-rs-018](#req-rs-018)                | MUST    | 7.4.1   | consumer    |
 | [req-pr-001](#req-pr-001)                | MUST    | 8.2     | consumer    |
 | [req-pr-002](#req-pr-002)                | MUST    | 8.3     | consumer    |
 | [req-pr-003](#req-pr-003)                | MUST    | 8.3     | consumer    |
@@ -4743,7 +4834,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 138** (133 MUST, 5 SHOULD).
+**Total normative statements: 139** (134 MUST, 5 SHOULD).
 
 ---
 
@@ -4809,13 +4900,14 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.57 (proposed) | 2026-11-12 | Spec-citation fold for PR #3377 (closes the #3252 Mode-B silent-extension gate on MCP install and ownership). Added [req-mf-026](#req-mf-026) (Section 4.5, consumer MUST): a project-scoped Claude Code `.mcp.json` keeps `${VAR}` references (with `${env:VAR}` written as `${VAR}`) in `command`, `args`, `env`, `url` and `headers` instead of resolved values, and keeps static values and `${VAR:-default}` as declared. An existing entry holding values where the rendered server has references is replaced only when the consumer can show it wrote it (recorded native write hash, or exact expansion of the declared references from the current environment); otherwise it is left unchanged, the install fails, and the diagnostic names the affected fields. Diagnostics name variables and fields, never values. User scope keeps install-time resolution. The Section 4.5 dispatch matrix rows for `${VAR}` and `${env:VAR}` point to the new requirement. Under Section 9.2 this changes generated bytes for the Claude Code project target only. Sections 4.5, 4.9, 11.3.2 and Appendix C are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 136 -> 137 (132 MUST, 5 SHOULD). |
 | 0.1.58 (proposed) | 2026-11-12 | Amendment for accepted issue #1744 in PR #2030. Added [req-tg-018](#req-tg-018) (Section 8.5.10, consumer MUST): at project and user scope, a Cursor instruction whose normalized `applyTo` is exactly one universal `**` pattern (scalar, padded scalar, or single-item sequence) emits `alwaysApply: true` with no `globs`; every other non-empty set, including `**` mixed with scoped patterns, keeps `globs` and never `alwaysApply`; absent, empty, or null `applyTo` emits neither key. Under Section 9.2 this changes generated bytes for the Cursor target only: rules previously emitted as `globs: **` are replaced on reinstall. No source frontmatter field, scoped-glob serialization, or other target changes. Sections 1.3, 8.7, 11.3.2 and Appendix C, the requirements manifest and conformance test binding are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.59 (proposed) | 2026-11-12 | Amendment for accepted issue #3509 in PR #3606. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place with clause (g): a `dependencies.allow` or `dependencies.deny` pattern whose first segment contains U+002E and does not begin with it is host-qualified and matches only when the dependency's effective host (written host, or the implementation-default host), after port and trailing-dot removal and ASCII case folding, equals the named host. Hostless patterns still match every host; `dependencies.require` is unchanged. Updated the Section 6.3.1 table, the source-replacement policy sentence, the Section 10.8 note and the requirements-manifest notes. No new normative statement; count unchanged at 138 (133 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
+| 0.1.60 (proposed) | 2026-11-17 | Amendment for accepted issue #3763. Added [req-rs-018](#req-rs-018) (new Section 7.4.1, consumer MUST): when several edges reach one dependency, its deployment selection is the union over edges of each edge's `skills` x `targets` product; omitting an axis selects all for that edge; the result and its lock entry are independent of declaration order, discovery order and depth, with no first-wins or last-wins choice; `skill_subset` and `target_subset` record the unions and a new optional `subset_pairings` lock field records the exact per-target selection in a canonical form, only when the two flat fields would over-select; a malformed or inconsistent `subset_pairings` value is invalid lock state; and frozen install fails, naming the dependency, when the derived selection differs from the recorded one. Under Section 9.2 this defines previously unspecified merge behaviour, not behavior-neutral errata: a consumer that kept one edge's subsets, or unioned each field independently, now deploys different skills for divergent diamonds, and a frozen install over a lock written by such a consumer fails until the lock is regenerated when the selections differ. Locks whose flat fields are already exact are unchanged byte for byte. `subset_pairings` is additive and optional, `lockfile_version` is unchanged, and the published lockfile schemas already admit additional entry properties, so no schema revision is selected; older readers that preserve the unknown field without implementing it fall back to the flat product. Added the `target_subset` and `subset_pairings` rows to the Section 5.2 field table. Sections 1.3, 4.3.2, 5.2, 7.11, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 
-The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57 and 0.1.58
-proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises
+The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
+0.1.60 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises
 [req-tg-005](#req-tg-005) in place and 0.1.59 revises
 [req-pl-018](#req-pl-018) in place; neither adds a statement. Together, this
 working draft
-contains 138 statements (133 MUST, 5 SHOULD). Combining the proposals does not establish
+contains 139 statements (134 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
 Errata (none at publication).
