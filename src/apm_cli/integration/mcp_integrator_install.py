@@ -7,6 +7,7 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
+import copy
 import logging
 import re
 from enum import Enum
@@ -359,22 +360,9 @@ def _install_registry_group(  # noqa: PLR0913
             # Batch fetch server info once
             if verbose:
                 logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
-            server_info_cache = {
-                name: registry_server_cache[name]
-                for name in servers_to_install
-                if name in registry_server_cache
-            }
-            unresolved_servers = [
-                name for name in servers_to_install if name not in server_info_cache
-            ]
-            if unresolved_servers:
-                server_info_cache.update(operations.batch_fetch_server_info(unresolved_servers))
-
-            # Apply overlays
-            for server_name in servers_to_install:
-                dep = group_dep_map.get(server_name)
-                if dep:
-                    MCPIntegrator._apply_overlay(server_info_cache, dep)
+            server_info_cache = _overlaid_server_infos(
+                operations, servers_to_install, group_dep_map, known=registry_server_cache
+            )
 
             # Collect env and runtime variables
             shared_env_vars = operations.collect_environment_variables(
@@ -406,6 +394,19 @@ def _install_registry_group(  # noqa: PLR0913
                 successful_runtimes: list[str] = []
                 failed_runtimes: list[str] = []
                 for rt in target_runtimes:
+                    if _skip_unsupported_remote_transport(
+                        rt,
+                        dep,
+                        server_info_cache.get(dep),
+                        logger,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        stored_config=stored_mcp_configs.get(dep),
+                        managed_target_servers=managed_target_servers,
+                        native_hashes=native_hashes,
+                        registry_info=True,
+                    ):
+                        continue
                     installed_servers: set[str] = set()
                     written_hashes: dict[str, str] = {}
                     managed_fields: set[str] = set()
@@ -528,6 +529,188 @@ def _install_registry_group(  # noqa: PLR0913
         raise MCPNativeConflictError(message, wrote_connections=bool(written_connections))
     _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
+
+
+def _skip_unsupported_remote_transport(
+    runtime: str,
+    name: str,
+    server_info: dict | None,
+    logger: Any,
+    *,
+    project_root: Any,
+    user_scope: bool,
+    stored_config: dict | None = None,
+    managed_target_servers: dict[str, set[str]] | None = None,
+    native_hashes: dict[str, dict[str, str]] | None = None,
+    registry_info: bool = False,
+) -> bool:
+    """Warn and skip a remote whose transport *runtime* cannot load (never claimed).
+
+    Under ``--frozen`` a pair deferred because the lockfile never claimed it
+    (``is_frozen_unrecorded_mcp_pair``) is refused here when its transport turns
+    out to be supported, so a frozen install never writes a new claim.
+
+    Runs before any native comparison or write, so the server is not rendered
+    or recorded for that runtime and the install continues. An entry an earlier
+    APM release wrote for it (proven by fingerprint or an earlier render) is
+    removed and its claim dropped; any other same-name entry is left alone.
+    """
+    if not isinstance(server_info, dict):
+        return False
+    from apm_cli.adapters.client._remote_shapes import (
+        skip_unsupported_remote,
+        unsupported_remote_transport,
+    )
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import (
+        is_frozen_unrecorded_mcp_pair,
+        managed_unsupported_connection,
+    )
+
+    try:
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+    except ValueError:
+        return False
+    transport = unsupported_remote_transport(client, server_info)
+    if transport is None:
+        if is_frozen_unrecorded_mcp_pair(name, runtime):
+            from apm_cli.install.service import frozen_services_error, frozen_unrecorded_reason
+
+            raise frozen_services_error([frozen_unrecorded_reason("MCP", name, runtime)])
+        return False
+    skip_unsupported_remote(client, name, transport, warn=logger.warning)
+    claims = (managed_target_servers or {}).get(runtime, set())
+    if name not in claims:
+        return True
+    key = managed_unsupported_connection(
+        client,
+        name,
+        requested_info=server_info if registry_info else None,
+        stored_config=stored_config,
+        native_hash=(native_hashes or {}).get(runtime, {}).get(name),
+    )
+    if key is not None:
+        _remove_native_entry(client, key, logger)
+    # Reached only after a successful removal (cleanup failures raise).
+    claims.discard(name)
+    if native_hashes is not None:
+        native_hashes.get(runtime, {}).pop(name, None)
+    return True
+
+
+def _remove_native_entry(client: Any, key: str, logger: Any) -> None:
+    """Remove exactly *key* from *client*'s native MCP config, failing loudly."""
+    from apm_cli.adapters.client._remote_shapes import remote_shape_of
+    from apm_cli.integration.mcp_integrator import _clean_json_mcp_config, _clean_toml_mcp_config
+
+    path = Path(client.get_config_path())
+    label = f"{remote_shape_of(client).label} MCP config"
+    if path.suffix == ".toml":
+        _clean_toml_mcp_config(
+            path, {key}, label, logger=logger, use_rich=False, fail_on_write_error=True
+        )
+        return
+    _clean_json_mcp_config(
+        path,
+        {key},
+        logger,
+        label,
+        servers_key=client.mcp_servers_key,
+        trailing_newline=client.json_config_trailing_newline,
+        fail_on_write_error=True,
+    )
+
+
+def _resolve_frozen_deferred_pairs(
+    mcp_deps: list,
+    target_runtimes: list[str],
+    *,
+    project_root: Any,
+    user_scope: bool,
+) -> None:
+    """Refuse, before any native write, a deferred ``--frozen`` pair its harness can load.
+
+    ``InstallService.enforce_frozen_services`` defers an unrecorded pair whose
+    transport only the registry payload can decide; this resolves every such
+    pair against its overlaid payload so a refused replay changes nothing.
+    """
+    from apm_cli.adapters.client._remote_shapes import unsupported_remote_transport
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import current_frozen_unrecorded_mcp_pairs
+    from apm_cli.install.service import frozen_services_error, frozen_unrecorded_reason
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.registry.operations import MCPServerOperations
+
+    pairs = {pair for pair in current_frozen_unrecorded_mcp_pairs() if pair[1] in target_runtimes}
+    if not pairs:
+        return
+    deferred_names = {name for name, _runtime in pairs}
+    infos: dict[str, dict] = {}
+    groups: dict[str | None, list] = {}
+    for dep in mcp_deps:
+        name = dep.name if hasattr(dep, "name") else dep
+        if name not in deferred_names:
+            continue
+        if getattr(dep, "is_self_defined", False):
+            infos[name] = MCPIntegrator._build_self_defined_info(dep)
+        else:
+            groups.setdefault(_registry_group_key(dep), []).append(dep)
+    for registry_url, deps in groups.items():
+        infos.update(
+            _overlaid_server_infos(
+                MCPServerOperations(registry_url=registry_url),
+                [dep.name if hasattr(dep, "name") else dep for dep in deps],
+                {dep.name: dep for dep in deps if hasattr(dep, "name")},
+            )
+        )
+    reasons = []
+    for name, runtime in sorted(pairs):
+        info = infos.get(name)
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+        if info is None or unsupported_remote_transport(client, info) is None:
+            reasons.append(frozen_unrecorded_reason("MCP", name, runtime))
+    if reasons:
+        raise frozen_services_error(reasons)
+
+
+def _overlaid_server_infos(
+    operations: Any,
+    names: list[str],
+    dep_map: dict[str, Any],
+    *,
+    known: dict[str, dict] | None = None,
+) -> dict[str, dict]:
+    """Registry server info for *names*, fetched once and overlaid per declaration.
+
+    The one fetch-then-overlay step every registry install path uses. Entries
+    are deep copies, so overlaying never mutates a cached registry payload.
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    infos = {name: (known or {})[name] for name in names if name in (known or {})}
+    unresolved = [name for name in names if name not in infos]
+    if unresolved:
+        infos.update(operations.batch_fetch_server_info(unresolved))
+    infos = {name: copy.deepcopy(info) for name, info in infos.items()}
+    for name in names:
+        dep = dep_map.get(name)
+        if dep:
+            MCPIntegrator._apply_overlay(infos, dep)
+    return infos
+
+
+def _registry_group_key(dep: Any) -> str | None:
+    """Normalized per-dependency registry URL; ``None`` for the default registry."""
+    dep_registry = getattr(dep, "registry", None)
+    if not isinstance(dep_registry, str):
+        return None
+    from apm_cli.registry.client import normalize_mcp_registry_url
+
+    return normalize_mcp_registry_url(dep_registry)
 
 
 def _ascii_names(names: list[str]) -> str:
@@ -1391,6 +1574,18 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
+            if _skip_unsupported_remote_transport(
+                rt,
+                dep.name,
+                synthetic_info,
+                logger,
+                project_root=project_root,
+                user_scope=user_scope,
+                stored_config=stored_mcp_configs.get(dep.name),
+                managed_target_servers=managed_target_servers,
+                native_hashes=native_hashes,
+            ):
+                continue
             installed_servers: set[str] = set()
             managed_fields: set[str] = set()
             written_hashes: dict[str, str] = {}
@@ -1683,6 +1878,9 @@ def run_mcp_install(  # noqa: PLR0913
         console=console,
         logger=logger,
     )
+    _resolve_frozen_deferred_pairs(
+        mcp_deps, target_runtimes, project_root=project_root, user_scope=user_scope
+    )
     claude_targeted = "claude" in target_runtimes
     if claude_targeted:
         # Claude's diagnostics cover every server of this run, so they are
@@ -1770,13 +1968,7 @@ def run_mcp_install(  # noqa: PLR0913
             # the default group (key=None).  Only str values trigger routing.
             registry_groups: builtins.dict[str | None, list] = {}
             for dep in registry_deps:
-                dep_registry = getattr(dep, "registry", None)
-                if isinstance(dep_registry, str):
-                    from apm_cli.registry.client import normalize_mcp_registry_url
-
-                    key = normalize_mcp_registry_url(dep_registry)
-                else:
-                    key = None
+                key = _registry_group_key(dep)
                 if key not in registry_groups:
                     registry_groups[key] = []
                 registry_groups[key].append(dep)

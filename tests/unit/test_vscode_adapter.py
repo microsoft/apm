@@ -258,7 +258,8 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         }
         config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
-        self.assertEqual(config["type"], "streamable-http")
+        # VS Code reads ``http`` for Streamable HTTP (no ``streamable-http`` alias).
+        self.assertEqual(config["type"], "http")
         self.assertEqual(config["url"], "https://stream.example.com")
 
     @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
