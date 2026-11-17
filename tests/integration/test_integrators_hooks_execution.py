@@ -30,6 +30,7 @@ import pytest
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_downloader_validation import _ssh_attempt_allowed
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.hook_file_routing import (
     legacy_hook_file_selection as _filter_hook_files_for_target,
 )
@@ -51,7 +52,7 @@ from apm_cli.integration.skill_integrator import (
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.platform_sensitive]
 
 # ---------------------------------------------------------------------------
 # Helpers shared across test classes
@@ -1170,8 +1171,12 @@ class TestSyncIntegrationHooks:
 
         managed = {".github/hooks/my-pkg-hooks.json"}
         integrator = HookIntegrator()
+        # Stale cleanup deletes only on a matching recorded hash (#3663).
         stats = integrator.sync_integration(
-            _make_apm_package(), project_root, managed_files=managed
+            _make_apm_package(),
+            project_root,
+            managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, project_root),
         )
         assert stats["files_removed"] >= 1
         assert not hook_file.exists()

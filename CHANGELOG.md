@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 - `apm init --discover` now explains that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` reported as `unsupported` stays in place and is not adopted as an APM package, and that copies outside known target directories such as `.claude/` are not inventoried; `apm compile` with no APM content notes that native files are not APM content and points to `apm init --discover`. Statuses, report keys and exit codes are unchanged. -- by @AndresDvst (#3737)
 
 ## [0.36.0] - 2026-11-17
