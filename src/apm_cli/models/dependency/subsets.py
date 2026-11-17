@@ -311,6 +311,12 @@ class SkillTargetSelection:
     def __post_init__(self) -> None:
         if not self.pairings:
             raise ValueError("A dependency selection needs at least one pairing")
+        for pairing in self.pairings:
+            for axis, values in (("skills", pairing.skills), ("targets", pairing.targets)):
+                if values is not None and (
+                    not isinstance(values, tuple) or _normalize_axis(values, axis) != values
+                ):
+                    raise ValueError(f"Subset pairing {axis} must be None or non-empty names")
         if _canonicalize(_raw_from_pairings(self.pairings)) != self.pairings:
             raise ValueError("Subset pairings are not in canonical form")
 

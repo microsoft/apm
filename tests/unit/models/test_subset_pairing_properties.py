@@ -175,3 +175,18 @@ def test_non_canonical_construction_is_rejected() -> None:
         SkillTargetSelection(
             (SubsetPairing(("alpha",), ("copilot",)), SubsetPairing(("alpha",), ("claude",)))
         )
+
+
+@pytest.mark.parametrize(
+    "pairing",
+    [
+        SubsetPairing((), ("claude",)),
+        SubsetPairing((" alpha",), ("claude",)),
+        SubsetPairing(("alpha",), ("",)),
+        SubsetPairing(["alpha"], ("claude",)),
+    ],
+)
+def test_direct_construction_rejects_axes_that_change_meaning_on_replay(pairing) -> None:
+    """An empty, blank or padded axis would decode differently from the lock."""
+    with pytest.raises(ValueError, match="non-empty"):
+        SkillTargetSelection((pairing,))

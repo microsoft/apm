@@ -2497,8 +2497,9 @@ those edges:
 2. **All absorbs.** An edge that omits an axis selects everything on
    that axis for that edge. A narrower selection on another edge MUST
    NOT reduce it.
-3. **Order independence.** The derived selection, and the lock entry
-   that records it, MUST be identical for every manifest declaration
+3. **Order independence.** The derived selection, and the lock fields
+   that record it (`skill_subset`, `target_subset`, and
+   `subset_pairings`), MUST be identical for every manifest declaration
    order, edge discovery order, and edge depth. The consumer MUST NOT
    substitute a first-wins or last-wins choice among edges.
 4. **Lock recording.** The lock entry MUST record the derived selection
