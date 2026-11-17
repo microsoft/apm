@@ -17,7 +17,9 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.e2e,
+    pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
 ]
 
@@ -57,24 +59,33 @@ def _write_unrelated(package: Path) -> None:
     )
 
 
-def _write_manifest(manifest: Path, bundle: str, unrelated: str) -> None:
+def _write_manifest(
+    manifest: Path,
+    bundle: str,
+    unrelated: str,
+    *,
+    targets: str = "[copilot]",
+    bundle_targets: str | None = None,
+) -> None:
     """Pin one skill of the bundle and add the unrelated package."""
+    narrowed = f"      targets: {bundle_targets}\n" if bundle_targets else ""
     manifest.write_text(
         "name: consumer\n"
         "version: 1.0.0\n"
-        "targets: [copilot]\n"
+        f"targets: {targets}\n"
         "dependencies:\n"
         "  apm:\n"
         f"    - path: {bundle}\n"
         "      skills: [alpha]\n"
+        f"{narrowed}"
         f"    - {unrelated}\n"
         "  mcp: []\n",
         encoding="utf-8",
     )
 
 
-def _deployed_skill_dirs(deploy_root: Path) -> set[str]:
-    skills_root = deploy_root / ".agents" / "skills"
+def _deployed_skill_dirs(deploy_root: Path, skills_dir: str = ".agents/skills") -> set[str]:
+    skills_root = deploy_root / skills_dir
     if not skills_root.is_dir():
         return set()
     return {path.name for path in skills_root.iterdir() if path.is_dir()}
@@ -149,3 +160,43 @@ def test_uninstall_unrelated_package_keeps_survivor_skill_selection(
     reinstalled = run(("install", *scope_args), "reinstall")
     assert reinstalled.returncode == 0, _evidence(reinstalled)
     assert _deployed_skill_dirs(deploy_root) == {"alpha"}, _evidence(reinstalled)
+
+
+def test_uninstall_unrelated_package_keeps_survivor_target_selection(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A survivor narrowed to claude stays out of the copilot skills root."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    for name, write in (("bundle", _write_bundle), ("pkg-c", _write_unrelated)):
+        (isolated.work_root / name).mkdir()
+        write(isolated.work_root / name)
+    project = isolated.work_root / "project"
+    project.mkdir()
+    _write_manifest(
+        project / "apm.yml",
+        "../bundle",
+        "../pkg-c",
+        targets="[copilot, claude]",
+        bundle_targets="[claude]",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    def run(args: tuple[str, ...], scenario_id: str) -> CommandResult:
+        result = runner.run(
+            args,
+            scenario_id=f"uninstall-target-selection-{scenario_id}",
+            cwd=project,
+            env=isolated.subprocess_env(),
+        )
+        assert result.returncode == 0, _evidence(result)
+        return result
+
+    run(("install",), "install")
+    removed = run(("uninstall", "../pkg-c"), "uninstall")
+    assert _deployed_skill_dirs(project, ".claude/skills") == {"alpha"}, _evidence(removed)
+    assert _deployed_skill_dirs(project) == set(), _evidence(removed)
+    locked = _locked_files(project / "apm.lock.yaml")
+    assert ".claude/skills/alpha/SKILL.md" in locked, _evidence(removed)
+    assert not any(path.startswith(".agents/") for path in locked), _evidence(removed)
+    run(("audit", "--ci"), "audit")

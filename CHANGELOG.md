@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm uninstall` (project and `-g`) no longer redeploys every skill of a surviving package that selects skills with `skills:`; survivors are rebuilt with the same selection `apm install` deploys, so every deployed skill is recorded in `apm.lock.yaml`. Skill directories left behind by earlier versions are not tracked by APM; delete them manually. (#3784)
+
 ### Changed
 
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)

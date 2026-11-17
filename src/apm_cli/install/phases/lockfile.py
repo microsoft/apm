@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -398,11 +398,8 @@ class LockfileBuilder:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
-                merged = effective_deploy_skill_subset(
-                    skill_subset_from_cli=self.ctx.skill_subset_from_cli,
-                    cli_subset=self.ctx.skill_subset,
-                    persisted_subset=locked_dep.skill_subset,
-                )
+                # Record what was deployed: the same owner the deploy used (#3760).
+                merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
                 # merged is never None here: the guard above returns for
                 # --skill '*' (empty ctx.skill_subset), so a real named
                 # subset always survives the union.
