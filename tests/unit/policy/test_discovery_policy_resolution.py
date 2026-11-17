@@ -789,3 +789,31 @@ class TestWriteCacheOsError:
         with patch.object(Path, "write_text", selective_fail):
             _write_cache("owner/.github", policy, tmp_path)
         # No exception raised
+
+
+@pytest.mark.parametrize(
+    ("repo_ref", "env"),
+    [
+        ("org/.github", {"GITHUB_TOKEN": "env-github-token"}),
+        ("org/.github", {"GITHUB_APM_PAT": "env-apm-pat"}),
+        ("org/.github", {"GH_TOKEN": "env-gh-token"}),
+        ("ghe.example.com/org/.github", {"GITHUB_TOKEN": "env-github-token"}),
+    ],
+    ids=["github-token", "github-apm-pat", "gh-token", "non-github-host"],
+)
+def test_policy_fetch_resolver_failure_never_falls_back_to_env_tokens(repo_ref, env) -> None:
+    """When AuthResolver fails, no raw environment token is sent."""
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch(
+            "apm_cli.core.auth.AuthResolver.resolve",
+            side_effect=RuntimeError("resolver unavailable"),
+        ),
+        patch("apm_cli.policy.discovery.requests.get") as http_get,
+    ):
+        content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
+
+    assert content is None
+    assert error
+    sent = [str(call.kwargs.get("headers", {})) for call in http_get.call_args_list]
+    assert not any(token in header for token in env.values() for header in sent)

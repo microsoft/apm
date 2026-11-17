@@ -354,3 +354,69 @@ def test_secret_redaction_keeps_bearer_token_phrase() -> None:
     )
     jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmaXh0dXJlIn0.c2lnbmF0dXJlLXZhbHVl"
     assert jwt not in _redact_secrets(f"Authorization: Bearer {jwt}")
+
+
+def _git_config(env: dict[str, str]) -> list[tuple[str, str]]:
+    count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    return [(env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(count)]
+
+
+@pytest.mark.parametrize("pat", ["stale-pat", None], ids=["pat-bearer-helper", "tokenless"])
+def test_each_ado_step_child_env_carries_only_its_own_credential(monkeypatch, pat) -> None:
+    """Each attempt's git env holds exactly its own header and no helper lookup."""
+    for name in ("ADO_APM_PAT", "GITHUB_TOKEN", "GITHUB_APM_PAT", "GH_TOKEN", "GIT_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    if pat:
+        monkeypatch.setenv("ADO_APM_PAT", pat)
+    monkeypatch.setenv("GITHUB_TOKEN", "ambient-github-token")
+
+    class _Bearer:
+        last_error = None
+
+        def is_available(self) -> bool:
+            return True
+
+        def get_bearer_token(self) -> str:
+            return "az-jwt"
+
+    monkeypatch.setattr(azure_cli_module, "get_bearer_provider", lambda: _Bearer())
+    helper = token_manager_module.GitHelperCredential(
+        host="dev.azure.com", password="helper-pw", username="me"
+    )
+    monkeypatch.setattr(
+        token_manager_module.GitHubTokenManager,
+        "resolve_git_helper_credential",
+        staticmethod(lambda *_a, **_k: helper),
+    )
+    seen: list[tuple[str | None, dict[str, str]]] = []
+
+    def _rejected(token, env):
+        seen.append((token, dict(env)))
+        raise RuntimeError("fatal: Authentication failed (401)")
+
+    with pytest.raises(Exception, match="Tried in order"):
+        AuthResolver().try_with_fallback(
+            "dev.azure.com",
+            _rejected,
+            org="o",
+            path="o/p/_git/r",
+            remote_url="https://dev.azure.com/o/p/_git/r",
+        )
+
+    expected = {
+        "stale-pat": "Basic " + base64.b64encode(b":stale-pat").decode(),
+        "az-jwt": "Bearer az-jwt",
+        "helper-pw": "Basic " + base64.b64encode(b"me:helper-pw").decode(),
+    }
+    tokens = [token for token, _env in seen]
+    assert tokens == (["stale-pat"] if pat else []) + ["az-jwt", "helper-pw"], tokens
+    for token, env in seen:
+        config = _git_config(env)
+        assert ("credential.helper", "") in config
+        headers = [value for key, value in config if key == "http.extraheader" and value]
+        assert headers == [f"Authorization: {expected[token]}"]
+        for name in ("GIT_TOKEN", "ADO_APM_PAT", "GITHUB_TOKEN", "GITHUB_APM_PAT", "GH_TOKEN"):
+            assert name not in env
+        others = [cred for cred in ("stale-pat", "az-jwt", "helper-pw") if cred != token]
+        text = repr(env)
+        assert not any(cred in text for cred in others), (token, others)
