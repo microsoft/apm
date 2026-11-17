@@ -51,6 +51,7 @@
         "transport-platform-ado-validation-caller-config",
         "transport-platform-ado-validation-clone-bearer-fallback",
         "transport-platform-ado-validation-helper-suppression",
+        "transport-platform-authenticated-egress",
         "transport-platform-host-credential-resolution"
       ]
     },
@@ -208,6 +209,7 @@
         "src/apm_cli/deps/registry_proxy.py"
       ],
       "guards": [
+        "transport-platform-authenticated-egress-credential-headers",
         "transport-platform-credential-origin-scope",
         "transport-platform-origin-bounded-redirect"
       ]

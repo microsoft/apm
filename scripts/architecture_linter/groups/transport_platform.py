@@ -4,6 +4,9 @@ from scripts.architecture_linter.checks.transport_auth_platform import (
     COLLECTORS as _AUTH_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_auth_platform import RULES as _AUTH_RULES
+from scripts.architecture_linter.checks.transport_authenticated_egress import (
+    RULES as _EGRESS_RULES,
+)
 from scripts.architecture_linter.checks.transport_cache_cleanup import RULES as _CLEANUP_RULES
 from scripts.architecture_linter.checks.transport_cache_identity import (
     COLLECTORS as _CACHE_COLLECTORS,
@@ -42,6 +45,7 @@ from scripts.architecture_linter.checks.transport_sparse_and_updates import (
 
 RULES = (
     _AUTH_RULES
+    + _EGRESS_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
     + _SPARSE_RULES

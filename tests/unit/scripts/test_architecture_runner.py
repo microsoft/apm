@@ -752,6 +752,7 @@ registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-authenticated-egress
 transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope

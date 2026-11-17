@@ -1493,6 +1493,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Direct Artifactory entry requests regain ambient netrc credentials.",
     ),
     MutationCase(
+        guard_id="transport-platform-authenticated-egress",
+        rule_id="transport-platform-authenticated-egress",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="self._host._resilient_get(raw_url, headers=raw_headers, timeout=30)",
+        new="requests.get(raw_url, headers=raw_headers, timeout=30)",
+        intent="A GitHub file download opens raw HTTP egress outside the owners and inventory.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-authenticated-egress-credential-headers",
+        rule_id="transport-platform-authenticated-egress",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="return cfg.headers_for(scheme, host)",
+        new='return {"Authorization": f"Bearer {cfg.token}"}',
+        intent="Artifactory downloads assemble a credential header outside its owners.",
+    ),
+    MutationCase(
         guard_id="transport-platform-cache-cleanup-outcome",
         rule_id="transport-platform-cache-cleanup-outcome",
         path="src/apm_cli/cache/git_cache.py",
