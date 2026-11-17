@@ -24,6 +24,9 @@ from scripts.architecture_linter.checks.transport_network_and_runtime import (
 from scripts.architecture_linter.checks.transport_network_and_runtime import (
     RULES as _NETWORK_RULES,
 )
+from scripts.architecture_linter.checks.transport_origin_bounded_redirect import (
+    RULES as _REDIRECT_RULES,
+)
 from scripts.architecture_linter.checks.transport_revision_pins import (
     COLLECTORS as _REVISION_PIN_COLLECTORS,
 )
@@ -46,6 +49,7 @@ RULES = (
     + _REVISION_PIN_RULES
     + _LS_REMOTE_TAG_RULES
     + _NETWORK_RULES
+    + _REDIRECT_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

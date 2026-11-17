@@ -11,6 +11,8 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import requests
 
+from ..mcp_transport import canonical_remote_transport
+
 _log = logging.getLogger(__name__)
 
 # Hard byte ceiling for an MCP registry HTTP body. The registry URL can come
@@ -592,10 +594,11 @@ class SimpleRegistryClient:
 
     @classmethod
     def _normalize_v0_1_server(cls, server: dict[str, Any]) -> dict[str, Any]:
-        """Apply package-shape normalization to a server detail dict.
+        """Apply package- and remote-shape normalization to a server detail dict.
 
         Returns a shallow copy with each entry of ``packages`` normalized
-        via :meth:`_normalize_v0_1_package`. The input dict is not mutated,
+        via :meth:`_normalize_v0_1_package` and each entry of ``remotes``
+        via :meth:`_normalize_v0_1_remote`. The input dict is not mutated,
         matching the copy semantics of the sibling normalizer.
         """
         if not isinstance(server, dict):
@@ -604,6 +607,23 @@ class SimpleRegistryClient:
         packages = normalized.get("packages")
         if isinstance(packages, list) and packages:
             normalized["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
+        remotes = normalized.get("remotes")
+        if isinstance(remotes, list) and remotes:
+            normalized["remotes"] = [cls._normalize_v0_1_remote(r) for r in remotes]
+        return normalized
+
+    @staticmethod
+    def _normalize_v0_1_remote(remote: dict[str, Any]) -> dict[str, Any]:
+        """Record the canonical transport of one remote under ``transport``.
+
+        An unknown transport is left as published so the adapter that renders
+        it reports the error with its own runtime label.
+        """
+        if not isinstance(remote, dict):
+            return remote
+        normalized = dict(remote)
+        with contextlib.suppress(ValueError):
+            normalized["transport"] = canonical_remote_transport(remote)
         return normalized
 
     def get_server(self, server_name: str, version: str = "latest") -> dict[str, Any]:

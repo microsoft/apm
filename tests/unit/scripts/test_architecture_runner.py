@@ -619,6 +619,7 @@ contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
+contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -716,6 +717,8 @@ mutation_writes.mcp_json_config_write
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
 mutation_writes.mcp_passthrough_denylist
+mutation_writes.mcp_remote_shape_table
+mutation_writes.mcp_remote_transport_normalization
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.opencode_enabled_intent
@@ -764,6 +767,7 @@ transport-platform-host-reference-coordinates
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
+transport-platform-origin-bounded-redirect
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency
