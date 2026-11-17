@@ -421,7 +421,7 @@ Most targets with a `skills` primitive deploy to
 `.agents/skills/<name>/SKILL.md`. Claude, Grok Build, Kiro, and experimental
 Grok Cloud keep target-native skill directories.
 
-To restore the pre-convergence per-target layout (skills land under each target's own root), use the `--legacy-skill-paths` flag on `apm install` or set `APM_LEGACY_SKILL_PATHS=1`.
+To restore the pre-convergence per-target layout (skills land under each target's own root), use the `--legacy-skill-paths` flag on `apm install` or set `APM_LEGACY_SKILL_PATHS=1`. `apm audit --ci` and `apm uninstall` reuse the layout recorded in `apm.lock.yaml`, so they do not need the flag.
 
 ## MCP servers
 

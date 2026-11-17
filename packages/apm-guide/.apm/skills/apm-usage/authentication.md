@@ -349,6 +349,8 @@ Credentials are released only when `registry.<name>.url` in
 user-owned URL even when a project declares the same registry. Project-only
 registry declarations are anonymous, and credentials are never sent over
 HTTP.
+Redirects are followed only on the configured registry's origin and under
+its URL path (at most 3 hops); credentials are re-sent only on those hops.
 
 **Env-var naming:** `APM_REGISTRY_TOKEN_{NAME}` where `{NAME}` is the
 registry name uppercased, with `-` and `.` mapped to `_`.

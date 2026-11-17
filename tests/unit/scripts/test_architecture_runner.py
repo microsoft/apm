@@ -642,6 +642,7 @@ install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
+install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-lifecycle
@@ -714,6 +715,8 @@ mutation_writes.mcp_json_config_write
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
 mutation_writes.mcp_passthrough_denylist
+mutation_writes.mcp_remote_shape_table
+mutation_writes.mcp_remote_transport_normalization
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.opencode_enabled_intent
@@ -763,6 +766,7 @@ transport-platform-host-reference-coordinates
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
+transport-platform-origin-bounded-redirect
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency

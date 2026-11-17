@@ -1159,6 +1159,14 @@ class LockFile:
         paths = (*self.local_staged_files, *self.local_deployed_files)
         return sorted({slug for path in paths if (slug := local_staging_slug(path))})
 
+    def records_modules_content(self) -> bool:
+        """Return whether this lockfile records content installed under ``apm_modules/``.
+
+        Package dependencies and lockfile-proven local bundle staging both live
+        there; the virtual self-entry and MCP/LSP servers do not (#3781).
+        """
+        return bool(self.get_package_dependencies() or self.local_staging_slugs())
+
     def absent_staging_slugs(self, modules_dir: Path) -> list[str]:
         """Return recorded staging slugs whose ``modules_dir/<slug>`` root no longer exists."""
         slugs = {slug for path in self.local_staged_files if (slug := local_staging_slug(path))}

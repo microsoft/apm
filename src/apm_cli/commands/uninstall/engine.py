@@ -1144,15 +1144,26 @@ def _sync_integrations_after_uninstall(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.hook_reintegration import preflight_survivor_hooks
-    from ...integration.targets import resolve_targets
+    from ...integration.skill_layout import (
+        recorded_deployed_paths,
+        resolve_reintegration_targets,
+        resolve_skill_layout,
+        with_every_skill_layout,
+    )
     from ...primitives.discovery import clear_discovery_cache
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     config_target = list(apm_package.canonical_targets)
     _explicit = config_target or None
-    _resolved_targets = resolve_targets(
+    # Survivors are rebuilt in the skill layout they recorded; cleanup of the
+    # removed packages' paths recognises both layouts.
+    _base_targets = resolve_reintegration_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    _resolved_targets = resolve_skill_layout(
+        _base_targets, recorded_paths=recorded_deployed_paths(lockfile)
+    )
+    _skill_cleanup_targets = with_every_skill_layout(_base_targets)
     require_valid_survivors = bool(all_deployed_files) or _native_hook_state_exists(
         project_root,
         _resolved_targets,
@@ -1222,13 +1233,12 @@ def _sync_integrations_after_uninstall(
     sync_managed = all_deployed_files if lockfile is not None or all_deployed_files else None
     if sync_managed is not None:
         # Partition against default KNOWN_TARGETS for legacy/project-scope
-        # paths, then merge with resolved targets for user-scope paths.
-        # This ensures both .github/ (legacy) and .copilot/ (resolved)
-        # prefixes are recognized during uninstall cleanup.
+        # paths, then merge with resolved targets in both skill layouts for
+        # user-scope paths and --legacy-skill-paths roots (.github/skills/).
         _buckets = BaseIntegrator.partition_managed_files(sync_managed)
-        if user_scope and _resolved_targets:
+        if _resolved_targets:
             _scope_buckets = BaseIntegrator.partition_managed_files(
-                sync_managed, targets=_resolved_targets
+                sync_managed, targets=_skill_cleanup_targets
             )
             for _bname, _bpaths in _scope_buckets.items():
                 _existing = _buckets.get(_bname)
@@ -1272,7 +1282,7 @@ def _sync_integrations_after_uninstall(
     # Skills (multi-target, handled by SkillIntegrator)
     # Check the target's effective skills root (deploy_root + skills subdir)
     _skill_dirs_exist = False
-    for t in _resolved_targets:
+    for t in _skill_cleanup_targets:
         if t.supports("skills"):
             if (project_root / t.skills_rel_root).exists():
                 _skill_dirs_exist = True
@@ -1308,7 +1318,7 @@ def _sync_integrations_after_uninstall(
         # set).  Using _resolved_targets alone would yield only the local
         # prefix (.copilot/skills/) and cowork:// paths would be silently
         # skipped by the startswith() guard inside sync_integration.
-        _sync_targets = None if _has_cowork_skills else _resolved_targets
+        _sync_targets = None if _has_cowork_skills else _skill_cleanup_targets
         removed_skill_paths: list[Path] = []
         try:
             result = _integrators["skills"].sync_integration(
