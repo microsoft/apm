@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Remote MCP servers now reach each harness in its native shape: registry `remotes[].type` is honored, so SSE servers stay SSE on Copilot CLI, Claude Code and VS Code (`type: sse`) and Gemini (`url`); Antigravity gets `serverUrl`, and SSE on Antigravity or Codex is skipped with one warning and exit `0` instead of failing the install. `apm mcp show` prints the real transport, the next `apm install`, `apm update` or `apm install --frozen` rewrites entries an earlier APM wrote in the old shape (user entries are preserved), and `extra:` can no longer add an `httpUrl` or `serverUrl` endpoint. (#PR_NUMBER)
+- Remote MCP servers now reach each harness in its native shape: registry `remotes[].type` is honored, so SSE servers stay SSE on Copilot CLI, Claude Code and VS Code (`type: sse`) and Gemini (`url`); Antigravity gets `serverUrl`, and SSE on Antigravity or Codex is skipped with one warning and exit `0` instead of failing the install. `apm mcp show` prints the real transport, the next `apm install`, `apm update` or `apm install --frozen` rewrites entries an earlier APM wrote in the old shape (user entries are preserved), and `extra:` can no longer add an `httpUrl` or `serverUrl` endpoint. (#3789)
 ### Changed
 
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
