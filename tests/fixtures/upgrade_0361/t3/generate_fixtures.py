@@ -100,9 +100,13 @@ AGENT_SOURCE = "---\nname: kit-agent\ndescription: Research helper\n---\n\nAgent
 
 
 def _command(source: Path, version: str) -> list[str]:
+    # The lockfile stamps importlib.metadata's apm-cli version, so pin it too.
     code = (
-        "import sys; sys.path.insert(0, sys.argv.pop(1)); import apm_cli.version as v; "
-        "v.__BUILD_VERSION__ = sys.argv.pop(1); from apm_cli.cli import main; sys.exit(main())"
+        "import sys, importlib.metadata as m; sys.path.insert(0, sys.argv.pop(1)); "
+        "pinned = sys.argv.pop(1); real = m.version; "
+        "m.version = lambda name: pinned if name == 'apm-cli' else real(name); "
+        "import apm_cli.version as v; v.__BUILD_VERSION__ = pinned; "
+        "from apm_cli.cli import main; sys.exit(main())"
     )
     return [sys.executable, "-c", code, str(source), version]
 

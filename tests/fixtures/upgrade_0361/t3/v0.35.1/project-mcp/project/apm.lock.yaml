@@ -1,5 +1,5 @@
 lockfile_version: '1'
-apm_version: 0.36.0
+apm_version: 0.35.1
 dependencies: []
 deployments:
 - kind: uri
