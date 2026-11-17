@@ -45,8 +45,10 @@ APM writes runtime-specific config for each detected target. At project scope,
 Claude Code discovers LSP servers from the APM-managed plugin manifest at
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; user-scope installs use
 `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. Copilot CLI uses
-`.github/lsp.json` or `~/.copilot/lsp-config.json`. This generated shape
-matches each runtime's documented discovery contract.
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. At user scope,
+`CLAUDE_CONFIG_DIR` and `COPILOT_HOME` replace `~/.claude` and `~/.copilot`
+(see [harness home variables](../../reference/environment-variables/#harness-home-variables)).
+This generated shape matches each runtime's documented discovery contract.
 
 Claude skills-directory plugin discovery requires Claude Code v2.1.157 or
 newer. For project installs, accept Claude Code's workspace-trust prompt; LSP

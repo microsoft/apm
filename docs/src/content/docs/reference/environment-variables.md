@@ -87,13 +87,29 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
-| `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
-| `CODEX_HOME` | Override the Codex home used for user-scope writes: `apm compile --global` (`AGENTS.md`) and `apm install -g` agents, hooks, and MCP config (`config.toml`). | `~/.codex` | Nonblank values must be absolute. Blank or unset uses `~/.codex`. Codex skills stay in `~/.agents/skills/`. Auto-detection still checks `~/.codex/`; otherwise use `--target codex` or `targets:`. |
-| `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | Used by the explicit `hermes` target; it does not enable auto-detection. |
+| `COPILOT_HOME` | Override the GitHub Copilot CLI home for user-scope detection and writes: `apm install -g` instructions, agents, hooks, MCP config (`mcp-config.json`), LSP config (`lsp-config.json`), plugin settings, and skills with `--legacy-skill-paths`. | `~/.copilot` | See [harness home variables](#harness-home-variables). Default skills stay in `~/.agents/skills/`, which Copilot CLI also reads. The Copilot desktop app (`copilot-app`) and `copilot-cowork` targets ignore it; global canvas installs are refused when it is non-default. |
+| `CODEX_HOME` | Override the Codex home used for user-scope writes: `apm compile --global` (`AGENTS.md`) and `apm install -g` agents, hooks, and MCP config (`config.toml`). | `~/.codex` | See [harness home variables](#harness-home-variables). Codex skills stay in `~/.agents/skills/`. Auto-detection still checks `~/.codex/`; otherwise use `--target codex` or `targets:`. |
+| `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | See [harness home variables](#harness-home-variables). Used by the explicit `hermes` target; it does not enable auto-detection. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
-| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
+| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, LSP plugin, and MCP config. | `~/.claude` | See [harness home variables](#harness-home-variables). User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
+
+### Harness home variables
+
+`COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HERMES_HOME` follow one
+rule for user-scope (`-g`) commands:
+
+- Unset or blank: the harness default (`~/.copilot`, `~/.codex`, `~/.claude`,
+  `~/.hermes`).
+- Absolute path (`~` is expanded): that directory, inside or outside your home.
+- Relative path: rejected with an error naming the variable. APM never resolves
+  it against the current directory.
+
+Each value is a separate profile of the same harness. Profiles share one user
+lockfile; a global install or uninstall changes files only under the selected
+profile. Files written to another profile, such as `~/.copilot` before you set
+`COPILOT_HOME`, stay in place.
 
 ### `APM_HOME` path contract
 
@@ -140,7 +156,7 @@ These paths are outside the contract:
 
 1. APM metadata: `APM_HOME`, then `~/.apm`.
 2. Target files: the target's own home variable when it has one (for example
-   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `HERMES_HOME`), then the
+   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, or `HERMES_HOME`), then the
    operating-system home.
 
 The two families never fall back to each other: a target variable does not

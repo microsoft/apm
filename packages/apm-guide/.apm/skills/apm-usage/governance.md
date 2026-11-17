@@ -503,7 +503,7 @@ relax an ancestor that requires an explicit `includes:` list.
 
 - **Dependencies:** allow, deny, require (presence + optional version pin), max_depth
 - **MCP:** allow, deny, transport.allow, self_defined, trust_transitive
-- **Compilation:** target.allow / target.enforce (target-aware)
+- **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.
 - **Manifest:** required_fields, scripts, content_types.allow
 - **Unmanaged files:** action against configured directories
 
