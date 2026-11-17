@@ -284,6 +284,7 @@ class _RecordingStaging:
         self.relocations.append((source.name, destination.parent.name + "/" + destination.name))
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize(
     ("declared", "relocations"),
     (
