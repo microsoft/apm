@@ -507,8 +507,8 @@ def _check_mcp_transport(
         if isinstance(transports, UnresolvedTransport):
             violations.append(
                 f"{name}: effective transport unknown ({transports.reason}); "
-                f"declare `transport:` for it in apm.yml to check it against "
-                f"allowed {allowed_label}"
+                f"cannot check it against allowed {allowed_label} until the MCP "
+                "registry resolves it"
             )
             continue
         violations.extend(

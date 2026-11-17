@@ -65,8 +65,8 @@ _REQUIRED: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         _MCP_INSTALL,
-        ("checked = policy_checked_registry_info(", "unverified = unverified_policy_fallbacks("),
-        "install must write the registry snapshot org policy judged, and nothing policy did not check",
+        ("checked = policy_checked_registry_info(",),
+        "install must write the registry snapshot org policy judged",
     ),
     (
         _MCP_TRANSPORT,

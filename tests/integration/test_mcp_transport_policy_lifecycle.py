@@ -206,9 +206,24 @@ def test_unreachable_registry_blocks_with_remedy(tmp_path: Path, apm_binary_path
     output = " ".join((direct.stdout + direct.stderr).split())
     assert direct.returncode != 0, output
     assert f"{_SSE_NAME} -- effective transport unknown (MCP registry" in output
-    assert "is unreachable); declare `transport:` for it in apm.yml" in output
+    assert "is unreachable); cannot check it against allowed" in output
     assert (project.root / "apm.yml").read_bytes() == manifest_before
     assert _SSE_HOST not in project.mcp_config_texts()
+
+    # A declared transport does not stand in for the registry: install would
+    # write what the registry serves, so it is still unknown, before any write.
+    declared = project.run(
+        "install",
+        "--mcp",
+        _SSE_NAME,
+        "--transport",
+        "http",
+        scenario="transport-policy-unreachable-declared",
+    )
+    declared_output = " ".join((declared.stdout + declared.stderr).split())
+    assert declared.returncode != 0, declared_output
+    assert "effective transport unknown" in declared_output
+    assert (project.root / "apm.yml").read_bytes() == manifest_before
 
     project.write_manifest([_SSE_NAME])
     audit, checks = project.audit("transport-policy-unreachable-audit")

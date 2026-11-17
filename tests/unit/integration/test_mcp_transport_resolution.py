@@ -174,15 +174,17 @@ class TestDeclaredTransport:
         assert effective == {DUAL_SERVER["name"]: frozenset({"stdio"})}
 
     @pytest.mark.parametrize("declared", ["http", "streamable-http"])
-    def test_declared_http_alias_used_when_registry_cannot_resolve(self, fake_registry, declared):
-        dep = MCPDependency.from_dict({"name": "io.example/x", "transport": declared})
+    def test_declared_http_alias_matches_registry_remote(self, fake_registry, declared):
+        fake_registry["servers"][HTTP_SERVER["name"]] = HTTP_SERVER
+        dep = MCPDependency.from_dict({"name": HTTP_SERVER["name"], "transport": declared})
         result = run_dependency_policy_checks(
             [], policy=_policy("stdio", "streamable-http"), mcp_deps=[dep]
         )
         assert _transport_check(result).passed
 
     def test_declared_disallowed_transport_blocked(self, fake_registry):
-        dep = MCPDependency.from_dict({"name": "io.example/x", "transport": "sse"})
+        fake_registry["servers"][SSE_SERVER["name"]] = SSE_SERVER
+        dep = MCPDependency.from_dict({"name": SSE_SERVER["name"], "transport": "sse"})
         result = run_dependency_policy_checks([], policy=_policy("stdio"), mcp_deps=[dep])
         assert not _transport_check(result).passed
 
@@ -195,42 +197,17 @@ class TestDeclaredTransport:
         assert fake_registry["calls"] == []
 
 
-class TestDeclaredFallbackIsEnforcedAtInstall:
-    def test_flaky_registry_cannot_swap_in_an_unchecked_transport(self, fake_registry, tmp_path):
-        """Policy saw only the declared http; install must not then write sse."""
-        from unittest.mock import MagicMock
-
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-
-        name = SSE_SERVER["name"]
-        dep = MCPDependency.from_dict({"name": name, "transport": "http"})
+class TestDeclaredTransportNeedsTheRegistry:
+    def test_unresolvable_registry_server_is_unknown_even_when_declared(self, fake_registry):
+        """Install writes what the registry serves, so a declaration alone proves nothing."""
         fake_registry["unreachable"] = True
+        dep = MCPDependency.from_dict({"name": SSE_SERVER["name"], "transport": "http"})
         result = run_dependency_policy_checks(
             [], policy=_policy("stdio", "streamable-http"), mcp_deps=[dep]
         )
-        assert _transport_check(result).passed
-
-        operations = MagicMock()
-        operations.registry_client.registry_url = "https://registry.example"
-        operations.validate_servers_exist.side_effect = lambda names, **kwargs: (names, [])
-        operations.check_servers_needing_installation.return_value = [name]
-        operations.batch_fetch_server_info.return_value = {name: SSE_SERVER}
-        operations.collect_environment_variables.return_value = {}
-        operations.collect_runtime_variables.return_value = {}
-        install = MagicMock(return_value=True)
-        with (
-            patch("apm_cli.registry.operations.MCPServerOperations", return_value=operations),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
-                side_effect=lambda runtimes, **_kwargs: runtimes,
-            ),
-            patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime", install),
-            pytest.raises(RuntimeError, match="unverified"),
-        ):
-            run_mcp_install(
-                mcp_deps=[dep], runtime="copilot", project_root=tmp_path, logger=MagicMock()
-            )
-        install.assert_not_called()
+        check = _transport_check(result)
+        assert not check.passed
+        assert "effective transport unknown" in check.details[0]
 
 
 class TestUnresolvedTransport:
@@ -246,7 +223,7 @@ class TestUnresolvedTransport:
         assert detail.startswith(
             "io.example/missing: effective transport unknown (server not found"
         )
-        assert "declare `transport:`" in detail
+        assert "until the MCP registry resolves it" in detail
 
     def test_unreachable_registry_reason(self, fake_registry):
         fake_registry["unreachable"] = True

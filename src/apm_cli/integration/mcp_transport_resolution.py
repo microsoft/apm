@@ -28,9 +28,6 @@ EffectiveTransport = frozenset[str] | UnresolvedTransport
 # Process-local memo of registry lookups keyed by (registry URL, name), so the
 # install gate and the pre-write preflight do not query the registry twice.
 _REGISTRY_INFO_MEMO: dict[tuple[str, str], dict[str, Any] | UnresolvedTransport] = {}
-# Registry servers whose policy verdict used the declared ``transport:``
-# because the registry could not be read; keyed like the memo.
-_DECLARED_FALLBACKS: dict[tuple[str, str], frozenset[str]] = {}
 _MEMO_LOCK = threading.Lock()
 
 
@@ -52,34 +49,10 @@ def write_transports(server_info: dict[str, Any]) -> frozenset[str]:
     return server_write_transports(server_info, selected_remote=MCPClientAdapter.selected_remote)
 
 
-def unverified_policy_fallbacks(registry_url: str, server_infos: dict[str, Any]) -> list[str]:
-    """Names policy accepted on a declared transport that install would not write.
-
-    When the registry was unreadable during the policy check, policy judged
-    the declared ``transport:``. If install later obtains registry data whose
-    overlaid info writes another transport, that write was never checked.
-    """
-    with _MEMO_LOCK:
-        judged = {name: _DECLARED_FALLBACKS.get((registry_url, name)) for name in server_infos}
-    unverified = []
-    for name, transports in judged.items():
-        if transports is None:
-            continue
-        info = server_infos.get(name)
-        try:
-            written = write_transports(info) if isinstance(info, dict) else frozenset()
-        except ValueError:
-            written = frozenset({"unsupported"})
-        if not written <= transports:
-            unverified.append(name)
-    return sorted(unverified)
-
-
 def clear_registry_info_memo() -> None:
     """Forget memoized registry lookups (tests and long-lived callers)."""
     with _MEMO_LOCK:
         _REGISTRY_INFO_MEMO.clear()
-        _DECLARED_FALLBACKS.clear()
 
 
 def _dep_name(dep: Any) -> str:
@@ -159,9 +132,7 @@ def _fetch_registry_infos(
     return resolved_url, found
 
 
-def _registry_transports(
-    deps: list[Any],
-) -> tuple[dict[str, EffectiveTransport], dict[str, str | None]]:
+def _registry_transports(deps: list[Any]) -> dict[str, EffectiveTransport]:
     from .mcp_integrator_install import _overlaid_server_infos, _registry_group_key
 
     groups: dict[str | None, list[Any]] = {}
@@ -169,9 +140,10 @@ def _registry_transports(
         groups.setdefault(_registry_group_key(dep), []).append(dep)
 
     result: dict[str, EffectiveTransport] = {}
-    resolved_urls: dict[str, str | None] = {}
     for registry_url, group in groups.items():
-        resolved_url, infos = _fetch_registry_infos(registry_url, [_dep_name(dep) for dep in group])
+        _resolved_url, infos = _fetch_registry_infos(
+            registry_url, [_dep_name(dep) for dep in group]
+        )
         known = {name: info for name, info in infos.items() if isinstance(info, dict)}
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -187,8 +159,7 @@ def _registry_transports(
             name = _dep_name(dep)
             raw = infos[name]
             result[name] = raw if isinstance(raw, UnresolvedTransport) else _project(overlaid[name])
-            resolved_urls[name] = resolved_url
-    return result, resolved_urls
+    return result
 
 
 def resolve_effective_mcp_transports(
@@ -200,11 +171,9 @@ def resolve_effective_mcp_transports(
     (per-dependency ``registry:`` URL, else ``MCP_REGISTRY_URL`` or the
     configured default) and the manifest overlay is applied, so a declared
     ``transport:`` narrows the result only when the server offers it. A
-    server offering both a package and a remote reports both. When the
-    registry cannot resolve the server, a declared ``transport:`` is used
-    as-is and recorded, so install refuses to write anything else for it
-    (:func:`unverified_policy_fallbacks`); without one the result is an
-    :class:`UnresolvedTransport`. Self-defined servers resolve
+    server offering both a package and a remote reports both. A registry
+    server the registry cannot resolve is an :class:`UnresolvedTransport`,
+    even when it declares a transport. Self-defined servers resolve
     offline: their declaration is exactly what install writes.
     """
     from ._shared import deduplicate_deps
@@ -213,7 +182,7 @@ def resolve_effective_mcp_transports(
     # First declaration wins, as in install.
     deps = deduplicate_deps(list(mcp_deps))
     registry_deps = [dep for dep in deps if _is_registry_dep(dep)]
-    looked_up, resolved_urls = _registry_transports(registry_deps) if registry_deps else ({}, {})
+    looked_up = _registry_transports(registry_deps) if registry_deps else {}
 
     result: dict[str, EffectiveTransport] = {}
     for dep in deps:
@@ -222,14 +191,9 @@ def resolve_effective_mcp_transports(
             continue
         declared = _declared_transport(dep)
         if _is_registry_dep(dep):
-            effective = looked_up[name]
-            if isinstance(effective, UnresolvedTransport) and declared is not None:
-                effective = frozenset({canonical_transport_name(declared)})
-                registry_url = resolved_urls.get(name)
-                if registry_url is not None:
-                    with _MEMO_LOCK:
-                        _DECLARED_FALLBACKS[(registry_url, name)] = effective
-            result[name] = effective
+            # Install writes what the registry serves (a declaration only
+            # narrows it), so an unresolvable server stays unknown.
+            result[name] = looked_up[name]
         elif declared is not None:
             result[name] = frozenset({canonical_transport_name(declared)})
         else:
