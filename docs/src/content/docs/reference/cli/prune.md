@@ -188,6 +188,6 @@ confirm the resulting state.
 
 - [`apm install`](../install/) -- install declared dependencies
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
-- [`apm list`](../list/) -- inspect what is installed
+- [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
 - [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where

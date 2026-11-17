@@ -64,13 +64,14 @@ Output:
 
 ```
 [i] Cache root: /Users/you/Library/Caches/apm
-  Git repositories (db):    12
-  Git checkouts:            34
-  HTTP cache entries:       87
 
-  Total size:               142.3 MB
-    Git:                    138.1 MB
-    HTTP:                   4.2 MB
+[#]   Git repositories (db):    12
+[#]   Git checkouts:            34
+[#]   HTTP cache entries:       87
+
+[#]   Total size:               142.3 MB
+[#]     Git:                    138.1 MB
+[#]     HTTP:                   4.2 MB
 ```
 
 ### `apm cache clean`
@@ -116,8 +117,8 @@ apm cache prune --days 7     # tighter window
 Output counts SHA groups, not checkout variants:
 
 ```text
-Pruning SHA groups older than 30 days...
-Pruned 2 SHA group(s).
+[*] Pruning SHA groups older than 30 days...
+[+] Pruned 2 SHA group(s).
 ```
 
 | Flag | Description |

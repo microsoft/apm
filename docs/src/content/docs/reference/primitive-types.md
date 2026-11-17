@@ -19,7 +19,7 @@ The enhanced primitive discovery system extends the existing primitive discovery
 
 ### 1. Source Tracking
 
-All primitive models (`Chatmode`, `Instruction`, `Context`) now include an optional `source` field:
+All primitive models (`Chatmode`, `Instruction`, `Context`, `Skill`) now include an optional `source` field:
 
 ```python
 from apm_cli.primitives import Chatmode
@@ -145,19 +145,21 @@ project/
 ├── .apm/                             # Local primitives (highest priority)
 │   ├── agents/
 │   ├── instructions/
-│   └── contexts/
+│   └── context/
 └── apm_modules/                      # Dependency primitives
-    ├── standards/                    # From company/standards
-    │   └── .apm/
-    │       ├── agents/
-    │       └── instructions/
+    ├── company/
+    │   └── standards/                # From company/standards
+    │       └── .apm/
+    │           ├── agents/
+    │           └── instructions/
     ├── team/
     │   └── workflows/                # From team/workflows
     │       └── .apm/
-    │           └── contexts/
-    └── utilities/                    # From user/utilities
-        └── .apm/
-            └── instructions/
+    │           └── context/
+    └── user/
+        └── utilities/                # From user/utilities
+            └── .apm/
+                └── instructions/
 ```
 
 ## Backward Compatibility
