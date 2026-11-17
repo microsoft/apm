@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Registry installs, lockfile replays and `apm publish` now follow a gateway redirect that stays on the configured registry origin and under its URL path (for example a `307` from a gateway that decodes `%2F`), keeping the method and body for `307`/`308` and at most 3 hops; any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. Registry publish now follows redirects only within the configured registry origin, and marketplace metadata fetches use the shared credential-scoped HTTP owner. Reported with a prototype by @ashky23. (closes #3726, #PR_PLACEHOLDER)
+- Registry installs, lockfile replays and `apm publish` now follow a gateway redirect that stays on the configured registry origin and under its URL path (for example a `307` from a gateway that decodes `%2F`), keeping the method and body for `307`/`308` and at most 3 hops; any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. Registry publish now follows redirects only within the configured registry origin, and marketplace metadata fetches use the shared credential-scoped HTTP owner. Reported with a prototype by @ashky23. (closes #3726, #3785)
 
 ## [0.36.0] - 2026-11-17
 
