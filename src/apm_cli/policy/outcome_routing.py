@@ -161,11 +161,13 @@ def route_discovery_outcome(
     # canonical logger helper for consistent wording (Logging C1/C2,
     # UX F1/F2/F4).
     if outcome in _NON_FOUND_LOGGED_OUTCOMES:
+        hint = getattr(fetch_result, "discovery_hint", None)
         if logger is not None:
             logger.policy_discovery_miss(
                 outcome=outcome,
                 source=source,
                 error=fetch_result.error or fetch_result.fetch_error,
+                hint=hint,
             )
         if (
             raise_blocking_errors
@@ -176,7 +178,7 @@ def route_discovery_outcome(
                 "Install blocked: no enforceable org policy was resolved "
                 f"(outcome={outcome}) and project apm.yml has "
                 "policy.fetch_failure_default=block "
-                f"(source={source or 'unknown'})",
+                f"(source={source or 'unknown'})" + (f". {hint}" if hint else ""),
                 policy_source=source or "unknown",
             )
         return None

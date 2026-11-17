@@ -220,6 +220,10 @@ class PolicyFetchResult:
     outcome: str = ""  # See docstring for valid values
     warnings: list[str] = field(default_factory=list)
     not_found: bool = field(default=False, repr=False)
+    # Diagnostic for an ``absent`` auto-discovery whose cause may be a
+    # masked private-repo 404 (#3754). Data only: CommandLogger renders it
+    # in verbose output, ``apm policy status`` and fail-closed errors.
+    discovery_hint: str | None = None
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -947,6 +951,7 @@ def _auto_discover(
     except ValueError as exc:
         return PolicyFetchResult(error=str(exc), outcome="cache_miss_fetch_fail")
     is_ado = is_azure_devops_hostname(host)
+    masked_private_hint: str | None = None
 
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
@@ -991,17 +996,11 @@ def _auto_discover(
                 candidate_repo,
                 host,
             )
-            # Warn when .github-private is absent on a GitHub host -- GitHub
-            # returns 404 (not 403) when the token lacks private-repo scope,
-            # so an absent result may mask a token-permission problem.
+            # GitHub answers 404 (not 403) for a private repo the caller
+            # cannot read, so an absent .github-private may mask a permission
+            # problem. Record it; it only matters if every candidate is absent.
             if candidate_repo == ".github-private" and _is_github_host(host):
-                logger.warning(
-                    "Policy repo %s/%s not found (or token lacks private-repo "
-                    "read scope). If your org publishes policy in .github-private, "
-                    "ensure the token has Contents:read permission on that repo.",
-                    org,
-                    candidate_repo,
-                )
+                masked_private_hint = _masked_private_policy_hint(org, candidate_repo)
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
@@ -1010,7 +1009,20 @@ def _auto_discover(
     # All candidates exhausted: no policy published anywhere.
     if cache_only and expected_hash is not None:
         return _unverifiable_cache_pin(expected_hash, "")
-    return PolicyFetchResult(error=None, outcome="absent")
+    return PolicyFetchResult(error=None, outcome="absent", discovery_hint=masked_private_hint)
+
+
+def _masked_private_policy_hint(org: str, repo: str) -> str:
+    """Explain a possibly masked 404 on a private policy repo (#3754).
+
+    Worded without credential keywords followed by a value, so the secret
+    redaction filter leaves it readable.
+    """
+    return (
+        f"{org}/{repo} returned 404. GitHub also returns 404 when the credential "
+        "cannot read a private repository; if your org publishes policy there, "
+        f"grant Contents: read on {org}/{repo}."
+    )
 
 
 def _fetch_from_url(

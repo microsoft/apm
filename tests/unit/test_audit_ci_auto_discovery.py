@@ -281,6 +281,41 @@ class TestNoPolicyOutcomesBlock:
         assert "policy.fetch_failure_default=block" in result.stderr
 
 
+class TestMaskedPrivateRepoHint:
+    """#3754: the masked-404 hint shows only in the fail-closed error."""
+
+    @staticmethod
+    def _absent_with_hint() -> PolicyFetchResult:
+        result = _make_no_policy_outcome("absent")
+        result.discovery_hint = "foo/.github-private returned 404."
+        return result
+
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_hint_hidden_in_default_warn_mode(self, mock_discover, runner, tmp_path):
+        _setup_project_with_unmanaged_file(tmp_path)
+        mock_discover.return_value = self._absent_with_hint()
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
+
+        assert result.exit_code == 0, result.output
+        assert ".github-private" not in result.stderr
+
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_hint_in_block_error(self, mock_discover, runner, tmp_path):
+        _setup_project_with_unmanaged_file(tmp_path)
+        apm_yml = (tmp_path / "apm.yml").read_text() + ("policy:\n  fetch_failure_default: block\n")
+        (tmp_path / "apm.yml").write_text(apm_yml, encoding="utf-8")
+        mock_discover.return_value = self._absent_with_hint()
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
+
+        assert result.exit_code == 1, result.output
+        assert "[x]" in result.stderr
+        assert "foo/.github-private returned 404." in result.stderr
+
+
 class TestDisabledOutcome:
     """outcome=disabled emits forensic [i] breadcrumb on stderr; exit 0."""
 

@@ -212,6 +212,7 @@ def _build_report(
         "fetch_error": result.fetch_error,
         "error": result.error,
         "warnings": result.warnings,
+        "discovery_hint": getattr(result, "discovery_hint", None),
         "extends_chain": chain,
         "rule_counts": counts,
         "rule_summary": _summarize_rules(counts),
@@ -266,6 +267,8 @@ def _render_table(report: dict[str, Any]) -> None:
                     title="Notice",
                     style="yellow",
                 )
+            if report.get("discovery_hint"):
+                _rich_panel(report["discovery_hint"], title="Hint", style="cyan")
             return
         except Exception:
             pass
@@ -277,6 +280,8 @@ def _render_table(report: dict[str, Any]) -> None:
         click.echo(f"  {field_name:15s}  {value}")
     if report.get("error"):
         click.echo(f"\nNotice: Discovery error: {report['error']}")
+    if report.get("discovery_hint"):
+        click.echo(f"\nHint: {report['discovery_hint']}")
 
 
 # -- CLI surface ----------------------------------------------------

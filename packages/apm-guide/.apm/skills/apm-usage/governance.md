@@ -466,7 +466,9 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
-API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
+API-compatible hosts. No policy found is silent by default; because GitHub answers 404
+for a private repo the credential cannot read, `apm policy status`, `--verbose` and the
+`fetch_failure_default: block` error show a `.github-private` hint. Azure DevOps hosts use repository `apm-policy` in project
 `apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab looks for `apm-policy`
 at every namespace from the top-level group down to the project's own subgroup
 (e.g. `acme/apm-policy`, `acme/dept-a/apm-policy`, `acme/dept-a/team-x/apm-policy`)

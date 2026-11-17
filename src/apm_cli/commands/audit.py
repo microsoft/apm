@@ -746,8 +746,10 @@ def _audit_ci_gate(
             err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
             cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
             if fetch_result.outcome == "incomplete_chain" or project_default == "block":
+                hint = getattr(fetch_result, "discovery_hint", None)
                 click.echo(
-                    f"[x] {cause} (policy.fetch_failure_default=block)",
+                    f"[x] {cause} (policy.fetch_failure_default=block)"
+                    + (f". {hint}" if hint else ""),
                     err=True,
                 )
                 sys.exit(1)

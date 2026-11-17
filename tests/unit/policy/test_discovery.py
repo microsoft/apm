@@ -1009,6 +1009,41 @@ class TestAutoDiscover(unittest.TestCase):
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_all_absent_records_masked_404_hint_without_warning(self, mock_extract, mock_fetch):
+        """#3754: the masked-404 hint is result data, never a default-mode WARNING."""
+        from apm_cli.core.auth import _redact_secrets
+
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertNoLogs("apm_cli.policy.discovery", level="WARNING"):
+                result = _auto_discover(Path(tmpdir), no_cache=True)
+        self.assertEqual(result.outcome, "absent")
+        hint = result.discovery_hint
+        self.assertIn("contoso/.github-private", hint)
+        self.assertIn("Contents: read", hint)
+        # The secret redaction filter must leave the wording readable.
+        self.assertEqual(_redact_secrets(hint), hint)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_policy_in_dot_github_gets_no_masked_404_hint(self, mock_extract, mock_fetch):
+        """#3754: an absent .github-private says nothing when .github has the policy."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.side_effect = [
+            PolicyFetchResult(outcome="absent"),
+            PolicyFetchResult(policy=ApmPolicy(), source="org:contoso/.github", outcome="found"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertNoLogs("apm_cli.policy.discovery", level="WARNING"):
+                result = _auto_discover(Path(tmpdir), no_cache=True)
+        self.assertTrue(result.found)
+        self.assertIsNone(result.discovery_hint)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_com_error_fail_closed(self, mock_extract, mock_fetch):
         """Auth error on first candidate -> fail-closed, no fallback."""
         mock_extract.return_value = ("contoso", "github.com", None)
@@ -2554,3 +2589,26 @@ class TestPolicyFetchResult(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_discovery_emits_no_user_facing_log_output():
+    """#3754 guard: discovery returns diagnostics as data; CommandLogger renders them.
+
+    A ``logger.warning``/``error`` here bypasses the verbose gating of the
+    output owner and prints on every install via the root logging handler.
+    """
+    import ast
+
+    from apm_cli.policy import discovery
+
+    tree = ast.parse(Path(discovery.__file__).read_text(encoding="utf-8"))
+    offenders = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"warning", "error", "critical", "info"}
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "logger"
+    ]
+    assert offenders == [], f"user-facing logger calls in policy/discovery.py: {offenders}"

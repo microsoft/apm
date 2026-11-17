@@ -208,6 +208,19 @@ class TestPolicyGateFailClosed:
         assert "outcome=absent" in str(excinfo.value)
 
     @patch(_PATCH_DISCOVER)
+    def test_absent_block_error_carries_masked_404_hint(self, mock_discover):
+        """#3754: block mode fails closed and names the masked-404 cause."""
+        fetch = _fetch("absent", source="")
+        fetch.discovery_hint = "foo/.github-private returned 404."
+        mock_discover.return_value = fetch
+        ctx = _FakeCtx(logger=MagicMock(), policy_fetch_failure_default="block")
+        with pytest.raises(PolicyViolationError) as excinfo:
+            run(ctx)
+        assert "foo/.github-private returned 404." in str(excinfo.value)
+        ctx.logger.policy_discovery_miss.assert_called_once()
+        assert ctx.logger.policy_discovery_miss.call_args.kwargs["hint"] == fetch.discovery_hint
+
+    @patch(_PATCH_DISCOVER)
     def test_no_git_remote_block_raises(self, mock_discover):
         """#1159 install parity: no_git_remote now honours block."""
         mock_discover.return_value = _fetch("no_git_remote", source="")

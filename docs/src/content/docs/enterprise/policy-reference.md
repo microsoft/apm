@@ -938,6 +938,8 @@ Flags:
 - `--json` / `-o json` switches to JSON output.
 - `--check` exits non-zero (1) when no usable policy is found (anything other than `outcome=found`). Use this for CI pre-checks that must fail when org policy is unreachable or misconfigured. Default behaviour (without `--check`) remains exit-0.
 
+When auto-discovery finds no policy on GitHub, the report includes a `Hint` (JSON `discovery_hint`): GitHub answers 404 for a private `.github-private` repository the credential cannot read, so grant `Contents: read` on it if your org publishes policy there. `apm install` and `apm audit` stay silent about this in default mode; the hint also appears with `--verbose` and in the fail-closed error under `policy.fetch_failure_default: block`.
+
 ```shell
 $ apm policy status --check          # exits 1 if outcome != "found"
 $ apm policy status --check --json   # exit 1 + JSON body for CI tooling
