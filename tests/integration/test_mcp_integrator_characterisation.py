@@ -214,7 +214,7 @@ class TestBuildSelfDefinedInfo:
 
         assert info["remotes"] == [
             {
-                "transport_type": "http",
+                "transport": "streamable-http",
                 "url": "https://example.com/mcp",
                 "headers": [{"name": "X-Token", "value": "abc"}],
             }
@@ -231,7 +231,7 @@ class TestBuildSelfDefinedInfo:
 
         info = MCPIntegrator._build_self_defined_info(dep)
 
-        assert info["remotes"][0]["transport_type"] == "sse"
+        assert info["remotes"][0]["transport"] == "sse"
         assert info["remotes"][0]["url"] == "https://example.com/sse"
 
     def test_builds_runtime_arguments_from_dict_args(self) -> None:

@@ -406,6 +406,19 @@ def _install_registry_group(  # noqa: PLR0913
                 successful_runtimes: list[str] = []
                 failed_runtimes: list[str] = []
                 for rt in target_runtimes:
+                    if _skip_unsupported_remote_transport(
+                        rt,
+                        dep,
+                        server_info_cache.get(dep),
+                        logger,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        stored_config=stored_mcp_configs.get(dep),
+                        managed_target_servers=managed_target_servers,
+                        native_hashes=native_hashes,
+                        registry_info=True,
+                    ):
+                        continue
                     installed_servers: set[str] = set()
                     written_hashes: dict[str, str] = {}
                     managed_fields: set[str] = set()
@@ -528,6 +541,88 @@ def _install_registry_group(  # noqa: PLR0913
         raise MCPNativeConflictError(message, wrote_connections=bool(written_connections))
     _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
+
+
+def _skip_unsupported_remote_transport(
+    runtime: str,
+    name: str,
+    server_info: dict | None,
+    logger: Any,
+    *,
+    project_root: Any,
+    user_scope: bool,
+    stored_config: dict | None = None,
+    managed_target_servers: dict[str, set[str]] | None = None,
+    native_hashes: dict[str, dict[str, str]] | None = None,
+    registry_info: bool = False,
+) -> bool:
+    """Warn and skip a remote whose transport *runtime* cannot load (never claimed).
+
+    Under ``--frozen`` a pair deferred because the lockfile never claimed it
+    (``is_frozen_unrecorded_mcp_pair``) is refused here when its transport turns
+    out to be supported, so a frozen install never writes a new claim.
+
+    Runs before any native comparison or write, so the server is not rendered
+    or recorded for that runtime and the install continues. An entry an earlier
+    APM release wrote for it (proven by fingerprint or an earlier render) is
+    removed and its claim dropped; any other same-name entry is left alone.
+    """
+    if not isinstance(server_info, dict):
+        return False
+    from apm_cli.adapters.client._remote_shapes import (
+        skip_unsupported_remote,
+        unsupported_remote_transport,
+    )
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import (
+        is_frozen_unrecorded_mcp_pair,
+        managed_unsupported_connection,
+        mcp_native_hash,
+    )
+
+    try:
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+    except ValueError:
+        return False
+    transport = unsupported_remote_transport(client, server_info)
+    if transport is None:
+        if is_frozen_unrecorded_mcp_pair(name, runtime):
+            from apm_cli.install.service import frozen_services_error, frozen_unrecorded_reason
+
+            raise frozen_services_error([frozen_unrecorded_reason("MCP", name, runtime)])
+        return False
+    skip_unsupported_remote(client, name, transport, warn=logger.warning)
+    claims = (managed_target_servers or {}).get(runtime, set())
+    if name not in claims:
+        return True
+    native = managed_unsupported_connection(
+        client,
+        name,
+        requested_info=server_info if registry_info else None,
+        stored_config=stored_config,
+        native_hash=(native_hashes or {}).get(runtime, {}).get(name),
+    )
+    if native is not None:
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        MCPIntegrator.remove_stale(
+            {name},
+            runtime=runtime,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
+            stored_configs={name: stored_config} if isinstance(stored_config, dict) else {},
+            # Ownership is proven above; hand the remover the matching fingerprint.
+            native_hashes={runtime: {name: mcp_native_hash(client.managed_server_config(native))}},
+        )
+    claims.discard(name)
+    if native_hashes is not None:
+        native_hashes.get(runtime, {}).pop(name, None)
+    return True
 
 
 def _ascii_names(names: list[str]) -> str:
@@ -1391,6 +1486,18 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
+            if _skip_unsupported_remote_transport(
+                rt,
+                dep.name,
+                synthetic_info,
+                logger,
+                project_root=project_root,
+                user_scope=user_scope,
+                stored_config=stored_mcp_configs.get(dep.name),
+                managed_target_servers=managed_target_servers,
+                native_hashes=native_hashes,
+            ):
+                continue
             installed_servers: set[str] = set()
             managed_fields: set[str] = set()
             written_hashes: dict[str, str] = {}
