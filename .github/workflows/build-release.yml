@@ -24,7 +24,10 @@ on:
     # Run daily at 04:00 UTC (6 AM CEST)
     - cron: '0 4 * * *'
   repository_dispatch:
-    types: [manual-build-release]
+    # manual-build-release: full validation of main (promotion evidence).
+    # publish-existing-tag: re-publish PyPI distributions for an already
+    # released stable tag (client_payload.tag) when its tag run did not.
+    types: [manual-build-release, publish-existing-tag]
 
 # Restrict default GITHUB_TOKEN permissions for all jobs (principle of least privilege)
 permissions:
@@ -42,6 +45,9 @@ jobs:
   # validation of the exact SHA, earlier or in this run.
   release-plan:
     name: Release Plan
+    # Tag recovery runs only recover-tag and the PyPI jobs; skipping the plan
+    # skips every validation and release job below it.
+    if: github.event.action != 'publish-existing-tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -1107,6 +1113,11 @@ jobs:
             ./dist/apm-windows-x86_64.zip
             ./dist/apm-windows-x86_64.zip.sha256
 
+  # Jobs after create-release need explicit status functions: on a promoted
+  # tag, integration jobs upstream are skipped, and an implicit success()
+  # would then skip publication too (v0.36.0 lost PyPI that way).
+  # tests/unit/test_platform_contract_workflow.py pins this.
+
   # Deploy the docs site after the release is published.
   # Invoked here (rather than via the docs workflow's `release: published`
   # trigger) because release events created by GITHUB_TOKEN do not fire
@@ -1116,7 +1127,10 @@ jobs:
   deploy-docs:
     name: Deploy Docs
     needs: [create-release]
-    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.create-release.outputs.is_prerelease != 'true'
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
+      needs.create-release.result == 'success' &&
+      needs.create-release.outputs.is_prerelease != 'true'
     uses: ./.github/workflows/docs.yml
     permissions:
       contents: read
@@ -1133,7 +1147,9 @@ jobs:
   gh-aw-compat:
     name: GH-AW Compatibility
     needs: [create-release]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
+      needs.create-release.result == 'success'
     runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
@@ -1160,11 +1176,65 @@ jobs:
         run: |
           echo "::warning::GH-AW compatibility test failed. This is informational - external dependency may be unavailable. Investigate before next release."
 
+  # Recovery for a published stable release whose tag run did not reach
+  # PyPI. Dispatch from the default branch (repository write access):
+  #   gh api repos/microsoft/apm/dispatches -f event_type=publish-existing-tag \
+  #     -F 'client_payload[tag]=vX.Y.Z'
+  # It stays in this workflow so PyPI trusted publishing still matches, and
+  # builds from the tag, never from main.
+  recover-tag:
+    name: Resolve Existing Release Tag
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'publish-existing-tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Verify the tag is a published stable release missing from PyPI
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.event.client_payload.tag }}
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::client_payload.tag must be a stable vX.Y.Z tag."
+            exit 1
+          fi
+          if [ "$PRIVATE" = "true" ]; then
+            echo "::error::Private repositories do not publish to PyPI."
+            exit 1
+          fi
+          state="$(gh api "repos/$REPOSITORY/releases/tags/$TAG" --jq '"\(.draft) \(.prerelease)"')"
+          if [ "$state" != "false false" ]; then
+            echo "::error::$TAG is not a published stable GitHub release (draft prerelease: $state)."
+            exit 1
+          fi
+          version="${TAG#v}"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/apm-cli/$version/json")"
+          if [ "$code" != "404" ]; then
+            echo "::error::apm-cli $version is already on PyPI or PyPI is unreachable (HTTP $code)."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "[i] Publishing apm-cli $version to PyPI from $TAG"
+
   build-pypi-distributions:
     name: Build PyPI Distributions
     runs-on: ubuntu-latest
-    needs: [create-release]
-    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    needs: [create-release, recover-tag]
+    if: >-
+      !cancelled() && (
+        (github.event_name == 'push' && github.ref_type == 'tag' &&
+          needs.create-release.result == 'success' &&
+          needs.create-release.outputs.is_private_repo != 'true' &&
+          needs.create-release.outputs.is_prerelease != 'true') ||
+        (github.event_name == 'repository_dispatch' &&
+          needs.recover-tag.result == 'success'))
     permissions:
       contents: read
 
@@ -1173,15 +1243,29 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ needs.recover-tag.outputs.tag || github.ref }}
 
+      # Pin the interpreter: without it uv picks the runner's newest Python,
+      # where locked native dependencies (pydantic-core) have no wheels.
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install locked build dependencies
         run: uv sync --frozen --extra dev
 
       - name: Build Python package
         run: uv build --no-build-isolation --no-sources
+
+      - name: Verify distributions match the release tag
+        env:
+          TAG: ${{ needs.recover-tag.outputs.tag || github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          ls dist
+          compgen -G "dist/apm_cli-${version}-*.whl" > /dev/null
+          compgen -G "dist/apm_cli-${version}.tar.gz" > /dev/null
 
       - name: Upload Python distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1197,6 +1281,7 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: [build-pypi-distributions]
+    if: ${{ !cancelled() && needs.build-pypi-distributions.result == 'success' }}
     environment:
       name: pypi
       url: https://pypi.org/p/apm-cli

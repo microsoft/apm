@@ -14,11 +14,11 @@ from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import LocatorKind
 from apm_cli.core.target_detection import SIGNAL_WHITELIST
 from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
+from apm_cli.integration.skill_layout import resolve_skill_layout
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
     active_targets,
     active_targets_user_scope,
-    apply_legacy_skill_paths,
     scoped_profile_or_none,
 )
 from apm_cli.models.dependency import DependencyReference
@@ -35,7 +35,7 @@ def _inventory(root: Path, *, user_scope: bool) -> list[tuple[Path, str]]:
         if user_scope
         else active_targets(root, "all", create_config=False)
     )
-    profiles = profiles + apply_legacy_skill_paths(profiles)
+    profiles = profiles + resolve_skill_layout(profiles, legacy_skill_paths=True)
     directories: dict[Path, str] = {}
     shallow: set[Path] = set()
     for profile in profiles:
