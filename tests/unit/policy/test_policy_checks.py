@@ -467,8 +467,8 @@ class TestMcpTransport:
         detail = result.details[0]
         assert detail.startswith("srv: effective transport unknown (MCP registry")
         assert "unreachable" in detail
-        assert "until the MCP registry resolves it" in detail
-        assert "a declared `transport:` is not enough" in detail
+        assert "make the MCP registry reachable, then retry" in detail
+        assert "A declared 'transport:' cannot stand in" in detail
 
 
 # -- Check 10: mcp-self-defined -------------------------------------

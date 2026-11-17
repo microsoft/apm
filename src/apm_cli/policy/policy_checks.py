@@ -507,10 +507,10 @@ def _check_mcp_transport(
         if isinstance(transports, UnresolvedTransport):
             violations.append(
                 f"{name}: effective transport unknown ({transports.reason}); "
-                f"cannot check it against allowed {allowed_label} until the MCP "
-                "registry resolves it (a declared `transport:` is not enough: "
-                "install writes the transport the registry serves, and "
-                "`transport:` only picks among the ones it offers)"
+                f"cannot check it against allowed {allowed_label}. Check the server "
+                "name and registry URL, or make the MCP registry reachable, then "
+                "retry. A declared 'transport:' cannot stand in: install writes the "
+                "transport the registry serves"
             )
             continue
         violations.extend(

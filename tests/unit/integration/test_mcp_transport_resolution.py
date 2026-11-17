@@ -244,7 +244,7 @@ class TestUnresolvedTransport:
         assert detail.startswith(
             "io.example/missing: effective transport unknown (server not found"
         )
-        assert "until the MCP registry resolves it" in detail
+        assert "Check the server name and registry URL" in detail
 
     def test_unreachable_registry_reason(self, fake_registry):
         fake_registry["unreachable"] = True
