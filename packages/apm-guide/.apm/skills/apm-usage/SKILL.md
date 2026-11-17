@@ -29,7 +29,7 @@ agents, skills, and MCP server configurations across projects.
 - **Commit these files:** apm.yml, apm.lock.yaml, .apm/, deployed harness directories including .grok/, and AGENTS.md
 - **Never commit:** apm_modules/ (add to .gitignore)
 - **Team sync:** after `git clone`, run `apm install` to restore dependencies
-- **Update deps:** `apm install --update` refreshes to latest refs
+- **Update deps:** `apm update` refreshes to latest refs (`apm install --update` is deprecated)
 - **Pin versions:** use tags (`#v1.0.0`) in production, branches for development
 - **Prefer ASCII:** keep CLI output and scripts to printable ASCII for portability; package content itself may be UTF-8
 
