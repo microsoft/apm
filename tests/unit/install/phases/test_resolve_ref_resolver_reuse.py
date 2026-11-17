@@ -59,6 +59,27 @@ def _git_config_values(environment: dict[str, str]) -> set[str]:
     return {value for key, value in environment.items() if key.startswith("GIT_CONFIG_VALUE_")}
 
 
+class _ChainFake:
+    """Minimal AuthResolver stand-in: primary context, then ``extra`` credentials."""
+
+    extra: tuple[tuple[str, str], ...] = ()
+
+    def try_with_fallback(self, host, operation, **kwargs):
+        from apm_cli.core.auth_outcome import AuthAttemptFailed
+
+        ctx = self.resolve_for_dep(SimpleNamespace(host=host))
+        last = None
+        for token, scheme in ((ctx.token, ctx.auth_scheme), *self.extra):
+            env = AuthResolver._build_git_env(
+                token, scheme=scheme, host_kind="ado", base_env=kwargs.get("base_env")
+            )
+            try:
+                return operation(token, env)
+            except AuthAttemptFailed as exc:
+                last = exc
+        raise last
+
+
 def _set_noninteractive_git_policy(monkeypatch) -> None:
     """Arrange the indexed Git policy that auth overlays must preserve."""
     for name in tuple(os.environ):
@@ -673,7 +694,7 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes(monkeypatch):
     basic_token = "dummy-github-basic"
     calls = []
 
-    class _AuthResolver:
+    class _AuthResolver(_ChainFake):
         def resolve_for_dep(self, dep_ref):
             if dep_ref.host == "dev.azure.com":
                 return SimpleNamespace(token=bearer_token, auth_scheme="bearer")
@@ -768,25 +789,13 @@ def test_resolve_dep_auth_preserves_sanitized_git_environment():
 def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer(monkeypatch):
     """A stale ADO PAT retries tag listing with the canonical bearer scheme."""
     _set_noninteractive_git_policy(monkeypatch)
-    from apm_cli.core.auth import BearerFallbackOutcome
-
     calls = []
 
-    class _AuthResolver:
+    class _AuthResolver(_ChainFake):
+        extra = (("fresh-bearer", "bearer"),)
+
         def resolve_for_dep(self, dep_ref):
             return SimpleNamespace(token="stale-pat", auth_scheme="basic")
-
-        def execute_with_bearer_fallback(
-            self,
-            dep_ref,
-            primary_op,
-            bearer_op,
-            is_auth_failure,
-        ):
-            primary = primary_op()
-            assert is_auth_failure(primary)
-            fallback = bearer_op("fresh-bearer")
-            return BearerFallbackOutcome(fallback, True)
 
     def _run(args, **kwargs):
         calls.append((args, kwargs))

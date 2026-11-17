@@ -25,6 +25,8 @@ import requests
 
 from ..cache.url_normalize import normalize_repo_url
 from ..core.auth import AuthResolver, HostInfo
+from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.auth_outcome import AuthAttemptFailed
 from ..models.apm_package import DependencyReference
 from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner_and_repo
 from ..utils.archive import ArchiveError, safe_extract_zip
@@ -636,102 +638,47 @@ class DownloadDelegate:
             dep_ref.port,
         )
 
-        # Set up authentication headers.
-        # PAT path is first and unchanged; bearer is strictly the fallback
-        # when no PAT is present.  Bearer acquisition is routed through
-        # AuthResolver.resolve() so this module stays inside the auth-protocol
-        # boundary (scripts/lint-auth-signals.sh Rule A); auth.py's resolver
-        # handles the AAD bearer lookup internally.
-        auth_ctx = self._host.auth_resolver.resolve(
-            host,
-            dep_ref.ado_organization,
-            port=dep_ref.port,
-        )
+        resolver = self._host.auth_resolver
 
-        def _headers_for(token: str | None, scheme: str) -> dict[str, str]:
-            if not token:
-                return {}
-            if scheme == "bearer":
-                return {"Authorization": f"Bearer {token}"}
-            encoded = base64.b64encode(f":{token}".encode()).decode()
-            return {"Authorization": f"Basic {encoded}"}
-
-        headers = _headers_for(auth_ctx.token, auth_ctx.auth_scheme)
-
-        def _check_html_signin(response) -> None:
-            """Fail-closed when ADO returns an interactive sign-in HTML page.
-
-            Azure DevOps responds with HTTP 200 + text/html when auth is
-            missing or insufficient instead of a 401.  Writing that HTML to
-            disk produces a corrupt file (the #1671 bug).  Detect it by
-            Content-Type only on 200 responses so 404/403 error pages with
-            text/html bodies still fall through to raise_for_status and the
-            existing 404-fallback / 401-403 error paths.  Content-Type is
-            lowercased before comparison per RFC 7230 case-insensitivity.
-            """
-            if not 200 <= response.status_code < 300:
-                return
-            content_type = response.headers.get("Content-Type", "").lower()
-            if "text/html" in content_type:
-                error_msg = (
-                    f"Azure DevOps returned a sign-in page for {dep_ref.repo_url}. "
-                    "The server responded with HTML instead of the requested file, "
-                    "which means authentication is missing or insufficient. "
-                )
-                error_msg += self._host.auth_resolver.build_error_context(
-                    host,
-                    "download",
-                    org=dep_ref.ado_organization if dep_ref else None,
-                    port=dep_ref.port if dep_ref else None,
-                    dep_url=dep_ref.repo_url if dep_ref else None,
-                )
-                raise RuntimeError(error_msg)
-
-        bearer_attempted = False
-
-        def _request(url: str):
-            nonlocal bearer_attempted
-
-            def _primary_op():
-                return self._host._resilient_get(url, headers=headers, timeout=30)
-
-            if auth_ctx.source != "ADO_APM_PAT":
-                return _primary_op()
-
-            def _bearer_op(bearer: str):
-                return self._host._resilient_get(
+        def _fetch(url: str) -> bytes:
+            def _request(_token: str | None, git_env: dict[str, str]):
+                # The auth chain picks the credential (PAT, az bearer, or the
+                # path-scoped helper) and classifies every response, including
+                # an HTML sign-in page; ambient netrc never overrides it.
+                response = self._host._resilient_get(
                     url,
-                    headers=_headers_for(bearer, "bearer"),
+                    headers=resolver.http_authorization_headers(git_env),
                     timeout=30,
+                    allow_netrc=False,
                 )
+                if response.status_code != 200:
+                    raise AuthAttemptFailed(response=response)
+                return response
 
-            outcome = self._host.auth_resolver.execute_with_bearer_fallback(
-                dep_ref,
-                _primary_op,
-                _bearer_op,
-                lambda response: response.status_code in (401, 403),
+            response = resolver.try_with_fallback(
+                host,
+                _request,
+                org=dep_ref.ado_organization,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
             )
-            bearer_attempted = bearer_attempted or outcome.bearer_attempted
-            return outcome.outcome
+            return response.content
 
         try:
-            response = _request(api_url)
-            _check_html_signin(response)
-            response.raise_for_status()
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"Unexpected HTTP {response.status_code} downloading "
-                    f"{file_path} from Azure DevOps"
-                )
-            return response.content
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                # Try fallback branches
+            try:
+                return _fetch(api_url)
+            except AuthAttemptFailed as failed:
+                status = getattr(failed.response, "status_code", None)
+                if isinstance(status, int) and 200 <= status < 300:
+                    raise RuntimeError(
+                        f"Unexpected HTTP {status} downloading {file_path} from Azure DevOps"
+                    ) from failed
+                if status != 404:
+                    raise RuntimeError(f"Failed to download {file_path}: HTTP {status}") from failed
                 if ref not in ["main", "master"]:
                     raise RuntimeError(
                         f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
-                    ) from e
-
+                    ) from failed
                 fallback_ref = "master" if ref == "main" else "main"
                 fallback_url = build_ado_api_url(
                     dep_ref.ado_organization,
@@ -742,37 +689,24 @@ class DownloadDelegate:
                     host,
                     dep_ref.port,
                 )
-
                 try:
-                    response = _request(fallback_url)
-                    _check_html_signin(response)
-                    response.raise_for_status()
-                    if response.status_code != 200:
-                        raise RuntimeError(
-                            f"Unexpected HTTP {response.status_code} downloading "
-                            f"{file_path} from Azure DevOps"
-                        )
-                    return response.content
-                except requests.exceptions.HTTPError as fallback_err:
+                    return _fetch(fallback_url)
+                except AuthAttemptFailed as fallback_failed:
                     raise RuntimeError(
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
-                    ) from fallback_err
-            elif e.response.status_code in (401, 403):
-                error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. "
-                error_msg += self._host.auth_resolver.build_error_context(
-                    host,
-                    "download",
-                    org=dep_ref.ado_organization if dep_ref else None,
-                    port=dep_ref.port if dep_ref else None,
-                    dep_url=dep_ref.repo_url if dep_ref else None,
-                    bearer_also_failed=bearer_attempted,
-                )
-                raise RuntimeError(error_msg) from e
-            else:
-                raise RuntimeError(
-                    f"Failed to download {file_path}: HTTP {e.response.status_code}"
-                ) from e
+                    ) from fallback_failed
+        except AdoAuthChainExhaustedError as exhausted:
+            error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. {exhausted}"
+            error_msg += resolver.build_error_context(
+                host,
+                "download",
+                org=dep_ref.ado_organization,
+                port=dep_ref.port,
+                dep_url=dep_ref.repo_url,
+                attempts=exhausted.attempts,
+            )
+            raise RuntimeError(error_msg) from exhausted
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 

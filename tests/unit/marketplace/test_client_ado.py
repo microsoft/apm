@@ -25,7 +25,7 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
-from apm_cli.marketplace.client import _ado_auth_header, _fetch_ado
+from apm_cli.marketplace.client import _fetch_ado
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 
@@ -79,6 +79,15 @@ def _fake_response(status_code: int, *, text: str = "", content_type: str = "app
     return resp
 
 
+def _effective_headers(headers: dict | None, kwargs: dict) -> dict:
+    """Headers as sent: explicit headers plus what the ``auth=`` hook applies."""
+    request = SimpleNamespace(headers=dict(headers or {}))
+    auth = kwargs.get("auth")
+    if callable(auth):
+        auth(request)
+    return request.headers
+
+
 class _FakeResolver:
     """Single-attempt stand-in for ``AuthResolver.try_with_fallback``.
 
@@ -115,69 +124,6 @@ class _FakeResolver:
 
 
 # ---------------------------------------------------------------------------
-# _ado_auth_header
-# ---------------------------------------------------------------------------
-
-
-def test_ado_auth_header_none_token_is_anonymous() -> None:
-    assert _ado_auth_header(None, {}) == {}
-
-
-def test_ado_auth_header_pat_uses_basic() -> None:
-    headers = _ado_auth_header("pat-123", {"GIT_TOKEN": "pat-123"})
-    expected = base64.b64encode(b":pat-123").decode("ascii")
-    assert headers == {"Authorization": f"Basic {expected}"}
-
-
-def test_ado_auth_header_bearer_detected_from_git_env() -> None:
-    # GIT_CONFIG_COUNT accompanies the slot in every env APM builds; git reads
-    # nothing without it, and the sniff now honours the same bound.
-    git_env = {
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.extraheader",
-        "GIT_CONFIG_VALUE_0": "Authorization: Bearer jwt-xyz",
-    }
-    assert _ado_auth_header("jwt-xyz", git_env) == {"Authorization": "Bearer jwt-xyz"}
-
-
-def test_ado_auth_header_bearer_detected_at_any_config_index() -> None:
-    """#2368: the bearer header is appended after retained entries, so the
-    scheme sniff must scan every GIT_CONFIG_VALUE_ slot, not just index 0."""
-    git_env = {
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "http.sslCAInfo",
-        "GIT_CONFIG_VALUE_0": "/corporate/ca.pem",
-        "GIT_CONFIG_KEY_1": "http.extraheader",
-        "GIT_CONFIG_VALUE_1": "Authorization: Bearer jwt-xyz",
-    }
-    assert _ado_auth_header("jwt-xyz", git_env) == {"Authorization": "Bearer jwt-xyz"}
-
-
-def test_ado_auth_header_ignores_slots_beyond_the_configured_count() -> None:
-    """Only what git reads counts.
-
-    A slot above ``GIT_CONFIG_COUNT`` is a leftover or an injected entry; git
-    never applies it, so honouring it here would send the PAT under the Bearer
-    scheme and get it rejected.
-    """
-    git_env = {
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.sslCAInfo",
-        "GIT_CONFIG_VALUE_0": "/corporate/ca.pem",
-        "GIT_CONFIG_KEY_5": "http.extraheader",
-        "GIT_CONFIG_VALUE_5": "Authorization: Bearer not-ours",
-    }
-    expected = base64.b64encode(b":pat-123").decode("ascii")
-    assert _ado_auth_header("pat-123", git_env) == {"Authorization": f"Basic {expected}"}
-
-
-def test_ado_auth_header_tolerates_a_malformed_count() -> None:
-    git_env = {"GIT_CONFIG_COUNT": "not-a-number", "GIT_CONFIG_VALUE_0": "Authorization: Bearer x"}
-    expected = base64.b64encode(b":pat-123").decode("ascii")
-    assert _ado_auth_header("pat-123", git_env) == {"Authorization": f"Basic {expected}"}
-
-
-# ---------------------------------------------------------------------------
 # _fetch_ado -- REST fast path
 # ---------------------------------------------------------------------------
 
@@ -186,10 +132,13 @@ def test_fetch_ado_uses_rest_items_api_not_clone() -> None:
     captured: list[tuple[str, dict]] = []
 
     def fake_get(url, headers=None, timeout=None, **kwargs):
-        captured.append((url, dict(headers or {})))
+        captured.append((url, _effective_headers(headers, kwargs)))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
-    resolver = _FakeResolver(token="pat-abc", git_env={"GIT_TOKEN": "pat-abc"})
+    resolver = _FakeResolver(
+        token="pat-abc",
+        git_env=AuthResolver._build_git_env("pat-abc", host_kind="ado", base_env={}),
+    )
     with patch("apm_cli.marketplace.client._http_get", side_effect=fake_get):
         result = _fetch_ado(
             _ado_source(),
@@ -212,7 +161,7 @@ def test_fetch_ado_uses_rest_items_api_not_clone() -> None:
     assert "pat-abc" not in url
     # Auth routed for the ADO org/project/repo.
     assert resolver.calls[0]["org"] == "contoso"
-    assert resolver.calls[0]["path"] == "contoso/platform/tools"
+    assert resolver.calls[0]["path"] == "contoso/platform/_git/tools"
     assert resolver.calls[0]["unauth_first"] is False
 
 
@@ -220,7 +169,7 @@ def test_fetch_ado_bearer_context_sends_bearer_header() -> None:
     captured_headers: list[dict] = []
 
     def fake_get(url, headers=None, timeout=None, **kwargs):
-        captured_headers.append(dict(headers or {}))
+        captured_headers.append(_effective_headers(headers, kwargs))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
     resolver = _FakeResolver(
@@ -432,7 +381,7 @@ def test_fetch_file_dispatches_ado_kind_through_rest() -> None:
     captured: list[tuple[str, dict]] = []
 
     def fake_get(url, headers=None, timeout=None, **kwargs):
-        captured.append((url, dict(headers or {})))
+        captured.append((url, _effective_headers(headers, kwargs)))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
     with (
@@ -486,9 +435,9 @@ def test_fetch_ado_rest_auth_failure_then_git_fallback_via_resolver() -> None:
 def test_fetch_ado_signin_page_triggers_bearer_fallback_before_clone() -> None:
     """A stale PAT hitting the #1671 sign-in page must retry with AAD bearer.
 
-    Regression guard: the sign-in MarketplaceFetchError message must contain an
-    ``is_ado_auth_failure_signal`` keyword so ``try_with_fallback`` attempts the
-    AAD bearer before ``_fetch_ado`` degrades to a clone. With the bearer
+    Regression guard: the canonical classifier treats the HTML sign-in page as
+    an auth failure so ``try_with_fallback`` attempts the AAD bearer before
+    ``_fetch_ado`` degrades to a clone. With the bearer
     available and accepted, the REST path succeeds and ``_fetch_git`` is never
     called.
     """
@@ -497,7 +446,7 @@ def test_fetch_ado_signin_page_triggers_bearer_fallback_before_clone() -> None:
     bearer_provider.get_bearer_token.return_value = "jwt-fallback"
 
     def fake_get(url, headers=None, timeout=None, **kwargs):
-        auth = (headers or {}).get("Authorization", "")
+        auth = _effective_headers(headers, kwargs).get("Authorization", "")
         if auth.startswith("Bearer "):
             # Bearer retry succeeds with the real manifest.
             assert auth == "Bearer jwt-fallback"

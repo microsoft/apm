@@ -14,7 +14,6 @@ Targets uncovered branches in:
 - _fetch_from_repo (stale fallback on error, garbage result)
 - _fetch_github_contents (403, redirect, non-200, timeout, connection error)
 - _is_github_host (*.ghe.com, GITHUB_HOST env)
-- _get_token_for_host (token manager exception, fallback)
 - _detect_garbage (YAML error with cache_entry)
 - _read_cache_entry (expected_hash checks)
 - _write_cache (tmp_meta OSError + unlink)
@@ -41,7 +40,6 @@ from apm_cli.policy.discovery import (
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
-    _get_token_for_host,
     _is_github_host,
     _parse_remote_url,
     _read_cache_entry,
@@ -686,46 +684,6 @@ class TestIsGithubHost:
         """Empty GITHUB_HOST env var doesn't match arbitrary hosts."""
         with patch.dict(os.environ, {"GITHUB_HOST": ""}):
             assert _is_github_host("random.host.com") is False
-
-
-# ---------------------------------------------------------------------------
-# _get_token_for_host
-# ---------------------------------------------------------------------------
-
-
-class TestGetTokenForHost:
-    def test_resolver_failure_ignores_github_token_env(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token is None
-
-    def test_returns_none_for_non_github_host_on_failure(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {}, clear=True),
-        ):
-            token = _get_token_for_host("dev.azure.com")
-        assert token is None
-
-    def test_resolver_failure_ignores_github_apm_pat_env(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token is None
 
 
 # ---------------------------------------------------------------------------
