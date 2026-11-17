@@ -76,8 +76,8 @@ def _alias_divergence_warning(dep_ref: DependencyReference, selection) -> str:
 
 def _with_node_selection(dep_ref: DependencyReference, selection) -> DependencyReference:
     """Return *dep_ref* carrying the merged selection; keep it when nothing changes."""
-    skills = list(selection.skill_subset) if selection.skill_subset else None
-    targets = list(selection.target_subset) if selection.target_subset else None
+    skills = None if selection.skill_subset is None else list(selection.skill_subset)
+    targets = None if selection.target_subset is None else list(selection.target_subset)
     if (
         len(selection.contributors) == 1
         and sorted(dep_ref.skill_subset or ()) == (skills or [])

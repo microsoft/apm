@@ -266,3 +266,6 @@ def test_replaced_diamond_locks_the_merged_selection(tmp_path: Path) -> None:
     locked = LockedDependency.from_dependency_ref(node.dependency_ref, None, 1, None)
     assert locked.skill_subset == ["alpha", "beta"]
     assert locked.to_dependency_ref().skill_subset == ["alpha", "beta"]
+    reloaded = LockedDependency.from_dict(locked.to_dict())
+    assert reloaded.replacement.original.skill_subset == reloaded.skill_subset
+    assert reloaded.to_dependency_ref().skill_subset == ["alpha", "beta"]
