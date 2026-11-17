@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import os
 import stat
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from apm_cli.adapters.client.hermes import HermesClientAdapter
 from apm_cli.factory import ClientFactory
@@ -128,12 +131,15 @@ class TestHermesConfigPath(unittest.TestCase):
         expected = (fake_home / ".hermes" / "config.yaml").resolve(strict=False)
         self.assertEqual(path, expected)
 
+    @pytest.mark.windows_compat
     def test_hermes_home_override(self):
         adapter = HermesClientAdapter()
-        with patch.dict("os.environ", {"HERMES_HOME": "/custom/hermes"}):
-            path = Path(adapter.get_config_path())
-        expected = Path("/custom/hermes").expanduser().resolve(strict=False) / "config.yaml"
-        self.assertEqual(path, expected)
+        with tempfile.TemporaryDirectory() as tmp:
+            # A platform-absolute value: "/custom/hermes" has no drive on Windows.
+            custom = Path(tmp) / "custom" / "hermes"
+            with patch.dict("os.environ", {"HERMES_HOME": str(custom)}):
+                path = Path(adapter.get_config_path())
+        self.assertEqual(path, custom.resolve(strict=False) / "config.yaml")
 
 
 class TestHermesUpdateConfig(unittest.TestCase):
