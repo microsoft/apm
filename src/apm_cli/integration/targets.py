@@ -1863,9 +1863,15 @@ def resolve_audit_targets(
                 f"'{flag}' is disabled. Run "
                 f"'apm experimental enable {flag}' to audit this installation."
             )
-    return resolve_targets(
+    from apm_cli.integration.skill_layout import (
+        recorded_deployed_paths,
+        resolve_reintegration_targets,
+    )
+
+    return resolve_reintegration_targets(
         get_workspace_deploy_root(project_root),
         user_scope=user_scope,
         explicit_target=decision.value,
+        recorded_paths=recorded_deployed_paths(lock),
         create_config=False,
     )

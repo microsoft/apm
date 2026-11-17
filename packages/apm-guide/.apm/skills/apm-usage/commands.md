@@ -856,7 +856,7 @@ security-scan block. Audit reports any differing file no lockfile entry claims
 `unmanaged-conflict`, not managed `modified` drift, without the export-patch
 hint, and does not repair them.
 
-By default, Copilot, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf deploy skills to `.agents/skills/` (the agentskills.io standard). Claude, Grok Build, and Kiro retain native per-client routing (`.claude/skills/`, `.grok/skills/`, `.kiro/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
+By default, Copilot, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf deploy skills to `.agents/skills/` (the agentskills.io standard). Claude, Grok Build, and Kiro retain native per-client routing (`.claude/skills/`, `.grok/skills/`, `.kiro/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). `apm audit --ci` and `apm uninstall` reuse the skill layout recorded in `apm.lock.yaml`. Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 
 `apm install --target kiro` also delivers Kiro CLI prompts as body-only
 `.kiro/prompts/<name>.md`; add `--global` for `~/.kiro/prompts/<name>.md`.

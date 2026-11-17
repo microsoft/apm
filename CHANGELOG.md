@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
+
 ### Changed
 
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
@@ -14,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
 - `apm install -g --target copilot` now honors `COPILOT_HOME` for Copilot CLI instructions, agents, hooks, MCP and LSP config, plugin settings and `--legacy-skill-paths` skills, and `apm uninstall -g`, `apm audit` and target detection use the same root. `COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HERMES_HOME` now share one rule: a relative value fails with an error naming the variable instead of resolving against the current directory. Upgrade note: if you set `COPILOT_HOME`, your next `apm install -g` deploys Copilot user primitives there; files already under `~/.copilot` stay in place as another profile's files. (#3782)
 - `apm install --target opencode` now writes `dependencies.lsp` servers to the `lsp` key of `opencode.json` (or `~/.config/opencode/opencode.json` with `-g`) instead of failing, and prints an `[i]` line when it creates that key, because an `lsp` object also turns on OpenCode's built-in language servers; user-scope LSP config files are written owner-only (`0600`). When a package declares LSP servers but no selected target supports LSP (for example `--target cursor`), `apm install` and `apm update` now fail before deploying skills or changing `apm.lock.yaml`, `.gitignore` or MCP configs, instead of failing after a partial install. -- by @gideruette (#3730)
 

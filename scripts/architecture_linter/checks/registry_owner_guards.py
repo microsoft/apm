@@ -346,7 +346,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
             "resolve_audit_targets": (
                 "resolve_audit_target_decision",
                 "DeploymentLedgerCodec.recorded_target_names",
-                "resolve_targets",
+                "resolve_reintegration_targets",
             )
         },
     }
