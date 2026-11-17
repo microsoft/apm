@@ -619,6 +619,7 @@ contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
+contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -767,6 +768,7 @@ transport-platform-host-reference-coordinates
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
+transport-platform-origin-bounded-redirect
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency

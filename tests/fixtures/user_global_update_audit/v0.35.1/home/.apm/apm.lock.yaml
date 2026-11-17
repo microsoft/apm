@@ -1,0 +1,37 @@
+lockfile_version: '1'
+apm_version: 0.35.1
+dependencies: []
+deployments:
+- kind: uri
+  target: mcp
+  value: local-tool
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:90279f828f51d8cc3b54ae374fe0f6984612eb674fce1ccb78ad36bcc12735f7
+- kind: uri
+  target: mcp
+  value: local-tool
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+mcp_servers:
+- local-tool
+mcp_configs:
+  local-tool:
+    name: local-tool
+    transport: stdio
+    args:
+    - server.js
+    registry: false
+    command: node
+mcp_target_servers:
+  claude:
+  - local-tool
+  copilot:
+  - local-tool

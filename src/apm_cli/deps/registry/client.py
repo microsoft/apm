@@ -30,6 +30,16 @@ from typing import Any
 
 import requests
 
+from ...utils.http_credentials import (
+    REFUSED_HOP_LIMIT,
+    REFUSED_METHOD_CHANGE,
+    REFUSED_OUTSIDE_BASE_PATH,
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bound_refusal,
+    origin_bounded_request,
+    origin_label,
+)
 from .auth import RegistryAuthContext
 
 # Untrusted registry JSON is read incrementally with a hard byte cap so a
@@ -223,12 +233,6 @@ def _validate_registry_transport(url: str) -> urllib.parse.ParseResult:
     raise ValueError("registry URLs must use HTTPS (HTTP is allowed only for loopback testing)")
 
 
-def _effective_port(parsed: urllib.parse.ParseResult) -> int | None:
-    if parsed.port is not None:
-        return parsed.port
-    return {"http": 80, "https": 443}.get(parsed.scheme.lower())
-
-
 class RegistryClient:
     """Minimal HTTP client for the registry API.
 
@@ -252,7 +256,7 @@ class RegistryClient:
         # Strip trailing slash so we can join cleanly.
         self._base_url = base_url.rstrip("/")
         self._auth = auth
-        self._session = session or requests.Session()
+        self._session = session or CredentialScopedSession()
         self._timeout = timeout or _DEFAULT_TIMEOUT
 
     @property
@@ -280,22 +284,46 @@ class RegistryClient:
         stream: bool = False,
     ) -> requests.Response:
         url = self._url(path)
+        response = self._send(method, url, headers=self._headers(accept=accept), stream=stream)
+        return self._raise_for_status(response, url)
+
+    def _send(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        data: bytes | None = None,
+        stream: bool = False,
+    ) -> requests.Response:
+        """Send through the origin-bounded redirect owner, mapping its errors."""
         try:
-            # Pass ``url`` as a keyword so test doubles can inspect it without
-            # depending on positional-argument ordering.
-            response = self._session.request(
+            return origin_bounded_request(
+                self._session,
                 method,
-                url=url,
-                headers=self._headers(accept=accept),
+                url,
+                base_url=self._base_url,
+                headers=headers,
+                data=data,
                 timeout=self._timeout,
                 stream=stream,
-                allow_redirects=False,
             )
+        except RedirectRefusedError as exc:
+            status = getattr(exc.response, "status_code", None)
+            raise RegistryError(
+                _redirect_refusal_message(exc, method, self._base_url),
+                status=status,
+                url=url,
+            ) from exc
         except requests.RequestException as exc:
             raise RegistryError(
                 f"transport error talking to registry: {exc}",
                 url=url,
             ) from exc
+
+    @staticmethod
+    def _raise_for_status(response: requests.Response, url: str) -> requests.Response:
+        """Raise ``RegistryError`` for any non-2xx (an unfollowed 3xx included)."""
         if response.status_code >= 300:
             problem = _safe_problem_json(response)
             raise RegistryError(
@@ -364,43 +392,17 @@ class RegistryClient:
         from the URL recorded in the lockfile without re-querying ``/versions``.
         """
         _validate_registry_transport(url)
-        base = urllib.parse.urlparse(self._base_url)
-        target = urllib.parse.urlparse(url)
-        if (
-            target.scheme.lower(),
-            (target.hostname or "").lower(),
-            _effective_port(target),
-        ) != (
-            base.scheme.lower(),
-            (base.hostname or "").lower(),
-            _effective_port(base),
-        ):
-            raise RegistryError("lockfile registry URL does not match configured registry", url=url)
-        base_path = base.path.rstrip("/")
-        if base_path and target.path != base_path and not target.path.startswith(base_path + "/"):
+        refusal = origin_bound_refusal(url, base_url=self._base_url)
+        if refusal == REFUSED_OUTSIDE_BASE_PATH:
             raise RegistryError(
                 "lockfile registry URL is outside configured registry path", url=url
             )
-        if target.query or target.fragment:
-            raise RegistryError("lockfile registry URL must not contain query or fragment", url=url)
-        try:
-            response = self._session.request(
-                "GET",
-                url=url,
-                headers=self._headers(accept="application/gzip, application/zip"),
-                timeout=self._timeout,
-                allow_redirects=False,
-            )
-        except requests.RequestException as exc:
-            raise RegistryError(f"transport error fetching {url}: {exc}", url=url) from exc
-        if response.status_code >= 300:
-            problem = _safe_problem_json(response)
-            raise RegistryError(
-                _format_error(response.status_code, problem, url),
-                status=response.status_code,
-                problem=problem,
-                url=url,
-            )
+        if refusal is not None:
+            raise RegistryError("lockfile registry URL does not match configured registry", url=url)
+        response = self._send(
+            "GET", url, headers=self._headers(accept="application/gzip, application/zip")
+        )
+        self._raise_for_status(response, url)
         content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip()
         return response.content, content_type
 
@@ -428,27 +430,8 @@ class RegistryClient:
         url = self._url(path)
         headers = self._headers(accept="application/json")
         headers["Content-Type"] = "application/zip"
-        try:
-            response = self._session.request(
-                "PUT",
-                url=url,
-                headers=headers,
-                data=archive_bytes,
-                timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
-            raise RegistryError(
-                f"transport error talking to registry: {exc}",
-                url=url,
-            ) from exc
-        if response.status_code >= 400:
-            problem = _safe_problem_json(response)
-            raise RegistryError(
-                _format_error(response.status_code, problem, url),
-                status=response.status_code,
-                problem=problem,
-                url=url,
-            )
+        response = self._send("PUT", url, headers=headers, data=archive_bytes)
+        self._raise_for_status(response, url)
         body = (response.content or b"").strip()
         if not body:
             # Some registries (e.g. JFrog) return 201 with an empty body.
@@ -473,6 +456,19 @@ def _quote(s: str) -> str:
     as ``%5F`` in registry URLs.
     """
     return urllib.parse.quote(s, safe=".-_")
+
+
+def _redirect_refusal_message(exc: RedirectRefusedError, method: str, base_url: str) -> str:
+    origin = origin_label(base_url)
+    status = getattr(exc.response, "status_code", None)
+    if exc.reason == REFUSED_METHOD_CHANGE:
+        return (
+            f"registry answered {method} with HTTP {status}; only 307 and 308 may "
+            f"redirect a {method} ({origin}); refusing"
+        )
+    if exc.reason == REFUSED_HOP_LIMIT:
+        return f"registry redirected more than 3 times ({origin}); refusing"
+    return f"registry redirected outside the configured registry ({origin}); refusing"
 
 
 def _format_error(status: int, problem: Mapping[str, Any], url: str) -> str:

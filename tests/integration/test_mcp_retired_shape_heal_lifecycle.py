@@ -120,10 +120,6 @@ def _lock_bytes(scene: HarnessScene, *, user: bool) -> bytes | None:
     return path.read_bytes() if path.exists() else None
 
 
-class _AuditAfterGlobalUpdate(Exception):
-    """Known gap #3781: ``audit --ci`` after ``update -g`` misses apm_modules."""
-
-
 def _audit(scene: HarnessScene, *, user: bool, extra: tuple[str, ...] = ("--no-policy",)):
     return scene.runner.run(
         ("audit", "--ci", *extra),
@@ -146,12 +142,8 @@ def _command(kind: str, *, user: bool) -> tuple[str, ...]:
 @pytest.mark.parametrize("label", ["v0.35.1", "v0.36.0"])
 @pytest.mark.parametrize("user", [False, True], ids=["project", "user"])
 def test_upgrade_rewrites_apm_owned_entries_into_the_current_shape(
-    scene: HarnessScene, label: str, kind: str, user: bool, request: pytest.FixtureRequest
+    scene: HarnessScene, label: str, kind: str, user: bool
 ) -> None:
-    if user and kind == "update":
-        request.applymarker(
-            pytest.mark.xfail(strict=True, reason="#3781", raises=_AuditAfterGlobalUpdate)
-        )
     _seed(scene, label, user=user)
     frozen = kind == "install-frozen"
     lock_before = _lock_bytes(scene, user=user)
@@ -159,8 +151,9 @@ def test_upgrade_rewrites_apm_owned_entries_into_the_current_shape(
     result = scene.run(*_command(kind, user=user))
 
     assert result.returncode == 0, describe(result)
-    # Audit straight after the upgrade command (a later install re-materializes
-    # apm_modules, see #3781); --frozen keeps the claim until the next install.
+    # Audit straight after the upgrade command: update -g on a package-less
+    # user manifest leaves no apm_modules (#3781); --frozen keeps the claim
+    # until the next install.
     audit = None if frozen else _audit(scene, user=user)
     _assert_healed(scene, user=user, claims=not frozen)
     warnings = warning_segments(result)
@@ -175,8 +168,6 @@ def test_upgrade_rewrites_apm_owned_entries_into_the_current_shape(
     again = scene.run(*_command("install", user=user))
     assert again.returncode == 0, describe(again)
     assert _snapshot(scene, user=user) == before, "second install rewrote healed state"
-    if user and kind == "update" and audit.returncode != 0:
-        raise _AuditAfterGlobalUpdate(describe(audit))
     assert audit.returncode == 0, describe(audit)
 
 
