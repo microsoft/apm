@@ -197,10 +197,6 @@ def test_audit_ci_warn_names_unreachable_ado_policy(tmp_path: Path, apm_binary_p
     ids=["plural-noncompliant", "csv-compliant", "alias-compliant"],
 )
 @pytest.mark.parametrize("credential", ["helper", "pat"])
-@pytest.mark.xfail(
-    strict=False,
-    reason="needs T2 canonical targets (#3732): install and audit target semantics",
-)
 def test_ado_hosted_target_policy_is_enforced_on_canonical_targets(
     tmp_path: Path, apm_binary_path: Path, targets_line: str, expect_blocked: bool, credential: str
 ) -> None:
