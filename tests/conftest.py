@@ -56,9 +56,10 @@ def _ensure_home_env(home: Path) -> None:
 
 
 _ensure_home_env(_TMP_HOME)
-# User-scope Codex roots honor CODEX_HOME; keep a developer's value from
-# redirecting tests that expect the default ~/.codex root.
-os.environ.pop("CODEX_HOME", None)
+# User-scope harness roots honor these variables; keep a developer's value
+# from redirecting tests that expect the default roots.
+for _user_root_variable in ("CODEX_HOME", "COPILOT_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"):
+    os.environ.pop(_user_root_variable, None)
 # A developer's APM_HOME must not redirect user-scope metadata during tests.
 os.environ.pop("APM_HOME", None)
 

@@ -19,7 +19,7 @@ apm audit [PACKAGE] [OPTIONS]
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. In a project checkout with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, CI mode prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without mutating the checkout. Local dependencies must remain available at their declared paths. Windows long and native 8.3 spellings of the same project use the same project scope. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Global audit also checks resolved external deployment roots such as
-`HERMES_HOME` and `CLAUDE_CONFIG_DIR`. Default audit compares tracked files in
+`HERMES_HOME`, `CLAUDE_CONFIG_DIR` and `COPILOT_HOME`. Default audit compares tracked files in
 those roots for drift. `apm audit --ci` also scans target-governed external
 subtrees for content integrity. Neither mode modifies those roots.
 Auditing the user metadata workspace (`~/.apm`) still requires its installed

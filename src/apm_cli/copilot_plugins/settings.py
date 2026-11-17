@@ -15,7 +15,6 @@ precisely instead of being overwritten.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -68,10 +67,9 @@ class SettingsMergeResult:
 
 def copilot_home() -> Path:
     """Return the Copilot CLI configuration home, honoring ``COPILOT_HOME``."""
-    configured = os.environ.get("COPILOT_HOME", "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home() / ".copilot"
+    from apm_cli.integration.targets import resolve_user_root
+
+    return resolve_user_root("copilot")
 
 
 def resolve_settings_path(

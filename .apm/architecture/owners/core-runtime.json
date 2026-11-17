@@ -119,6 +119,16 @@
       "guards": ["registry-delegation-apm-home-resolution"]
     },
     {
+      "id": "harness-user-root-resolution",
+      "decision": "Harness user-root variables (COPILOT_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR, HERMES_HOME): defaults, absolute-only values and the selected user root",
+      "owner": "integration/targets.py (USER_ROOT_VARIABLES, configured_user_root, resolve_user_root)",
+      "selectors": [
+        "src/apm_cli/integration/canvas_integrator.py",
+        "src/apm_cli/commands/uninstall/profile_scope.py"
+      ],
+      "guards": ["registry-delegation-harness-user-root-resolution"]
+    },
+    {
       "id": "process-interrupt-signals",
       "decision": "SIGTERM takes the same interrupt (Ctrl+C) path as SIGINT; a second SIGTERM terminates",
       "owner": "cli.py (main, _route_sigterm_to_interrupt)",

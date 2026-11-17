@@ -127,7 +127,7 @@ Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
-### Claude Code and Codex profiles
+### Harness profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
 removes a package's files and lockfile rows only under the selected
@@ -139,7 +139,8 @@ profiles share the package loses files: selecting a Claude profile leaves
 `~/.hermes` (and other targets such as `~/.agents`) untouched, and the reverse.
 The selected profile is matched by path; symlinks are not resolved.
 Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
-Codex agents and hooks.
+Codex agents and hooks, and Copilot CLI homes selected by `COPILOT_HOME` (or
+`~/.copilot`) for Copilot instructions, agents and hooks.
 
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message

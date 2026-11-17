@@ -27,6 +27,8 @@ registry-delegation-bootstrap-project-  AC18 ``lint-bootstrap-project-name``
 name                                    (ported semantically)
 registry-delegation-apm-home-resolution APM-owned user metadata must route
                                         through core/scope.py
+registry-delegation-harness-user-root-  Harness user-root variables must
+resolution                              route through integration/targets.py
 ======================================  ==================================
 
 Every rule check consumes only :class:`FactsProvider` inventory and cached
@@ -242,6 +244,28 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
 }
 
 
+_USER_ROOT_OWNER = "src/apm_cli/integration/targets.py"
+
+
+_USER_ROOT_ENV_NAMES = frozenset({"CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "HERMES_HOME"})
+
+
+_USER_ROOT_CONSUMER_NEEDLES: dict[str, str] = {
+    "src/apm_cli/adapters/client/claude.py": 'config_dir = configured_user_root("claude")',
+    "src/apm_cli/adapters/client/codex.py": 'return resolve_user_root("codex")',
+    "src/apm_cli/adapters/client/copilot.py": (
+        'return str(resolve_user_root("copilot") / "mcp-config.json")'
+    ),
+    "src/apm_cli/adapters/client/hermes.py": 'resolve_user_root("hermes")',
+    "src/apm_cli/copilot_plugins/settings.py": 'return resolve_user_root("copilot")',
+    "src/apm_cli/integration/canvas_integrator.py": 'user_root_is_default("copilot")',
+    "src/apm_cli/integration/lsp_integrator.py": "return resolve_user_root(self.runtime)",
+    "src/apm_cli/integration/mcp_integrator.py": (
+        'unresolved_cfg = resolve_user_root("hermes") / "config.yaml"'
+    ),
+}
+
+
 def _count_fixed_lines(facts: FileFacts, needle: str) -> int:
     """Count lexical lines containing `needle` (mirrors ``grep -Fc``)."""
     return sum(1 for line in facts.lines if needle in line)
@@ -422,6 +446,109 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
                     column=getattr(node, "col_offset", 0) + 1,
                 )
             )
+    return findings
+
+
+_POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
+    {"run_dependency_policy_checks", "run_policy_preflight"}
+)
+_POLICY_TARGET_CHECK = "_check_compilation_target"
+_POLICY_TARGET_SEAM_PARAMETER = "effective_target"
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_canonical_targets(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "canonical_targets"
+
+
+def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violation]:
+    """Compilation-target policy judges only the canonical decision projection.
+
+    Every target selection handed to the policy seams must be an
+    ``EffectiveTargetDecision.canonical_targets`` expression, the check itself
+    must never read the raw manifest, and no sibling normalizer may exist.
+    """
+    rule_id = "registry_delegation.policy_target_projection"
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            line = getattr(node, "lineno", 1)
+            if isinstance(node, FUNCTION_NODES) and node.name == "normalize_policy_targets":
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "policy target normalization belongs to "
+                        "EffectiveTargetDecision.canonical_targets",
+                        line=line,
+                    )
+                )
+            elif isinstance(node, FUNCTION_NODES) and node.name == _POLICY_TARGET_CHECK:
+                first = node.args.args[0].arg if node.args.args else None
+                if first != "targets":
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must take canonical targets, not {first}",
+                            line=line,
+                        )
+                    )
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            anchor = index.definition_anchor(node)
+            # A seam may forward its own already-projected parameter.
+            passthrough = isinstance(anchor, FUNCTION_NODES) and anchor.name in _POLICY_TARGET_SEAMS
+            if name in _POLICY_TARGET_SEAMS:
+                for keyword in node.keywords:
+                    if keyword.arg != _POLICY_TARGET_SEAM_PARAMETER:
+                        continue
+                    value = keyword.value
+                    if isinstance(value, ast.Constant) and value.value is None:
+                        continue
+                    if passthrough and _is_name(value, _POLICY_TARGET_SEAM_PARAMETER):
+                        continue
+                    if not _is_canonical_targets(value):
+                        findings.append(
+                            violation(
+                                rule_id,
+                                path,
+                                f"{name} effective_target must be an "
+                                "EffectiveTargetDecision.canonical_targets projection",
+                                line=line,
+                            )
+                        )
+            elif name == _POLICY_TARGET_CHECK:
+                first_arg = node.args[0] if node.args else None
+                if not (
+                    _is_canonical_targets(first_arg)
+                    or (passthrough and _is_name(first_arg, _POLICY_TARGET_SEAM_PARAMETER))
+                ):
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must receive "
+                            "EffectiveTargetDecision.canonical_targets",
+                            line=line,
+                        )
+                    )
     return findings
 
 
@@ -1133,6 +1260,81 @@ def _check_apm_home_resolution(provider: FactsProvider) -> Iterable[Violation]:
     return findings
 
 
+def _check_harness_user_root_resolution(provider: FactsProvider) -> Iterable[Violation]:
+    """Harness user-root variables must be read only by the targets.py owner."""
+    rule_id = "registry_delegation.harness_user_root_resolution"
+    required_paths = (_USER_ROOT_OWNER, *_USER_ROOT_CONSUMER_NEEDLES)
+    facts_by_path, failures = _read_required(provider, rule_id, required_paths)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+    for name in ("configured_user_root", "resolve_user_root"):
+        definers, def_failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(def_failures)
+        if definers != frozenset({_USER_ROOT_OWNER}):
+            findings.append(
+                violation(
+                    rule_id,
+                    _USER_ROOT_OWNER,
+                    f"{name} must be defined only by integration/targets.py",
+                )
+            )
+
+    owner = facts_by_path[_USER_ROOT_OWNER]
+    if _count_fixed_lines(owner, "os.environ.get(variable.env_var") != 1:
+        findings.append(
+            violation(
+                rule_id,
+                _USER_ROOT_OWNER,
+                "the user-root environment lookup must exist exactly once in its owner",
+            )
+        )
+
+    for path, needle in _USER_ROOT_CONSUMER_NEEDLES.items():
+        if not _has_fixed(facts_by_path[path], needle):
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "harness user-root path must route through integration/targets.py",
+                )
+            )
+
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        seen: dict[str, int] = {}
+        for node in index.nodes:
+            if not (isinstance(node, ast.Constant) and node.value in _USER_ROOT_ENV_NAMES):
+                continue
+            seen[node.value] = seen.get(node.value, 0) + 1
+            if path != _USER_ROOT_OWNER or seen[node.value] > 1:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{node.value} must be named only in the USER_ROOT_VARIABLES owner table",
+                        line=getattr(node, "lineno", 1),
+                        column=getattr(node, "col_offset", 0) + 1,
+                    )
+                )
+        if path == _USER_ROOT_OWNER and set(seen) != _USER_ROOT_ENV_NAMES:
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "USER_ROOT_VARIABLES must declare every harness user-root variable",
+                )
+            )
+    return findings
+
+
 def _is_name(node: ast.AST | None, name: str) -> bool:
     return isinstance(node, ast.Name) and node.id == name
 
@@ -1429,6 +1631,16 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-apm-home-resolution",),
         description="APM-owned user metadata paths must share core/scope.py::get_apm_home.",
         check=_check_apm_home_resolution,
+    ),
+    Rule(
+        id="registry_delegation.harness_user_root_resolution",
+        group=GROUP,
+        guard_ids=("registry-delegation-harness-user-root-resolution",),
+        description=(
+            "Harness user-root variables (COPILOT_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR, "
+            "HERMES_HOME) must be read only through integration/targets.py."
+        ),
+        check=_check_harness_user_root_resolution,
     ),
     Rule(
         id="registry_delegation.process_interrupt_signals",
