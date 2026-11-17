@@ -1336,6 +1336,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         replace_all=True,
     ),
     MutationCase(
+        guard_id="registry-delegation-manifest-target-deprecation",
+        rule_id="registry_delegation.manifest_target_deprecation",
+        path="src/apm_cli/install/pipeline.py",
+        old="import builtins\n",
+        new="import builtins\n\nfrom apm_cli.models.manifest_target_migration import plan_manifest_migration\n",
+        intent="Install gains a path that rewrites the deprecated apm.yml 'target:' key.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-output-diagnostics",
         rule_id="registry_delegation.output_diagnostics",
         path="src/apm_cli/commands/marketplace/__init__.py",

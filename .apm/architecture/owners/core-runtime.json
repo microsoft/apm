@@ -116,6 +116,16 @@
       "owner": "cli.py (main, _route_sigterm_to_interrupt)",
       "selectors": ["src/apm_cli/cli.py"],
       "guards": ["registry-delegation-process-interrupt-signals"]
+    },
+    {
+      "id": "manifest-target-deprecation",
+      "decision": "Deprecated manifest 'target:' key: the once-per-process consumer-manifest warning and the explicit 'target:' to 'targets:' rewrite",
+      "owner": "models/apm_package.py (_warn_deprecated_manifest_keys) and models/manifest_target_migration.py, reachable only from commands/manifest.py (apm manifest migrate)",
+      "selectors": [
+        "src/apm_cli/models/manifest_target_migration.py",
+        "src/apm_cli/commands/manifest.py"
+      ],
+      "guards": ["registry-delegation-manifest-target-deprecation"]
     }
   ]
 }

@@ -356,8 +356,12 @@ specification at v0.1 is:
 copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all
 ```
 
-The legacy aliases `vscode` and `agents` MAY appear in input manifests
-and MUST be normalised to `copilot` when the manifest is rewritten.
+The legacy aliases `vscode` and `agents` MAY appear in input manifests.
+When the manifest is rewritten, `agents` MUST be normalised to
+`copilot`, and `vscode` MUST be preserved as `vscode`, because it
+selects a different MCP configuration destination than `copilot`
+(`.vscode/mcp.json` rather than `.github/mcp.json`).
+[Errata 2026-11-17](#appendix-d-revision-history)
 The internal fallback value `minimal` MUST NOT be set explicitly in a
 manifest; it is reserved for the auto-detection fallback described in
 [Section 8.4](#84-target-detection-signals-normative). In an
@@ -4818,7 +4822,15 @@ working draft
 contains 138 statements (133 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
-Errata (none at publication).
+Errata:
+
+- **2026-11-17, Section 4.2.1** (#3762). The rewrite rule for the
+  legacy `vscode` alias said to normalise it to `copilot`. Doing so
+  would move MCP configuration from `.vscode/mcp.json` to
+  `.github/mcp.json`. A rewrite now preserves `vscode`; `agents` is
+  still normalised to `copilot`. No implementation rewrote the alias
+  before this erratum, so no existing behaviour changes. No
+  requirement ID, keyword, or statement count changes.
 
 ---
 

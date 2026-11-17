@@ -40,6 +40,7 @@ from .validation import (
 if TYPE_CHECKING:
     from apm_cli.agent_plugins.ir import AgentPlugin
     from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
+    from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.dependency.replacement import ReplacementRule
 
@@ -392,6 +393,79 @@ def _warn_unknown_manifest_keys(keys: list[str], manifest_path: Path) -> None:
         "and the dependency lock entry, or remove it.",
         symbol="warning",
     )
+
+
+_deprecated_manifest_keys_warned: set[str] = set()
+
+
+def reset_manifest_deprecation_warnings() -> None:
+    """Re-arm the once-per-process deprecation warnings. For tests only."""
+    _deprecated_manifest_keys_warned.clear()
+
+
+def _consumer_manifest_scope(manifest_path: Path) -> "InstallScope | None":
+    """Return the scope whose consumer manifest is *manifest_path*, else None.
+
+    Only the project ``apm.yml`` and the user ``~/.apm/apm.yml`` are consumer
+    manifests; dependency manifests under ``apm_modules/`` never match.
+    """
+    from ..core.scope import InstallScope, get_manifest_path
+
+    try:
+        resolved = manifest_path.resolve()
+    except OSError:
+        return None
+    for scope in (InstallScope.USER, InstallScope.PROJECT):
+        try:
+            if get_manifest_path(scope).resolve() == resolved:
+                return scope
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path) -> None:
+    """Warn once per process about deprecated keys in a consumer manifest.
+
+    Covers the singular top-level ``target:`` key and the ignored
+    ``compilation.target`` key. Writes to stderr and never changes the exit
+    code, so ``--frozen`` and ``--ci`` runs keep their outcome.
+    """
+    compilation = data.get("compilation")
+    pending = [
+        key
+        for key, present in (
+            ("target", "target" in data),
+            ("compilation.target", isinstance(compilation, Mapping) and "target" in compilation),
+        )
+        if present and key not in _deprecated_manifest_keys_warned
+    ]
+    if not pending:
+        return
+    scope = _consumer_manifest_scope(manifest_path)
+    if scope is None:
+        return
+
+    from ..core.scope import InstallScope
+    from ..utils.console import _rich_warning
+
+    user_scope = scope is InstallScope.USER
+    label = _ascii_token(manifest_path.as_posix()) if user_scope else "apm.yml"
+    migrate_cmd = "apm manifest migrate --global" if user_scope else "apm manifest migrate"
+    for key in pending:
+        _deprecated_manifest_keys_warned.add(key)
+        if key == "target":
+            message = (
+                f"{label} uses the deprecated 'target:' key. Use 'targets:' (a YAML list). "
+                f"Run '{migrate_cmd}' to update it. 'target:' will be removed in v1.0."
+            )
+        else:
+            message = (
+                f"{label} sets 'compilation.target', which APM ignores: targets come from "
+                "'targets:' or auto-detection. Remove the key. 'compilation.target' will be "
+                "removed in v1.0."
+            )
+        _rich_warning(message, symbol="warning", err=True)
 
 
 def _collect_manifest_extensions(
@@ -761,6 +835,8 @@ class APMPackage:
                 name if name == "all" else normalize_target_name(name)
                 for name in parsed_target_values
             )
+        if warning_handler is not None:
+            _warn_deprecated_manifest_keys(data, source_manifest)
 
         extensions = _collect_manifest_extensions(data, source_manifest, warning_handler)
 

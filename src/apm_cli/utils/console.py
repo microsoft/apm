@@ -65,11 +65,26 @@ STATUS_SYMBOLS = {
 _console_instance: Any | None = None
 _console_lock = threading.Lock()
 _console_stderr: bool = False
+_stderr_console_instance: Any | None = None
 
 
-def _get_console() -> Any | None:
-    """Get Rich console instance if available (singleton, thread-safe)."""
-    global _console_instance
+def _get_console(*, err: bool = False) -> Any | None:
+    """Get Rich console instance if available (singleton, thread-safe).
+
+    ``err=True`` returns a console bound to stderr even when normal output
+    goes to stdout, for diagnostics that must never mix with command output.
+    """
+    global _console_instance, _stderr_console_instance
+    if err and not _console_stderr:
+        if _stderr_console_instance is not None or not RICH_AVAILABLE:
+            return _stderr_console_instance
+        with _console_lock:
+            if _stderr_console_instance is None:
+                try:  # noqa: SIM105
+                    _stderr_console_instance = Console(stderr=True)
+                except Exception:
+                    pass
+        return _stderr_console_instance
     if _console_instance is not None:
         return _console_instance
     if not RICH_AVAILABLE:
@@ -99,9 +114,10 @@ def set_console_stderr(enabled: bool = True) -> None:
 
 def _reset_console() -> None:
     """Reset the console singleton. For testing only."""
-    global _console_instance, _console_stderr
+    global _console_instance, _console_stderr, _stderr_console_instance
     with _console_lock:
         _console_instance = None
+        _stderr_console_instance = None
         _console_stderr = False
 
 
@@ -113,8 +129,12 @@ def _rich_echo(
     symbol: str = None,  # noqa: RUF013
     *,
     soft_wrap: bool = False,
+    err: bool = False,
 ):
-    """Echo message with Rich formatting or colorama fallback."""
+    """Echo message with Rich formatting or colorama fallback.
+
+    ``err=True`` writes to stderr regardless of the configured output stream.
+    """
     # Handle backward compatibility - if style is provided, use it as color
     if style is not None:
         color = style
@@ -123,7 +143,7 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
-    console = _get_console()
+    console = _get_console(err=err)
     if console:
         try:
             style_str = color
@@ -155,9 +175,11 @@ def _rich_echo(
         }
         color_code = color_map.get(color, Fore.WHITE)
         style_code = Style.BRIGHT if bold else ""
-        click.echo(f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=_console_stderr)
+        click.echo(
+            f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=err or _console_stderr
+        )
     else:
-        click.echo(message, err=_console_stderr)
+        click.echo(message, err=err or _console_stderr)
 
 
 def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
@@ -170,9 +192,9 @@ def _rich_error(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="red", symbol=symbol)
 
 
-def _rich_warning(message: str, symbol: str = None):  # noqa: RUF013
-    """Display warning message with yellow color."""
-    _rich_echo(message, color="yellow", symbol=symbol)
+def _rich_warning(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
+    """Display warning message with yellow color (``err=True`` writes to stderr)."""
+    _rich_echo(message, color="yellow", symbol=symbol, err=err)
 
 
 def _rich_info(

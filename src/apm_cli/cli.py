@@ -120,6 +120,12 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "Install APM, MCP, and LSP dependencies",
     ),
     (
+        "manifest",
+        "apm_cli.commands.manifest",
+        "manifest",
+        "Maintain the apm.yml manifest",
+    ),
+    (
         "marketplace",
         "apm_cli.commands.marketplace",
         "marketplace",

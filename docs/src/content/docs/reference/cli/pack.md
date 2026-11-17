@@ -259,7 +259,7 @@ Ship one APM package; consumers get a native plugin for their tool of choice. Wh
 
 This runs for the default Claude plugin build (`--claude-plugin`, or `--format plugin|claude|claude-plugin`, since `plugin` is a compatibility alias for the Claude plugin bundle). Under an
 explicit `--format agent-plugin` build, the Claude ecosystem
-manifest is skipped -- if `target:` names only `claude` and the project has no
+manifest is skipped -- if `targets:` names only `claude` and the project has no
 other agent sources, `apm pack --format agent-plugin` fails and tells you to use
 `apm pack --claude-plugin` instead.
 
@@ -269,7 +269,7 @@ Add one line to `apm.yml` and pack:
 # apm.yml
 name: my-plugin
 version: 1.0.0
-target: claude
+targets: [claude]
 ```
 
 ```bash

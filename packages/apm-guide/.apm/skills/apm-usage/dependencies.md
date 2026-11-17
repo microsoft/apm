@@ -546,7 +546,10 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
-compile/install targets; per-dependency `targets:` (inside a
+compile/install targets. The older top-level `target:` key is deprecated
+(warning on the consumer manifest only, removal in v1.0); `apm manifest
+migrate` rewrites it and never touches per-dependency `targets:`.
+Per-dependency `targets:` (inside a
 `dependencies.apm` entry) selects which active targets receive that
 dependency's target-scoped primitives. They compose via intersection. See
 `package-authoring.md` for author guidance.

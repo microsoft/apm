@@ -166,11 +166,12 @@ For example, this package can write hooks only to Claude:
 ```yaml
 name: claude-hooks
 version: "1.0.0"
-target: claude
+targets: [claude]
 ```
 
-`target:` accepts scalar, CSV, and list spellings, including aliases such
-as `vscode` (normalized to `copilot`). `targets:` accepts a scalar or list
+The deprecated `target:` key accepts scalar, CSV, and list spellings, including
+aliases such as `vscode` (normalized to `copilot`); `apm manifest migrate`
+rewrites it to `targets:`. `targets:` accepts a scalar or list
 of canonical names. Unknown names, both keys together, and an empty
 or null `targets:` value fail validation. A null singular `target:` is
 treated as omission for legacy compatibility; an empty string or list fails
