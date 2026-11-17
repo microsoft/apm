@@ -161,7 +161,7 @@ def route_discovery_outcome(
     # canonical logger helper for consistent wording (Logging C1/C2,
     # UX F1/F2/F4).
     if outcome in _NON_FOUND_LOGGED_OUTCOMES:
-        hint = getattr(fetch_result, "discovery_hint", None)
+        hint = fetch_result.discovery_hint
         if logger is not None:
             logger.policy_discovery_miss(
                 outcome=outcome,

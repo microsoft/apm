@@ -212,7 +212,7 @@ def _build_report(
         "fetch_error": result.fetch_error,
         "error": result.error,
         "warnings": result.warnings,
-        "discovery_hint": getattr(result, "discovery_hint", None),
+        "discovery_hint": result.discovery_hint,
         "extends_chain": chain,
         "rule_counts": counts,
         "rule_summary": _summarize_rules(counts),
