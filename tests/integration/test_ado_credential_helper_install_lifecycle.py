@@ -86,7 +86,7 @@ def test_ado_pat_keeps_precedence_over_credential_helper(
         env = scenario.env(proxy, {"ADO_APM_PAT": _PAT})
         result = scenario.run(INSTALL, cwd=project, env=env, step="pat-install")
         assert result.returncode == 0, describe(result, proxy)
-        assert helper.gets() == ()
+        assert helper.events() == ()
         assert not received_helper_credential(proxy)
     assert (project / SKILL_PATH).read_text(encoding="utf-8") == skill_document("version one")
     assert _PAT not in (project / "apm.lock.yaml").read_text(encoding="utf-8")
@@ -190,6 +190,43 @@ def test_ado_user_scope_install_through_credential_helper(
     for path in home.rglob("*"):
         if path.is_file() and path.suffix in (".yml", ".yaml", ".json"):
             assert HELPER_SECRET not in path.read_text(encoding="utf-8", errors="replace")
+
+
+def test_ado_helper_credential_outcome_is_reported_back_to_git(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Git's helper hears approve after success and reject after a 401, once each (#3765)."""
+    scenario = AdoAuthScenario(tmp_path, apm_binary_path)
+    helper = scenario.install_helper()
+    project = scenario.project(manifest=manifest(ado_dependency_entry()))
+    with scenario.serve() as proxy:
+        env = scenario.env(proxy)
+        result = scenario.run(INSTALL, cwd=project, env=env, step="accepted")
+        assert result.returncode == 0, describe(result, proxy)
+    stores = [event for event in helper.events() if event["action"] == "store"]
+    assert len(stores) == 1, helper.events()
+    assert [event for event in helper.events() if event["action"] == "erase"] == []
+    stored = stores[0]["fields"]
+    assert (stored["host"], stored["path"].removesuffix(".git")) == (ADO_HOST, HELPER_PATH)
+    assert (stored["username"], stored["password"]) == (HELPER_USER, HELPER_SECRET)
+    assert stores[0]["env"]["GCM_INTERACTIVE"] in ("0", "never", "false"), stores[0]
+
+    # The server now refuses the stored credential (expired or revoked).
+    scenario.ado.accepted_authorizations.clear()
+    before = len(helper.events())
+    stale = scenario.project("stale-consumer", manifest=manifest(ado_dependency_entry()))
+    with scenario.serve() as proxy:
+        env = scenario.env(proxy)
+        result = scenario.run(INSTALL, cwd=stale, env=env, step="rejected")
+        assert result.returncode != 0, describe(result, proxy)
+    later = helper.events()[before:]
+    erases = [event for event in later if event["action"] == "erase"]
+    assert len(erases) == 1, later
+    assert [event for event in later if event["action"] == "store"] == []
+    erased = erases[0]["fields"]
+    assert (erased["host"], erased["path"].removesuffix(".git")) == (ADO_HOST, HELPER_PATH)
+    assert erased["password"] == HELPER_SECRET
+    assert HELPER_SECRET not in flat(result)
 
 
 def test_ado_noninteractive_credential_fill_disables_helper_ui_in_ci(

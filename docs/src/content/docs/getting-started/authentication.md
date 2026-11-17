@@ -368,9 +368,15 @@ auth chain; an unrelated `~/.netrc` entry does not replace it. The helper
 step asks `git credential fill` for the repository path
 (`org/project/_git/repo`) so GCM can select the stored account, and sends
 the returned credential as HTTP Basic `username:password`, as Git does. APM
-asks once per repository per run and never runs `git credential approve` or
-`reject`. When stdin is not a terminal or `CI` is set, APM sets
-`GCM_INTERACTIVE=0`, so an unattended run never waits for a browser or dialog.
+asks once per repository per run. Like Git, APM then reports the result to
+the helper: `git credential approve` after the credential worked, or
+`git credential reject` after Azure DevOps refused it with HTTP 401, so GCM can
+replace an expired credential. A 403, a sign-in redirect, or a network, TLS,
+or not-found failure is not reported. Each report happens at most once per
+repository per run, never for `ADO_APM_PAT` or `az` tokens, and a helper
+failure never fails the command. When stdin is not a terminal or `CI` is set,
+APM sets `GCM_INTERACTIVE=0`, so an unattended run never waits for a browser
+or dialog.
 
 **Stale-PAT fallback:** if `ADO_APM_PAT` is rejected with HTTP 401/403 or a
 recognized Git authentication failure, APM tries an available `az` bearer.

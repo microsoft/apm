@@ -105,16 +105,28 @@ _AUTH_FAILURE_KINDS = frozenset(
 
 @dataclass(frozen=True)
 class AuthOutcome:
-    """Classified result of one attempt; ``detail`` is always redacted."""
+    """Classified result of one attempt; ``detail`` is always redacted.
+
+    ``rejection_verified`` is set only when the server refused the presented
+    credential itself: HTTP 401, or Git's wording for a 401. A 403, a sign-in
+    redirect, or a sign-in page never sets it, because those also answer a
+    valid credential that lacks access.
+    """
 
     kind: AuthOutcomeKind
     detail: str = ""
     status: int | None = None
+    rejection_verified: bool = False
 
     @property
     def is_auth_failure(self) -> bool:
         """Return whether the auth chain may escalate to the next credential."""
         return self.kind in _AUTH_FAILURE_KINDS
+
+    @property
+    def is_verified_rejection(self) -> bool:
+        """Return whether the presented credential was verifiably refused (HTTP 401)."""
+        return self.kind is AuthOutcomeKind.CREDENTIAL_REJECTED and self.rejection_verified
 
 
 class AuthAttemptFailed(RuntimeError):
@@ -204,6 +216,17 @@ _AUTH_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403)\b|\b(?:401|403)\b",
     re.IGNORECASE,
 )
+# Git and HTTP wording that only follows an HTTP 401 for a presented credential
+# (Git asks for a new credential, or reports the one it sent as failed).
+_REJECTED_PHRASES = (
+    "authentication failed",
+    "could not read username",
+    "could not read password",
+    "terminal prompts disabled",
+    "invalid username or password",
+)
+_REJECTED_STATUS_RE = re.compile(r"\b401\b")
+_FORBIDDEN_STATUS_RE = re.compile(r"\b403\b")
 _PUBLIC_GITHUB_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403|404)\b",
 )
@@ -332,7 +355,12 @@ def _classify_response(
             )
         return AuthOutcome(AuthOutcomeKind.OK, "", status)
     if status in (401, 403):
-        return AuthOutcome(_failure(credential_presented), f"HTTP {status}", status)
+        return AuthOutcome(
+            _failure(credential_presented),
+            f"HTTP {status}",
+            status,
+            rejection_verified=credential_presented and status == 401,
+        )
     if 300 <= status < 400:
         location = _header(headers, "Location")
         if is_ado and is_ado_signin_location(location):
@@ -375,9 +403,21 @@ def _classify_text(
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         return AuthOutcome(AuthOutcomeKind.OTHER, detail)
     if any(status in {401, 403} for status in statuses):
-        return AuthOutcome(_failure(credential_presented), detail)
+        return AuthOutcome(
+            _failure(credential_presented),
+            detail,
+            rejection_verified=credential_presented and 401 in statuses and 403 not in statuses,
+        )
     if any(phrase in lowered for phrase in _AUTH_PHRASES) or _AUTH_STATUS_RE.search(text):
-        return AuthOutcome(_failure(credential_presented), detail)
+        verified = (
+            credential_presented
+            and not _FORBIDDEN_STATUS_RE.search(text)
+            and (
+                any(phrase in lowered for phrase in _REJECTED_PHRASES)
+                or _REJECTED_STATUS_RE.search(text) is not None
+            )
+        )
+        return AuthOutcome(_failure(credential_presented), detail, rejection_verified=verified)
     if 404 in statuses or _NOT_FOUND_RE.search(text):
         return AuthOutcome(AuthOutcomeKind.NOT_FOUND, detail)
     return AuthOutcome(AuthOutcomeKind.OTHER, detail)

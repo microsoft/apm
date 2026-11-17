@@ -82,6 +82,36 @@ def test_ado_git_stderr_classification(error: str, expected: bool) -> None:
     assert outcome.is_auth_failure is expected
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "verified"),
+    [
+        ({"response": _response(401)}, True),
+        ({"error": "fatal: could not read Username: terminal prompts disabled"}, True),
+        ({"error": "fatal: Authentication failed for 'https://dev.azure.com/o/'"}, True),
+        ({"error": "The requested URL returned error: 401"}, True),
+        ({"response": _response(403)}, False),
+        ({"error": "The requested URL returned error: 403"}, False),
+        ({"error": "remote: TF400813: unauthorized"}, False),
+        (
+            {
+                "response": _response(
+                    302, {"Location": "https://app.vssps.visualstudio.com/_signin"}
+                )
+            },
+            False,
+        ),
+        ({"response": _response(203, {"Content-Type": "text/html"})}, False),
+    ],
+)
+def test_only_a_401_for_a_presented_credential_verifies_rejection(kwargs, verified) -> None:
+    """Only a verified rejection may erase a helper credential (#3765)."""
+    presented = classify_auth_outcome(host_kind="ado", credential_presented=True, **kwargs)
+    assert presented.is_auth_failure
+    assert presented.is_verified_rejection is verified
+    anonymous = classify_auth_outcome(host_kind="ado", credential_presented=False, **kwargs)
+    assert not anonymous.is_verified_rejection
+
+
 def test_transport_errors_never_escalate() -> None:
     assert (
         classify_auth_outcome(host_kind="ado", error=requests.exceptions.ConnectionError("x")).kind
@@ -188,6 +218,8 @@ def test_helper_credential_keeps_username_and_request_scope(monkeypatch) -> None
         "dev.azure.com",
         "org/proj/_git/repo",
     )
+    assert "secret-value" not in repr(credential)
+    assert credential.description == (("username", "bob"), ("password", "secret-value"))
     assert "secret-value" not in repr(credential)
 
 

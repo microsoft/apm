@@ -194,7 +194,10 @@ Auth failures are HTTP 401/403, a redirect to the ADO sign-in service, an
 HTML sign-in page instead of the file, or a Git auth error. DNS, TLS,
 timeout, and not-found errors stop the chain. ADO requests use only the
 credential chosen by the chain (an unrelated `~/.netrc` entry is ignored).
-APM never runs `git credential approve`/`reject`, and sets
+For the helper credential only, APM runs `git credential approve` after
+success and `git credential reject` after an HTTP 401 for it (once per
+repository per run; never for 403, sign-in redirects, network or TLS errors,
+`ADO_APM_PAT`, or `az` tokens; helper errors never fail the command). It sets
 `GCM_INTERACTIVE=0` when stdin is not a terminal or `CI` is set.
 
 ```bash
