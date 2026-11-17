@@ -290,3 +290,19 @@ def test_credentialed_request_ignores_ambient_netrc(tmp_path, monkeypatch) -> No
         # The owner keeps the chosen credential; a plain session lets netrc win.
         assert origin.seen[0]["authorization"] == "Bearer chosen"
         assert origin.seen[1]["authorization"].startswith("Basic ")
+
+
+def test_anonymous_request_can_exclude_ambient_netrc(tmp_path, monkeypatch) -> None:
+    with _server() as origin:
+        port = origin.server_address[1]
+        netrc = tmp_path / "netrc"
+        netrc.write_text("machine 127.0.0.1 login ambient password ambient-secret\n")
+        netrc.chmod(0o600)
+        monkeypatch.setenv("NETRC", str(netrc))
+        url = f"http://127.0.0.1:{port}/landing"
+        with requests.Session() as session:
+            origin_bounded_request(session, "GET", url, base_url=url, ambient_credentials=False)
+            origin_bounded_request(session, "GET", url, base_url=url)
+        # An auth-chain step opts out of netrc even without a credential header.
+        assert "authorization" not in origin.seen[0]
+        assert origin.seen[1]["authorization"].startswith("Basic ")

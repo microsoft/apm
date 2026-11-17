@@ -762,6 +762,7 @@ transport-platform-host-reference-coordinates
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
+transport-platform-origin-bounded-redirect
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency

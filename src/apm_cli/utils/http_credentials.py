@@ -248,6 +248,7 @@ def origin_bounded_request(
     data: Any = None,
     max_hops: int = MAX_REDIRECT_HOPS,
     follow_cross_origin_without_credentials: bool = False,
+    ambient_credentials: bool = True,
     **kwargs: Any,
 ) -> requests.Response:
     """Send one request, following only redirects that stay inside *base_url*.
@@ -261,7 +262,9 @@ def origin_bounded_request(
     unfollowed response. A response without ``Location`` is returned as is.
 
     Credentials are re-sent only on in-bound hops. Requests that carry a
-    credential header never pick up ambient ``.netrc`` credentials.
+    credential header never pick up ambient ``.netrc`` credentials; pass
+    ``ambient_credentials=False`` to exclude them even when no credential
+    header is sent (for example an anonymous step of an auth chain).
 
     ``follow_cross_origin_without_credentials`` keeps a legacy anonymous
     follow: an out-of-bound HTTPS hop is followed with every credential header
@@ -276,7 +279,7 @@ def origin_bounded_request(
     initial_refusal = origin_bound_refusal(url, base_url=base_url)
     if initial_refusal is not None:
         raise ValueError(f"request URL is outside {origin}: {_REFUSAL_TEXT[initial_refusal]}")
-    if _carries_credentials(request_headers):
+    if not ambient_credentials or _carries_credentials(request_headers):
         kwargs["auth"] = _NO_AMBIENT_CREDENTIALS
     if data is not None:
         kwargs["data"] = data

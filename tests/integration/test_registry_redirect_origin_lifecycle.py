@@ -152,8 +152,18 @@ class _Scenario:
         return self.runner.run(args, scenario_id=step, cwd=self.project, env=env)
 
     def enable(self, env: dict[str, str]) -> None:
+        """Enable registries and bind the credential to the registry origin in user config."""
         result = self.run(env, "experimental", "enable", "registries", step="enable")
         assert result.returncode == 0, result.stdout + result.stderr
+        bound = self.run(
+            env,
+            "config",
+            "set",
+            "registry.fixture.url",
+            f"https://{REGISTRY_HOST}{BASE}",
+            step="bind-credential",
+        )
+        assert bound.returncode == 0, bound.stdout + bound.stderr
 
     def write_manifest(self, *, consumer: bool = True) -> None:
         manifest: dict[str, object] = {
@@ -198,6 +208,7 @@ def test_registry_install_follows_same_origin_gateway_redirect(
         scenario.enable(env)
         result = scenario.run(env, *_INSTALL, step="install-307")
         off_origin = _off_origin(proxy)
+        assert REGISTRY_HOST in proxy.hosts_receiving(TOKEN), "credential never presented"
     assert off_origin == []
     assert result.returncode == 0, _text(result)
     locked = load_yaml(scenario.project / "apm.lock.yaml")["dependencies"][0]
@@ -221,6 +232,7 @@ def test_registry_install_refuses_redirect_outside_configured_registry(
         scenario.enable(env)
         result = scenario.run(env, *_INSTALL, step=f"install-{mode}")
         receiving = proxy.hosts_receiving(TOKEN)
+        assert REGISTRY_HOST in receiving, "credential never presented"
         off_origin = _off_origin(proxy)
     assert result.returncode != 0, _text(result)
     assert receiving <= {REGISTRY_HOST}
@@ -272,6 +284,7 @@ def test_publish_upload_never_leaves_registry_origin(tmp_path: Path, apm_binary_
             env, "publish", "--package", "acme/widget", "--registry", "fixture", step="publish-x"
         )
         off_origin = _off_origin(proxy)
+        assert proxy.hosts_receiving(TOKEN) == {REGISTRY_HOST}, "credential not presented on origin"
     assert off_origin == [], [(o.host, o.method, o.path, len(o.body)) for o in off_origin]
     assert scenario.other.published == []
     assert result.returncode != 0, _text(result)
@@ -291,7 +304,9 @@ def test_publish_upload_follows_same_origin_307_with_body(
         result = scenario.run(
             env, "publish", "--package", "acme/widget", "--registry", "fixture", step="publish-307"
         )
+        followed = [o for o in proxy.requests_to(REGISTRY_HOST) if o.path.endswith("/")]
     assert result.returncode == 0, _text(result)
+    assert followed and all(o.header("Authorization") == f"Bearer {TOKEN}" for o in followed)
     assert len(scenario.gateway.published) == 1 and scenario.gateway.published[0]
 
 

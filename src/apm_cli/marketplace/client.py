@@ -226,12 +226,20 @@ def _read_stale_meta(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def _http_get(url: str, *, headers: dict[str, str] | None = None, **kwargs: object):
+def _http_get(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    follow_cross_origin_without_credentials: bool = True,
+    **kwargs: object,
+):
     """Issue HTTP GET through a shared session without persisting cookies.
 
     Redirects follow the shared origin-bounded owner: credentials are re-sent
-    only within the request's origin, and a hop to another HTTPS origin is
-    followed without any credential header.
+    only within the request's origin, and by default a hop to another HTTPS
+    origin is followed without any credential header. Callers whose redirects
+    carry an auth signal (Azure DevOps sign-in) pass
+    ``follow_cross_origin_without_credentials=False`` to get the refusal.
     """
     cookies = getattr(_HTTP_SESSION, "cookies", None)
     if cookies is not None:
@@ -242,7 +250,7 @@ def _http_get(url: str, *, headers: dict[str, str] | None = None, **kwargs: obje
         url,
         base_url=origin_root(url),
         headers=headers,
-        follow_cross_origin_without_credentials=True,
+        follow_cross_origin_without_credentials=follow_cross_origin_without_credentials,
         **kwargs,
     )
     if cookies is not None:
