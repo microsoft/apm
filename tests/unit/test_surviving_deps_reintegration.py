@@ -504,6 +504,68 @@ def test_uninstall_survivor_rebuild_honors_package_target_restriction(
     assert not (tmp_path / ".cursor/hooks.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("survivor_root", "removed_root"),
+    [
+        (".github/skills", ".github/skills"),
+        (".agents/skills", ".github/skills"),
+        (".github/skills", ".agents/skills"),
+    ],
+    ids=["legacy", "removed-legacy-survivor-converged", "removed-converged-survivor-legacy"],
+)
+def test_uninstall_keeps_each_survivor_in_its_recorded_skill_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    survivor_root: str,
+    removed_root: str,
+) -> None:
+    """#3773: survivors rebuild where they were recorded; removed skills go from either layout."""
+    monkeypatch.chdir(tmp_path)
+    survivor = tmp_path / "apm_modules" / "acme" / "survivor"
+    survivor.mkdir(parents=True)
+    (survivor / "apm.yml").write_text("name: survivor\nversion: 1.0.0\n", encoding="utf-8")
+    (survivor / "SKILL.md").write_text(
+        "---\nname: survivor\ndescription: test survivor\n---\n", encoding="utf-8"
+    )
+    (tmp_path / "apm.yml").write_text(
+        "name: root\nversion: 0.0.0\ntargets:\n  - copilot\n"
+        "dependencies:\n  apm:\n    - acme/survivor\n",
+        encoding="utf-8",
+    )
+    for root, name in ((survivor_root, "survivor"), (removed_root, "gone")):
+        (tmp_path / root / name).mkdir(parents=True)
+        (tmp_path / root / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    survivors = LockFile()
+    survivors.add_dependency(
+        LockedDependency(
+            repo_url="acme/survivor",
+            depth=1,
+            deployed_files=[f"{survivor_root}/survivor"],
+        )
+    )
+    observed: list[list[str]] = []
+
+    def _record_integration(*_args, **kwargs):
+        observed.append([t.skills_rel_root for t in kwargs["targets"] if t.supports("skills")])
+        return {"deployed_files": []}
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives", _record_integration
+    )
+
+    _sync_integrations_after_uninstall(
+        APMPackage.from_apm_yml(tmp_path / "apm.yml"),
+        tmp_path,
+        {f"{removed_root}/gone"},
+        MagicMock(),
+        lockfile=survivors,
+    )
+
+    assert not (tmp_path / removed_root / "gone").exists()
+    assert (tmp_path / survivor_root / "survivor" / "SKILL.md").is_file()
+    assert observed == [[survivor_root]]
+
+
 def test_uninstall_rejects_invalid_survivor_before_wiping_hooks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

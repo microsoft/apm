@@ -86,7 +86,7 @@ use the user installation's lockfile; retain `--global` when retrying.
 | `--exclude VALUE` | unset | Skip one runtime from the resolved MCP/LSP target set (explicit selection, manifest, saved config, or auto-detection). |
 | `--only apm\|mcp` | both | Install only APM packages or MCP/LSP service dependencies. Use `--only=apm` to skip service configuration and `--only=mcp` to select MCP and LSP services only. |
 | `-g`, `--global` | off | Install to user scope under the APM home (`$APM_HOME`, default `~/.apm`) instead of the current project. `apm install -g --mcp NAME` creates or updates `$APM_HOME/apm.yml`, then deploys only to global-capable runtimes, such as Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot. `APM_HOME` does not move target files; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract). Mixed selections skip workspace-only targets with a warning. A selection with no global-capable target exits `2` before changing the user manifest, lockfile, or runtime configuration. |
-| `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
+| `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Later `apm audit --ci` and `apm uninstall` keep the layout recorded in the lockfile. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 File primitives resolve targets in this order: `--target`, manifest
 `targets:`, `apm config set target ...`, then auto-detection. MCP resolves
