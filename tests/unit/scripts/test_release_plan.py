@@ -139,6 +139,8 @@ def test_main_writes_outputs_and_summary(tmp_path: Path, monkeypatch: pytest.Mon
     assert "/runs/1" in summary.read_text()
 
     output.unlink()
+    summary.unlink()
     monkeypatch.setattr(release_plan, "github_fetch", lambda repo: _fetch([]))
-    assert release_plan.main({**env, "GITHUB_OUTPUT": str(output)}) == 0
+    assert release_plan.main(env) == 0
     assert output.read_text() == "mode=full\npublish=true\nrun_unit=true\nfull=true\n"
+    assert "Evidence: none: no green schedule/repository_dispatch run" in summary.read_text()

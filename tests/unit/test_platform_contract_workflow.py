@@ -269,6 +269,31 @@ def _assert_publication_gates(workflow: dict) -> None:
         ), job_id
 
 
+INTEGRATION_LANES = {
+    "PLAN": "integration-plan",
+    "LINUX_X86": "integration-linux-x86",
+    "LINUX_ARM": "integration-linux-arm",
+    "NETWORK": "integration-network",
+    "WINDOWS": "integration-windows",
+}
+
+
+def _assert_integration_summary_requires_every_lane(workflow: dict) -> None:
+    """The always()-run summary must fail unless every integration lane succeeded."""
+    job = workflow_job(workflow, "integration-tests")
+    assert job["name"] == "Integration Tests Summary"
+    assert " ".join(job["if"].split()) == "always() && needs.release-plan.outputs.full == 'true'"
+    assert set(job["needs"]) == {"release-plan", *INTEGRATION_LANES.values()}
+    step = workflow_step(job, "Require every integration lane")
+    assert step["env"] == {
+        name: f"${{{{ needs.{job_id}.result }}}}" for name, job_id in INTEGRATION_LANES.items()
+    }
+    run = step["run"]
+    assert f"for lane in {' '.join(INTEGRATION_LANES)}; do" in run
+    assert '[ "$result" = success ] || failed=1' in run
+    assert "exit 1" in run
+
+
 def test_macos_jobs_run_non_shell_binary_startup_after_build() -> None:
     """Both macOS jobs execute the exact generated artifact before upload."""
     _assert_macos_startup_steps(_workflow())
@@ -592,3 +617,38 @@ def test_linux_audit_witness_bypass_mutation_is_rejected(key: str, value: object
     step[key] = value
     with pytest.raises(AssertionError):
         _assert_linux_audit_witness(workflow)
+
+
+def test_integration_summary_requires_every_lane() -> None:
+    _assert_integration_summary_requires_every_lane(_workflow())
+
+
+@pytest.mark.parametrize(
+    ("needle", "replacement"),
+    [
+        (" NETWORK WINDOWS; do", " NETWORK; do"),
+        ("exit 1", "exit 0"),
+        ('[ "$result" = success ] || failed=1', "true"),
+    ],
+)
+def test_integration_summary_weakening_is_rejected(needle: str, replacement: str) -> None:
+    workflow = deepcopy(_workflow())
+    step = workflow_step(
+        workflow_job(workflow, "integration-tests"), "Require every integration lane"
+    )
+    assert needle in step["run"]
+    step["run"] = step["run"].replace(needle, replacement)
+
+    with pytest.raises(AssertionError):
+        _assert_integration_summary_requires_every_lane(workflow)
+
+
+def test_integration_summary_dropped_lane_env_is_rejected() -> None:
+    workflow = deepcopy(_workflow())
+    step = workflow_step(
+        workflow_job(workflow, "integration-tests"), "Require every integration lane"
+    )
+    del step["env"]["WINDOWS"]
+
+    with pytest.raises(AssertionError):
+        _assert_integration_summary_requires_every_lane(workflow)
