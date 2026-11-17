@@ -86,6 +86,23 @@ def test_retired_shape_heal_matrix(
     assert _compare(tmp_path, native, managed=managed, fingerprint=fingerprint) is expected
 
 
+@pytest.mark.parametrize(
+    ("native", "expected"),
+    [
+        (_CURRENT, NativeMcpConnectionState.UPDATE_MANAGED),
+        ({**_CURRENT, "headers": {"X-Edit": "user"}}, NativeMcpConnectionState.CONFLICT),
+        ({**_CURRENT, "type": "streamable-http"}, NativeMcpConnectionState.CONFLICT),
+    ],
+    ids=["frozen-healed", "edited-after-heal", "user-reshaped"],
+)
+def test_frozen_heal_keeps_the_retired_receipt_verifiable(
+    tmp_path: Path, native: dict, expected: NativeMcpConnectionState
+) -> None:
+    """--frozen heals without writing the lock, so the receipt still fingerprints _RETIRED."""
+    fingerprint = mcp_native_hash(_RETIRED)
+    assert _compare(tmp_path, native, managed=True, fingerprint=fingerprint) is expected
+
+
 def test_self_defined_vscode_streamable_alias_heals_without_fingerprint(tmp_path: Path) -> None:
     client = ClientFactory.create_client("vscode", project_root=tmp_path)
     stored = {"name": "sd", "registry": False, "transport": "streamable-http", "url": _URL}

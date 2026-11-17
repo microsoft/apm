@@ -367,6 +367,36 @@ def test_healed_entries_are_cleaned_when_their_declaration_is_removed(
     assert audit.returncode == 0, describe(audit)
 
 
+@pytest.mark.parametrize("user", [False, True], ids=["project", "user"])
+def test_frozen_heal_keeps_ownership_of_fingerprinted_registry_entries(
+    scene: HarnessScene, user: bool
+) -> None:
+    """A --frozen heal keeps the old fingerprint; later commands still own the entry."""
+    _seed(scene, "v0.36.0", user=user)
+    owners = set(_targets(user)) - {"antigravity"}
+    assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
+    scene.ok(*_command("install-frozen", user=user))
+
+    scene.ok(*_command("install", user=user))
+    assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
+    scene.ok(*_command("update", user=user))
+    assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
+    _assert_healed(scene, user=user)
+
+    path = scene.manifest_root(user) / "apm.yml"
+    manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+    manifest["dependencies"]["mcp"] = [
+        item for item in manifest["dependencies"]["mcp"] if item.get("name") != _REGISTRY_NAME
+    ]
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    scene.ok(*_command("install", user=user))
+    for harness in _targets(user):
+        servers = scene.servers(harness, user=user)
+        assert not {"heal-registry", _REGISTRY_NAME} & servers.keys(), (harness, servers)
+    audit = _audit(scene, user=user)
+    assert audit.returncode == 0, describe(audit)
+
+
 @pytest.mark.parametrize("kind", ["install", "update", "install-frozen"])
 @pytest.mark.parametrize("label", ["v0.35.1", "v0.36.0"])
 def test_upgrade_removes_a_stale_codex_sse_entry(
