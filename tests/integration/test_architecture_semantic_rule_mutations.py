@@ -107,8 +107,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-audit-policy-discovery",
         path="src/apm_cli/commands/audit.py",
-        old="fetch_result = discover_policy_with_chain(cfg.project_root)",
-        new="fetch_result = discover_policy(cfg.project_root)",
+        old="fetch_result = discover_policy_with_chain(\n            cfg.project_root,",
+        new="fetch_result = discover_policy(\n            cfg.project_root,",
         intent="Audit resolves policy without the chain-aware discovery entry point.",
     ),
     MutationCase(
@@ -310,13 +310,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         new="data_root",
         intent="Local bundles revive the removed native plugin lifecycle vocabulary.",
         replace_all=True,
-    ),
-    MutationCase(
-        rule_id="marketplace-integrations-source-parsing",
-        path="src/apm_cli/marketplace/resolver.py",
-        old="dependency = DependencyReference.parse_from_dict(entry)",
-        new="dependency = DependencyReference.parse_from_mapping(entry)",
-        intent="Packed marketplace sources stop parsing through DependencyReference.",
     ),
     MutationCase(
         rule_id="mutation_writes.drift_hook_membership",

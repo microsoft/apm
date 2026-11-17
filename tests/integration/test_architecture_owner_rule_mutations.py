@@ -387,6 +387,27 @@ def test_preview_cannot_bypass_offline_graph_authority(path: str, old: str, new:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
+    """Packed marketplace sources stay on DependencyReference, not just entry coordinates.
+
+    The matrix case for this guard mutates the entry-coordinate half in
+    ref_resolver.py; this proves the packed-source half in resolver.py has teeth.
+    """
+    rule_id = "marketplace-integrations-source-parsing"
+    path = "src/apm_cli/marketplace/resolver.py"
+    old = "dependency = DependencyReference.parse_from_dict(entry)"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "dependency = DependencyReference.parse_from_mapping(entry)", 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+    assert {violation.path for violation in report.violations} == {path}
+
+
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [
