@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install -g` no longer reports APM's own converted agents as "files skipped" on a second run: Codex `.toml` agents, Kiro agents and agents whose relative links APM rewrote are now compared with the text APM would write and adopted, even when no lockfile records them. -- by @MohammedAlkindi (closes #3722, #3743)
 - Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
 
 ### Changed
@@ -20,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
+- `apm install -g` no longer reports APM's own converted agents as "files skipped" on a second run: Codex `.toml` agents, Kiro agents and agents whose relative links APM rewrote are now compared with the text APM would write and adopted, even when no lockfile records them. -- by @MohammedAlkindi (closes #3722, #3743)
 
 ## [0.36.0] - 2026-11-17
 
