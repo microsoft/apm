@@ -1784,22 +1784,28 @@ class TestMaterializeInstallPath:
         with pytest.raises(CacheMissError, match="no downloader"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=False)
 
-    def test_local_dep_returns_project_subpath(self, tmp_path: Path) -> None:
+    def test_local_dep_replays_install_image_from_project_subpath(self, tmp_path: Path) -> None:
+        # Audit replays the image install copies (#3667), never the raw source tree.
         from apm_cli.install.drift import _materialize_install_path
 
         project_root = tmp_path / "project"
         local_pkg = project_root / "packages" / "my-tool"
         local_pkg.mkdir(parents=True)
+        (local_pkg / "apm.yml").write_text("name: my-tool\nversion: 1.0.0\n", encoding="utf-8")
         local_pkg_rel = "packages/my-tool"
 
         lock_dep = LockedDependency(
             repo_url="_local/my-tool", source="local", local_path=local_pkg_rel
         )
+        modules_dir = tmp_path / "apm_modules"
 
-        path = _materialize_install_path(
-            lock_dep, project_root, tmp_path / "apm_modules", cache_only=True
+        path = _materialize_install_path(lock_dep, project_root, modules_dir, cache_only=True)
+
+        assert path == lock_dep.to_dependency_ref().get_install_path(modules_dir)
+        assert path != local_pkg.resolve()
+        assert (path / "apm.yml").read_text(encoding="utf-8") == (local_pkg / "apm.yml").read_text(
+            encoding="utf-8"
         )
-        assert path == local_pkg.resolve()
 
     def test_local_dep_missing_path_raises(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import CacheMissError, _materialize_install_path

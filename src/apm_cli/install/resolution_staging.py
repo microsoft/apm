@@ -170,6 +170,10 @@ class ResolutionStagingSession:
             destination.parent.mkdir(parents=True, exist_ok=True)
             source.replace(destination)
             self._relocations.append((source, destination))
+            # A move into a case-variant parent can strand empty source
+            # ancestors that later lookups count as a second package
+            # directory; rollback recreates them via source.parent.mkdir().
+            self._remove_empty_parents(source.parent)
 
     def commit(self) -> list[tuple[Path, str]]:
         """Discard preserved pre-resolution contents after successful validation."""

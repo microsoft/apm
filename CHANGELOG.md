@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
+
 ### Fixed
 
 - `require_pinned_constraint` accepts exact package release tags such as `shadcn@4.12.0` and `@upstash/context7-mcp@4.4.4` (npm workspaces and Changesets monorepos) as pinned; dist-tags, ranges and partial versions after `@` still fail. -- by @MohammedAlkindi (#3775)
