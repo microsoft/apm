@@ -363,6 +363,9 @@ def _build_dependency_graph(ctx: InstallContext, resolver):
     )
     ctx.dependency_graph = dependency_graph
     _attach_resolver_marketplace_provenance(ctx, resolver)
+    if ctx.logger:
+        for warning in dependency_graph.dependency_tree.resolution_warnings:
+            ctx.logger.warning(warning)
     return dependency_graph
 
 

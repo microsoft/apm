@@ -29,6 +29,7 @@ from .engine import (
     _preflight_uninstall_survivors,
     _project_transitive_orphans,
     _remove_packages_from_disk,
+    _shrink_surviving_selections,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
@@ -684,6 +685,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 refreshed_survivor_keys=refreshed_survivor_keys,
             )
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
+                lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
+            )
+            # Survivors whose selection shrinks are redeployed in full below.
+            refreshed_survivor_keys |= _shrink_surviving_selections(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
         except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:

@@ -622,13 +622,26 @@ class InstallService:
         # than borrowing drift.py's private wrapper around the same call.
         committed_paths = set(DeploymentLedgerCodec.legacy_deployed_file_claims(committed))
 
+        changed_selections: dict[str, str] = {}
         unclaimed: set[str] = set()
         for payload in withheld:
             candidate = LockFile.from_yaml(payload)
             if committed.is_semantically_equivalent(candidate):
                 continue
+            changed_selections.update(_changed_selections(committed, candidate))
             claimed = set(DeploymentLedgerCodec.legacy_deployed_file_claims(candidate))
             unclaimed |= claimed - committed_paths
+        if changed_selections:
+            # An older lockfile recorded one parent's selection where the
+            # graph now merges every declaring edge (#3735).
+            raise FrozenInstallError(
+                "--frozen: dependency selections differ from apm.lock.yaml.",
+                reasons=[f"  - {reason}" for _key, reason in sorted(changed_selections.items())],
+                tip=(
+                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
+                    "or --global if specified, then commit apm.lock.yaml."
+                ),
+            )
         if unclaimed:
             raise FrozenInstallError(
                 "--frozen: apm.lock.yaml does not record everything this install deploys.",
@@ -662,6 +675,27 @@ _FROZEN_REPAIR_TIP = (
     "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
     "or --global if specified, then commit the deployed files and apm.lock.yaml."
 )
+
+
+def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, str]:
+    """Name each locked dependency whose resolved skill or target selection changed."""
+    changed: dict[str, str] = {}
+    for dependency in candidate.get_package_dependencies():
+        key = dependency.get_unique_key()
+        locked = committed.get_dependency(key)
+        if locked is None:
+            continue
+        for field_name, label in (("skill_subset", "skills"), ("target_subset", "targets")):
+            before = sorted(getattr(locked, field_name) or ())
+            after = sorted(getattr(dependency, field_name) or ())
+            if before != after:
+                changed[key] = (
+                    f"selection for {key} changed: locked {label} {before or 'all'}, "
+                    f"resolved {label} {after or 'all'}; run 'apm install' and commit "
+                    "apm.lock.yaml"
+                )
+                break
+    return changed
 
 
 def _outermost(paths: set[str]) -> list[str]:

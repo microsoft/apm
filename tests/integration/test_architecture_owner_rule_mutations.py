@@ -1095,6 +1095,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Resolution staging owner drops a mandatory replacement-activation method.",
     ),
     MutationCase(
+        guard_id="install-deployment-selection-merge",
+        rule_id="install-deployment-selection-merge",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="                        self._record_edge_selection(sub_dep, node)\n",
+        new="                        self._note_edge(sub_dep, node)\n",
+        intent="A transitive edge reaches queue dedup without being recorded for the merge.",
+    ),
+    MutationCase(
         guard_id="install-deployment-single-file-materialization",
         rule_id="install-deployment-single-file-materialization",
         path="src/apm_cli/install/phases/local_content.py",

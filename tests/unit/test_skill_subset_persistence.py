@@ -498,8 +498,7 @@ class TestSkillSubsetConsistencyCheck:
         return LockFile(dependencies=locked_deps)
 
     def _make_dep_ref(self, repo_url, skill_subset=None):
-        ref = Mock()
-        ref.get_unique_key.return_value = repo_url
+        ref = DependencyReference.parse(repo_url)
         ref.skill_subset = skill_subset
         return ref
 
@@ -511,7 +510,7 @@ class TestSkillSubsetConsistencyCheck:
         )
 
     def _package_with_skills(self, tmp_path: Path, *names: str) -> Path:
-        package = tmp_path / "pkg"
+        package = tmp_path / "apm_modules" / "owner" / "repo"
         for name in names:
             skill = package / "skills" / name
             skill.mkdir(parents=True)
@@ -523,11 +522,7 @@ class TestSkillSubsetConsistencyCheck:
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha", "beta"])
-        dep_ref.get_install_path.return_value = self._package_with_skills(
-            tmp_path,
-            "alpha",
-            "beta",
-        )
+        self._package_with_skills(tmp_path, "alpha", "beta")
         locked = self._make_locked_dep(skill_subset=["alpha", "beta"])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
@@ -540,6 +535,7 @@ class TestSkillSubsetConsistencyCheck:
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha", "beta"])
+        self._package_with_skills(tmp_path, "alpha", "beta")
         locked = self._make_locked_dep(skill_subset=["alpha"])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
@@ -553,6 +549,7 @@ class TestSkillSubsetConsistencyCheck:
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=None)
+        self._package_with_skills(tmp_path, "alpha")
         locked = self._make_locked_dep(skill_subset=["alpha"])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
@@ -565,6 +562,7 @@ class TestSkillSubsetConsistencyCheck:
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha"])
+        self._package_with_skills(tmp_path, "alpha")
         locked = self._make_locked_dep(package_type="marketplace_plugin", skill_subset=[])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
@@ -588,12 +586,45 @@ class TestSkillSubsetConsistencyCheck:
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=None)
+        self._package_with_skills(tmp_path, "alpha")
         locked = self._make_locked_dep(skill_subset=[])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 
         result = _check_skill_subset_consistency(manifest, lock, tmp_path)
         assert result.passed is True
+
+    def test_transitive_union_passes_and_missing_manifest_is_unverified(self, tmp_path: Path):
+        """A root plus transitive declaration audits as their union (#3735)."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        self._package_with_skills(tmp_path, "alpha", "gamma")
+        parent = tmp_path / "apm_modules" / "owner" / "parent"
+        parent.mkdir(parents=True)
+        (parent / "apm.yml").write_text(
+            "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - git: https://github.com/owner/repo.git\n      skills: [gamma]\n",
+            encoding="utf-8",
+        )
+        manifest = self._make_manifest_mock(
+            [
+                self._make_dep_ref("owner/repo", skill_subset=["alpha"]),
+                self._make_dep_ref("owner/parent"),
+            ]
+        )
+        lock = self._make_lock_mock(
+            {
+                "owner/repo": self._make_locked_dep(skill_subset=["alpha", "gamma"]),
+                "owner/parent": LockedDependency(repo_url="owner/parent"),
+            }
+        )
+
+        assert _check_skill_subset_consistency(manifest, lock, tmp_path).passed is True
+
+        (parent / "apm.yml").unlink()
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        assert result.passed is False
+        assert any("unverified" in detail for detail in result.details)
 
 
 # ============================================================================
