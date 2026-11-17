@@ -448,6 +448,106 @@ class TestDefaultSkillRouting:
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
 
 
+def _converged_skill_profiles():
+    """Yield (profile, legacy profile) for every scope with a distinct legacy skill root."""
+    from apm_cli.integration.targets import apply_legacy_skill_paths
+
+    for name, base in sorted(KNOWN_TARGETS.items()):
+        for user_scope in (False, True):
+            profile = None if base.user_root_resolver else base.for_scope(user_scope=user_scope)
+            if profile is None or profile.primitives.get("skills") is None:
+                continue
+            legacy = apply_legacy_skill_paths([profile])[0]
+            if legacy.skills_rel_root != profile.skills_rel_root:
+                yield pytest.param(profile, legacy, id=f"{name}-{user_scope}")
+
+
+class TestRecordedSkillLayout:
+    """Re-integration recovers the skill layout the install recorded (#3773)."""
+
+    @staticmethod
+    def _roots(profiles):
+        return {p.name: p.skills_rel_root for p in profiles}
+
+    def test_legacy_recorded_paths_restore_per_client_skill_root(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        profiles = [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["cursor"], KNOWN_TARGETS["claude"]]
+        resolved = resolve_skill_layout(
+            profiles,
+            recorded_paths=[".github/skills/alpha/SKILL.md", ".claude/skills/alpha/SKILL.md"],
+        )
+        assert self._roots(resolved) == {
+            "copilot": ".github/skills",
+            "cursor": ".agents/skills",
+            "claude": ".claude/skills",
+        }
+
+    def test_default_recorded_paths_keep_converged_skill_root(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        profiles = [KNOWN_TARGETS["copilot"]]
+        for recorded in ([], [".agents/skills/alpha/SKILL.md", ".github/prompts/x.prompt.md"]):
+            resolved = resolve_skill_layout(profiles, recorded_paths=recorded)
+            assert self._roots(resolved) == {"copilot": ".agents/skills"}
+
+    def test_user_scope_legacy_recorded_paths_use_scoped_root(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        scoped = [KNOWN_TARGETS["copilot"].for_scope(user_scope=True)]
+        resolved = resolve_skill_layout(scoped, recorded_paths=[".copilot/skills/alpha/SKILL.md"])
+        assert self._roots(resolved) == {"copilot": ".copilot/skills"}
+
+    def test_install_flag_selects_legacy_layout_for_every_target(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        resolved = resolve_skill_layout(
+            [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["cursor"]], legacy_skill_paths=True
+        )
+        assert self._roots(resolved) == {"copilot": ".github/skills", "cursor": ".cursor/skills"}
+
+    @pytest.mark.parametrize(
+        ("recorded", "expected"),
+        [(".github/skills/alpha/SKILL.md", ".github/skills"), (None, ".agents/skills")],
+    )
+    def test_audit_targets_follow_the_recorded_skill_layout(self, tmp_path, recorded, expected):
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.integration.targets import resolve_audit_targets
+
+        (tmp_path / "apm.yml").write_text(
+            "name: root\nversion: 0.0.0\ntargets:\n  - copilot\n", encoding="utf-8"
+        )
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="acme/bundle",
+                depth=1,
+                deployed_files=[recorded] if recorded else [],
+            )
+        )
+        targets = resolve_audit_targets(tmp_path, lockfile=lock)
+        assert self._roots(targets) == {"copilot": expected}
+
+    def test_user_root_equal_to_home_recovers_legacy_layout(self, tmp_path, monkeypatch):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        assert profile.root_dir == "."
+        resolved = resolve_skill_layout([profile], recorded_paths=["skills/alpha/SKILL.md"])
+        assert resolved[0].primitives["skills"].deploy_root is None
+
+    @pytest.mark.parametrize(("profile", "legacy"), list(_converged_skill_profiles()))
+    def test_every_converged_target_recovers_its_recorded_layout(self, profile, legacy):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        for root in (legacy.skills_rel_root, profile.skills_rel_root):
+            recovered = resolve_skill_layout([profile], recorded_paths=[f"{root}/alpha/SKILL.md"])
+            assert recovered[0].skills_rel_root == root
+
+
 class TestGrokCloudTarget:
     """Registry and gating invariants for the grok-cloud target."""
 

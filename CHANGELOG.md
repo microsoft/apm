@@ -11,12 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm uninstall` (project and `-g`) no longer redeploys every skill of a surviving package that selects skills with `skills:`; survivors are rebuilt with the same selection `apm install` deploys, so every deployed skill is recorded in `apm.lock.yaml`. Skill directories left behind by earlier versions are not tracked by APM; delete them manually. (#3784)
 - A dependency declared by several parents with different `skills:` or `targets:` now deploys and locks the sorted union of every declaration, whatever the manifest order; a declaration without the field selects everything. `apm uninstall` of one parent narrows the union, `apm audit --ci` checks every locked dependency against it, and a parent whose `skills:` matches no skill fails naming that parent. Upgrading changes `skill_subset`/`target_subset` in `apm.lock.yaml` for such dependencies, and `apm install --frozen` with an older lockfile fails naming the dependency: run `apm install` once and commit `apm.lock.yaml`. -- by @azevedo-luis (#3786)
+- Remote MCP servers now reach each harness in its native shape: registry `remotes[].type` is honored, so SSE servers stay SSE on Copilot CLI, Claude Code and VS Code (`type: sse`) and Gemini (`url`); Antigravity gets `serverUrl`, and SSE on Antigravity or Codex is skipped with one warning and exit `0` instead of failing the install. `apm mcp show` prints the real transport, the next `apm install`, `apm update` or `apm install --frozen` rewrites entries an earlier APM wrote in the old shape (user entries are preserved), and `extra:` can no longer add an `httpUrl` or `serverUrl` endpoint. (#3789)
 - Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
 
 ### Changed
 
+- `apm init --plugin` and `apm plugin init` no longer write a default `"license": "MIT"` into the new `plugin.json`; choose and add your package's license yourself. (#3799)
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
 - Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
+
+### Fixed
+
+- After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
 
 ## [0.36.0] - 2026-11-17
 

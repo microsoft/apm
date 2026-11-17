@@ -58,7 +58,7 @@ class TestInitPlugin:
                 os.chdir(self.original_dir)
 
     def test_plugin_json_structure(self):
-        """plugin.json has required fields: name, version, description, author, license."""
+        """plugin.json has name, version, description, author, and no default license."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             project_dir = Path(tmp_dir) / "my-plugin"
             project_dir.mkdir()
@@ -75,7 +75,7 @@ class TestInitPlugin:
                 assert isinstance(data["description"], str)
                 assert isinstance(data["author"], dict)
                 assert "name" in data["author"]
-                assert data["license"] == "MIT"
+                assert "license" not in data
             finally:
                 os.chdir(self.original_dir)
 

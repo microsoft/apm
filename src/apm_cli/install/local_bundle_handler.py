@@ -141,9 +141,9 @@ def install_local_bundle(
         # Apply --legacy-skill-paths before policy evaluation. The target names
         # remain canonical; only their deployment paths change.
         if legacy_skill_paths:
-            from ..integration.targets import apply_legacy_skill_paths
+            from ..integration.skill_layout import resolve_skill_layout
 
-            targets = apply_legacy_skill_paths(targets)
+            targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
         bundle_mcp_deps: list[MCPDependency] = []
         bundle_mcp_declared = False

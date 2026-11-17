@@ -704,14 +704,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 SelectedCleanupOutcome,
                 reconcile_target_deployed_files,
             )
-            from ...integration.targets import resolve_targets
+            from ...integration.skill_layout import (
+                recorded_deployed_paths,
+                resolve_reintegration_targets,
+            )
             from ...utils.diagnostics import DiagnosticCollector
 
             cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
-            cleanup_targets = resolve_targets(
+            cleanup_targets = resolve_reintegration_targets(
                 deploy_root,
                 user_scope=scope is InstallScope.USER,
                 explicit_target=cleanup_target_names or None,
+                recorded_paths=recorded_deployed_paths(lockfile),
             )
             cleanup_keys = removed_keys | builtins.set(projected_orphans) | profile_keys
             cleanup_outcome = SelectedCleanupOutcome()

@@ -1,0 +1,18 @@
+mcp_servers:
+  heal-registry:
+    url: https://registry-sse.example.invalid/sse
+    enabled: true
+  heal-sse:
+    url: https://sse.example.invalid/sse
+    enabled: true
+  heal-http:
+    url: https://http.example.invalid/mcp
+    enabled: true
+  heal-streamable:
+    url: https://streamable.example.invalid/mcp
+    enabled: true
+  heal-stdio:
+    command: node
+    args:
+    - server.js
+    enabled: true

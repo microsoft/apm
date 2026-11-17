@@ -104,6 +104,7 @@ class SkillSelectionWorld:
         *,
         skills: Sequence[str] = (),
         instructions: Sequence[str] = (),
+        hooks: Mapping[str, object] | None = None,
         dependencies: Sequence[object] = (),
         dev_dependencies: Sequence[object] = (),
         owner: str = OWNER,
@@ -125,6 +126,11 @@ class SkillSelectionWorld:
             dev_dependencies=dev_dependencies,
             manifest_extra=manifest_extra,
         )
+        for hook_name, document in (hooks or {}).items():
+            _write(
+                source / ".apm" / "hooks" / f"{hook_name}.json",
+                json.dumps(document, indent=2, sort_keys=True) + "\n",
+            )
         repository = self.repositories.create(
             f"{host}--{owner}--{repo}".replace("/", "_"), source_tree=source
         )
@@ -291,3 +297,45 @@ def audit_failures(result: CommandResult) -> dict[str, list[str]]:
         for check in payload.get("checks", [])
         if not check.get("passed", True)
     }
+
+
+# -- upgrade scenarios -------------------------------------------------------
+#
+# Fixtures under tests/fixtures/upgrade_0361/t4/ were produced by older
+# releases against exactly these worlds. Changing a builder changes commit
+# SHAs and invalidates the captured lockfiles; regenerate them if you do.
+
+UPGRADE_SKILLS = ("alpha", "beta", "gamma", "delta")
+UPGRADE_SCENARIOS = ("divergent-diamond", "target-subset", "alias", "u1-leaked")
+UPGRADE_CAPTURE_EXCLUDES = frozenset({"apm_modules", ".apm-local"})
+
+
+def build_upgrade_world(world: SkillSelectionWorld, scenario: str) -> dict[str, object]:
+    """Publish the packages for *scenario*; return the consumer's manifest knobs."""
+    bundle = world.publish("bundle", skills=UPGRADE_SKILLS).slug
+    if scenario == "u1-leaked":
+        pkg_c = world.publish("pkg-c", instructions=["c-rules"]).slug
+        return {
+            "dependencies": [{"git": bundle, "skills": ["alpha"]}, pkg_c],
+            "targets": ["copilot"],
+            "uninstall": pkg_c,
+        }
+    edges = {
+        "divergent-diamond": ({"skills": ["alpha", "beta"]}, {"skills": ["gamma", "delta"]}),
+        "target-subset": ({"targets": ["claude"]}, {"targets": ["copilot"]}),
+        "alias": ({"alias": "bun-a"}, {"alias": "bun-b"}),
+    }[scenario]
+    a = world.publish("pkg-a", dependencies=[{"git": bundle, **edges[0]}]).slug
+    b = world.publish("pkg-b", dependencies=[{"git": bundle, **edges[1]}]).slug
+    targets = ["claude", "copilot"] if scenario == "target-subset" else ["copilot"]
+    return {"dependencies": [a, b], "targets": targets}
+
+
+def copy_capture(source: Path, destination: Path) -> None:
+    """Copy a consumer checkout, skipping caches and per-machine identity."""
+    shutil.copytree(
+        source,
+        destination,
+        ignore=lambda _d, names: [n for n in names if n in UPGRADE_CAPTURE_EXCLUDES],
+        dirs_exist_ok=True,
+    )
