@@ -78,7 +78,7 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives; at project scope, skills for `copilot`, `cursor`, `codex`, `gemini`, `opencode`, and `windsurf` land in the shared `.agents/skills/`.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
@@ -97,7 +97,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 
 Notes per target:
 
-- **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: modular instructions deploy to `~/.copilot/instructions/**/*.instructions.md` (mirroring the project-scope layout); prompts, agents, skills, hooks, and canvas remain project-scope only.
+- **copilot** -- GitHub Copilot (CLI + IDE). User scope: instructions, prompts, agents, and hooks deploy under `~/.copilot/` (instructions as `~/.copilot/instructions/**/*.instructions.md`, mirroring the project-scope layout); skills go to `~/.agents/skills/`; a dependency canvas deploys to `~/.copilot/extensions/`.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
 - **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Full user-scope support; instructions deploy to `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context (see [Cursor user scope](../../reference/targets-matrix/#cursor)).
@@ -122,7 +122,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 | Primitive | Copilot | Claude | Grok Build | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro | Hermes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | instructions | native | native | native | native | compiled | compiled | native | compiled | native | native | compiled |
-| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | compiled | unsupported |
+| prompts | native | compiled | compiled | compiled | unsupported | compiled | unsupported | compiled | compiled | compiled | unsupported |
 | agents | native | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled | unsupported |
 | skills | native | native | native | native | native | native | native | native | native | native | native |
 | hooks | native | native | unsupported | native | native | native | native | unsupported | native | native | unsupported |
