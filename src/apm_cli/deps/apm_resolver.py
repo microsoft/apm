@@ -74,6 +74,33 @@ def _alias_divergence_warning(dep_ref: DependencyReference, selection) -> str:
     )
 
 
+def _with_node_selection(dep_ref: DependencyReference, selection) -> DependencyReference:
+    """Return *dep_ref* carrying the merged selection; keep it when nothing changes."""
+    skills = list(selection.skill_subset) if selection.skill_subset else None
+    targets = list(selection.target_subset) if selection.target_subset else None
+    if (
+        len(selection.contributors) == 1
+        and sorted(dep_ref.skill_subset or ()) == (skills or [])
+        and sorted(dep_ref.target_subset or ()) == (targets or [])
+        and dep_ref.allow_insecure == selection.allow_insecure
+    ):
+        return dep_ref
+    merged = replace(
+        dep_ref,
+        skill_subset=skills,
+        target_subset=targets,
+        allow_insecure=selection.allow_insecure,
+        selection_contributors=selection.contributors,
+    )
+    # Download callbacks annotate the node reference with non-field state
+    # (for example ``resolved_reference``); keep it on the merged reference.
+    declared = {item.name for item in fields(dep_ref)}
+    for name, value in vars(dep_ref).items():
+        if name not in declared:
+            setattr(merged, name, value)
+    return merged
+
+
 # Type alias for the download callback.
 # Takes (dep_ref, apm_modules_dir, parent_chain, parent_pkg) and returns the
 # install path if successful. ``parent_chain`` is a human-readable breadcrumb
@@ -1130,13 +1157,7 @@ class APMDependencyResolver:
             if not edges:
                 continue
             selection = merge_edge_selections(edges)
-            node.dependency_ref = replace(
-                dep_ref,
-                skill_subset=list(selection.skill_subset) if selection.skill_subset else None,
-                target_subset=list(selection.target_subset) if selection.target_subset else None,
-                allow_insecure=selection.allow_insecure,
-                selection_contributors=selection.contributors,
-            )
+            node.dependency_ref = _with_node_selection(dep_ref, selection)
             self._select_nearest_parent(node, self._edge_parents.get(key, ()))
             if selection.divergent_aliases and key not in warned:
                 warned.add(key)

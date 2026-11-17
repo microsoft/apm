@@ -175,3 +175,26 @@ def test_selection_merge_never_changes_identity_key(tmp_path: Path) -> None:
     graph = _resolve(tmp_path, ["org/a", "org/b"], SIBLINGS)
     keys = [dep.get_unique_key() for dep in graph.flattened_dependencies.get_installation_list()]
     assert len(keys) == len(set(keys)) == 3
+
+
+def test_merged_reference_keeps_download_annotations(tmp_path: Path) -> None:
+    """State a download callback attaches to the node reference survives the merge."""
+    modules = tmp_path / "apm_modules"
+    for name, deps in SIBLINGS.items():
+        _write_pkg(modules, name, deps)
+    _write_pkg(modules, BUNDLE)
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(
+            {"name": "consumer", "version": "1.0.0", "dependencies": {"apm": ["org/a", "org/b"]}}
+        ),
+        encoding="utf-8",
+    )
+
+    def callback(dep_ref, mods_dir, parent_chain="", parent_pkg=None):
+        dep_ref.resolved_reference = f"resolved:{dep_ref.repo_url}"
+        return dep_ref.get_install_path(mods_dir)
+
+    resolver = APMDependencyResolver(apm_modules_dir=modules, download_callback=callback)
+    ref = _bundle_ref(resolver.resolve_dependencies(tmp_path))
+    assert ref.skill_subset == ["alpha", "beta", "delta", "gamma"]
+    assert ref.resolved_reference == f"resolved:{BUNDLE}"
