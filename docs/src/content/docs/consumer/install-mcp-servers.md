@@ -426,6 +426,36 @@ MCP defines two transport families. APM exposes both:
   and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
   for HTTP headers such as `Authorization`.
 
+### Remote transport per harness
+
+`http` and `streamable-http` both mean Streamable HTTP; `sse` is the legacy
+HTTP+SSE transport. For a registry server, APM reads the transport from the
+registry's `remotes[].type` (a missing value means Streamable HTTP). `apm mcp
+show` prints the same transport. Each harness gets its own native keys:
+
+| Harness | Streamable HTTP | SSE |
+|---|---|---|
+| Copilot CLI, Claude Code, VS Code | `type: http`, `url` | `type: sse`, `url` |
+| Gemini CLI | `httpUrl` | `url` |
+| Antigravity | `serverUrl` | not supported |
+| Codex CLI | `url` | not supported |
+| Cursor, Windsurf, JetBrains Copilot | `type: http`, `url` | `type: http`, `url` |
+| Kiro, Hermes | `url` | `url` |
+| OpenCode | `type: remote`, `url` | `type: remote`, `url` |
+
+When a harness does not support the transport, APM prints one warning naming
+the server and the harness, skips that harness, and continues; the server is
+not recorded for that harness and the install exits `0`, including under
+`apm install --frozen`.
+
+Entries an earlier APM release wrote in a shape the table above replaced (for
+example Antigravity `httpUrl`, or `type: http` for an SSE server) are rewritten
+on the next `apm install`, `apm update` or `apm install --frozen`, even when
+`apm.yml` did not change. APM rewrites only entries it can prove it wrote; a
+same-name entry you added yourself is preserved and reported as a conflict.
+Extra fields cannot add a second endpoint: `extra:` keys named `url`,
+`httpUrl` or `serverUrl` are dropped.
+
 Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
 accepted only for literal loopback addresses such as `localhost`,
 `ip6-localhost`, `127.0.0.0/8`, and `::1`, which keeps local development

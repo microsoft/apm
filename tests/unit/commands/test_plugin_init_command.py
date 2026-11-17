@@ -87,6 +87,7 @@ class TestPluginInitCommand:
                 pj = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
                 assert "$schema" not in pj
                 assert "extensions" not in pj
+                assert "license" not in pj
                 assert not Path("mcp.json").exists()
             finally:
                 os.chdir(self.original_dir)

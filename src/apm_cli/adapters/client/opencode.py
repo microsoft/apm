@@ -42,6 +42,7 @@ from typing import Any
 from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
 from ...models.dependency.mcp import opencode_enabled_matches as _enabled_matches
 from ...utils.console import _rich_warning
+from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
 _ENV_REF_TEMPLATE = "{env:%s}"
@@ -58,6 +59,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     Converts the standard Copilot config format into OpenCode's schema
     and writes to the project or user-scope ``opencode.json``.
     """
+
+    remote_shape = remote_shape_row("opencode")
 
     supports_user_scope: bool = True
     target_name: str = "opencode"

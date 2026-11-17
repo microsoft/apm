@@ -1245,8 +1245,12 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.recover-tag.outputs.tag || github.ref }}
 
+      # Pin the interpreter: without it uv picks the runner's newest Python,
+      # where locked native dependencies (pydantic-core) have no wheels.
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install locked build dependencies
         run: uv sync --frozen --extra dev

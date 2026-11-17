@@ -573,17 +573,24 @@ def _export_one(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
+def _resolve_diff_targets(
+    project_root: Path, lockfile: LockFile | None = None
+) -> list[TargetProfile]:
     """Resolve targets for the diff phase, honoring apm.yml ``target:``.
 
     Must match how the replay resolves targets (drift.py, #1924):
     auto-detection alone would skip declared targets whose root
-    directory does not exist, silently hiding their findings.
+    directory does not exist, silently hiding their findings. Skills
+    keep the layout recorded in *lockfile*, as in the replay (#3773).
     """
     from ..core.target_detection import read_manifest_target
-    from ..integration.targets import resolve_targets
+    from ..integration.skill_layout import recorded_deployed_paths, resolve_reintegration_targets
 
-    return resolve_targets(project_root, explicit_target=read_manifest_target(project_root))
+    return resolve_reintegration_targets(
+        project_root,
+        explicit_target=read_manifest_target(project_root),
+        recorded_paths=recorded_deployed_paths(lockfile),
+    )
 
 
 @click.command(
@@ -709,7 +716,7 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
         logger.error(f"Drift replay failed: {exc}")
         sys.exit(1)
 
-    targets = _resolve_diff_targets(project_root)
+    targets = _resolve_diff_targets(project_root, lockfile)
     findings = diff_scratch_against_project(scratch, project_root, lockfile, targets)
 
     export = build_patch_export(project_root, scratch, lockfile, findings)

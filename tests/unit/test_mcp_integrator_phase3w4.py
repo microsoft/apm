@@ -119,7 +119,7 @@ class TestBuildSelfDefinedInfo:
         dep = self._make_dep(transport="sse", url="https://sse.example.com/mcp")
         info = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in info
-        assert info["remotes"][0]["transport_type"] == "sse"
+        assert info["remotes"][0]["transport"] == "sse"
 
     def test_tools_override_embedded(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator

@@ -60,6 +60,8 @@ def test_pypi_publisher_only_downloads_and_publishes() -> None:
     workflow = load_workflow(ROOT / ".github" / "workflows" / "build-release.yml")
     builder = workflow_job(workflow, "build-pypi-distributions")
     assert builder["permissions"] == {"contents": "read"}
+    uv = workflow_step(builder, "Install uv")
+    assert uv["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
     sync = workflow_step(builder, "Install locked build dependencies")
     assert sync["run"] == "uv sync --frozen --extra dev"
     build = workflow_step(builder, "Build Python package")
