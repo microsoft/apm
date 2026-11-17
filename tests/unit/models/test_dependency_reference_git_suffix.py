@@ -57,6 +57,7 @@ def test_names_ending_in_git_characters_parse_and_round_trip(spec: str, repo_url
         "owner/.git.git",
         "https://github.com/owner/git.git.git",
         "git@github.com:owner/git.git.git",
+        "https://github.com/owner/git%2Egit.git",
         "gitlab.com/group/tig.git.git",
         "dev.azure.com/org/proj/git.git.git",
     ],
@@ -70,7 +71,9 @@ _OWNER = st.text(string.ascii_letters + string.digits + "-", min_size=1, max_siz
     lambda s: not s.startswith("-") and not s.endswith("-")
 )
 _REPO = st.text(string.ascii_letters + string.digits + "._-", min_size=1, max_size=16).filter(
-    lambda s: s.removesuffix(".git").strip(".") != "" and not s.removesuffix(".git").endswith(".git")
+    lambda s: (
+        s.removesuffix(".git").strip(".") != "" and not s.removesuffix(".git").endswith(".git")
+    )
 )
 
 

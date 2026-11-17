@@ -22,6 +22,7 @@ from ...utils.github_host import (
 )
 from ...utils.path_security import (
     PathTraversalError,
+    decode_url_path_segments,
     parse_url_path_segments,
     validate_path_segments,
 )
@@ -1745,7 +1746,7 @@ class DependencyReference(ProviderCoordinateMixin):
     def _reject_git_suffixed_repo_name(name: str) -> None:
         # Parsing removes exactly one ".git" transport suffix, so a name that
         # still ends in ".git" would be written to apm.yml as a different repo.
-        if urllib.parse.unquote(name).endswith(".git"):
+        if name.endswith(".git"):
             raise ValueError(
                 f"Invalid repository path component: {name}. A repository name "
                 "cannot end in '.git' once its '.git' suffix is removed"
@@ -1778,7 +1779,9 @@ class DependencyReference(ProviderCoordinateMixin):
         if not all(re.match(allowed_pattern, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path", reject_all_dots=True)
-        cls._reject_git_suffixed_repo_name(segments[-1])
+        cls._reject_git_suffixed_repo_name(
+            decode_url_path_segments(segments[-1], context="repository path")[0]
+        )
         for seg in segments:
             if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                 raise ValueError(
