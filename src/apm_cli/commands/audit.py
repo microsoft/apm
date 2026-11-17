@@ -618,33 +618,15 @@ def _audit_ci_gate(
     """
     logger = cfg.logger
 
+    from ..install.audit_replay import resolve_ci_audit_materialization
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
     fail_fast = not no_fail_fast
 
-    prepared_replay = None
-    prepared_replay_error = None
-    if (cfg.project_root / "apm.yml").exists() and not (cfg.project_root / "apm_modules").exists():
-        from ..core.scope import get_workspace_deploy_root
-        from ..deps.lockfile import get_lockfile_path
-        from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
-
-        if get_lockfile_path(cfg.project_root).exists():
-            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve():
-                prepared_replay_error = (
-                    "installed package materialization is missing at "
-                    f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "
-                    "to restore it"
-                )
-            else:
-                try:
-                    prepared_replay = prepare_ci_audit_replay(
-                        cfg.project_root,
-                        verbose=cfg.verbose,
-                    )
-                except CiAuditReplayError as exc:
-                    prepared_replay_error = str(exc)
+    materialization = resolve_ci_audit_materialization(cfg.project_root, verbose=cfg.verbose)
+    prepared_replay = materialization.prepared_replay
+    prepared_replay_error = materialization.error
 
     # Always run baseline checks
     ci_result = run_baseline_checks(
