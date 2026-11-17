@@ -16,12 +16,13 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 | Target               | Marker / signal                     | Notes                                  |
 |----------------------|--------------------------------------|----------------------------------------|
 | VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
-| Claude Code          | `.claude/`                           | Skills, agents, commands, MCP          |
+| Claude Code          | `.claude/`                           | Rules, skills, agents, commands, hooks, MCP |
 | Grok Build           | `.grok/`                             | Rules, agents, commands, skills        |
-| Cursor               | `.cursor/`                           | Rules, commands, MCP                   |
-| Codex CLI            | `.codex/`                            | Skills, MCP                            |
+| Cursor               | `.cursor/`                           | Rules, agents, commands, skills, hooks, MCP |
+| Codex CLI            | `.codex/`                            | Skills, agents, hooks, MCP             |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
+| Hermes               | explicit `--target hermes`           | Skills, compiled instructions, MCP     |
 | OpenCode             | `.opencode/`                         | Agents, commands, skills, compiled instructions, MCP |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Agents + Skills + Hooks + MCP |
@@ -51,7 +52,7 @@ target:
   - cursor
 ```
 
-The `target:` field accepts either a YAML list or a CSV string. See [Manifest schema](../../reference/manifest-schema/#target).
+The `target:` field accepts either a YAML list or a CSV string. See [Manifest schema](../../reference/manifest-schema/#36-target-and-targets).
 
 ## Primitive flow per target
 
@@ -91,8 +92,8 @@ Or pin in `apm.yml` and rerun install.
 ### Remove a target
 
 1. Edit `apm.yml` to drop the target from `target:`.
-2. `apm prune` to remove APM-managed files for the dropped target.
-3. `apm install && apm compile` to verify.
+2. `apm install` to remove APM-managed files for the dropped target.
+3. `apm compile` to refresh compiled context files.
 
 See [Migration paths -> target migration](../../troubleshooting/migration/#5-target-migration).
 
@@ -115,6 +116,9 @@ Dependency packages contribute only `dependencies.mcp`; their
 - `.cursor/mcp.json` (Cursor)
 - `.codex/config.toml` (Codex)
 - `.vscode/mcp.json` (VS Code)
+- `.github/mcp.json` (Copilot CLI)
+- `.agents/mcp_config.json` (Antigravity)
+- `~/.hermes/config.yaml` (Hermes, `mcp_servers:` block)
 - `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
