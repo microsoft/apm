@@ -310,6 +310,13 @@ class MCPClientAdapter(ABC):
     # other adapters keep their written entry until the declaration changes.
     refreshes_environment_renders: bool = False
 
+    # Render-time state owned by ``_remote_shapes``: a retired shape while
+    # ``legacy_managed_renders`` reproduces an earlier APM render, and the
+    # nesting depth of comparison renders (which raise instead of warning on
+    # an unsupported transport).
+    _remote_shape_override: Any = None
+    _comparison_render_depth: int = 0
+
     @staticmethod
     def _merge_extra(config: dict, server_info: dict) -> dict:
         """Merge harness-specific ``_extra`` keys from server_info into config.
@@ -401,16 +408,58 @@ class MCPClientAdapter(ABC):
         runtime_vars: dict | None = None,
     ) -> dict:
         """Render one native server entry for exact baseline comparisons."""
-        rendered = self._format_server_config(
-            server_info,
-            env_overrides=env_overrides or {},
-            runtime_vars=runtime_vars or {},
-        )
+        # A comparison render reports an unsupported transport by raising,
+        # so only the install itself warns about the skip.
+        self._comparison_render_depth += 1
+        try:
+            rendered = self._format_server_config(
+                server_info,
+                env_overrides=env_overrides or {},
+                runtime_vars=runtime_vars or {},
+            )
+        finally:
+            self._comparison_render_depth -= 1
         if isinstance(rendered, tuple):
             rendered = rendered[0]
         if not isinstance(rendered, dict):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
+
+    def legacy_managed_renders(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> tuple[dict, ...]:
+        """Renders earlier APM releases wrote for the same declaration.
+
+        Rendered with each retired remote shape of this adapter's row
+        (``_remote_shapes``), so the ownership owner can recognize, heal or
+        retire an APM-written entry in a shape APM no longer writes.
+        """
+        from ._remote_shapes import remote_shape_of, requested_remote_transport
+
+        shape = remote_shape_of(self)
+        if not shape.retired or requested_remote_transport(self, server_info) is None:
+            return ()
+        kwargs = {"env_overrides": env_overrides, "runtime_vars": runtime_vars}
+        try:
+            current = self.render_server_config(server_info, **kwargs)
+        except ValueError:
+            current = None
+        renders: list[dict] = []
+        for spec in shape.retired:
+            self._remote_shape_override = spec
+            try:
+                candidate = self.render_server_config(server_info, **kwargs)
+            except ValueError:
+                continue
+            finally:
+                self._remote_shape_override = None
+            if candidate != current and candidate not in renders:
+                renders.append(candidate)
+        return tuple(renders)
 
     @staticmethod
     def json_identical(left: object, right: object) -> bool:
@@ -1270,6 +1319,17 @@ class MCPClientAdapter(ABC):
 
         # If no priority package found, return the first one
         return packages[0] if packages else None
+
+    @classmethod
+    def selected_remote(cls, server_info) -> dict | None:
+        """Return the remote entry this adapter renders for *server_info*, if any."""
+        if not isinstance(server_info, dict) or server_info.get("_raw_stdio"):
+            return None
+        remotes = server_info.get("remotes") or []
+        if not remotes:
+            return None
+        remote = cls._select_remote_with_url(remotes) or remotes[0]
+        return remote if isinstance(remote, dict) else None
 
     @staticmethod
     def _select_remote_with_url(remotes):
