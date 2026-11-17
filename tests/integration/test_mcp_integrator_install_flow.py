@@ -185,12 +185,12 @@ class TestBuildSelfDefinedInfo:
     def test_sse_transport(self):
         dep = _make_dep("sse-srv", transport="sse", url="https://example.com/sse")
         info = MCPIntegrator._build_self_defined_info(dep)
-        assert info["remotes"][0]["transport_type"] == "sse"
+        assert info["remotes"][0]["transport"] == "sse"
 
     def test_streamable_http_transport(self):
         dep = _make_dep("sh-srv", transport="streamable-http", url="https://example.com/mcp")
         info = MCPIntegrator._build_self_defined_info(dep)
-        assert info["remotes"][0]["transport_type"] == "streamable-http"
+        assert info["remotes"][0]["transport"] == "streamable-http"
 
     def test_http_with_headers(self):
         dep = _make_dep(

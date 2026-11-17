@@ -359,7 +359,7 @@ class TestBuildSelfDefinedInfo:
         info = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in info
         assert info["remotes"][0]["url"] == "https://example.com/mcp"
-        assert info["remotes"][0]["transport_type"] == "http"
+        assert info["remotes"][0]["transport"] == "streamable-http"
         assert "packages" not in info
 
     def test_sse_transport_builds_remote(self):
@@ -372,7 +372,7 @@ class TestBuildSelfDefinedInfo:
             "stream-svc", transport="streamable-http", url="https://example.com/mcp"
         )
         info = MCPIntegrator._build_self_defined_info(dep)
-        assert info["remotes"][0]["transport_type"] == "streamable-http"
+        assert info["remotes"][0]["transport"] == "streamable-http"
         assert info["remotes"][0]["url"] == "https://example.com/mcp"
         assert "packages" not in info
 

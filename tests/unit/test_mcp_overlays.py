@@ -598,7 +598,7 @@ class TestBuildSelfDefinedServerInfo:
         assert "remotes" in result
         assert len(result["remotes"]) == 1
         assert result["remotes"][0]["url"] == "http://example.com"
-        assert result["remotes"][0]["transport_type"] == "http"
+        assert result["remotes"][0]["transport"] == "streamable-http"
         assert "packages" not in result
 
     def test_sse_transport_builds_remote(self):
@@ -610,7 +610,7 @@ class TestBuildSelfDefinedServerInfo:
         )
         result = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in result
-        assert result["remotes"][0]["transport_type"] == "sse"
+        assert result["remotes"][0]["transport"] == "sse"
         assert result["remotes"][0]["url"] == "http://example.com/sse"
 
     def test_stdio_transport_builds_package(self):

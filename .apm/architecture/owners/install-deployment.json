@@ -232,8 +232,8 @@
     },
     {
       "id": "ci-audit-scratch-materialization",
-      "decision": "CI audit scratch materialization",
-      "owner": "install/audit_replay.py (prepare_ci_audit_replay) + install/audit_target_roots.py (scratch deployment projections)",
+      "decision": "CI audit scratch materialization and whether a workspace needs live package materialization",
+      "owner": "install/audit_replay.py (resolve_ci_audit_materialization, prepare_ci_audit_replay) + install/audit_target_roots.py (scratch deployment projections)",
       "selectors": [
         "src/apm_cli/install/audit_replay.py",
         "src/apm_cli/install/audit_target_roots.py",
@@ -271,6 +271,13 @@
         "src/apm_cli/commands/uninstall/engine.py"
       ],
       "guards": ["install-deployment-skills-root-derivation"]
+    },
+    {
+      "id": "skill-layout",
+      "decision": "Effective skill layout (converged .agents/skills or per-client --legacy-skill-paths roots) for install and for every flagless rebuild of recorded deployments",
+      "owner": "integration/skill_layout.py (resolve_skill_layout; resolve_reintegration_targets recovers the layout from recorded deployed paths for uninstall cleanup and survivor rebuild; integration/targets.py resolve_audit_targets routes audit drift replay through it)",
+      "selectors": ["src/apm_cli/integration/skill_layout.py"],
+      "guards": ["install-deployment-skill-layout"]
     },
     {
       "id": "consumer-manifest-rewrite",

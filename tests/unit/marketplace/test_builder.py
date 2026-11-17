@@ -32,6 +32,7 @@ from apm_cli.marketplace.semver import (
     parse_semver,
     satisfies_range,
 )
+from tests.utils.metadata_transport import patch_metadata_urlopen
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1748,7 +1749,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"name: my-tool\ndescription: Remote tool description\nversion: 2.3.1\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is not None
         assert result["description"] == "Remote tool description"
@@ -1760,8 +1761,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"description: Nested plugin desc\nversion: 1.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             return_value=mock_resp,
         ) as mock_open:
             result = builder._fetch_remote_metadata(pkg)
@@ -1778,7 +1778,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"name: my-tool\ndescription: Only desc\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is not None
         assert result["description"] == "Only desc"
@@ -1790,7 +1790,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"name: my-tool\nversion: 3.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is not None
         assert result["version"] == "3.0.0"
@@ -1802,8 +1802,7 @@ class TestFetchRemoteMetadata:
 
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             side_effect=urllib.error.URLError("connection refused"),
         ):
             result = builder._fetch_remote_metadata(pkg)
@@ -1815,8 +1814,7 @@ class TestFetchRemoteMetadata:
 
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             side_effect=urllib.error.HTTPError(
                 url="",
                 code=404,
@@ -1834,7 +1832,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"name: my-tool\ntags:\n  - util\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
@@ -1844,7 +1842,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b'name: my-tool\ndescription: ""\nversion: 1.0.0\n'
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is not None
         assert "description" not in result
@@ -1856,7 +1854,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"- item1\n- item2\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
@@ -1866,7 +1864,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"{{{{not: yaml at all"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
@@ -1876,7 +1874,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         yaml_body = b"name: my-tool\nversion: 1.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
         assert result is not None
         assert result["version"] == "1.0"
@@ -1893,8 +1891,7 @@ class TestFetchRemoteMetadata:
         )
         yaml_body = b"description: Private plugin\nversion: 1.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             return_value=mock_resp,
         ) as mock_open:
             result = builder._fetch_remote_metadata(pkg)
@@ -1922,8 +1919,7 @@ class TestFetchRemoteMetadata:
         )
         yaml_body = b"description: Public plugin\nversion: 2.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             return_value=mock_resp,
         ) as mock_open:
             result = builder._fetch_remote_metadata(pkg)
@@ -2351,8 +2347,7 @@ class TestResolveGitHubToken:
         ]
         yaml_body = b"description: Auth test\nversion: 1.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             return_value=mock_resp,
         ) as mock_open:
             results = builder._prefetch_metadata(resolved)
@@ -2404,8 +2399,7 @@ class TestResolveGitHubToken:
         ]
         yaml_body = b"description: Public test\nversion: 2.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             return_value=mock_resp,
         ) as mock_open:
             results = builder._prefetch_metadata(resolved)
@@ -2464,8 +2458,7 @@ class TestFetchRemoteMetadataGHEHost:
         )
         yaml_body = b"description: GHES tool\nversion: 1.2.3\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             return_value=mock_resp,
         ) as mock_open:
             result = builder._fetch_remote_metadata(pkg)
@@ -2496,8 +2489,7 @@ class TestFetchRemoteMetadataGHEHost:
             hdrs=None,
             fp=None,  # type: ignore[arg-type]
         )
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             side_effect=[
                 manifest_404,
                 _FakeHTTPResponse(b"---\nname: review\ndescription: Review skill\n---\n# Review\n"),
@@ -2537,8 +2529,7 @@ class TestFetchRemoteMetadataGHEHost:
             hdrs=None,
             fp=None,  # type: ignore[arg-type]
         )
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             side_effect=[manifest_404, _FakeHTTPResponse(b'[{"type":"file","name":"child"}]')],
         ):
             outcome = builder._fetch_remote_metadata_outcome(pkg)
@@ -2592,8 +2583,7 @@ class TestFetchRemoteMetadataGHEHost:
             )
         else:
             responses.append(_FakeHTTPResponse(b"description: Private tool\nversion: 2.1.0\n"))
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             side_effect=responses,
         ) as mock_open:
             outcome = builder._fetch_remote_metadata_outcome(pkg)
@@ -2651,8 +2641,7 @@ class TestFetchRemoteMetadataGHEHost:
             hdrs=None,
             fp=None,  # type: ignore[arg-type]
         )
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        with patch_metadata_urlopen(
             side_effect=raw_403,
         ) as mock_open:
             result = builder._fetch_remote_metadata(pkg)
@@ -2671,9 +2660,7 @@ class TestFetchRemoteMetadataGHEHost:
         builder = self._make_builder(tmp_path)
         builder._host = "gitlab.example.com"
         builder._host_info = SimpleNamespace(kind="generic", api_base=None)
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
-        ) as mock_open:
+        with patch_metadata_urlopen() as mock_open:
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
         mock_open.assert_not_called()
@@ -2688,9 +2675,7 @@ class TestFetchRemoteMetadataGHEHost:
             kind="ghe_cloud",
             api_base="https://mycompany.ghe.com/api/v3",
         )
-        with patch(
-            "apm_cli.marketplace.builder.urllib.request.urlopen",
-        ) as mock_open:
+        with patch_metadata_urlopen() as mock_open:
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
         mock_open.assert_not_called()
@@ -2760,8 +2745,7 @@ class TestFetchRemoteMetadataGHEHost:
                     api_base="https://ghe.corp.example.com/api/v3",
                 ),
             ),
-            patch(
-                "apm_cli.marketplace.builder.urllib.request.urlopen",
+            patch_metadata_urlopen(
                 return_value=mock_resp,
             ) as mock_open,
         ):
@@ -2799,9 +2783,7 @@ class TestFetchRemoteMetadataGHEHost:
                 return_value=SimpleNamespace(kind="gitlab", api_base=None),
             ),
             _patch.object(builder, "_resolve_token_for_host", return_value=None),
-            patch(
-                "apm_cli.marketplace.builder.urllib.request.urlopen",
-            ) as mock_open,
+            patch_metadata_urlopen() as mock_open,
         ):
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
