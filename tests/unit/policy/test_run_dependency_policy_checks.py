@@ -477,7 +477,7 @@ class TestTargetChecks:
         policy = ApmPolicy(
             compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(deps, policy=policy, effective_target="claude")
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target=("claude",))
         assert not result.passed
         assert "compilation-target" in _failed_names(result)
 
@@ -487,7 +487,7 @@ class TestTargetChecks:
         policy = ApmPolicy(
             compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(deps, policy=policy, effective_target="vscode")
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target=("copilot",))
         assert result.passed
         assert "compilation-target" in _check_names(result)
 

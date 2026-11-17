@@ -619,6 +619,7 @@ contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
+contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -736,6 +737,7 @@ registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes
 registry_delegation.diagnostic_ascii_owner
 registry_delegation.experimental_target_hints
+registry_delegation.harness_user_root_resolution
 registry_delegation.host_backend_dispatch
 registry_delegation.install_target_selection
 registry_delegation.lifecycle_docs_aggregate
@@ -745,6 +747,7 @@ registry_delegation.manifest_schema_negotiation
 registry_delegation.native_locator_target_names
 registry_delegation.output_diagnostics
 registry_delegation.policy_ref_redaction
+registry_delegation.policy_target_projection
 registry_delegation.process_interrupt_signals
 registry_delegation.root_cli_output_mode
 registry_delegation.runtime_descriptors

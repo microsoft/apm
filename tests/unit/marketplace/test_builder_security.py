@@ -89,6 +89,12 @@ def test_plugin_root_subtraction_empty_result() -> None:
         _subtract_plugin_root("./plugins", "./plugins")
 
 
+@pytest.mark.parametrize("plugin_root", ["./", "."])
+def test_plugin_root_subtraction_keeps_leading_dot_of_hidden_source(plugin_root: str) -> None:
+    """Only the literal './' prefix is removed, never a leading '.' of a name."""
+    assert _subtract_plugin_root("./.hidden/plug", plugin_root) == "./.hidden/plug"
+
+
 def test_plugin_root_subtraction_absolute_result() -> None:
     """pluginRoot with '..' is rejected at parse (S1), but if bypassed
     the post-subtraction guard would catch absolute paths."""

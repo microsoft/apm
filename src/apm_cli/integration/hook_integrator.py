@@ -1100,7 +1100,7 @@ class HookIntegrator(BaseIntegrator):
                         locator=DeploymentLedgerCodec.locator_for_path(
                             target_path,
                             project_root=project_root,
-                            target=KNOWN_TARGETS["copilot"],
+                            target=target or KNOWN_TARGETS["copilot"],
                             scope=InstallScope.PROJECT,
                         ),
                         owners=frozenset({package_info.get_canonical_dependency_string()}),
@@ -1126,7 +1126,7 @@ class HookIntegrator(BaseIntegrator):
                     locator=DeploymentLedgerCodec.locator_for_path(
                         target_path,
                         project_root=project_root,
-                        target=KNOWN_TARGETS["copilot"],
+                        target=target or KNOWN_TARGETS["copilot"],
                         scope=InstallScope.PROJECT,
                     ),
                     owners=frozenset({package_info.get_canonical_dependency_string()}),

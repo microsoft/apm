@@ -80,7 +80,7 @@ The scope matrix below is the contract. Every row maps a security or operational
 | MCP server denylist | `mcp.deny` | `mcp-denylist` | Yes (direct + transitive) | Yes |
 | MCP transport allowlist | `mcp.transport.allow` | `mcp-transport` | Yes | Yes |
 | Self-defined MCP control | `mcp.self_defined` | `mcp-self-defined` | Yes | Yes |
-| Compilation target allowlist | `compilation.target.allow` (with `enforce: true`) | `compilation-target` | Yes (post-targets phase) | Yes |
+| Compilation target allowlist | `compilation.target.allow` / `.enforce` | `compilation-target` | Yes (post-targets phase, effective selection) | Yes (targets declared in `apm.yml`) |
 | Compilation strategy | `compilation.strategy.enforce` | `compilation-strategy` | `[i] audit-only` | Yes |
 | Source attribution | `compilation.source_attribution` | `source-attribution` | `[i] audit-only` | Yes |
 | Required manifest fields | `manifest.required_fields` | `required-manifest-fields` | `[i] audit-only` | Yes |
@@ -308,7 +308,7 @@ When `apm install` returns exit code 0 and the effective org policy is in `enfor
 - Every package in `dependencies.require` is present and at the required version (with one nuance: `require_resolution: project-wins` downgrades version mismatches to warnings, by design).
 - Every direct MCP server matches `mcp.allow`, is not matched by `mcp.deny`, uses an allowed transport, and respects the `mcp.self_defined` rule.
 - Every transitive MCP server discovered from APM packages was re-checked against the same `mcp.*` rules in a second pass (unless `--trust-transitive-mcp` was passed).
-- Compilation targets that would be written match `compilation.target.allow` (when `enforce: true` on that field).
+- The effective target selection (`--target`, `apm.yml`, `apm config target`, or auto-detection) includes `compilation.target.enforce` when it is set; otherwise every selected target is in `compilation.target.allow`. `enforce` takes precedence, so `allow` is not checked when both are set. Targets compare after aliases resolve (`vscode` is `copilot`).
 - The fetched policy file matched any `policy.hash` pin in `apm.yml`. If the hash did not match, install failed closed regardless of `fetch_failure_default` -- hash-mismatch is unconditionally fail-closed in non-dry-run install paths. (`apm install --dry-run` logs the mismatch but does not exit non-zero -- see section 14 gap.)
 - The lockfile (`apm.lock.yaml`) was regenerated from the resolved, gated set.
 - Any cached policy used was current within the effective `cache.ttl` (default `3600` seconds), or -- if a refresh failed -- was within the 7-day stale ceiling (`MAX_STALE_TTL`) and a warning was logged naming the cache age.

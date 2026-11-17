@@ -59,7 +59,6 @@ def run_mcp_policy_preflight(
     target_decision: EffectiveTargetDecision,
 ) -> None:
     """Run policy checks for a direct MCP install before any persistent write."""
-    from ...core.target_detection import normalize_policy_targets
     from ...models.dependency.mcp import MCPDependency
     from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
 
@@ -82,7 +81,8 @@ def run_mcp_policy_preflight(
             no_policy=no_policy,
             logger=logger,
             dry_run=logger.dry_run,
-            effective_target=normalize_policy_targets(target_decision.value),
+            effective_target=target_decision.canonical_targets,
+            effective_target_source=target_decision.source,
         )
     except PolicyBlockError:
         logger.render_summary()
