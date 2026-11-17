@@ -276,3 +276,16 @@ def test_compaction_keeps_slow_tests_and_folds_the_rest(tmp_path: Path) -> None:
         "tests/b.py": 0.1,
     }
     assert ci_sharding.main(["merge"]) == 2
+
+
+def test_grouped_durations_match_with_or_without_the_xdist_suffix() -> None:
+    """The planner collects without xdist; shards collect with ``@<group>`` IDs."""
+    group = pytest.mark.xdist_group(name="g")
+    durations = {"tests/a.py::slow@g": 100.0, "tests/a.py::fast": 1.0}
+    plain = [_item("tests/a.py::slow", group), _item("tests/a.py::fast")]
+    suffixed = [_item("tests/a.py::slow@g", group), _item("tests/a.py::fast")]
+
+    assert ci_sharding.item_weights(plain, durations)["tests/a.py::slow"] == 100.0
+    assert ci_sharding.item_weights(suffixed, durations)["tests/a.py::slow@g"] == 100.0
+    unsuffixed = {"tests/a.py::slow": 7.0}
+    assert ci_sharding.item_weights(suffixed, unsuffixed)["tests/a.py::slow@g"] == 7.0

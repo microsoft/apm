@@ -132,6 +132,25 @@ def _contiguous_chunks(
     return chunks
 
 
+def _measured_seconds(item: pytest.Item, durations: Mapping[str, float]) -> float | None:
+    """Look up an item's duration under either node ID form.
+
+    Under ``--dist loadgroup`` xdist appends ``@<group>`` to grouped node IDs,
+    so recorded durations carry the suffix while a plain collection (the
+    planner) does not, and vice versa.
+    """
+    nodeid = item.nodeid
+    candidates = [nodeid]
+    group = _group_key(item)
+    if group:
+        suffix = f"@{group}"
+        candidates.append(nodeid[: -len(suffix)] if nodeid.endswith(suffix) else nodeid + suffix)
+    for candidate in candidates:
+        if candidate in durations:
+            return durations[candidate]
+    return None
+
+
 def item_weights(items: Sequence[pytest.Item], durations: Mapping[str, float]) -> dict[str, float]:
     """Weight every item by its measured duration.
 
@@ -139,9 +158,11 @@ def item_weights(items: Sequence[pytest.Item], durations: Mapping[str, float]) -
     shared equally by that module's selected tests that have no own entry.
     Anything still unknown weighs the mean known duration (1.0 with no data).
     """
-    weights: dict[str, float] = {
-        item.nodeid: durations[item.nodeid] for item in items if item.nodeid in durations
-    }
+    weights: dict[str, float] = {}
+    for item in items:
+        measured = _measured_seconds(item, durations)
+        if measured is not None:
+            weights[item.nodeid] = measured
     residual: dict[str, list[pytest.Item]] = defaultdict(list)
     for item in items:
         module = item.nodeid.split("::", 1)[0]

@@ -652,3 +652,11 @@ def test_integration_summary_dropped_lane_env_is_rejected() -> None:
 
     with pytest.raises(AssertionError):
         _assert_integration_summary_requires_every_lane(workflow)
+
+
+def test_network_lane_opts_into_network_integration_tests() -> None:
+    """Without the opt-in, requires_network_integration tests silently skip."""
+    workflow = _workflow()
+    job = workflow_job(workflow, "integration-network")
+    step = workflow_step(job, "Run network-dependent integration tests")
+    assert effective_env(workflow, job, step)["APM_RUN_INTEGRATION_TESTS"] == "1"

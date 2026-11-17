@@ -682,6 +682,9 @@ jobs:
           GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           PYTEST_MARK_EXPR: ${{ env.NETWORK_MARK_EXPR }}
+          # requires_network_integration tests skip without this opt-in
+          # (tests/integration/conftest.py); the merge queue sets it too.
+          APM_RUN_INTEGRATION_TESTS: "1"
           PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
           PYTEST_RETRY_FAILED: "2"
         run: |
