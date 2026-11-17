@@ -313,7 +313,7 @@ class TestMaskedPrivateRepoHint:
 
         assert result.exit_code == 1, result.output
         assert "[x]" in result.stderr
-        assert "foo/.github-private returned 404." in result.stderr
+        assert "[i] foo/.github-private returned 404." in result.stderr.splitlines()
 
 
 class TestDisabledOutcome:
