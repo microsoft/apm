@@ -343,3 +343,19 @@ def test_cross_origin_follow_never_applies_ambient_credentials() -> None:
 
     assert "auth" not in session.calls[0]
     assert session.calls[1]["auth"] is not None
+
+
+def test_request_body_cannot_use_anonymous_cross_origin_follow() -> None:
+    session = _ScriptedSession()
+
+    with pytest.raises(TypeError, match="request body"):
+        origin_bounded_request(
+            session,
+            "PUT",
+            f"{_BASE}/v1/x",
+            base_url=_BASE,
+            data=b"body",
+            follow_cross_origin_without_credentials=True,
+        )
+
+    assert session.calls == []

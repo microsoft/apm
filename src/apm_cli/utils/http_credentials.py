@@ -292,6 +292,8 @@ def origin_bounded_request(
     for reserved in ("allow_redirects", "auth"):
         if reserved in kwargs:
             raise TypeError(f"origin_bounded_request owns {reserved!r}")
+    if data is not None and follow_cross_origin_without_credentials:
+        raise TypeError("a request body cannot follow redirects to another origin")
     method = method.upper()
     request_headers = dict(headers or {})
     origin = origin_label(base_url)
