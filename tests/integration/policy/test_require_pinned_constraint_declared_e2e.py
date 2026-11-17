@@ -101,6 +101,9 @@ def _publish_monorepo(
     second = repositories.commit(repository, message="pkg-a 1.1.0")
     repositories.tag(repository, "pkg-a-v1.1.0", second)
     repositories.tag(repository, "pkg-a--v1.1.0", second)
+    # npm workspaces / Changesets release tags (#3731).
+    repositories.tag(repository, "pkg-a@1.1.0", second)
+    repositories.tag(repository, "@acme/pkg-a@1.1.0", second)
 
     # A fork of pkg-a at its repository root, for the ``replace:`` contract:
     # ``v1.0.0`` is a bounded choice, ``main`` a moving branch.
@@ -129,7 +132,9 @@ def _git(args: tuple[str, ...], *, cwd: Path, env: dict[str, str]) -> None:
     subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, check=True, timeout=30)
 
 
-def _consumer(root: Path, name: str, dependency: str, env: dict[str, str]) -> Path:
+def _consumer(
+    root: Path, name: str, dependency: str, env: dict[str, str], *, enforcement: str = "block"
+) -> Path:
     project = LocalPackageFactory(root).create(
         name, dependencies=(dependency,), targets=("copilot",)
     )
@@ -146,7 +151,7 @@ def _consumer(root: Path, name: str, dependency: str, env: dict[str, str]) -> Pa
         {
             "name": "pinned-declared-contract",
             "version": "1",
-            "enforcement": "block",
+            "enforcement": enforcement,
             "fetch_failure": "block",
             "dependencies": {"require_pinned_constraint": True},
         },
@@ -285,6 +290,9 @@ def test_declared_range_passes_across_install_replay_update_and_audit(scenario, 
     [
         ("literal-dash", "pkg-a-v1.1.0"),
         ("literal-double-dash", "pkg-a--v1.1.0"),
+        # Exact package release tags count as declared releases (#3731).
+        ("at-tag", "pkg-a@1.1.0"),
+        ("scoped-at-tag", "@acme/pkg-a@1.1.0"),
     ],
 )
 def test_package_qualified_literal_tags_install_and_audit(
@@ -375,6 +383,71 @@ def test_unbounded_declarations_stay_blocked(scenario, apm_binary_path, name, re
     verdict = _pinned_verdict(runner, project, env, name)
     assert verdict["passed"] is False, verdict
     assert any(hint in detail for detail in verdict["details"]), verdict
+
+
+@pytest.mark.parametrize("enforcement", ["block", "warn"])
+@pytest.mark.parametrize(
+    ("name", "reference"),
+    [
+        ("dist-tag", "release@next"),
+        ("slash-at-tag", "feature/x@1.2.3"),
+        ("at-range", "pkg-a@^1.2.0"),
+    ],
+)
+def test_non_exact_package_release_tags_stay_violations(
+    scenario, apm_binary_path, name, reference, enforcement
+):
+    # #3731 accepts only exact name@X.Y.Z tags; the object form carries
+    # refs that the shorthand parser would reject before policy runs.
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
+    tag = f"{name}-{enforcement}"
+    project = _consumer(
+        isolated.work_root,
+        f"{tag}-consumer",
+        f"{_SUBDIR_DEP}#^1.0.0",
+        env,
+        enforcement=enforcement,
+    )
+    _set_manifest_dependencies(
+        project, apm=[{"git": _GIT_URL, "path": "packages/pkg-a", "ref": reference}]
+    )
+    _warm_policy(runner, project, env, tag)
+    hint = f"bare branch '{reference}'"
+    verdict = _pinned_verdict(runner, project, env, tag)
+    # warn reports the same violation but does not fail the check.
+    assert verdict["passed"] is (enforcement == "warn"), verdict
+    assert any(hint in detail for detail in verdict["details"]), verdict
+    if enforcement == "warn":
+        # The ref does not exist, so only a dry run can show warn passing
+        # the gate; it does not print the cached-policy diagnostic.
+        warned = _run(
+            runner,
+            ("install", *_COMMON, "--dry-run"),
+            cwd=project,
+            env=env,
+            scenario_id=f"{tag}-install",
+            expected=0,
+        )
+        text = warned.stdout + warned.stderr
+        assert "Policy warning" in text and "blocked by org policy" not in text.lower(), text
+        return
+    blocked = _governed(
+        _run(
+            runner,
+            ("install", *_COMMON),
+            cwd=project,
+            env=env,
+            scenario_id=f"{tag}-install",
+            expected=1,
+        )
+    )
+    text = blocked.stdout + blocked.stderr
+    assert "blocked by org policy" in text.lower(), text
+    assert hint in text, text
+    assert not (project / "apm.lock.yaml").exists()
 
 
 def _set_manifest_dependencies(project: Path, *, apm: list, dev_apm: list | None = None) -> None:
