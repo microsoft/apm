@@ -12,6 +12,8 @@ A dependency is "pinned" when its declared constraint is bounded:
 * Package-qualified literal tags in the layouts the git-semver resolver
   selects from (``pkg-a-v1.2.3``, ``pkg-a--v1.2.3``), when ``pkg-a`` is
   the dependency's own package name.
+* Exact package release tags (``name@1.2.3``, ``@scope/name@1.2.3``) for
+  any name, as npm workspaces and Changesets monorepos publish them.
 * Full 40-char SHA refs.
 
 A dependency is "unbounded" when any of the following hold:

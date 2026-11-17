@@ -823,7 +823,7 @@ New named refs may need a Git lookup to establish equivalence.
 
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
-| Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
+| Tag | `owner/repo#v1.0.0` | Production -- release tag; the lockfile pins the commit |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
 | Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |

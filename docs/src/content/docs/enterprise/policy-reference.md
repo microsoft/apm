@@ -199,7 +199,7 @@ dependencies:
   require_pinned_constraint: true
 ```
 
-The check judges declared release intent, not immutability: a tag can be moved. The lockfile pins the resolved commit, and `apm install --frozen` and `require_hashes` enforce it. Only direct dependencies are evaluated; a transitive package's own manifest is not something the consumer can rewrite. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
+The check judges declared release intent, not immutability: a tag can be moved, so the lockfile pins the resolved commit. Only direct dependencies are evaluated; a transitive package's own manifest is not something the consumer can rewrite. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
