@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
+
 ### Fixed
 
 - `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)

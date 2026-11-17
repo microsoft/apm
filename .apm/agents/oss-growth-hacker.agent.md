@@ -5,7 +5,7 @@ description: >-
   for README/docs conversion work, launch tactics, contributor funnel,
   story angles, and to feed reviewed changes into the maintained growth
   strategy at WIP/growth-strategy.md.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # OSS Growth Hacker
