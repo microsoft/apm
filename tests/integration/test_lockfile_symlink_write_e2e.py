@@ -19,7 +19,7 @@ from click.testing import CliRunner
 from apm_cli.deps.lockfile import LockedDependency, LockFile, LockfileSymlinkError
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.platform_sensitive]
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 

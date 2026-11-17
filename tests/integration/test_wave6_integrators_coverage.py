@@ -19,6 +19,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.hook_file_routing import (
     legacy_hook_file_selection as _filter_hook_files_for_target,
 )
@@ -1029,11 +1030,14 @@ class TestSyncIntegrationHooks:
         hook_file = github_hooks / "my-pkg-hooks.json"
         hook_file.write_text("{}")
 
+        # Stale cleanup deletes only on a matching recorded hash (#3663).
+        managed = {".github/hooks/my-pkg-hooks.json"}
         integrator = HookIntegrator()
         stats = integrator.sync_integration(
             apm_package=None,
             project_root=tmp_path,
-            managed_files={".github/hooks/my-pkg-hooks.json"},
+            managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, tmp_path),
         )
         assert stats["files_removed"] == 1
         assert not hook_file.exists()
