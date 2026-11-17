@@ -13,7 +13,6 @@ rather than duplicate it.  The gate phase adds pipeline-specific wiring
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
@@ -117,7 +116,9 @@ def run_policy_preflight(
         ``PolicyBlockError`` is a deprecated alias for the same class.
     """
     # -- Escape hatches ------------------------------------------------
-    if no_policy or os.environ.get("APM_POLICY_DISABLE") == "1":
+    from .discovery import policy_disabled_by_env
+
+    if no_policy or policy_disabled_by_env():
         reason = "--no-policy" if no_policy else "APM_POLICY_DISABLE=1"
         logger.policy_disabled(reason)
         return None, False

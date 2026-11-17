@@ -213,6 +213,8 @@ When marketplace notation (`name@marketplace`) falls through to the registry (St
 
 If `apm.lock.yaml` is not present, marketplace notation has no offline anchor: Stage 1 finds nothing, and the supply-chain guard cannot cross-check the registry result. APM still attempts registry resolution and proceeds if the canonical matches an entry in `apm.yml`, but this path has weaker integrity guarantees. A local `_local/<name>` key also has no persisted mapping without the lockfile, so use its exact declared path or run `apm install` to regenerate the lockfile first.
 
+Without a lockfile, nothing proves which skill directories APM deployed, so uninstall (project and `-g`) removes no skill directories and prints a notice. Run `apm install` first to restore lockfile ownership if you want deployed skills cleaned up.
+
 `--dry-run` keeps the uninstall engine read-only, but `pre-uninstall` lifecycle scripts still run and may have their own side effects. Registry fallback and shared-slot staging are skipped, so marketplace refs not already in the lockfile cannot be previewed and a real shared-slot uninstall can still fail validation; use `owner/repo` notation or re-run without `--dry-run`.
 
 ## Related

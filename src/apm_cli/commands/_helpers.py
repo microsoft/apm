@@ -766,3 +766,15 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
         if manifest.is_file():
             return manifest
     return None
+
+
+# Shared by ``apm install`` and ``apm update`` so both commands expose the same
+# per-invocation consent for transitive self-defined MCP servers.
+trust_transitive_mcp_option = click.option(
+    "--trust-transitive-mcp",
+    is_flag=True,
+    help=(
+        "Trust MCP servers from transitive packages that are self-defined or set "
+        "their own registry or configuration (skip re-declaration requirement)"
+    ),
+)

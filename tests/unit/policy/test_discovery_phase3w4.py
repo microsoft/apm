@@ -14,7 +14,7 @@ Targets uncovered branches in:
 - _fetch_from_repo (stale fallback on error, garbage result)
 - _fetch_github_contents (403, redirect, non-200, timeout, connection error)
 - _is_github_host (*.ghe.com, GITHUB_HOST env)
-- _get_token_for_host (token manager exception, fallback)
+- _get_token_for_host (resolver-only, no environment fallback)
 - _detect_garbage (YAML error with cache_entry)
 - _read_cache_entry (expected_hash checks)
 - _write_cache (tmp_meta OSError + unlink)
@@ -589,38 +589,22 @@ class TestIsGithubHost:
 
 
 class TestGetTokenForHost:
-    def test_returns_github_token_env_for_github_host(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token == "mytoken"
+    def test_returns_resolver_token(self) -> None:
+        resolved = MagicMock(token="resolved-token")
+        with patch("apm_cli.core.auth.AuthResolver.resolve", return_value=resolved):
+            assert _get_token_for_host("github.com") == "resolved-token"
 
-    def test_returns_none_for_non_github_host_on_failure(self) -> None:
+    @pytest.mark.parametrize("host", ["github.com", "acme.ghe.com", "dev.azure.com"])
+    def test_resolver_failure_returns_none_without_env_fallback(self, host: str) -> None:
+        env = {"GITHUB_TOKEN": "env-token", "GITHUB_APM_PAT": "env-pat", "GH_TOKEN": "gh-token"}
         with (
             patch(
                 "apm_cli.core.auth.AuthResolver.resolve",
                 side_effect=Exception("unavailable"),
             ),
-            patch.dict(os.environ, {}, clear=True),
+            patch.dict(os.environ, env, clear=True),
         ):
-            token = _get_token_for_host("dev.azure.com")
-        assert token is None
-
-    def test_prefers_github_apm_pat(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token == "apmtoken"
+            assert _get_token_for_host(host) is None
 
 
 # ---------------------------------------------------------------------------

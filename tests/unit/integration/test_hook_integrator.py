@@ -1520,11 +1520,12 @@ class TestCursorIntegration:
 
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
-        # hook_source_selection=None means the up-front
-        # preflight_hooks_for_targets() gate is a no-op for this plan, so
-        # the unconditional check inside _integrate_merged_hooks is the
-        # ONLY preflight that runs for this single invocation.
-        source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
+        # Only _integrate_merged_hooks runs here, so its unconditional check
+        # is the ONLY preflight for this single invocation.
+        selection = integrator.select_hook_sources_for_target(pkg_info, "cursor")
+        source_plan = DeployableSourcePlan(
+            source_root=temp_project, paths=frozenset(), hook_source_selection=selection
+        )
         expected_retiring = frozenset({"claude"})
 
         with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:

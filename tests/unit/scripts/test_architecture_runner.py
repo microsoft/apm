@@ -656,6 +656,7 @@ install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-policy-disable-switch-owner
 install-deployment-policy-remote-origin-owner
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
@@ -749,6 +750,7 @@ transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
 transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
+transport-platform-credential-origin-scope
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
@@ -761,6 +763,7 @@ transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
+transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution

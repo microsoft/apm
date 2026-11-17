@@ -273,10 +273,12 @@ def prepare_lsp_integration(
 ) -> PreparedLspIntegration:
     """Collect trusted declarations once before native-service reconciliation."""
     from apm_cli.integration.lsp_integrator import LSPIntegrator
-    from apm_cli.security.executables import filter_lsp_by_allow_executables
+    from apm_cli.security.executables import (
+        filter_lsp_by_allow_executables,
+        resolve_project_exec_allow_map,
+    )
 
     apm_config, explicit_target, scope = target_context
-    effective_allow_executables, effective_allow_resolved = executable_context
     lsp_deps = apm_package.get_lsp_dependencies()
     if not isinstance(lsp_deps, list):
         logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
@@ -289,28 +291,13 @@ def prepare_lsp_integration(
         )
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
-            if not effective_allow_resolved:
-                from apm_cli.security.executables import effective_exec_map_for_project
-
-                policy = None
-                if not no_policy:
-                    from apm_cli.policy.discovery import discover_policy_with_chain
-
-                    policy = getattr(
-                        discover_policy_with_chain(project_root),
-                        "policy",
-                        None,
-                    )
-                effective_allow_executables = effective_exec_map_for_project(
-                    project_root,
-                    policy=policy,
-                    fallback_allow_executables=getattr(
-                        apm_package,
-                        "allow_executables",
-                        None,
-                    ),
-                    logger=logger,
-                )
+            effective_allow_executables = resolve_project_exec_allow_map(
+                project_root,
+                apm_package,
+                executable_context=executable_context,
+                no_policy=no_policy,
+                logger=logger,
+            )
             transitive_lsp = filter_lsp_by_allow_executables(
                 transitive_lsp,
                 effective_allow_executables,

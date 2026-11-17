@@ -828,6 +828,96 @@ class TestLocalBundlePathRouting:
             == "hooks/pkg.json"
         )
 
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            ".claude/settings.json",
+            ".claude/settings.local.json",
+            ".cursor/mcp.json",
+            ".github/workflows/ci.yml",
+            "settings.json",
+        ],
+    )
+    def test_only_primitive_paths_are_routed(self, rel: str) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        known = known_bundle_deploy_prefixes()
+        for name in ("claude", "copilot", "cursor"):
+            target = KNOWN_TARGETS[name]
+            allowed = target_bundle_deploy_prefixes(target)
+            assert bundle_deploy_relative_path(rel, allowed, known, target=target) is None
+            warning = bundle_deploy_skip_warning(rel, allowed, known, target=target)
+            if warning is not None:
+                assert "not a primitive file" in warning
+
+    def test_target_rooted_hook_files_follow_hook_approval(self) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        rel = ".github/hooks/pkg.json"
+        assert (
+            bundle_deploy_relative_path(
+                rel, prefixes, prefixes, target=target, hooks_approved=False
+            )
+            is None
+        )
+        warning = bundle_deploy_skip_warning(
+            rel, prefixes, prefixes, target=target, hooks_approved=False
+        )
+        assert warning is not None and "not approved" in warning
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "extensions/x/extension.mjs",
+            ".github/extensions/x/extension.mjs",
+            "com.microsoft.apm/extensions/x/extension.mjs",
+        ],
+    )
+    def test_canvas_files_follow_canvas_approval(self, rel: str) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        assert (
+            bundle_deploy_relative_path(
+                rel, prefixes, prefixes, target=target, canvas_approved=False
+            )
+            is None
+        )
+        warning = bundle_deploy_skip_warning(
+            rel, prefixes, prefixes, target=target, canvas_approved=False
+        )
+        assert warning is not None and "not approved" in warning
+
+    def test_primitive_directories_keep_routing(self) -> None:
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        assert (
+            bundle_deploy_relative_path(
+                ".github/prompts/review.prompt.md", prefixes, prefixes, target=target
+            )
+            == "prompts/review.prompt.md"
+        )
+
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
         from apm_cli.utils.path_security import PathTraversalError

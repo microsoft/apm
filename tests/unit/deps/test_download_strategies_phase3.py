@@ -534,20 +534,19 @@ class TestBuildRepoUrl:
 class TestGetArtifactoryHeaders:
     def test_no_registry_config_no_token_empty_headers(self) -> None:
         d = DownloadDelegate(_make_host())
-        assert d.get_artifactory_headers() == {}
+        assert d.get_artifactory_headers(scheme="https", host="art.example.com") == {}
 
     def test_no_registry_config_with_artifactory_token(self) -> None:
         d = DownloadDelegate(_make_host(artifactory_token="art-tok"))
-        headers = d.get_artifactory_headers()
-        assert headers["Authorization"] == "Bearer art-tok"
+        assert d.get_artifactory_headers(scheme="https", host="art.example.com") == {}
 
-    def test_uses_registry_config_get_headers(self) -> None:
+    def test_uses_registry_config_headers_for_origin(self) -> None:
         cfg = MagicMock()
-        cfg.get_headers.return_value = {"Authorization": "Bearer reg-tok"}
+        cfg.headers_for.return_value = {"Authorization": "Bearer reg-tok"}
         d = DownloadDelegate(_make_host(registry_config=cfg))
-        headers = d.get_artifactory_headers()
+        headers = d.get_artifactory_headers(scheme="https", host="art.example.com")
         assert headers["Authorization"] == "Bearer reg-tok"
-        cfg.get_headers.assert_called_once()
+        cfg.headers_for.assert_called_once_with("https", "art.example.com")
 
 
 # ---------------------------------------------------------------------------

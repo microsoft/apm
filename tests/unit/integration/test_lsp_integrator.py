@@ -844,26 +844,3 @@ class TestCollectTransitive:
 
         assert result[0].resolved_by == "ghe.example/owner/repo"
         assert result[0].approval_keys == ()
-
-
-def test_skill_cleanup_preserves_reserved_claude_lsp_plugin(tmp_path: Path) -> None:
-    """Legacy skill cleanup must consume the LSP owner's reservation."""
-    from apm_cli.integration.skill_support import clean_orphaned_skills
-
-    skills_dir = tmp_path / ".claude" / "skills"
-    plugin = skills_dir / "apm-lsp" / ".claude-plugin" / "plugin.json"
-    plugin.parent.mkdir(parents=True)
-    plugin.write_text('{"name": "apm-lsp", "lspServers": {}}', encoding="utf-8")
-    orphan = skills_dir / "old-apm-skill"
-    orphan.mkdir()
-
-    result = clean_orphaned_skills(
-        skills_dir,
-        set(),
-        project_root=tmp_path,
-        get_lockfile_owned_agent_skills=lambda _root: set(),
-    )
-
-    assert plugin.is_file()
-    assert not orphan.exists()
-    assert result == {"files_removed": 1, "errors": 0}

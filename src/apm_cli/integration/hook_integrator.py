@@ -63,6 +63,7 @@ from apm_cli.integration.hook_ownership import (
     dependency_hook_sources,
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
+    read_merged_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -545,9 +546,12 @@ class HookIntegrator(BaseIntegrator):
         *,
         source_plan=None,
     ) -> HookSourceSelection:
-        """Read the plan's selection or build it; refuse retired-routing widening."""
-        selection = getattr(source_plan, "hook_source_selection", None)
-        if selection is None:
+        """Read the plan's selection (empty when unauthorized) or build one; refuse widening."""
+        if source_plan is not None:
+            selection = getattr(source_plan, "hook_source_selection", None)
+            if selection is None:
+                selection = HookSourceSelection({}, {})
+        else:
             selection = self.select_deployable_hook_sources(
                 package_info.install_path, (target_name,)
             )
@@ -1259,13 +1263,7 @@ class HookIntegrator(BaseIntegrator):
 
         # Read existing JSON config
         json_path = target_dir / config.config_filename
-        json_config: dict = {}
-        if json_path.exists():
-            try:
-                with open(json_path, encoding="utf-8") as f:
-                    json_config = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                json_config = {}
+        json_config = read_merged_hook_config(json_path, project_root, user_scope=user_scope)
 
         # Load external ownership metadata before reconciling native entries.
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
@@ -1951,6 +1949,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
         )
+        from apm_cli.security.executables import resolve_project_exec_allow_map
 
         from .targets import resolve_targets
 
@@ -1972,6 +1971,9 @@ class HookIntegrator(BaseIntegrator):
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
         )
+        allow_map = None
+        if survivor_plan:
+            allow_map = resolve_project_exec_allow_map(project_root, apm_package)
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(
@@ -1985,7 +1987,7 @@ class HookIntegrator(BaseIntegrator):
                 dep_ref,
                 pkg_info,
                 list(target_selection.targets),
-                getattr(apm_package, "allow_executables", None),
+                allow_map,
             )
             if source_plan.hook_source_selection is not None:
                 source_plan.hook_source_selection.require_deployable(pkg_info, _HOOK_EVENT_MAP)

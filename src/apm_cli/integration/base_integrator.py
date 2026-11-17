@@ -233,7 +233,17 @@ class BaseIntegrator:
 
         .. note:: Callers must pre-normalize *managed_files* with
            forward-slash separators (see ``normalize_managed_files``).
+
+        Raises:
+            PathTraversalError: *target_path* itself is a symlink (dangling
+                or not). Integrators never write through a linked
+                destination, regardless of ``force`` or ownership.
         """
+        if target_path.is_symlink():
+            raise PathTraversalError(
+                f"Refusing deployment through a symlinked destination: {rel_path}. "
+                "Replace the symlink with a regular file or remove it, then retry."
+            )
         if managed_files is None:
             managed_files = set()
         if not target_path.exists():
