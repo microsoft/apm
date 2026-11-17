@@ -336,10 +336,6 @@ def _fetch_url_direct(
         raise MarketplaceFetchError(url, str(exc)) from exc
 
     try:
-        final_url = getattr(resp, "url", url)
-        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
         if resp.status_code == 304:
             return None
         if resp.status_code == 404:
