@@ -389,7 +389,7 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
     declaration = read_manifest_target_declaration(source_root / APM_YML_FILENAME)
     if declaration is None or declaration.spelling is None:
         return list(KNOWN_TARGETS.values()), None
-    declared = declaration.restriction(allow_empty_singular=False)
+    declared = declaration.restriction(strict=True)
     if not declared:
         return list(KNOWN_TARGETS.values()), None
     canonical = dict.fromkeys(normalize_target_name(name) for name in declared)

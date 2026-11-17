@@ -3078,6 +3078,15 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             "src/apm_cli/install/target_filter.py",
             '    package = getattr(package_source, "package", package_source)\n',
             '    package = getattr(package_source, "package", package_source)\n'
+            "    if package.targets:\n"
+            "        # architecture-authority-exempt: bootstrap-writer\n"
+            "        pass\n",
+            id="body-marker-does-not-cover-header",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
             '    raw_targets = package_source["targets"]\n',
             id="raw-subscript",
         ),

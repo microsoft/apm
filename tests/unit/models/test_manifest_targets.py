@@ -11,6 +11,7 @@ from apm_cli.core import apm_yml
 from apm_cli.core.errors import (
     ConflictingTargetsError,
     EmptyTargetsListError,
+    TargetResolutionError,
     UnknownTargetError,
 )
 from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -171,7 +172,16 @@ def test_strict_restriction_rejects_an_empty_singular_target():
     declaration = _declaration(target=None)
     assert declaration.restriction() is None
     with pytest.raises(EmptyTargetsListError):
-        declaration.restriction(allow_empty_singular=False)
+        declaration.restriction(strict=True)
+
+
+def test_strict_restriction_rejects_singular_all_combined_with_targets():
+    """compile -g agrees with install: ``all`` cannot be combined with other targets."""
+    declaration = _declaration(target="all,claude")
+    assert declaration.restriction() is None
+    with pytest.raises(TargetResolutionError, match="all"):
+        declaration.restriction(strict=True)
+    assert _declaration(target="all").restriction(strict=True) is None
 
 
 def test_stand_in_packages_route_through_the_owner():

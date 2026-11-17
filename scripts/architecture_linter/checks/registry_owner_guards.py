@@ -361,8 +361,13 @@ def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -
     first = anchor.lineno
     last = getattr(anchor, "end_lineno", None) or first
     body = getattr(anchor, "body", None)
+    if isinstance(anchor, ast.Match) and anchor.cases:
+        body = [anchor.cases[0].pattern]
     if isinstance(anchor, ast.stmt) and isinstance(body, list) and body:
         last = max(first, body[0].lineno - 1)
+        # Comments between a header and its body belong to the body.
+        while last > first and lines[last - 1].lstrip()[:1] in {"", "#"}:
+            last -= 1
     candidates = list(range(first, last + 1))
     if 1 < first <= len(lines) + 1 and lines[first - 2].lstrip().startswith("#"):
         candidates.append(first - 1)

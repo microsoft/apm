@@ -105,14 +105,15 @@ class ManifestTargetDeclaration:
         """A valid, nonempty declaration that does not rely on legacy ``all``."""
         return bool(self.selection) and not self.legacy_all
 
-    def restriction(self, *, allow_empty_singular: bool = True) -> list[str] | None:
+    def restriction(self, *, strict: bool = False) -> list[str] | None:
         """Declared names that restrict deployment, with legacy ``all`` folded.
 
         Validates with the plural vocabulary, so MCP-only and experimental
         tokens raise. Singular ``all`` folds without the plural deprecation
         warning because install expands it rather than treating it as omitted.
-        Authoritative readers pass ``allow_empty_singular=False`` so an empty
-        singular ``target:`` raises instead of meaning "nothing declared".
+        Authoritative readers pass ``strict=True``: an empty singular
+        ``target:`` and a singular ``all`` combined with other targets raise,
+        as they do for install, instead of meaning "nothing declared".
         """
         data = dict(self.fields)
         if self.spelling == "target" and "targets" not in data and self.legacy_all:
@@ -123,9 +124,19 @@ class ManifestTargetDeclaration:
             ]
             if remaining:
                 parse_targets_field({"target": remaining})
+                if strict:
+                    self._raise_invalid_selection()
             return None
-        names = parse_targets_field(data, allow_empty_singular=allow_empty_singular)
+        names = parse_targets_field(data, allow_empty_singular=not strict)
         return names or None
+
+    def _raise_invalid_selection(self) -> None:
+        from ..core.errors import TargetResolutionError
+
+        try:
+            _ = self.selection
+        except ValueError as exc:
+            raise TargetResolutionError(str(exc)) from exc
 
     def authored_names(self) -> list[str]:
         """Unvalidated names as written, ``targets:`` first (for prompts only)."""
