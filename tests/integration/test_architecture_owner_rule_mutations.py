@@ -911,6 +911,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="TargetProfile flips the user-root scoped-instruction eligibility default.",
     ),
     MutationCase(
+        guard_id="install-deployment-agent-render-then-adopt",
+        rule_id="install-deployment-agent-render-then-adopt",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="expected_content=rendered,",
+        new="expected_content=None,",
+        intent="Agent adoption compares the raw source instead of the rendered text (#3722).",
+    ),
+    MutationCase(
         guard_id="install-deployment-audit-replay",
         rule_id="install-deployment-audit-replay",
         path="src/apm_cli/install/audit_replay.py",
