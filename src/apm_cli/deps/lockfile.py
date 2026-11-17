@@ -1020,6 +1020,11 @@ class LockedDependency:
             return dep
         selected = project_effective_reference(self.replacement.original, self.replacement.rule)
         selected.replacement = self.replacement
+        # The locked selection is the merge over every edge (req-rs-018); the
+        # replacement rule's original edge alone must not narrow or widen it.
+        selected.skill_subset = dep.skill_subset
+        selected.target_subset = dep.target_subset
+        selected.subset_pairings = dep.subset_pairings
         if not selected.is_local:
             selected.reference = self.resolved_ref or selected.reference
         return selected

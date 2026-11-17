@@ -413,6 +413,8 @@ class LockfileBuilder:
                     # (req-rs-018), as effective_dependency_selection deploys it.
                     pairing = pairing.with_edge(self.ctx.skill_subset, locked_dep.target_subset)
                     locked_dep.subset_pairings = pairing.to_lock_records()
+                else:
+                    locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():
