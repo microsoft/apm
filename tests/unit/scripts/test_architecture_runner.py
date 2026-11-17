@@ -632,6 +632,7 @@ install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-drift-claim-classification
+install-deployment-effective-selection
 install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority

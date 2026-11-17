@@ -66,6 +66,7 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         "managed_files": set(),
         "diagnostics": DiagnosticCollector(),
         "package_name": "owner/example",
+        "skill_subset": None,
         "scope": InstallScope.USER,
         "ctx": ctx,
     }
