@@ -375,6 +375,10 @@ def compute_forward_reachable_keys(
             # trusting a partial walk.
             unverifiable.append((visit_key, str(exc)))
             continue
+        if not ref.is_local and not package.source:
+            # Install marks a fetched package with its origin, which is what
+            # makes its same-repository ``path:`` children expand as remote.
+            package = replace(package, source=ref.repo_url)
 
         child_chain = (*chain, ref.get_display_name())
         for declared in package.get_apm_dependencies():

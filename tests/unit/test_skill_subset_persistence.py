@@ -738,6 +738,37 @@ class TestSkillSubsetConsistencyCheck:
         )
         assert result.passed is True, result.details
 
+    def test_remote_parent_same_repo_path_child_is_declared(self, tmp_path: Path):
+        """A fetched package's ``path:`` child expands as install expands it (#3735)."""
+        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
+
+        parent = tmp_path / "apm_modules" / "owner" / "repo"
+        child = parent / "packages" / "dep"
+        (child / "skills" / "alpha").mkdir(parents=True)
+        (child / "skills" / "alpha" / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
+        (parent / "apm.yml").write_text(
+            "name: repo\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - path: ./packages/dep\n      skills: [alpha]\n",
+            encoding="utf-8",
+        )
+        manifest = self._make_manifest_mock([self._make_dep_ref("owner/repo")])
+        nested = LockedDependency(
+            repo_url="owner/repo",
+            virtual_path="packages/dep",
+            is_virtual=True,
+            package_type="skill_bundle",
+            skill_subset=["alpha"],
+        )
+        lock = LockFile(
+            dependencies={
+                "owner/repo": LockedDependency(repo_url="owner/repo"),
+                nested.get_unique_key(): nested,
+            }
+        )
+
+        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
+        assert result.passed is True, result.details
+
     def test_marketplace_declaration_audits_under_its_locked_key(self, tmp_path: Path):
         """A marketplace declaration's selection is checked against its locked entry."""
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
