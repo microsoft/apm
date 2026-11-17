@@ -93,6 +93,14 @@ def test_ado_git_stderr_classification(error: str, expected: bool) -> None:
         ({"error": "The requested URL returned error: 403"}, False),
         ({"error": "remote: TF400813: unauthorized"}, False),
         (
+            {"error": "fatal: repository 'https://dev.azure.com/o/team-401/_git/r/' not found"},
+            False,
+        ),
+        (
+            {"error": "fatal: unable to access 'https://x/team-401/': returned error: 404"},
+            False,
+        ),
+        (
             {
                 "response": _response(
                     302, {"Location": "https://app.vssps.visualstudio.com/_signin"}

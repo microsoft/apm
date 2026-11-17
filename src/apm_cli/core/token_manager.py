@@ -259,6 +259,8 @@ class GitHubTokenManager:
     # The 60s default prevents false negatives on slow helpers.
     DEFAULT_CREDENTIAL_TIMEOUT = 60
     MAX_CREDENTIAL_TIMEOUT = 180
+    # approve/reject is advisory; never wait on a slow helper as long as fill.
+    CREDENTIAL_REPORT_TIMEOUT = 10
 
     @classmethod
     def _get_credential_timeout(cls) -> int:
@@ -383,9 +385,9 @@ class GitHubTokenManager:
         CREDENTIAL"): ``approve`` after the credential allowed the operation,
         ``reject`` after it was rejected, each fed the description fill
         returned. Only the auth chain decides when to call this. Runs with the
-        same non-interactive environment and timeout as fill, writes the
-        description on stdin only, and never raises: a helper failure is
-        logged at debug level and the operation result stands.
+        same non-interactive environment as fill and at most a 10s timeout,
+        writes the description on stdin only, and never raises: a helper
+        failure is logged at debug level and the operation result stands.
         """
         description = credential.description
         attributes = dict(description)
@@ -405,7 +407,10 @@ class GitHubTokenManager:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                timeout=GitHubTokenManager._get_credential_timeout(),
+                timeout=min(
+                    GitHubTokenManager._get_credential_timeout(),
+                    GitHubTokenManager.CREDENTIAL_REPORT_TIMEOUT,
+                ),
                 env=credential_fill_env(os.environ if env is None else env),
             )
         except (subprocess.TimeoutExpired, OSError) as exc:

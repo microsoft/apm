@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -88,13 +89,21 @@ def _actions(helper: LoggingCredentialHelper, action: str) -> list[dict[str, obj
     return [event for event in helper.events() if event["action"] == action]
 
 
-def _run(operation, *, bearer: MagicMock | None = None, resolver: AuthResolver | None = None):
+def _run(
+    operation,
+    *,
+    bearer: MagicMock | None = None,
+    resolver: AuthResolver | None = None,
+    host: str = HOST,
+    port: int | None = None,
+    path: str = REPO_PATH,
+):
     resolver = resolver or AuthResolver()
     with patch(
         "apm_cli.core.azure_cli.get_bearer_provider",
         return_value=bearer or _unavailable_bearer(),
     ):
-        return resolver.try_with_fallback(HOST, operation, org="contoso", path=REPO_PATH)
+        return resolver.try_with_fallback(host, operation, org="contoso", port=port, path=path)
 
 
 def _accept_secret(token, _env):
@@ -140,6 +149,87 @@ def test_accepted_helper_credential_is_approved_once_with_fill_description(helpe
     assert fields["password"] == SECRET
     assert stores[0]["env"]["GCM_INTERACTIVE"] == "0"
     assert stores[0]["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_concurrent_workers_report_once_per_key(helper):
+    resolver = AuthResolver()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: _run(_accept_secret, resolver=resolver), range(8)))
+    assert results == ["ok"] * 8
+    assert len(_actions(helper, "store")) == 1
+
+
+def test_returned_success_response_is_approved(helper):
+    def _operation(token, _env):
+        if token != SECRET:
+            raise AuthAttemptFailed(response=_response(401 if token else 203))
+        return _response(200, {"Content-Type": "application/octet-stream"})
+
+    assert _run(_operation).status_code == 200
+    assert len(_actions(helper, "store")) == 1
+
+
+@pytest.mark.parametrize(
+    "returned",
+    [
+        pytest.param(_response(404), id="404"),
+        pytest.param(_response(500), id="500"),
+        pytest.param(_response(302, {"Location": "https://elsewhere.example/r"}), id="302"),
+    ],
+)
+def test_returned_non_success_response_is_not_approved(helper, returned):
+    def _operation(token, _env):
+        if token != SECRET:
+            raise AuthAttemptFailed(response=_response(401 if token else 203))
+        return returned
+
+    assert _run(_operation) is returned
+    assert _actions(helper, "store") == []
+    assert _actions(helper, "erase") == []
+
+
+def test_secret_accepted_on_this_host_is_not_rejected_for_another_path(helper):
+    resolver = AuthResolver()
+    assert _run(_accept_secret, resolver=resolver) == "ok"
+    with pytest.raises(AdoAuthChainExhaustedError):
+        _run(_helper_answers(_response(401)), resolver=resolver, path="other/project/repo")
+    assert _actions(helper, "erase") == [], helper.events()
+
+
+def test_host_scoped_helper_without_use_http_path(tmp_path, helper):
+    git_config = Path(os.environ["GIT_CONFIG_GLOBAL"])
+    git_config.write_text("", encoding="utf-8")
+    plain = install_logging_credential_helper(
+        git_config,
+        tmp_path / "plain-helper",
+        username=USER,
+        password=SECRET,
+        hosts=(HOST,),
+        use_http_path=False,
+    )
+    assert _run(_accept_secret) == "ok"
+    stores = _actions(plain, "store")
+    assert len(stores) == 1, plain.events()
+    assert "path" not in stores[0]["fields"]
+    assert stores[0]["fields"]["host"] == HOST
+
+
+def test_ado_server_host_with_port_reports_port_in_host_field(tmp_path, helper, monkeypatch):
+    server = "ado.example.com"
+    monkeypatch.setenv("ADO_HOST", server)
+    git_config = Path(os.environ["GIT_CONFIG_GLOBAL"])
+    git_config.write_text("", encoding="utf-8")
+    logged = install_logging_credential_helper(
+        git_config,
+        tmp_path / "server-helper",
+        username=USER,
+        password=SECRET,
+        hosts=(f"{server}:8443",),
+    )
+    assert _run(_accept_secret, host=server, port=8443) == "ok"
+    stores = _actions(logged, "store")
+    assert len(stores) == 1, logged.events()
+    assert stores[0]["fields"]["host"] == f"{server}:8443"
 
 
 def test_approve_is_once_per_process_across_resolvers(helper):

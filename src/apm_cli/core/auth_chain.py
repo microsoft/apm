@@ -21,6 +21,7 @@ Invariants:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 from collections.abc import Callable
@@ -259,11 +260,25 @@ class HelperCredentialCache:
 
 
 class HelperReportLedger:
-    """Process-wide record of helper reports; one per (key, action)."""
+    """Process-wide record of helper reports; one per (key, action).
+
+    Also remembers (in memory, as digests) which secrets were accepted per
+    (host, port), so a 401 on another path never erases a secret this process
+    has already seen work on that host.
+    """
 
     def __init__(self) -> None:
         self._claimed: set[tuple[HelperKey, str]] = set()
+        self._accepted: set[tuple[str, int | None, str]] = set()
         self._lock = threading.Lock()
+
+    def note_accepted(self, key: HelperKey, digest: str) -> None:
+        with self._lock:
+            self._accepted.add((key[0], key[1], digest))
+
+    def was_accepted(self, key: HelperKey, digest: str) -> bool:
+        with self._lock:
+            return (key[0], key[1], digest) in self._accepted
 
     def claim(self, key: HelperKey, action: str) -> bool:
         """Return True the first time *action* is claimed for *key*."""
@@ -276,6 +291,7 @@ class HelperReportLedger:
     def clear(self) -> None:
         with self._lock:
             self._claimed.clear()
+            self._accepted.clear()
 
 
 _HELPER_REPORTS = HelperReportLedger()
@@ -290,16 +306,18 @@ def report_helper_outcome(
 ) -> None:
     """Report one helper credential's outcome back to Git's credential helpers.
 
-    ``outcome`` is ``None`` when the operation succeeded with *credential*:
-    Git is told to ``approve`` it. A verified rejection (HTTP 401 for this
-    credential) tells Git to ``reject`` it and drops it from the cache. Every
-    other outcome (403, sign-in redirect or page, not found, throttle,
-    network, TLS) is ambiguous and is not reported. Failures never reach the
-    operation.
+    ``outcome`` is ``None`` (or ``ok``) when the operation succeeded with
+    *credential*: Git is told to ``approve`` it. A verified rejection (HTTP
+    401 for this credential) tells Git to ``reject`` it and drops it from the
+    cache, unless this process already saw the same secret accepted on this
+    host (then the 401 means "no access to this path", not a dead
+    credential). Every other outcome (403, sign-in redirect or page, not
+    found, throttle, network, TLS, a returned non-2xx response) is ambiguous
+    and is not reported. Failures never reach the operation.
     """
     from apm_cli.core.token_manager import GitHelperCredential
 
-    if outcome is None:
+    if outcome is None or outcome.kind is AuthOutcomeKind.OK:
         action = "approve"
     elif outcome.is_verified_rejection:
         action = "reject"
@@ -309,6 +327,11 @@ def report_helper_outcome(
         return
     key = helper_cache_key(host_info, path)
     if credential.host.lower() != key[0] or credential.port != key[1]:
+        return
+    digest = hashlib.sha256(credential.password.encode("utf-8")).hexdigest()
+    if action == "approve":
+        _HELPER_REPORTS.note_accepted(key, digest)
+    elif _HELPER_REPORTS.was_accepted(key, digest):
         return
     if not _HELPER_REPORTS.claim(key, action):
         return
@@ -409,6 +432,7 @@ def run_ado_chain(
                 )
                 if returned.is_auth_failure:
                     raise AuthAttemptFailed(returned.detail, response=value)
+                return True, value, returned
             return True, value, None
         except Exception as exc:
             # operation is caller-provided; the classifier decides what happens next.

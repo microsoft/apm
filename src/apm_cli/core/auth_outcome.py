@@ -225,8 +225,15 @@ _REJECTED_PHRASES = (
     "terminal prompts disabled",
     "invalid username or password",
 )
-_REJECTED_STATUS_RE = re.compile(r"\b401\b")
-_FORBIDDEN_STATUS_RE = re.compile(r"\b403\b")
+# Status-anchored only: a bare "401" may be part of a repository URL.
+_REJECTED_STATUS_RE = re.compile(
+    r"(?:\bhttp(?: error)?|returned error:|status(?: code)?[=: ]+)\s*401\b",
+    re.IGNORECASE,
+)
+_FORBIDDEN_STATUS_RE = re.compile(
+    r"(?:\bhttp(?: error)?|returned error:|status(?: code)?[=: ]+)\s*403\b",
+    re.IGNORECASE,
+)
 _PUBLIC_GITHUB_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403|404)\b",
 )
@@ -402,16 +409,22 @@ def _classify_text(
         if _PUBLIC_GITHUB_STATUS_RE.search(lowered):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         return AuthOutcome(AuthOutcomeKind.OTHER, detail)
+    # Any not-found or 403 signal makes a rejection ambiguous: never verified.
+    ambiguous = (
+        bool({403, 404} & set(statuses))
+        or _FORBIDDEN_STATUS_RE.search(text) is not None
+        or _NOT_FOUND_RE.search(text) is not None
+    )
     if any(status in {401, 403} for status in statuses):
         return AuthOutcome(
             _failure(credential_presented),
             detail,
-            rejection_verified=credential_presented and 401 in statuses and 403 not in statuses,
+            rejection_verified=credential_presented and 401 in statuses and not ambiguous,
         )
     if any(phrase in lowered for phrase in _AUTH_PHRASES) or _AUTH_STATUS_RE.search(text):
         verified = (
             credential_presented
-            and not _FORBIDDEN_STATUS_RE.search(text)
+            and not ambiguous
             and (
                 any(phrase in lowered for phrase in _REJECTED_PHRASES)
                 or _REJECTED_STATUS_RE.search(text) is not None
