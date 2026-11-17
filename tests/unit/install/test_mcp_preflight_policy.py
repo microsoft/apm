@@ -182,7 +182,7 @@ class TestAllowedMCPProceeds:
             run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("test-server", transport="http")],
-                effective_target=["copilot", "claude"],
+                effective_target=("copilot", "claude"),
                 logger=_make_logger(),
             )
 

@@ -839,6 +839,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="TargetProfile flips the user-root scoped-instruction eligibility default.",
     ),
     MutationCase(
+        guard_id="install-deployment-agent-render-then-adopt",
+        rule_id="install-deployment-agent-render-then-adopt",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="expected_content=rendered,",
+        new="expected_content=None,",
+        intent="Agent adoption compares the raw source instead of the rendered text (#3722).",
+    ),
+    MutationCase(
         guard_id="install-deployment-audit-replay",
         rule_id="install-deployment-audit-replay",
         path="src/apm_cli/install/audit_replay.py",
@@ -1426,6 +1434,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '    return "[i]" if check.informational else "[+]"'
         ),
         intent="Doctor status icons hard-code glyphs instead of console STATUS_SYMBOLS.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-policy-target-projection",
+        rule_id="registry_delegation.policy_target_projection",
+        path="src/apm_cli/policy/policy_checks.py",
+        old="            manifest_decision.canonical_targets,\n",
+        new="            raw_yml,\n",
+        intent="Audit judges compilation-target policy from the raw manifest dict.",
     ),
     MutationCase(
         guard_id="registry-delegation-process-interrupt-signals",
@@ -3030,3 +3046,49 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
     report = run_selected_rules(ROOT, (_HOST_CRED_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(v.rule_id == _HOST_CRED_RULE for v in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/policy_target_check.py",
+            "effective_target=target_decision.canonical_targets,",
+            'effective_target=getattr(ctx.apm_package, "target", None),',
+            id="install-gate-raw-manifest",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "effective_target=target_decision.canonical_targets,",
+            "effective_target=target_decision.value,",
+            id="mcp-install-raw-selection",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "effective_target=deployment_decision.canonical_targets,",
+            "effective_target=[resolved.name for resolved in targets],",
+            id="local-bundle-raw-names",
+        ),
+        pytest.param(
+            "src/apm_cli/core/target_detection.py",
+            "def canonical_policy_target_name(value: str | None) -> str | None:",
+            "def normalize_policy_targets(value):\n    return value\n\n\n"
+            "def canonical_policy_target_name(value: str | None) -> str | None:",
+            id="sibling-normalizer",
+        ),
+    ],
+)
+def test_policy_target_projection_guard_rejects_raw_selections(
+    path: str, old: str, new: str
+) -> None:
+    """Every compilation-target policy seam judges the canonical projection (#3732)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.policy_target_projection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

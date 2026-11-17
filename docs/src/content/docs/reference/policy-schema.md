@@ -166,8 +166,8 @@ Rules over MCP server references, including transitive ones declared by deep dep
 
 | Field                  | Type                  | Default | Notes                                                                          |
 |------------------------|-----------------------|---------|--------------------------------------------------------------------------------|
-| `target.allow`         | list or null          | `null`  | Allowed `apm compile` targets, e.g. `vscode`, `claude`, `all`.                |
-| `target.enforce`       | string or null        | `null`  | If set, `apm compile` must select this target.                                 |
+| `target.allow`         | list or null          | `null`  | Allowed targets, e.g. `copilot`, `claude`. Aliases resolve (`vscode` is `copilot`); `all` allows every target. |
+| `target.enforce`       | string or null        | `null`  | If set, the target selection must include this target.                         |
 | `strategy.enforce`     | enum or null          | `null`  | `distributed` / `single-file`. Pins the compilation strategy.                  |
 | `source_attribution`   | boolean               | `false` | Require source-attribution headers in compiled outputs.                        |
 
