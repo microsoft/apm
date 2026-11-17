@@ -354,12 +354,19 @@ class LSPIntegrator:
                 target for target in target_decision.lsp_targets if target in _LSP_TARGET_SPECS
             ]
         else:
+            from apm_cli.integration.targets import user_root_exists
+
             candidates = []
-            if find_runtime_binary("copilot") is not None:
+            if find_runtime_binary("copilot") is not None or (
+                user_scope and user_root_exists("copilot")
+            ):
                 candidates.append("copilot")
-            if (project_root_path / ".claude").is_dir() or find_runtime_binary(
-                "claude"
-            ) is not None:
+            claude_root = (
+                user_root_exists("claude")
+                if user_scope
+                else (project_root_path / ".claude").is_dir()
+            )
+            if claude_root or find_runtime_binary("claude") is not None:
                 candidates.append("claude")
 
         if exclude:

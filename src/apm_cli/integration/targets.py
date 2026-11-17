@@ -156,6 +156,18 @@ def user_root_is_default(target: str) -> bool:
     return configured.resolve(strict=False) == default.resolve(strict=False)
 
 
+def user_root_exists(target: str) -> bool:
+    """Return whether *target*'s user root is an existing directory.
+
+    A relative value selects no root, so it detects nothing; deploying to that
+    target still fails clearly through :func:`configured_user_root`.
+    """
+    try:
+        return resolve_user_root(target).is_dir()
+    except PathTraversalError:
+        return False
+
+
 def user_root_display(target: str) -> str:
     """Return a human-readable user root: ``~/<default>`` or the configured path."""
     configured = configured_user_root(target)
@@ -1521,16 +1533,9 @@ def is_other_profile_path(profile: TargetProfile, value: str) -> bool:
 
 
 def _user_root_dir_exists(profile: TargetProfile, home: Path) -> bool:
-    """Return whether *profile*'s user-scope root exists, honoring its user-root variable.
-
-    A relative user-root value detects nothing; deploying to that target
-    still fails clearly through ``for_scope``.
-    """
+    """Return whether *profile*'s user-scope root exists, honoring its user-root variable."""
     if profile.name in USER_ROOT_VARIABLES:
-        try:
-            return resolve_user_root(profile.name).is_dir()
-        except PathTraversalError:
-            return False
+        return user_root_exists(profile.name)
     return (home / profile.effective_root(user_scope=True)).is_dir()
 
 

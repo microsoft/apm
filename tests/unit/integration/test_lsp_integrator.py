@@ -573,6 +573,25 @@ class TestResolveLspTargets:
 
         assert targets == ["copilot"]
 
+    @pytest.mark.parametrize(
+        ("env_var", "target"), [("COPILOT_HOME", "copilot"), ("CLAUDE_CONFIG_DIR", "claude")]
+    )
+    def test_user_scope_detects_the_configured_user_root(
+        self, tmp_path, monkeypatch, env_var, target
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        selected = tmp_path / "profiles" / target
+        selected.mkdir(parents=True)
+        monkeypatch.setenv(env_var, str(selected))
+        with (
+            patch("apm_cli.integration.lsp_integrator.Path.home", return_value=home),
+            patch("apm_cli.integration.lsp_integrator.find_runtime_binary", return_value=None),
+        ):
+            targets = LSPIntegrator.resolve_target_runtimes(project_root=home, user_scope=True)
+
+        assert targets == [target]
+
 
 # ===========================================================================
 # LSPIntegrator.remove_stale
