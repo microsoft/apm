@@ -31,6 +31,7 @@ from pathlib import Path
 
 import requests
 
+from ..core.auth import AuthResolver
 from ..core.auth_chain import AdoAuthChainExhaustedError, AuthAttemptLog
 from ..core.auth_outcome import AuthAttemptFailed, classify_auth_outcome
 from ..core.tls_trust import tls_failure_guidance
@@ -51,6 +52,7 @@ from ..utils.github_host import (
     is_github_hostname,
     is_gitlab_hostname,
 )
+from ..utils.http_credentials import CredentialScopedSession, origin_bounded_request, origin_root
 from .errors import AuthenticationError
 from .phases.local_content import LocalPackageError, read_local_package_source
 
@@ -646,6 +648,14 @@ def _validate_ado_git_package(
     return result.returncode == 0
 
 
+def _github_api_get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
+    """GET one GitHub REST URL; redirects are followed only within its origin."""
+    with CredentialScopedSession() as session:
+        return origin_bounded_request(
+            session, "GET", url, base_url=origin_root(url), headers=headers, timeout=timeout
+        )
+
+
 def _validate_github_package(
     dep_ref,
     auth_resolver,
@@ -696,11 +706,10 @@ def _validate_github_package(
             "Accept": "application/vnd.github+json",
             "User-Agent": "apm-cli",
         }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers.update(AuthResolver.github_rest_headers(token))
 
         try:
-            resp = requests.get(api_url, headers=headers, timeout=15)
+            resp = _github_api_get(api_url, headers=headers, timeout=15)
         except requests.exceptions.SSLError as e:
             raise RuntimeError(f"TLS verification failed for {host_info.display_name}") from e
         except requests.exceptions.RequestException as e:
@@ -799,11 +808,10 @@ def _validate_parse_failure_fallback(
             "Accept": "application/vnd.github+json",
             "User-Agent": "apm-cli",
         }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers.update(AuthResolver.github_rest_headers(token))
 
         try:
-            resp = requests.get(api_url, headers=headers, timeout=15)
+            resp = _github_api_get(api_url, headers=headers, timeout=15)
         except requests.exceptions.SSLError as e:
             raise RuntimeError(f"TLS verification failed for {host_info.display_name}") from e
         except requests.exceptions.RequestException as e:

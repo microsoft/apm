@@ -63,7 +63,7 @@ def _run_probe(
 
     with (
         patch(
-            "apm_cli.install.validation.requests.get",
+            "apm_cli.install.validation._github_api_get",
             side_effect=request_results,
         ),
         patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=False),
@@ -210,3 +210,29 @@ def test_transient_detail_is_verbose_only(probe_path: str) -> None:
     logger.verbose_detail.assert_not_called()
     logger.warning.assert_not_called()
     logger.info.assert_not_called()
+
+
+def test_github_api_probe_keeps_its_credential_on_the_api_origin() -> None:
+    """A rename redirect on the API origin is followed; another origin is refused."""
+    _github_api_get = validation._github_api_get
+
+    def _resp(status, location=None):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {"Location": location} if location else {}
+        return resp
+
+    headers = {"Authorization": "token probe-token"}
+    session_request = "apm_cli.utils.http_credentials.CredentialScopedSession.request"
+    renamed = "https://api.github.com/repositories/42"
+    with patch(session_request, side_effect=[_resp(301, renamed), _resp(200)]) as request:
+        assert _github_api_get("https://api.github.com/repos/o/r", headers=headers, timeout=15).ok
+    assert [c.kwargs["url"] for c in request.call_args_list][-1] == renamed
+
+    elsewhere = "https://elsewhere.example.net/repos/o/r"
+    with (
+        patch(session_request, return_value=_resp(301, elsewhere)) as request,
+        pytest.raises(requests.RequestException),
+    ):
+        _github_api_get("https://api.github.com/repos/o/r", headers=headers, timeout=15)
+    assert request.call_count == 1

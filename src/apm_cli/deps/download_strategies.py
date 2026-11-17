@@ -1182,8 +1182,7 @@ class DownloadDelegate:
             headers: dict[str, str] = {
                 "Accept": "application/vnd.github.v3.raw",
             }
-            if token:
-                headers["Authorization"] = f"token {token}"
+            headers.update(AuthResolver.github_rest_headers(token))
             last_response = None
             for candidate_ref in refs:
                 api_url = self._build_contents_api_urls(
@@ -1402,8 +1401,7 @@ class DownloadDelegate:
         accept = "application/vnd.github.v3.raw" if is_github_host else "application/json"
         if is_github_host:
             headers: dict[str, str] = {"Accept": accept}
-            if token:
-                headers["Authorization"] = f"token {token}"
+            headers.update(AuthResolver.github_rest_headers(token))
         else:
             headers = self._build_generic_host_auth_headers(host, file_ctx, accept=accept)
 
@@ -1702,7 +1700,7 @@ class DownloadDelegate:
         org_scoped = source.startswith("GITHUB_APM_PAT_")
         configured_ghes = DownloadDelegate._is_configured_ghes(host)
         if host_scoped or org_scoped or configured_ghes:
-            headers["Authorization"] = f"token {auth_ctx.token}"
+            headers.update(AuthResolver.github_rest_headers(auth_ctx.token))
         return headers
 
     @staticmethod

@@ -362,7 +362,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         source = "https://policy.invalid/apm-policy.yml"
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=requests.exceptions.ConnectionError(),
         ):
             result = _invoke_ci(runner, "--policy", source, "--no-cache")
@@ -378,7 +378,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         source = "https://policy.invalid/apm-policy.yml"
         resp = MagicMock(status_code=404)
 
-        with patch("apm_cli.policy.discovery.requests.get", return_value=resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=resp):
             result = _invoke_ci(runner, "--policy", source, "--no-cache")
 
         _assert_explicit_load_failure(result, source)
@@ -392,7 +392,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         source = "https://policy.invalid/apm-policy.yml"
         resp = MagicMock(status_code=200, text="<html>captive portal</html>")
 
-        with patch("apm_cli.policy.discovery.requests.get", return_value=resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=resp):
             result = _invoke_ci(runner, "--policy", source, "--no-cache")
 
         _assert_explicit_load_failure(result, source)
@@ -491,7 +491,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         _setup_clean_project(tmp_path)
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=requests.exceptions.ConnectionError(),
         ):
             result = _invoke_ci(

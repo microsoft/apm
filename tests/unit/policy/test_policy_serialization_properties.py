@@ -273,7 +273,7 @@ def _assert_policy_ttl_refreshes(data: dict[str, Any]) -> None:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         project_root = Path(temp_dir)
-        with patch("apm_cli.policy.discovery.requests.get", return_value=response) as request:
+        with patch("apm_cli.policy.discovery.policy_get", return_value=response) as request:
             with patch("apm_cli.policy.discovery.time.time", return_value=cached_at):
                 cold = discovery._fetch_from_url(POLICY_URL, project_root)
             with patch(
@@ -315,7 +315,7 @@ def test_cold_and_warm_policy_results_are_observationally_equivalent(
 
     with tempfile.TemporaryDirectory() as temp_dir:
         project_root = Path(temp_dir)
-        with patch("apm_cli.policy.discovery.requests.get", return_value=response) as request:
+        with patch("apm_cli.policy.discovery.policy_get", return_value=response) as request:
             cold = discovery._fetch_from_url(POLICY_URL, project_root)
             warm = discovery._fetch_from_url(POLICY_URL, project_root)
 
@@ -388,7 +388,7 @@ def test_invalid_refresh_fails_closed_and_preserves_last_good_cache(
 
     with tempfile.TemporaryDirectory() as temp_dir:
         project_root = Path(temp_dir)
-        with patch("apm_cli.policy.discovery.requests.get", side_effect=responses):
+        with patch("apm_cli.policy.discovery.policy_get", side_effect=responses):
             valid = discovery._fetch_from_url(POLICY_URL, project_root)
             before = _cache_bytes(project_root)
             invalid = discovery._fetch_from_url(POLICY_URL, project_root, no_cache=True)

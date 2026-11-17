@@ -56,7 +56,7 @@ class TestValidateRateLimitClassification:
             headers={"X-RateLimit-Remaining": "0"},
         )
 
-        with patch("apm_cli.install.validation.requests.get", return_value=rate_limited):
+        with patch("apm_cli.install.validation._github_api_get", return_value=rate_limited):
             result = validation._validate_package_exists(
                 "octocat/hello-world",
                 verbose=False,
@@ -78,7 +78,7 @@ class TestValidateRateLimitClassification:
             headers={"X-RateLimit-Remaining": "4900"},
         )
 
-        with patch("apm_cli.install.validation.requests.get", return_value=forbidden):
+        with patch("apm_cli.install.validation._github_api_get", return_value=forbidden):
             result = validation._validate_package_exists(
                 "octocat/private-repo", verbose=False, auth_resolver=resolver
             )

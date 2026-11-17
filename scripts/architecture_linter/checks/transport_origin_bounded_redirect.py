@@ -61,18 +61,6 @@ _ALLOW_REDIRECTS_EXEMPT: Mapping[str, tuple[int, str]] = {
         1,
         "ADO file download refuses every redirect; the auth-outcome owner classifies sign-in 3xx",
     ),
-    "src/apm_cli/install/artifactory_resolver.py": (
-        1,
-        "registry boundary HEAD probe refuses every redirect; migrates in the guard PR",
-    ),
-    "src/apm_cli/policy/_gitlab.py": (
-        1,
-        "policy fetch refuses every redirect; auth-outcome owner, migrates in the guard PR",
-    ),
-    "src/apm_cli/policy/discovery.py": (
-        3,
-        "policy fetches refuse every redirect; auth-outcome owner, migrates in the guard PR",
-    ),
     "src/apm_cli/utils/version_checker.py": (
         1,
         "anonymous release-metadata discovery owned by release-metadata-discovery",

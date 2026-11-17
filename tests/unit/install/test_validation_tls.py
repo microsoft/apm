@@ -90,7 +90,7 @@ class TestValidateTlsClassification:
         logger, verbose_msgs, warning_msgs = self._capture_logger()
 
         with patch(
-            "apm_cli.install.validation.requests.get",
+            "apm_cli.install.validation._github_api_get",
             side_effect=requests.exceptions.SSLError("CERTIFICATE_VERIFY_FAILED"),
         ):
             result = validation._validate_package_exists(
@@ -119,7 +119,7 @@ class TestValidateTlsClassification:
         logger.verbose = False
 
         with patch(
-            "apm_cli.install.validation.requests.get",
+            "apm_cli.install.validation._github_api_get",
             side_effect=requests.exceptions.SSLError("bad cert"),
         ):
             result = validation._validate_package_exists(
@@ -159,7 +159,7 @@ class TestValidateTlsClassification:
         logger, _verbose_msgs, warning_msgs = self._capture_logger()
 
         with patch(
-            "apm_cli.install.validation.requests.get",
+            "apm_cli.install.validation._github_api_get",
             side_effect=requests.exceptions.SSLError("bad cert"),
         ):
             result = validation._validate_package_exists(
@@ -181,7 +181,7 @@ class TestValidateTlsClassification:
         logger, _verbose_msgs, _warning_msgs = self._capture_logger()
 
         with patch(
-            "apm_cli.install.validation.requests.get",
+            "apm_cli.install.validation._github_api_get",
             side_effect=requests.exceptions.SSLError("bad cert"),
         ):
             validation._validate_package_exists(
@@ -199,7 +199,7 @@ class TestValidateTlsClassification:
         resolver = self._setup_resolver()
         fake_resp = MagicMock(ok=False, status_code=404, reason="Not Found")
 
-        with patch("apm_cli.install.validation.requests.get", return_value=fake_resp):
+        with patch("apm_cli.install.validation._github_api_get", return_value=fake_resp):
             result = validation._validate_package_exists(
                 "octocat/missing", verbose=False, auth_resolver=resolver
             )
@@ -210,7 +210,7 @@ class TestValidateTlsClassification:
         resolver = self._setup_resolver()
         fake_resp = MagicMock(ok=True, status_code=200, reason="OK")
 
-        with patch("apm_cli.install.validation.requests.get", return_value=fake_resp):
+        with patch("apm_cli.install.validation._github_api_get", return_value=fake_resp):
             result = validation._validate_package_exists(
                 "octocat/hello-world", verbose=False, auth_resolver=resolver
             )
@@ -246,7 +246,7 @@ class TestNoUrllibUrlopenInValidation:
 
         with (
             patch("urllib.request.urlopen", side_effect=forbidden) as urlopen_mock,
-            patch("apm_cli.install.validation.requests.get", return_value=fake_resp),
+            patch("apm_cli.install.validation._github_api_get", return_value=fake_resp),
         ):
             result = validation._validate_package_exists(
                 "octocat/hello-world", verbose=False, auth_resolver=resolver
@@ -285,8 +285,8 @@ class TestTlsFailureGuidanceThroughCli:
             lambda self, host, operation, **kwargs: operation(None, {}),
         )
         monkeypatch.setattr(
-            validation.requests,
-            "get",
+            validation,
+            "_github_api_get",
             MagicMock(side_effect=requests.exceptions.SSLError("CERTIFICATE_VERIFY_FAILED")),
         )
         monkeypatch.chdir(tmp_path)

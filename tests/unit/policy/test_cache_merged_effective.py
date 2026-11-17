@@ -189,7 +189,7 @@ class TestURLChainCache:
         }
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: responses[url],
         ) as transport:
             cold = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
@@ -226,7 +226,7 @@ class TestURLChainCache:
         }
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: responses[url],
         ) as transport:
             first = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
@@ -1115,7 +1115,7 @@ dependencies:
             "apm_cli.policy.discovery._policy_auth_resolver",
             return_value=StaticPolicyResolver(None),
         ),
-        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+        patch("apm_cli.policy.discovery.policy_get", side_effect=get) as transport,
     ):
         cold = discover_policy_with_chain(
             tmp_path,
@@ -1210,7 +1210,7 @@ dependencies:
             "apm_cli.policy.discovery._policy_auth_resolver",
             return_value=StaticPolicyResolver(None),
         ),
-        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+        patch("apm_cli.policy.discovery.policy_get", side_effect=get) as transport,
     ):
         cold = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
         assert cold.policy is not None

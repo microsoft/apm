@@ -51,7 +51,8 @@ _FLAGGED = {
 _ALLOWED = {
     "src/apm_cli/utils/console.py": (
         "def _ok_dict_get(self, k):\n    return self._session_owners.get(k)\n\n"
-        'def _ok_header_read(h):\n    return h.get("Authorization")\n'
+        'def _ok_header_read(h):\n    return h.get("Authorization")\n\n'
+        "def _ok_annotation(s: requests.Session) -> requests.Session:\n    return s\n"
     ),
     "src/apm_cli/utils/http_credentials.py": (
         'def _ok_owner(u, t):\n    return requests.get(u, headers={"Authorization": t})\n'

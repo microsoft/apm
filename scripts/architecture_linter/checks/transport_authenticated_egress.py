@@ -61,6 +61,7 @@ _EGRESS_OWNERS = frozenset(
 _HEADER_OWNERS: Mapping[str, str | None] = MappingProxyType(
     {
         "src/apm_cli/core/auth.py": None,
+        "src/apm_cli/core/auth_chain.py": None,
         "src/apm_cli/deps/registry/auth.py": None,
         "src/apm_cli/deps/registry_proxy.py": None,
         "src/apm_cli/utils/github_host.py": "set_authorization_header_git_env",
@@ -68,8 +69,9 @@ _HEADER_OWNERS: Mapping[str, str | None] = MappingProxyType(
     }
 )
 
-# Frozen inventory of HTTP egress outside the owners. Reasons prefixed
-# ``pending PR <n>:`` are sites the 0.36.1 auth track migrates onto the owners.
+# Frozen inventory of anonymous or already origin-scoped HTTP egress outside
+# the owners. It only shrinks; credential-bearing egress routes through
+# utils/http_credentials.origin_bounded_request.
 _EGRESS_EXEMPTIONS: Mapping[tuple[str, str], str] = MappingProxyType(
     {
         ("src/apm_cli/commands/auth.py", "check_token"): (
@@ -94,51 +96,11 @@ _EGRESS_EXEMPTIONS: Mapping[tuple[str, str], str] = MappingProxyType(
             "registry-proxy entry fetch; headers from RegistryConfig.headers_for"
         ),
         ("src/apm_cli/deps/download_strategies.py", "DownloadDelegate.resilient_get"): (
-            "pending PR 3: shared download retry transport; callers pass owner-built headers"
+            "shared download retry transport; callers pass AuthResolver/RegistryConfig"
+            " headers and credential-bearing calls use the no-netrc session"
         ),
         ("src/apm_cli/deps/download_strategies.py", "DownloadDelegate.try_raw_download"): (
             "anonymous pre-auth raw content CDN fetch; never carries a credential"
-        ),
-        ("src/apm_cli/deps/registry/client.py", "RegistryClient.__init__"): (
-            "pending PR 2: registry session construction"
-        ),
-        ("src/apm_cli/deps/registry/client.py", "RegistryClient._request"): (
-            "pending PR 2: registry GET through origin_bounded_request"
-        ),
-        ("src/apm_cli/deps/registry/client.py", "RegistryClient.fetch_from_url"): (
-            "pending PR 2: registry download through origin_bounded_request"
-        ),
-        ("src/apm_cli/deps/registry/client.py", "RegistryClient.publish_version"): (
-            "pending PR 2: registry publish through origin_bounded_request"
-        ),
-        ("src/apm_cli/install/artifactory_resolver.py", "_candidate_archive_status"): (
-            "registry-proxy boundary HEAD; registry headers, redirects refused"
-        ),
-        ("src/apm_cli/install/validation.py", "_validate_github_package._check_repo"): (
-            "pending PR 1: validation API probe routed through the auth chain"
-        ),
-        (
-            "src/apm_cli/install/validation.py",
-            "_validate_parse_failure_fallback._check_repo_fallback",
-        ): "pending PR 1: validation API probe routed through the auth chain",
-        (
-            "src/apm_cli/marketplace/builder.py",
-            "MarketplaceBuilder._fetch_remote_metadata_outcome._open_metadata._request_text",
-        ): "pending PR 2: metadata fetch through origin_bounded_request",
-        ("src/apm_cli/marketplace/client.py", "_http_get"): (
-            "pending PR 2: CredentialScopedSession redirect follow moves to the owner"
-        ),
-        ("src/apm_cli/policy/_gitlab.py", "_authenticated_gitlab_request._request"): (
-            "pending PR 1: policy GitLab fetch routed through the auth chain"
-        ),
-        ("src/apm_cli/policy/discovery.py", "_fetch_ado_contents._request"): (
-            "pending PR 1: policy ADO fetch routed through the auth chain"
-        ),
-        ("src/apm_cli/policy/discovery.py", "_fetch_from_url"): (
-            "anonymous policy URL fetch; redirects refused"
-        ),
-        ("src/apm_cli/policy/discovery.py", "_fetch_github_contents"): (
-            "pending PR 1: policy GitHub fetch routed through the auth chain"
         ),
         ("src/apm_cli/registry/client.py", "SimpleRegistryClient.__init__"): (
             "anonymous MCP registry session"
@@ -146,8 +108,8 @@ _EGRESS_EXEMPTIONS: Mapping[tuple[str, str], str] = MappingProxyType(
         ("src/apm_cli/registry/client.py", "SimpleRegistryClient._cached_get_json"): (
             "anonymous MCP registry metadata fetch"
         ),
-        ("src/apm_cli/utils/archive.py", _MODULE_SCOPE): ("anonymous archive download session"),
-        ("src/apm_cli/utils/archive.py", "_archive_get"): ("anonymous archive download"),
+        ("src/apm_cli/utils/archive.py", _MODULE_SCOPE): "anonymous archive download session",
+        ("src/apm_cli/utils/archive.py", "_archive_get"): "anonymous archive download",
         ("src/apm_cli/utils/version_checker.py", "get_latest_version_from_github.fetch"): (
             "release metadata lookup owned by release-metadata-discovery; redirects refused"
         ),
@@ -159,60 +121,6 @@ _HEADER_EXEMPTIONS: Mapping[tuple[str, str], str] = MappingProxyType(
     {
         ("src/apm_cli/adapters/client/base.py", "MCPClientAdapter._apply_auth_and_headers_impl"): (
             "writes MCP server config for the harness client; owned by the harness track"
-        ),
-        ("src/apm_cli/commands/auth.py", "check_token"): (
-            "pending PR 3: status probe header moves to an AuthResolver header builder"
-        ),
-        (
-            "src/apm_cli/deps/download_strategies.py",
-            "DownloadDelegate._build_generic_host_auth_headers",
-        ): "pending PR 3: generic host header moves to an AuthResolver header builder",
-        (
-            "src/apm_cli/deps/download_strategies.py",
-            "DownloadDelegate._download_public_github_file_anonymous_first._contents_request",
-        ): "pending PR 3: GitHub contents header moves to an AuthResolver header builder",
-        (
-            "src/apm_cli/deps/download_strategies.py",
-            "DownloadDelegate.download_ado_file._headers_for",
-        ): ("pending PR 1: ADO download credential chosen by the auth chain"),
-        ("src/apm_cli/deps/download_strategies.py", "DownloadDelegate.download_github_file"): (
-            "pending PR 3: GitHub contents header moves to an AuthResolver header builder"
-        ),
-        (
-            "src/apm_cli/deps/git_reference_resolver.py",
-            "GitReferenceResolver.resolve_commit_sha_for_ref._request",
-        ): "pending PR 1: ref resolution routed through the auth chain",
-        ("src/apm_cli/deps/github_downloader_validation.py", "_directory_exists_at_ref._request"): (
-            "pending PR 1: validation probe routed through the auth chain"
-        ),
-        ("src/apm_cli/deps/registry/client.py", "RegistryClient._headers"): (
-            "pending PR 3: registry header assembly moves into deps/registry/auth.py"
-        ),
-        ("src/apm_cli/install/artifactory_resolver.py", "_proxy_probe_headers"): (
-            "pending PR 3: registry-proxy probe header moves to RegistryConfig"
-        ),
-        ("src/apm_cli/install/validation.py", "_validate_github_package._check_repo"): (
-            "pending PR 1: validation API probe routed through the auth chain"
-        ),
-        (
-            "src/apm_cli/install/validation.py",
-            "_validate_parse_failure_fallback._check_repo_fallback",
-        ): "pending PR 1: validation API probe routed through the auth chain",
-        (
-            "src/apm_cli/marketplace/builder.py",
-            "MarketplaceBuilder._fetch_remote_metadata_outcome._open_metadata._request_text",
-        ): "pending PR 2: metadata fetch through origin_bounded_request",
-        ("src/apm_cli/marketplace/client.py", "_ado_auth_header"): (
-            "pending PR 1: marketplace ADO credential chosen by the auth chain"
-        ),
-        ("src/apm_cli/marketplace/client.py", "_github_headers"): (
-            "pending PR 3: marketplace GitHub header moves to an AuthResolver header builder"
-        ),
-        ("src/apm_cli/policy/discovery.py", "_fetch_ado_contents._headers"): (
-            "pending PR 1: policy ADO credential chosen by the auth chain"
-        ),
-        ("src/apm_cli/policy/discovery.py", "_fetch_github_contents"): (
-            "pending PR 1: policy GitHub fetch routed through the auth chain"
         ),
         ("src/apm_cli/utils/version_checker.py", "get_latest_version_from_github"): (
             "release metadata lookup owned by release-metadata-discovery"
@@ -279,9 +187,23 @@ class _Aliases:
         return False
 
 
+def _annotation_node_ids(index: TreeIndex) -> frozenset[int]:
+    """Return ids of nodes inside type annotations (references, not egress)."""
+    roots: list[ast.AST] = []
+    for node in index.nodes:
+        if isinstance(node, ast.arg | ast.AnnAssign) and node.annotation is not None:
+            roots.append(node.annotation)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns:
+            roots.append(node.returns)
+    return frozenset(id(child) for root in roots for child in index.walk(root))
+
+
 def _egress_sites(index: TreeIndex) -> Iterator[ast.AST]:
     aliases = _Aliases(index)
+    annotations = _annotation_node_ids(index)
     for node in index.nodes:
+        if id(node) in annotations:
+            continue
         attribute = isinstance(node, ast.Attribute) and aliases.is_egress_attribute(node)
         direct = (
             isinstance(node, ast.Name)

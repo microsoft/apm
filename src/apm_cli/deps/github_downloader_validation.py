@@ -316,8 +316,9 @@ def _directory_exists_at_ref(
 
     def _request(token: str | None, _git_env: dict[str, str]) -> bool:
         headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
-        if token:
-            headers["Authorization"] = f"token {token}"
+        from ..core.auth import AuthResolver
+
+        headers.update(AuthResolver.github_rest_headers(token))
         response = downloader._resilient_get(
             api_url,
             headers=headers,

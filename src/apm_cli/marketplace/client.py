@@ -479,8 +479,9 @@ def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -
 
 def _github_headers(token: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github.v3.raw", "User-Agent": "apm-cli"}
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth import AuthResolver
+
+    headers.update(AuthResolver.github_rest_headers(token))
     return headers
 
 

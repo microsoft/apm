@@ -51,7 +51,7 @@ class TestProxyBypassGuard:
         resolver = self._setup_resolver()
 
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
-            with patch("apm_cli.install.validation.requests.get") as mock_get:
+            with patch("apm_cli.install.validation._github_api_get") as mock_get:
                 result = validation._validate_package_exists(
                     "microsoft/apm",
                     verbose=False,
@@ -78,7 +78,7 @@ class TestProxyBypassGuard:
         }
 
         with patch.dict(os.environ, env, clear=True):
-            with patch("apm_cli.install.validation.requests.get") as mock_get:
+            with patch("apm_cli.install.validation._github_api_get") as mock_get:
                 # Mock a successful API response (200 OK).
                 mock_response = MagicMock()
                 mock_response.status_code = 200
@@ -113,7 +113,7 @@ class TestProxyBypassGuard:
                 "apm_cli.models.apm_package.DependencyReference.parse",
                 side_effect=ValueError("Simulated parse error"),
             ):
-                with patch("apm_cli.install.validation.requests.get") as mock_get:
+                with patch("apm_cli.install.validation._github_api_get") as mock_get:
                     # Use a valid owner/repo format for the fallback path.
                     result = validation._validate_package_exists(
                         "owner/repo",
@@ -149,7 +149,7 @@ class TestProxyBypassGuard:
                 "apm_cli.models.apm_package.DependencyReference.parse",
                 side_effect=ValueError("Simulated parse error"),
             ):
-                with patch("apm_cli.install.validation.requests.get") as mock_get:
+                with patch("apm_cli.install.validation._github_api_get") as mock_get:
                     # Mock a successful API response.
                     mock_response = MagicMock()
                     mock_response.status_code = 200
@@ -183,7 +183,7 @@ class TestProxyBypassGuard:
             "apm_cli.models.apm_package.DependencyReference.parse",
             side_effect=ValueError("Simulated parse error"),
         ):
-            with patch("apm_cli.install.validation.requests.get") as mock_get:
+            with patch("apm_cli.install.validation._github_api_get") as mock_get:
                 # Invalid formats should be rejected (return False) WITHOUT
                 # making any API call.
                 test_cases = [
@@ -219,7 +219,7 @@ class TestProxyBypassGuard:
 
         for value in truthy_values:
             with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": value}):
-                with patch("apm_cli.install.validation.requests.get") as mock_get:
+                with patch("apm_cli.install.validation._github_api_get") as mock_get:
                     result = validation._validate_package_exists(
                         "microsoft/apm",
                         verbose=False,
@@ -458,7 +458,7 @@ class TestProxyBypassGuard:
         env["ARTIFACTORY_ONLY"] = "1"
 
         with patch.dict(os.environ, env, clear=True):
-            with patch("apm_cli.install.validation.requests.get") as mock_get:
+            with patch("apm_cli.install.validation._github_api_get") as mock_get:
                 result = validation._validate_package_exists(
                     "microsoft/apm",
                     verbose=False,
