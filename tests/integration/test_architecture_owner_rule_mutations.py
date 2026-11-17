@@ -687,6 +687,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Root replacement matching becomes host- and endpoint-blind.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-strip-charset",
+        rule_id="contracts-tooling-strip-charset",
+        path="src/apm_cli/models/dependency/reference.py",
+        old='part.removesuffix(".git")',
+        new='part.rstrip(".git")',
+        intent="Repository segment validation strips a .git character set again (#3715).",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-claude-mcp-paths",
         rule_id="mutation_writes.claude_mcp_paths",
         path="src/apm_cli/integration/mcp_integrator.py",

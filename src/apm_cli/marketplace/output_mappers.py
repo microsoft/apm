@@ -607,8 +607,8 @@ def _is_display_version(value: str | None) -> bool:
 def _subtract_plugin_root(source: str, plugin_root: str) -> str:
     from pathlib import PurePosixPath
 
-    norm_source = source.lstrip("./") if source.startswith("./") else source
-    norm_root = plugin_root.lstrip("./") if plugin_root.startswith("./") else plugin_root
+    norm_source = source.removeprefix("./")
+    norm_root = plugin_root.removeprefix("./")
     norm_root = norm_root.rstrip("/")
     norm_source = norm_source.rstrip("/")
 
