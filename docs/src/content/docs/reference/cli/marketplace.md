@@ -165,6 +165,7 @@ apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json -
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--path` | Repository-relative path to the catalog JSON file, such as `catalogs/frontend/marketplace.json`. Skips auto-discovery. Applies to git-backed sources and local repository directories, not to hosted `marketplace.json` URLs or a direct local file. |
+| `--offline` | Read a local `apm.yml` source without network. See [Live local authoring catalogs](#live-local-authoring-catalogs). |
 | `--verbose`, `-v` | Show detailed output. |
 
 Without `--path`, APM checks `marketplace.json`,
@@ -379,8 +380,8 @@ remote, as `apm marketplace check` requires; otherwise the command exits
 ### `apm marketplace package set NAME`
 
 Update fields on an existing package entry. Same flag set as
-`package add` minus `--no-verify`; only the fields you pass are
-modified.
+`package add` minus `--name` and `--no-verify` (`--subdir` has no `-s`
+short form); only the fields you pass are modified.
 
 ### `apm marketplace package remove NAME`
 

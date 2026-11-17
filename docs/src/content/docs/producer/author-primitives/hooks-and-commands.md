@@ -204,6 +204,7 @@ Supported targets and where the integrator writes:
 | gemini   | `.gemini/settings.json`               | merged               |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
+| antigravity | `.agents/hooks.json`              | merged               |
 | kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
@@ -385,6 +386,7 @@ Supported targets and output paths:
 | opencode | `.opencode/commands/<name>.md`   | opencode markdown     |
 | gemini   | `.gemini/commands/<name>.toml`   | TOML                  |
 | windsurf | `.windsurf/workflows/<name>.md`  | called "workflows"    |
+| kiro     | `.kiro/prompts/<name>.md`        | body-only Kiro prompt |
 | codex    | -- not supported --              | silently skipped      |
 
 Verified against `src/apm_cli/integration/targets.py` and
@@ -394,8 +396,9 @@ Verified against `src/apm_cli/integration/targets.py` and
 
 Reach for a skill, instruction, or prompt first. Use hooks or commands
 only when the behavior is a runtime callback (hook) or a
-command-palette entry (command), you accept that consumers on Copilot,
-Codex, or OpenCode will not get them, and you will own per-target
+command-palette entry (command), you accept that consumers will not
+get both (Copilot and Codex have no commands; OpenCode has no hooks),
+and you will own per-target
 formats. "Run a script before every tool call" fits a hook. "Give the
 agent a procedure" fits a skill -- and reaches every harness.
 

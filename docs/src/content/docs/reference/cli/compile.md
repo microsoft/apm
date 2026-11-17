@@ -267,7 +267,7 @@ cloud agents, and contributors who do not run `apm compile` locally
 and rely on the checked-in artifacts.
 
 For the full list of accepted `targets:` values, see
-[manifest schema -- targets](../../../reference/manifest-schema/#36-target).
+[manifest schema -- targets](../../../reference/manifest-schema/#36-target-and-targets).
 
 ## Examples
 
@@ -384,6 +384,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `agent-skills` | none |
 | `grok-cloud` | none |
 | `grok-bot` | none |
+| `openclaw`, `copilot-app`, `copilot-cowork` | Falls back to target detection; with no other target signal this is `AGENTS.md` |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first

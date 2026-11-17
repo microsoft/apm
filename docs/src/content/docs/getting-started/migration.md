@@ -7,7 +7,7 @@ sidebar:
 
 APM is additive. It does not move or rewrite your existing configuration
 sources. Your current `.github/copilot-instructions.md`, `AGENTS.md`,
-`.claude/` config, and `.cursor-rules` stay in place.
+`.claude/` config, and `.cursorrules` stay in place.
 
 ## Add APM in three steps
 
@@ -26,7 +26,7 @@ This creates an `apm.yml` manifest alongside your existing files. Nothing is del
 Add the shared packages your team needs:
 
 ```bash
-apm install microsoft/copilot-best-practices
+apm install microsoft/apm-sample-package
 apm install your-org/team-standards
 ```
 

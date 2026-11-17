@@ -35,7 +35,7 @@ git clone <repo> && cd <repo> && apm install
   install fans out to by default (Copilot, Claude, Grok Build, Cursor, Codex,
   Gemini, OpenCode, Windsurf, and Kiro); Antigravity, Hermes, and Grok Bot
   are registered as explicit-only targets.
-- `src/apm_cli/deps/lockfile.py` -- the `LockEntry.content_hash`
+- `src/apm_cli/deps/lockfile.py` -- the `LockedDependency.content_hash`
   field (SHA-256 of the package file tree) that makes "same install
   on every clone" mean byte-for-byte the same.
 
@@ -71,7 +71,7 @@ apm audit
   `_pre_deploy_security_scan` hook that runs before any file is
   written to the project tree, via `SecurityGate.scan_files()` with
   the install pipeline's `BLOCK_POLICY`.
-- `src/apm_cli/deps/lockfile.py` -- `LockEntry.content_hash` pins the
+- `src/apm_cli/deps/lockfile.py` -- `LockedDependency.content_hash` pins the
   exact tree per dependency; `ci_checks._check_content_integrity`
   re-verifies it on every audit.
 - `src/apm_cli/commands/audit.py` -- `apm audit` wires the scan,

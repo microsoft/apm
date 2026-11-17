@@ -500,7 +500,7 @@ coupled edits in the same PR:
 1. **Spec:** add or change a `<a id="req-XXX"></a>` anchor and its prose in
    `docs/src/content/docs/specs/openapm-v0.1.md`, plus the matching Appendix C row.
 2. **Manifest:** update
-   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
 3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
    `tests/spec_conformance/`. If a real assertion is not yet possible, call

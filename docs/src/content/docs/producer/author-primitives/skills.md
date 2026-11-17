@@ -107,11 +107,13 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 | `gemini`          | `.agents/skills/<name>/SKILL.md`             |
 | `opencode`        | `.agents/skills/<name>/SKILL.md`             |
 | `windsurf`        | `.agents/skills/<name>/SKILL.md`             |
+| `antigravity`     | `.agents/skills/<name>/SKILL.md` (explicit)  |
+| `hermes`          | `.agents/skills/<name>/SKILL.md` (explicit)  |
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
 
 For user-scope locations, see the [Targets matrix](../../../reference/targets-matrix/).
 
-Seven harnesses converge on the cross-tool `.agents/skills/`
+Nine harnesses converge on the cross-tool `.agents/skills/`
 directory. Claude, Kiro, and Grok Build keep their harness-native paths
 (`.claude/skills/`, `.kiro/skills/`, `.grok/skills/`) because those clients' default
 scan is the per-tool directory. Windsurf (now Devin Desktop) converged
@@ -187,6 +189,6 @@ compile sits between install and run.
   scan over every primitive before deploy. A zero-width character in a
   reference file blocks the install for every consumer. Run
   `apm audit --file .apm/skills/<name>/SKILL.md` while authoring.
-- **Setting `target: vscode` in `apm.yml`.** There is no `vscode`
-  target. Use `targets:` (plural) with slugs from the table above, or
-  let auto-detection pick.
+- **Setting `target: vscode` in `apm.yml`.** `vscode` is only an alias
+  that normalizes to `copilot`. Use `targets:` (plural) with slugs from
+  the table above, or let auto-detection pick.

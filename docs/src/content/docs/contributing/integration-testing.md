@@ -660,12 +660,12 @@ Promotion integration tests run on:
 ## Benefits
 
 ### **Speed vs Confidence Balance**
-- **Smoke tests**: Fast feedback (2-3 min) on every change
-- **E2E tests**: High confidence (15 min) only when shipping
+- **Smoke tests**: Fast feedback (2-3 min) in the merge queue and on runtime changes
+- **E2E tests**: High confidence (15 min) in the merge queue and when shipping
 
 ### **Cost Efficiency**
 - Smoke tests use no API credits
-- E2E tests only run on releases (minimizing API usage)
+- E2E tests run in the merge queue and release validation, not on every PR push (minimizing API usage)
 - Manual workflow dispatch for test builds without publishing
 
 ### **Platform Coverage**
