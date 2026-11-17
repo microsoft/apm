@@ -95,6 +95,21 @@ def _copy_subset_pairings(value: object) -> Any:
     return value
 
 
+def _replay_pairing(
+    skill_subset: list[str], target_subset: list[str], records: Any
+) -> SkillTargetSelection | None:
+    """Return the exact pairing a lock entry replays, or ``None`` for a product.
+
+    Invalid records degrade to the flat product (what earlier writers
+    deployed); audit and frozen install reject them via ``selection()``.
+    """
+    try:
+        pairing = SkillTargetSelection.from_lock_fields(skill_subset, target_subset, records)
+    except ValueError:
+        return None
+    return None if pairing.is_product else pairing
+
+
 class _ExistingLockfileUnset:
     """Sentinel for callers that have not already read the destination."""
 
@@ -1014,16 +1029,16 @@ class LockedDependency:
             source=self.source,
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
-            subset_pairings=self._exact_pairing_or_none(),
+            subset_pairings=_replay_pairing(
+                self.skill_subset, self.target_subset, self.subset_pairings
+            ),
         ).with_derived_provider_coordinates()
         if not effective or self.replacement is None:
             return dep
         selected = project_effective_reference(self.replacement.original, self.replacement.rule)
         selected.replacement = self.replacement
-        # The locked selection is the merge over every edge (req-rs-018); the
-        # replacement rule's original edge alone must not narrow or widen it.
-        selected.skill_subset = dep.skill_subset
-        selected.target_subset = dep.target_subset
+        # The binding's original carries the merged flat selection; the exact
+        # per-edge pairing comes from the lock entry (req-rs-018).
         selected.subset_pairings = dep.subset_pairings
         if not selected.is_local:
             selected.reference = self.resolved_ref or selected.reference
@@ -1038,15 +1053,6 @@ class LockedDependency:
         return SkillTargetSelection.from_lock_fields(
             self.skill_subset, self.target_subset, self.subset_pairings
         )
-
-    def _exact_pairing_or_none(self) -> SkillTargetSelection | None:
-        # Invalid records degrade to the flat product (what earlier writers
-        # deployed); audit and frozen install reject them via ``selection()``.
-        try:
-            pairing = self.selection()
-        except ValueError:
-            return None
-        return None if pairing.is_product else pairing
 
     def matches_replacement(self, dep: DependencyReference) -> bool:
         """Whether this pin belongs to the same root-selected source contract."""

@@ -93,7 +93,7 @@ def check_selection_merge(provider: FactsProvider) -> tuple[Violation, ...]:
         "src/apm_cli/deps/reachability.py": ("merge_edge_selections(edges)",),
         "src/apm_cli/deps/lockfile.py": (
             "SkillTargetSelection.from_lock_fields(",
-            "subset_pairings=self._exact_pairing_or_none(),",
+            "subset_pairings=_replay_pairing(",
         ),
         "src/apm_cli/policy/ci_checks.py": (
             "declared = declared_node_selections(",

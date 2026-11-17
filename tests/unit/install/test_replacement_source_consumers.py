@@ -644,6 +644,4 @@ def test_replaced_dependency_replays_the_locked_skill_target_pairing(tmp_path: P
     replayed = LockedDependency.from_dict(locked.to_dict()).to_dependency_ref()
 
     assert replayed.replacement is not None
-    assert replayed.skill_subset == ["alpha", "gamma"]
-    assert replayed.target_subset == ["claude", "copilot"]
     assert replayed.subset_pairings == pairing

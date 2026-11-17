@@ -493,8 +493,8 @@ def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
         ),
         pytest.param(
             "src/apm_cli/deps/lockfile.py",
-            "            subset_pairings=self._exact_pairing_or_none(),\n",
-            "",
+            "            subset_pairings=_replay_pairing(\n",
+            "            _ignored=_replay_pairing(\n",
             id="lock-replay-drops-pairing",
         ),
         pytest.param(
