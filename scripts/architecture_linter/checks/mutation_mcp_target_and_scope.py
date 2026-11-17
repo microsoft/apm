@@ -188,7 +188,7 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
         return ()
 
     findings: list[Violation] = []
-    if not _span_has_fixed(install_facts, adapter_span, "parse_targets_field(apm_config)"):
+    if not _span_has_fixed(install_facts, adapter_span, "manifest_target_restriction(apm_config)"):
         findings.append(
             violation(
                 rule_id, _MCP_INSTALL, "manifest adapter must parse targets from the manifest"
@@ -215,12 +215,16 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "resolver must consult the manifest adapter before runtime discovery",
             )
         )
-    if _span_has_fixed(install_facts, resolver_span, "parse_targets_field("):
+    if _span_has_fixed(install_facts, resolver_span, "parse_targets_field(") or _span_has_fixed(
+        install_facts, resolver_span, "manifest_target_restriction("
+    ):
         findings.append(
             violation(rule_id, _MCP_INSTALL, "resolver must not parse manifest targets itself")
         )
     validation_line = _first_span_line(
-        integration_facts, integration_span, "parse_targets_field(mcp_apm_config)"
+        integration_facts,
+        integration_span,
+        "package_target_declaration(apm_package).validate_for_install()",
     )
     install_line = _first_span_line(integration_facts, integration_span, "MCPIntegrator.install(")
     if validation_line is None or install_line is None or validation_line >= install_line:

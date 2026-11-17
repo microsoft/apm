@@ -396,10 +396,10 @@ def declared_target_profiles(
     diagnostics: DiagnosticCollector | None = None,
 ) -> list[TargetProfile] | None:
     """Resolve the target universe declared by a project manifest."""
-    from apm_cli.core.apm_yml import parse_targets_field
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.core.target_catalog import normalize_target_name
     from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from apm_cli.models.manifest_targets import manifest_target_restriction
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
@@ -409,7 +409,7 @@ def declared_target_profiles(
     if not isinstance(data, dict):
         return None
     try:
-        names = parse_targets_field(data)
+        names = manifest_target_restriction(data)
     except TargetResolutionError:
         return None
     active_by_name = _profiles_by_name(active_targets)

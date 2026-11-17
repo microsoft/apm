@@ -203,6 +203,7 @@ class CompilationConfig:
                     config.chatmode = compilation_config["chatmode"]
                 if "resolve_links" in compilation_config:
                     config.resolve_links = compilation_config["resolve_links"]
+                # architecture-authority-exempt: compilation-target-field
                 if "target" in compilation_config:
                     config.target = compilation_config["target"]
 

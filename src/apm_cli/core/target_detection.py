@@ -1028,7 +1028,7 @@ def read_manifest_target(project_root: Path) -> list[str] | None:
     """Read audit's manifest target hint; manifest checks own parse failures."""
     import yaml
 
-    from apm_cli.core.apm_yml import parse_targets_field
+    from apm_cli.models.manifest_targets import manifest_target_restriction
     from apm_cli.utils.yaml_io import load_yaml
 
     apm_yml = project_root / "apm.yml"
@@ -1036,7 +1036,7 @@ def read_manifest_target(project_root: Path) -> list[str] | None:
         return None
     try:
         data = load_yaml(apm_yml) or {}
-        tokens = parse_targets_field(data)
+        tokens = manifest_target_restriction(data)
         return tokens if tokens else None
     except (OSError, ValueError, TypeError, yaml.YAMLError, click.UsageError):
         return None

@@ -9,6 +9,13 @@
       "guards": ["registry-delegation-target-vocabulary"]
     },
     {
+      "id": "manifest-target-declaration",
+      "decision": "Package manifest target declaration: target:/targets: spelling, token validation, legacy all, and the views readers consume",
+      "owner": "models/manifest_targets.py (ManifestTargetDeclaration, read_manifest_target_declaration) via models/apm_package.py (APMPackage.target_declaration, package_target_declaration)",
+      "selectors": ["src/apm_cli/models/manifest_targets.py"],
+      "guards": ["registry-delegation-manifest-target-declaration"]
+    },
+    {
       "id": "effective-install-target-selection",
       "decision": "Effective target selection and its compilation-target policy projection",
       "owner": "core/target_detection.py (EffectiveTargetDecision.canonical_targets, canonical_policy_target_names)",

@@ -337,28 +337,15 @@ def _resolve_effective_target(
         (str | list | None) for user-facing label rendering.
     """
     from ...core.target_detection import detect_target
-    from ...models.apm_package import APMPackage
+    from ...models.apm_package import APMPackage, package_target_selection
 
     _root = source_root or Path(".")
     config_target = None
     apm_yml_path = _root / APM_YML_FILENAME
     if apm_yml_path.exists():
-        apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
-        config_target = apm_pkg.target
-        if config_target is None:
-            try:
-                from ...core.apm_yml import parse_targets_field
-                from ...utils.yaml_io import load_yaml
-
-                _raw = load_yaml(apm_yml_path)
-                if isinstance(_raw, dict):
-                    _yaml_targets = parse_targets_field(_raw)
-                    if _yaml_targets:
-                        config_target = (
-                            _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
-                        )
-            except Exception:
-                pass
+        config_target = package_target_selection(APMPackage.from_apm_yml(apm_yml_path))
+        if isinstance(config_target, list) and len(config_target) == 1:
+            config_target = config_target[0]
 
     compile_target = _resolve_compile_target(target)
     compile_config_target = _resolve_compile_target(config_target)

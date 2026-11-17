@@ -79,7 +79,7 @@ def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:
     skills_raw = entry.get("skills")
     if skills_raw is not None:
         dep.skill_subset = parse_skill_subset(skills_raw)
-    targets_raw = entry.get("targets")
+    targets_raw = entry.get("targets")  # architecture-authority-exempt: dependency-target-subset
     if targets_raw is not None:
         dep.target_subset = parse_target_subset(targets_raw)
 
