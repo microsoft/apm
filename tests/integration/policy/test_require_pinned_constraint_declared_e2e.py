@@ -104,6 +104,9 @@ def _publish_monorepo(
     # npm workspaces / Changesets release tags (#3731).
     repositories.tag(repository, "pkg-a@1.1.0", second)
     repositories.tag(repository, "@acme/pkg-a@1.1.0", second)
+    # The tag may name the published package, not the directory
+    # (``shadcn/ui#shadcn@4.12.0``).
+    repositories.tag(repository, "shadcn@1.1.0", second)
 
     # A fork of pkg-a at its repository root, for the ``replace:`` contract:
     # ``v1.0.0`` is a bounded choice, ``main`` a moving branch.
@@ -293,6 +296,7 @@ def test_declared_range_passes_across_install_replay_update_and_audit(scenario, 
         # Exact package release tags count as declared releases (#3731).
         ("at-tag", "pkg-a@1.1.0"),
         ("scoped-at-tag", "@acme/pkg-a@1.1.0"),
+        ("other-name-at-tag", "shadcn@1.1.0"),
     ],
 )
 def test_package_qualified_literal_tags_install_and_audit(
