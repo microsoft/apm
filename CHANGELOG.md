@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Registry installs, lockfile replays and `apm publish` now follow a gateway redirect that stays on the configured registry origin and under its URL path (for example a `307` from a gateway that decodes `%2F`), keeping the method and body for `307`/`308` and at most 3 hops; any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. Registry publish now follows redirects only within the configured registry origin, and marketplace metadata fetches use the shared credential-scoped HTTP owner. Reported with a prototype by @ashky23. (closes #3726, #3785)
+### Changed
+
+- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 
 ## [0.36.0] - 2026-11-17
 
