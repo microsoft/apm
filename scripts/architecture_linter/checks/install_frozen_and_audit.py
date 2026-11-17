@@ -707,18 +707,29 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
         re.compile(r"^def resolve_ci_audit_materialization\("),
         re.compile(r"^(def |class |@)"),
     )
+    lockfile, lockfile_fail = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    findings.extend(lockfile_fail)
+    modules_content_body = _awk_body(
+        lockfile,
+        re.compile(r"^    def records_modules_content\("),
+        re.compile(r"^    (def |@)"),
+    )
     # #3781: one owner decides whether a workspace needs live package
-    # materialization; the user workspace needs it only when packages are locked.
+    # materialization; the user workspace needs it only when the lockfile
+    # records apm_modules content (packages or local bundle staging).
     if not (
         _body_has(
             materialization_body,
             "get_workspace_deploy_root(project_root) != project_root.resolve()",
         )
-        and _body_has(materialization_body, "lockfile.get_package_dependencies()")
+        and _body_has(materialization_body, "lockfile.records_modules_content()")
+        and _body_has(modules_content_body, "self.get_package_dependencies()")
+        and _body_has(modules_content_body, "self.local_staging_slugs()")
         and _body_has(materialization_body, "prepare_ci_audit_replay(")
         and "resolve_ci_audit_materialization" in audit_gate_calls
         and not {"get_workspace_deploy_root", "prepare_ci_audit_replay"} & audit_gate_calls
         and not _body_has(audit_gate_body, "apm_modules")
+        and not _body_has(audit_gate_body, "APM_MODULES_DIR")
     ):
         findings.append(
             _summary(
@@ -726,7 +737,7 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
                 _AUDIT_REPLAY_OWNER,
                 "CI audit must ask resolve_ci_audit_materialization whether a workspace "
                 "needs package materialization (resolved identity; user scope only when "
-                "packages are locked)",
+                "the lockfile records apm_modules content)",
             )
         )
     findings.extend(

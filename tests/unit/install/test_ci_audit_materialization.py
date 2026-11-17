@@ -30,6 +30,16 @@ _ONE_PACKAGE = (
     "  package_type: apm_package\n"
     "  deployed_files: []\n"
 )
+_SELF_CONTENT_ONLY = (
+    "lockfile_version: '1'\n"
+    "dependencies: []\n"
+    "local_deployed_files:\n- .copilot/agents/kit-agent.agent.md\n"
+)
+_STAGED_BUNDLE_ONLY = (
+    "lockfile_version: '1'\n"
+    "dependencies: []\n"
+    "local_staged_files:\n- apm_modules/my-bundle/.apm/instructions/a.instructions.md\n"
+)
 
 
 def _workspace(root: Path, lockfile: str) -> Path:
@@ -58,7 +68,11 @@ def replay_calls(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     return calls
 
 
-@pytest.mark.parametrize("lockfile", [_NO_PACKAGES, "lockfile_version: '1'\ndependencies: []\n"])
+@pytest.mark.parametrize(
+    "lockfile",
+    [_NO_PACKAGES, "lockfile_version: '1'\ndependencies: []\n", _SELF_CONTENT_ONLY],
+    ids=["mcp-only", "empty", "self-content-only"],
+)
 def test_user_workspace_without_packages_needs_no_modules(
     user_home: Path, replay_calls: list[Path], lockfile: str
 ) -> None:
@@ -70,10 +84,13 @@ def test_user_workspace_without_packages_needs_no_modules(
     assert replay_calls == []
 
 
-def test_user_workspace_with_packages_reports_missing_materialization(
-    user_home: Path, replay_calls: list[Path]
+@pytest.mark.parametrize(
+    "lockfile", [_ONE_PACKAGE, _STAGED_BUNDLE_ONLY], ids=["package", "staging"]
+)
+def test_user_workspace_with_modules_content_reports_missing_materialization(
+    user_home: Path, replay_calls: list[Path], lockfile: str
 ) -> None:
-    root = _workspace(user_home, _ONE_PACKAGE)
+    root = _workspace(user_home, lockfile)
 
     result = resolve_ci_audit_materialization(root)
 

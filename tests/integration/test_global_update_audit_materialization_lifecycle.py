@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
@@ -109,7 +110,10 @@ def test_global_update_then_audit_passes_for_released_user_lockfiles(
     # The service-only update path never materializes packages; none are locked.
     assert not (user_root / "apm_modules").exists()
 
+    before = ArtifactSnapshot.capture(scene.isolated.home)
     _assert_green(*scene.audit(user_root))
+    assert_unchanged(before, ArtifactSnapshot.capture(scene.isolated.home))
+    assert not (user_root / "apm_modules").exists()
 
     scene.ok("install", "--global", "--no-policy", *_TARGETS)
     _assert_green(*scene.audit(user_root))

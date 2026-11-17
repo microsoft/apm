@@ -153,7 +153,8 @@ def resolve_ci_audit_materialization(
     A live ``apm_modules/`` tree is used as-is. A project checkout without one
     gets a lock-pinned scratch replay. The user workspace (``$APM_HOME``) is
     never cold-replayed: it needs ``apm_modules/`` only when the lockfile
-    records packages that install materializes there. A lockfile holding only
+    records content installed there (packages or local bundle staging,
+    ``LockFile.records_modules_content``). A lockfile holding only
     MCP/LSP servers or the workspace's own content needs none, whichever of
     ``apm install -g`` or ``apm update -g`` wrote it (#3781).
     """
@@ -172,7 +173,7 @@ def resolve_ci_audit_materialization(
             lockfile = LockFile.read(lockfile_path)
         except (LockfileFormatError, OSError):
             lockfile = None
-        if lockfile is not None and not lockfile.get_package_dependencies():
+        if lockfile is not None and not lockfile.records_modules_content():
             return CiAuditMaterialization()
         return CiAuditMaterialization(
             error=(

@@ -23,8 +23,8 @@ Global audit also checks resolved external deployment roots such as
 those roots for drift. `apm audit --ci` also scans target-governed external
 subtrees for content integrity. Neither mode modifies those roots.
 Auditing the user metadata workspace (`~/.apm`) still requires its installed
-`apm_modules/` when `apm.lock.yaml` records packages; if missing, restore it
-with `apm install --global`. A user lockfile with only MCP/LSP servers or your
+`apm_modules/` when `apm.lock.yaml` records packages or local bundle staging;
+if missing, restore it with `apm install --global`. A user lockfile with only MCP/LSP servers or your
 own `~/.apm` content needs no `apm_modules/`, so `apm audit --ci` passes after
 `apm update -g` as it does after `apm install -g`. Project scratch replay does
 not enable cold replay for global installations.

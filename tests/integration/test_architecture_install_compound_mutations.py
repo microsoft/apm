@@ -687,8 +687,28 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/install/audit_replay.py",
         _replace(
+            "if lockfile is not None and not lockfile.records_modules_content():",
             "if lockfile is not None and not lockfile.get_package_dependencies():",
-            "if lockfile is not None and False:",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-modules-content-staging",
+        AUDIT_RULE,
+        "src/apm_cli/deps/lockfile.py",
+        _replace(
+            "return bool(self.get_package_dependencies() or self.local_staging_slugs())",
+            "return bool(self.get_package_dependencies())",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-command-modules-constant-probe",
+        AUDIT_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "    prepared_replay = materialization.prepared_replay\n",
+            "    prepared_replay = materialization.prepared_replay\n"
+            "    if not (cfg.project_root / APM_MODULES_DIR).exists():\n"
+            "        prepared_replay = None\n",
         ),
     ),
     CompoundMutation(

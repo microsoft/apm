@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm audit --ci` run from `~/.apm` no longer fails with "installed package materialization is missing" after `apm update -g` when the user manifest declares no APM packages (only MCP/LSP servers or your own `~/.apm` content); it still fails closed when the user lockfile records packages and `~/.apm/apm_modules` is gone. (#3797)
+- `apm audit --ci` run from `~/.apm` no longer fails with "installed package materialization is missing" after `apm update -g` when the user manifest declares no APM packages (only MCP/LSP servers or your own `~/.apm` content); it still fails closed when the user lockfile records packages or local bundle staging and `~/.apm/apm_modules` is gone. (#3797)
 
 ## [0.36.0] - 2026-11-17
 
