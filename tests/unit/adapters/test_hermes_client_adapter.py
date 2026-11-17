@@ -20,6 +20,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.adapters.client.hermes import HermesClientAdapter
 from apm_cli.factory import ClientFactory
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
@@ -278,6 +280,137 @@ class TestHermesConfigSecurity(unittest.TestCase):
                 self.assertTrue(adapter.update_config({"demo": {"command": "npx"}}))
             data = load_yaml(cfg_path)
             self.assertIn("demo", data["mcp_servers"])
+
+
+# --- #3749: documented Hermes keys survive the render -------------------------
+
+_STDIO = {
+    "name": "fidelity-stdio",
+    "registry": False,
+    "transport": "stdio",
+    "command": "node",
+    "args": ["server.js"],
+    "env": {"MODE": "safe"},
+    "cwd": "/srv/fixture",
+    "extra": {"timeout": 120, "connect_timeout": 15, "httpUrl": "https://evil.invalid"},
+}
+_SSE = {
+    "name": "fidelity-sse",
+    "registry": False,
+    "transport": "sse",
+    "url": "https://sse.example.invalid/sse",
+    "extra": {"auth": "oauth", "serverUrl": "https://evil.invalid", "enabled": False},
+}
+_HTTP = {
+    "name": "fidelity-http",
+    "registry": False,
+    "transport": "streamable-http",
+    "url": "https://http.example.invalid/mcp",
+    "headers": {"X-Tenant": "acme"},
+}
+
+
+def _info(declaration: dict) -> dict:
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+    return MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(declaration))
+
+
+@pytest.fixture
+def hermes(tmp_path, monkeypatch) -> HermesClientAdapter:
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    return HermesClientAdapter()
+
+
+def test_stdio_render_keeps_cwd_and_passthrough_keys(hermes) -> None:
+    assert hermes.render_server_config(_info(_STDIO)) == {
+        "command": "node",
+        "args": ["server.js"],
+        "env": {"MODE": "safe"},
+        "cwd": "/srv/fixture",
+        "timeout": 120,
+        "connect_timeout": 15,
+        "enabled": True,
+    }
+
+
+def test_sse_render_sets_transport_and_keeps_auth(hermes) -> None:
+    # Denylisted aliases (serverUrl, enabled) never reach the entry.
+    assert hermes.render_server_config(_info(_SSE)) == {
+        "url": "https://sse.example.invalid/sse",
+        "transport": "sse",
+        "auth": "oauth",
+        "enabled": True,
+    }
+
+
+def test_streamable_http_render_has_no_transport_key(hermes) -> None:
+    assert hermes.render_server_config(_info(_HTTP)) == {
+        "url": "https://http.example.invalid/mcp",
+        "headers": {"X-Tenant": "acme"},
+        "enabled": True,
+    }
+
+
+def test_registry_sse_remote_sets_transport(hermes) -> None:
+    info = {"name": "srv", "id": "", "remotes": [{"type": "sse", "url": "https://r.invalid"}]}
+    rendered = hermes.render_server_config(info)
+    assert rendered == {"url": "https://r.invalid", "transport": "sse", "enabled": True}
+
+
+def test_write_preserves_unrelated_keys_and_foreign_servers(hermes, tmp_path) -> None:
+    path = tmp_path / "hermes-home" / "config.yaml"
+    path.parent.mkdir()
+    foreign = {"command": "user-owned", "enabled": False}
+    dump_yaml({"model": {"provider": "p"}, "mcp_servers": {"user-own": foreign}}, path)
+
+    rendered = {d["name"]: hermes.render_server_config(_info(d)) for d in (_STDIO, _SSE)}
+    assert hermes.update_config(rendered)
+    first = path.read_bytes()
+    assert hermes.update_config(rendered)
+
+    data = load_yaml(path)
+    assert path.read_bytes() == first
+    assert data["model"] == {"provider": "p"}
+    assert data["mcp_servers"]["user-own"] == foreign
+    assert data["mcp_servers"]["fidelity-stdio"]["cwd"] == "/srv/fixture"
+    assert data["mcp_servers"]["fidelity-sse"]["transport"] == "sse"
+
+
+@pytest.mark.parametrize("declaration", [_STDIO, _SSE], ids=["stdio-cwd", "sse"])
+def test_v036_write_heals_and_foreign_edit_is_preserved(hermes, declaration) -> None:
+    from apm_cli.install.mcp.ownership import (
+        NativeMcpConnectionState,
+        compare_native_mcp_connection,
+        mcp_native_hash,
+        native_comparison_clients,
+    )
+
+    assert "hermes" in native_comparison_clients(["hermes"], project_root=None, user_scope=True)
+    info = _info(declaration)
+    current = hermes.render_server_config(info)
+    v036 = HermesClientAdapter._v036_render(current)
+    assert v036 != current
+
+    def compare(native: dict, native_hash: str | None) -> NativeMcpConnectionState:
+        return compare_native_mcp_connection(
+            hermes,
+            declaration["name"],
+            requested_info=info,
+            stored_config=declaration,
+            managed=True,
+            existing_configs={declaration["name"]: native},
+            native_hash=native_hash,
+            declaration_changed=False,
+        )
+
+    healed = NativeMcpConnectionState.UPDATE_MANAGED
+    assert compare(v036, mcp_native_hash(v036)) is healed
+    assert compare(v036, None) is healed
+    assert compare(current, mcp_native_hash(current)) is NativeMcpConnectionState.MATCHING_MANAGED
+    edited = {**v036, "enabled": False}
+    assert compare(edited, mcp_native_hash(v036)) is NativeMcpConnectionState.CONFLICT
 
 
 if __name__ == "__main__":

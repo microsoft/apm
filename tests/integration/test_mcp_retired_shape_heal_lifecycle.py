@@ -105,8 +105,11 @@ def _assert_healed(scene: HarnessScene, *, user: bool, claims: bool = True) -> N
             assert "antigravity" not in scene.claimed_runtimes(name, user=user), name
     # Stale APM-owned SSE entries are removed once SSE is unsupported there.
     assert not {"heal-sse", "heal-registry"} & antigravity.keys(), antigravity
-    # The Hermes row (transport: sse, cwd) lands with #3749, which restores
-    # its assertions here.
+    for name, url in (("heal-sse", _SSE), ("heal-registry", _REGISTRY_SSE)):
+        entry = _entry(scene, "hermes", name, user=user)
+        assert (entry.get("url"), entry.get("transport")) == (url, "sse"), (name, entry)
+    assert "transport" not in _entry(scene, "hermes", "heal-streamable", user=user)
+    assert _entry(scene, "hermes", "heal-stdio", user=user).get("cwd") == "/srv/heal-fixture"
 
 
 def _snapshot(scene: HarnessScene, *, user: bool) -> dict[str, bytes | None]:
