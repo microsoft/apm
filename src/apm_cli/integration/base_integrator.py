@@ -544,13 +544,14 @@ class BaseIntegrator:
         """Adopt *target_path* when it is identical to what would be deployed.
 
         Encapsulates the ``is_content_identical_to_source`` + append pattern
-        so secondary call sites in agent/prompt/hook integrators share a
-        single predicate call instead of repeating the three-line block.
+        for byte-preserving call sites (hook bundles) that deploy the source
+        verbatim. Writers that transform content (agents, prompts) render
+        first and adopt via :meth:`_check_adopt_or_skip` with
+        ``expected_content`` instead.
 
         ``lf_normalized_deploy`` is forwarded to
-        :meth:`is_content_identical_to_source`: LF-normalizing deployers
-        (agent, prompt) pass ``True``; byte-preserving deployers (hook,
-        kiro-hook) keep the ``False`` default.
+        :meth:`is_content_identical_to_source`; byte-preserving deployers
+        (hook, kiro-hook) keep the ``False`` default.
 
         Returns ``True`` and appends *target_path* to *target_paths* when the
         files are identical; returns ``False`` and leaves *target_paths*
