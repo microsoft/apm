@@ -11,12 +11,14 @@ from apm_cli.core.target_detection import (
     EXPERIMENTAL_TARGETS,
     MCP_ONLY_TARGETS,
     VALID_TARGET_VALUES,
+    EffectiveTargetDecision,
     TargetParamType,
     can_dedup_agents_md_instructions,
+    canonical_policy_target_name,
+    canonical_policy_target_names,
     detect_target,
     get_dedup_rules_dir,
     get_target_description,
-    normalize_policy_targets,
     normalize_target_list,
     should_compile_agents_md,
     should_compile_claude_md,
@@ -958,36 +960,84 @@ class TestIntelliJConstantGuards:
             assert t in result
 
 
-class TestNormalizePolicyTargets:
-    """Direct contract tests for MCP-only policy target normalization."""
+class TestPolicyTargetProjection:
+    """Contract tests for the compilation-target policy projection (#3732)."""
 
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
             (None, None),
-            ("intellij", "copilot"),
-            (["intellij", "claude"], ["copilot", "claude"]),
-            (["intellij", "copilot"], ["copilot"]),
+            ("intellij", ("copilot",)),
+            (["intellij", "claude"], ("copilot", "claude")),
+            (["intellij", "copilot"], ("copilot",)),
+            ("vscode", ("copilot",)),
+            ("agents", ("copilot",)),
+            ("agy", ("antigravity",)),
+            (["claude", "vscode"], ("claude", "copilot")),
         ],
     )
-    def test_normalizes_shape_and_deduplicates(
+    def test_decision_projects_aliases_and_mcp_only_targets(
         self,
         value: str | list[str] | None,
-        expected: str | list[str] | None,
+        expected: tuple[str, ...] | None,
     ) -> None:
-        """Normalize MCP-only values while preserving scalar/list shape."""
-        assert normalize_policy_targets(value) == expected
+        """The decision projection resolves aliases and MCP-only targets."""
+        assert EffectiveTargetDecision(value, "apm.yml").canonical_targets == expected
+
+    def test_decision_expands_all(self) -> None:
+        """``all`` projects to every target an install deploys."""
+        projected = EffectiveTargetDecision("all", "apm.yml").canonical_targets
+        assert projected is not None
+        assert "all" not in projected
+        assert {"claude", "copilot"} <= set(projected)
+
+    def test_runtime_targets_keep_vscode_distinct(self) -> None:
+        """Policy canonicalization must not move the VS Code MCP destination."""
+        decision = EffectiveTargetDecision(["claude", "vscode"], "apm.yml")
+        assert decision.canonical_targets == ("claude", "copilot")
+        assert "vscode" in (decision.runtime_targets or ())
 
     def test_unmapped_mcp_only_target_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Reject an MCP-only target without a canonical policy mapping."""
+        from dataclasses import replace
+
+        real = target_detection.get_target_capability
         monkeypatch.setattr(
             target_detection,
-            "MCP_ONLY_TARGETS",
-            frozenset({*MCP_ONLY_TARGETS, "unmapped-mcp"}),
+            "get_target_capability",
+            lambda name: replace(real(name), primitive_profile=None),
         )
 
         with pytest.raises(RuntimeError, match="has no canonical policy mapping"):
-            normalize_policy_targets("unmapped-mcp")
+            _ = EffectiveTargetDecision("intellij", "apm.yml").canonical_targets
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [
+            (None, None),
+            ((), ()),
+            (("vscode", "claude"), ("copilot", "claude")),
+            (("Copilot", "agents"), ("copilot",)),
+            (("all",), None),
+            (("claude", "all"), None),
+            (("agy", "unknown-tool"), ("antigravity", "unknown-tool")),
+        ],
+    )
+    def test_policy_names_canonicalize(
+        self,
+        values: tuple[str, ...] | None,
+        expected: tuple[str, ...] | None,
+    ) -> None:
+        """Policy allow lists compare on profiles; ``all`` means unrestricted."""
+        assert canonical_policy_target_names(values) == expected
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(None, None), ("vscode", "copilot"), ("all", "all"), ("claude", "claude")],
+    )
+    def test_policy_enforce_canonicalizes(self, value: str | None, expected: str | None) -> None:
+        """A single enforced target resolves its alias; ``all`` is kept."""
+        assert canonical_policy_target_name(value) == expected
 
 
 # ---------------------------------------------------------------------------

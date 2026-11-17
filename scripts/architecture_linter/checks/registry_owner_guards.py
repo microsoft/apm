@@ -14,6 +14,8 @@ registry-delegation-target-vocabulary   AC1 "Manifest target consumers must
                                         use canonical_targets"
 registry-delegation-install-target-     AC1 "Package, MCP, and LSP phases
 selection                               must share EffectiveTargetDecision"
+registry-delegation-policy-target-      Compilation-target policy judges
+projection                              EffectiveTargetDecision.canonical_targets
 registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
@@ -316,6 +318,109 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
         message="manifest target consumers must use canonical_targets",
         exempt_marker=EXEMPT_MARKER,
     )
+
+
+_POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
+    {"run_dependency_policy_checks", "run_policy_preflight"}
+)
+_POLICY_TARGET_CHECK = "_check_compilation_target"
+_POLICY_TARGET_SEAM_PARAMETER = "effective_target"
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_canonical_targets(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "canonical_targets"
+
+
+def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violation]:
+    """Compilation-target policy judges only the canonical decision projection.
+
+    Every target selection handed to the policy seams must be an
+    ``EffectiveTargetDecision.canonical_targets`` expression, the check itself
+    must never read the raw manifest, and no sibling normalizer may exist.
+    """
+    rule_id = "registry_delegation.policy_target_projection"
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            line = getattr(node, "lineno", 1)
+            if isinstance(node, FUNCTION_NODES) and node.name == "normalize_policy_targets":
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "policy target normalization belongs to "
+                        "EffectiveTargetDecision.canonical_targets",
+                        line=line,
+                    )
+                )
+            elif isinstance(node, FUNCTION_NODES) and node.name == _POLICY_TARGET_CHECK:
+                first = node.args.args[0].arg if node.args.args else None
+                if first != "targets":
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must take canonical targets, not {first}",
+                            line=line,
+                        )
+                    )
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            anchor = index.definition_anchor(node)
+            # A seam may forward its own already-projected parameter.
+            passthrough = isinstance(anchor, FUNCTION_NODES) and anchor.name in _POLICY_TARGET_SEAMS
+            if name in _POLICY_TARGET_SEAMS:
+                for keyword in node.keywords:
+                    if keyword.arg != _POLICY_TARGET_SEAM_PARAMETER:
+                        continue
+                    value = keyword.value
+                    if isinstance(value, ast.Constant) and value.value is None:
+                        continue
+                    if passthrough and _is_name(value, _POLICY_TARGET_SEAM_PARAMETER):
+                        continue
+                    if not _is_canonical_targets(value):
+                        findings.append(
+                            violation(
+                                rule_id,
+                                path,
+                                f"{name} effective_target must be an "
+                                "EffectiveTargetDecision.canonical_targets projection",
+                                line=line,
+                            )
+                        )
+            elif name == _POLICY_TARGET_CHECK:
+                first_arg = node.args[0] if node.args else None
+                if not (
+                    _is_canonical_targets(first_arg)
+                    or (passthrough and _is_name(first_arg, _POLICY_TARGET_SEAM_PARAMETER))
+                ):
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must receive "
+                            "EffectiveTargetDecision.canonical_targets",
+                            line=line,
+                        )
+                    )
+    return findings
 
 
 def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation]:
@@ -1223,6 +1328,15 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-target-vocabulary",),
         description="Manifest target consumers must use core/target_catalog canonical targets.",
         check=_check_target_vocabulary,
+    ),
+    Rule(
+        id="registry_delegation.policy_target_projection",
+        group=GROUP,
+        guard_ids=("registry-delegation-policy-target-projection",),
+        description=(
+            "Compilation-target policy judges EffectiveTargetDecision.canonical_targets only."
+        ),
+        check=_check_policy_target_projection,
     ),
     Rule(
         id="registry_delegation.install_target_selection",
