@@ -276,6 +276,38 @@ def test_case_variant_lookup_fails_closed_on_distinct_collisions(tmp_path: Path)
         )
 
 
+class _RecordingStaging:
+    def __init__(self) -> None:
+        self.relocations: list[tuple[str, str]] = []
+
+    def relocate_path(self, source: Path, destination: Path) -> None:
+        self.relocations.append((source.name, destination.parent.name + "/" + destination.name))
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("declared", "relocations"),
+    (
+        ("Test/C", []),
+        ("test/c", [("C", "test/c")]),
+    ),
+)
+def test_case_variant_owner_holding_another_package_is_not_a_collision(
+    tmp_path: Path, declared: str, relocations: list[tuple[str, str]]
+) -> None:
+    """Case-sensitive FS: ``Test/C`` beside ``test/e`` re-installs under either casing."""
+    modules = tmp_path / "apm_modules"
+    reader = CaseSensitiveMaterializationReader(modules, ("Test/C", "test/e"))
+    staging = _RecordingStaging()
+
+    selected = prepare_materialization_path(
+        DependencyReference.parse(declared), modules, staging, reader=reader
+    )
+
+    assert selected == modules.joinpath(*declared.split("/"))
+    assert staging.relocations == relocations
+
+
 def test_virtual_subpath_casing_remains_identity_significant(tmp_path: Path) -> None:
     """Casefolding stops at the repository boundary for nested packages."""
     modules = tmp_path / "apm_modules"

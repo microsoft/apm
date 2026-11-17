@@ -200,6 +200,36 @@ def test_relocation_rollback_reverses_nested_case_changes(tmp_path: Path) -> Non
 
 
 @pytest.mark.windows_compat
+def test_cross_parent_relocation_prunes_emptied_source_ancestors(tmp_path: Path) -> None:
+    """Moving the last package out of an owner tree must not leave it behind.
+
+    On case-sensitive filesystems ``Test/C/packages/a`` moves beside
+    ``test/c/packages/b``; a leftover empty ``Test/C`` tree is later counted
+    as a second package directory for ``test/c``. Rollback restores the tree.
+    """
+    modules = tmp_path / "apm_modules"
+    source = modules / "Old" / "c" / "packages" / "a"
+    source.mkdir(parents=True)
+    (source / "apm.yml").write_text("name: a\n", encoding="utf-8")
+    sibling = modules / "new" / "c" / "packages" / "b"
+    sibling.mkdir(parents=True)
+    staging = ResolutionStagingSession(modules)
+
+    destination = modules / "new" / "c" / "packages" / "a"
+    staging.relocate_path(source, destination)
+
+    assert (destination / "apm.yml").is_file()
+    assert not (modules / "Old").exists()
+    assert sibling.is_dir()
+
+    staging.rollback()
+
+    assert (source / "apm.yml").read_text(encoding="utf-8") == "name: a\n"
+    assert not destination.exists()
+    assert sibling.is_dir()
+
+
+@pytest.mark.windows_compat
 def test_case_only_relocation_updates_spelling_and_rolls_back(tmp_path: Path) -> None:
     """Case-only rename behavior is identical on sensitive and insensitive filesystems."""
     modules = tmp_path / "apm_modules"

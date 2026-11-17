@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Azure DevOps installs, updates, clones, ref lookups, file downloads, org policy discovery and marketplace reads now use one credential chain: `ADO_APM_PAT`, then the Azure CLI bearer, then your Git credential helper (for example Git Credential Manager) for that repository. A sign-in redirect, an HTML sign-in page, HTTP 401 or 403 all count as an authentication failure, so users without a PAT or `az` session install from Azure DevOps and read ADO-hosted org policy through Git Credential Manager instead of failing. The helper credential is sent as Basic `username:password`, as Git does; `GCM_INTERACTIVE=0` is set when stdin is not a terminal or `CI` is set; and Azure DevOps requests use only the credential chosen by the auth chain. No live Azure DevOps organization was available: this follows the documented Azure DevOps and Git credential contracts and is validated by hermetic tests (#3752, #3758, #PR)
 - When `az` cannot issue an Azure DevOps token, the error now shows the Azure CLI's reason (such as an `AADSTS` code) and `az login` instead of claiming Azure DevOps rejected a token; an exhausted chain lists every step in order, and `--verbose` shows each attempt (#3753, #PR)
 - GitHub org policy discovery now uses the per-org `GITHUB_APM_PAT_<ORG>` credential and the same fallback chain as dependency installs (#PR)
+### Changed
+
+- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 
 ## [0.36.0] - 2026-11-17
 
