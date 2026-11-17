@@ -1,0 +1,38 @@
+lockfile_version: '1'
+apm_version: 0.35.1
+dependencies: []
+deployments:
+- kind: uri
+  target: mcp
+  value: heal-http
+  runtime: codex
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:436267c3122ea669d9515cc710a514f72dac6f8b3a0bc8d91d52a6f3ac6c0898
+- kind: uri
+  target: mcp
+  value: io.github.apm-fixture/heal-registry
+  runtime: codex
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:d49dd98f2fd8b7968300574b22a3bef4e552fe06b11a407988951cd46e5dbe39
+mcp_servers:
+- heal-http
+- io.github.apm-fixture/heal-registry
+mcp_configs:
+  heal-http:
+    name: heal-http
+    transport: http
+    registry: false
+    url: https://http.example.invalid/mcp
+  io.github.apm-fixture/heal-registry:
+    name: io.github.apm-fixture/heal-registry
+    registry: __REGISTRY_URL__
+mcp_target_servers:
+  codex:
+  - heal-http
+  - io.github.apm-fixture/heal-registry

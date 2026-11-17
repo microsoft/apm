@@ -637,14 +637,14 @@ def _create_plugin_json(config, mode: str = "agent", target_path: Path | None = 
     """
     import json
 
+    # No license is scaffolded: the author must choose one deliberately.
     if mode == "claude":
-        # Preserve legacy Claude scaffold byte-for-byte
+        # Preserve the legacy Claude scaffold shape
         plugin_data = {
             "name": config["name"],
             "version": config.get("version", "0.1.0"),
             "description": config.get("description", ""),
             "author": {"name": config.get("author", "")},
-            "license": "MIT",
         }
     else:
         # Agent Plugins v1 canonical scaffold
@@ -660,7 +660,6 @@ def _create_plugin_json(config, mode: str = "agent", target_path: Path | None = 
             "version": config.get("version", "0.1.0"),
             "description": config.get("description", ""),
             "author": {"name": config.get("author", "")},
-            "license": "MIT",
             "extensions": {
                 COM_MICROSOFT_APM_NAMESPACE: {"schemaVersion": COM_MICROSOFT_APM_SCHEMA_VERSION}
             },

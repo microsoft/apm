@@ -30,6 +30,7 @@ from typing import ClassVar
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
 from ...utils.path_security import PathTraversalError, validate_path_segments
+from ._remote_shapes import remote_shape_row
 from .base import _ENV_VAR_RE, _translate_env_placeholder
 from .copilot import CopilotClientAdapter
 
@@ -122,6 +123,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     Scope routing is governed by the ``user_scope`` constructor flag inherited
     from :class:`MCPClientAdapter` -- not by post-construction monkey-patching.
     """
+
+    remote_shape = remote_shape_row("claude")
 
     supports_user_scope: bool = True
     _client_label: str = "Claude Code"

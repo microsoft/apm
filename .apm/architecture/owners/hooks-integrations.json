@@ -91,6 +91,20 @@
       ]
     },
     {
+      "id": "mcp-remote-transport-normalization",
+      "decision": "MCP remote transport vocabulary: registry v0.1 type, legacy transport_type and manifest transport normalized to streamable-http or sse, recorded at ingestion and read by every adapter and apm mcp show",
+      "owner": "mcp_transport.py (canonical_remote_transport, TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE, CANONICAL_REMOTE_TRANSPORTS)",
+      "selectors": ["src/apm_cli/mcp_transport.py"],
+      "guards": ["hooks-integrations-mcp-remote-transport-normalization"]
+    },
+    {
+      "id": "mcp-remote-shape-table",
+      "decision": "Per-harness remote MCP output shape (URL key, transport discriminator, unsupported transports and retired APM renders), one evidence-backed row per registered runtime, plus the warn-skip-unclaimed disposition for unsupported transports",
+      "owner": "adapters/client/_remote_shapes.py (REMOTE_SHAPES, remote_shape_of, skip_unsupported_remote)",
+      "selectors": ["src/apm_cli/adapters/client/_remote_shapes.py"],
+      "guards": ["hooks-integrations-mcp-remote-shape-table"]
+    },
+    {
       "id": "jetbrains-copilot-mcp-config-path",
       "decision": "JetBrains Copilot MCP config path",
       "owner": "adapters/client/intellij.py",

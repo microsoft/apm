@@ -122,6 +122,16 @@
       "owner": "compilation/footer.py (build_generation_footer)",
       "selectors": ["src/apm_cli/compilation/footer.py"],
       "guards": ["contracts-tooling-generation-footer"]
+    },
+    {
+      "id": "literal-affix-removal",
+      "decision": "Literal prefix/suffix removal on identity and path text (str.removeprefix/removesuffix; multi-character strip arguments are allowlisted character sets only)",
+      "owner": "models/dependency/reference.py (repository segment .git suffix) and marketplace/output_mappers.py (pluginRoot prefix); allowlist in scripts/architecture_linter/checks/contracts_strip_charset.py",
+      "selectors": [
+        "src/apm_cli/marketplace/output_mappers.py",
+        "scripts/architecture_linter/checks/contracts_strip_charset.py"
+      ],
+      "guards": ["contracts-tooling-strip-charset"]
     }
   ]
 }

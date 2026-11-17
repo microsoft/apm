@@ -687,6 +687,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Root replacement matching becomes host- and endpoint-blind.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-strip-charset",
+        rule_id="contracts-tooling-strip-charset",
+        path="src/apm_cli/models/dependency/reference.py",
+        old='part.removesuffix(".git")',
+        new='part.rstrip(".git")',
+        intent="Repository segment validation strips a .git character set again (#3715).",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-claude-mcp-paths",
         rule_id="mutation_writes.claude_mcp_paths",
         path="src/apm_cli/integration/mcp_integrator.py",
@@ -765,6 +773,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='        "environment",\n',
         new="",
         intent="Shared MCP model stops denying the OpenCode environment alias.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-mcp-remote-shape-table",
+        rule_id="mutation_writes.mcp_remote_shape_table",
+        path="src/apm_cli/adapters/client/antigravity.py",
+        old='    remote_shape = remote_shape_row("antigravity")\n',
+        new="",
+        intent="Antigravity silently inherits Gemini's remote shape row (httpUrl).",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-mcp-remote-transport-normalization",
+        rule_id="mutation_writes.mcp_remote_transport_normalization",
+        path="src/apm_cli/adapters/client/kiro.py",
+        old='remote, runtime_label="Kiro", server_name=server_name',
+        new='{"transport": remote.get("transport_type")}, runtime_label="Kiro"',
+        intent="Kiro re-derives the remote transport from the raw legacy key.",
     ),
     MutationCase(
         guard_id="hooks-integrations-mcp-target-selection",
@@ -1792,6 +1816,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="ip = parse_host_address(bare)",
         new="ip = None  # bypass",
         intent="MCP warnings stop classifying host literals through utils/net.py.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-origin-bounded-redirect",
+        rule_id="transport-platform-origin-bounded-redirect",
+        path="src/apm_cli/deps/registry/client.py",
+        old="            return origin_bounded_request(\n                self._session,\n",
+        new="            return self._session.request(\n",
+        intent="Registry requests bypass the origin-bounded redirect owner.",
     ),
     MutationCase(
         guard_id="transport-platform-ref-freshness",
