@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)
+### Fixed
+
+- With `PROXY_REGISTRY_ONLY=1`, the semver-range error and the registry proxy guide no longer claim the proxy has no listing; they explain that APM fetches exact versions only and name the two supported routes: exact pins with lockfile replay, or a registry implementing the APM Registry HTTP API. (#3777)
 
 ## [0.36.0] - 2026-11-17
 
