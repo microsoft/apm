@@ -18,8 +18,11 @@ publishes without a green full validation of the exact SHA, either earlier
 full validation, never to promotion.
 
 Evidence for a SHA is a successful full run (schedule or repository_dispatch)
-of build-release.yml on main for that exact SHA. Only a full run exercises
-every platform's integration lanes, so nothing weaker promotes a tag.
+of build-release.yml on main for that exact SHA whose ``Integration Tests
+Summary`` job succeeded. Only a full run exercises every platform's
+integration lanes, so nothing weaker promotes a tag; a green dispatch that
+ran no integration (for example ``publish-existing-tag`` recovery) is not
+evidence.
 """
 
 from __future__ import annotations
@@ -38,6 +41,8 @@ RELEASE_WORKFLOW = "build-release.yml"
 EVIDENCE_BRANCH = "main"
 
 Fetch = Callable[[str, str], Sequence[Mapping[str, object]]]
+FetchJobs = Callable[[str], Sequence[Mapping[str, object]]]
+INTEGRATION_SUMMARY_JOB = "Integration Tests Summary"
 
 
 @dataclass(frozen=True)
@@ -55,7 +60,7 @@ class Plan:
         return self.mode == "full"
 
 
-def find_evidence(sha: str, fetch: Fetch, *, current_run_id: str = "") -> str:
+def find_evidence(sha: str, fetch: Fetch, jobs: FetchJobs, *, current_run_id: str = "") -> str:
     """Return the URL of a green full run of sha on main, or ''."""
     for run in fetch(RELEASE_WORKFLOW, sha):
         if (
@@ -65,12 +70,16 @@ def find_evidence(sha: str, fetch: Fetch, *, current_run_id: str = "") -> str:
             and run.get("head_branch") == EVIDENCE_BRANCH
             and run.get("status") == "completed"
             and run.get("conclusion") == "success"
+            and any(
+                job.get("name") == INTEGRATION_SUMMARY_JOB and job.get("conclusion") == "success"
+                for job in jobs(str(run.get("id")))
+            )
         ):
             return str(run.get("html_url", ""))
     return ""
 
 
-def decide(env: Mapping[str, str], fetch: Fetch) -> Plan:
+def decide(env: Mapping[str, str], fetch: Fetch, jobs: FetchJobs) -> Plan:
     """Map the triggering event to a validation mode, checking tag evidence."""
     event = env.get("EVENT_NAME", "")
     if event in FULL_EVENTS:
@@ -81,7 +90,7 @@ def decide(env: Mapping[str, str], fetch: Fetch) -> Plan:
         return Plan("push", publish=False)
     sha = env.get("SHA", "")
     try:
-        evidence = find_evidence(sha, fetch, current_run_id=env.get("RUN_ID", ""))
+        evidence = find_evidence(sha, fetch, jobs, current_run_id=env.get("RUN_ID", ""))
     except Exception as exc:  # any lookup failure means "no evidence"
         print(f"::warning title=Evidence lookup failed::{exc}; validating in this run.")
         evidence = ""
@@ -97,22 +106,32 @@ def decide(env: Mapping[str, str], fetch: Fetch) -> Plan:
     )
 
 
-def github_fetch(repository: str) -> Fetch:
-    """List workflow runs for a head SHA with the gh CLI (GH_TOKEN from the job)."""
+def _gh_json(path: str) -> Mapping[str, object]:
+    gh = shutil.which("gh") or "gh"
+    result = subprocess.run(  # noqa: S603 - resolved gh, argument vector, no shell
+        [gh, "api", path],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return json.loads(result.stdout)
+
+
+def github_fetch(repository: str) -> tuple[Fetch, FetchJobs]:
+    """List workflow runs for a head SHA, and a run's jobs, with the gh CLI."""
 
     def fetch(workflow: str, sha: str) -> Sequence[Mapping[str, object]]:
         query = urllib.parse.urlencode({"head_sha": sha, "per_page": "100"})
-        gh = shutil.which("gh") or "gh"
-        result = subprocess.run(  # noqa: S603 - resolved gh, argument vector, no shell
-            [gh, "api", f"repos/{repository}/actions/workflows/{workflow}/runs?{query}"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=60,
-        )
-        return list(json.loads(result.stdout).get("workflow_runs", []))
+        data = _gh_json(f"repos/{repository}/actions/workflows/{workflow}/runs?{query}")
+        return list(data.get("workflow_runs", []))  # type: ignore[call-overload]
 
-    return fetch
+    def jobs(run_id: str) -> Sequence[Mapping[str, object]]:
+        query = urllib.parse.urlencode({"filter": "latest", "per_page": "100"})
+        data = _gh_json(f"repos/{repository}/actions/runs/{run_id}/jobs?{query}")
+        return list(data.get("jobs", []))  # type: ignore[call-overload]
+
+    return fetch, jobs
 
 
 def _write(path: str | None, text: str) -> None:
@@ -122,7 +141,7 @@ def _write(path: str | None, text: str) -> None:
 
 
 def main(env: Mapping[str, str]) -> int:
-    plan = decide(env, github_fetch(env.get("REPOSITORY", "")))
+    plan = decide(env, *github_fetch(env.get("REPOSITORY", "")))
     outputs = {
         "mode": plan.mode,
         "publish": str(plan.publish).lower(),
