@@ -104,12 +104,12 @@ class TestEffectiveDependencySelection:
     def test_without_install_context_returns_persisted_selection(self):
         dep_ref = SimpleNamespace(skill_subset=["beta", "alpha"], target_subset=["claude"])
         selection = effective_dependency_selection(dep_ref)
-        assert selection == (("alpha", "beta"), ["claude"])
+        assert selection == (("alpha", "beta"), ["claude"], None)
 
     def test_install_context_adds_cli_overlay(self):
         dep_ref = SimpleNamespace(skill_subset=["alpha"], target_subset=None)
         ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
-        assert effective_dependency_selection(dep_ref, ctx) == (("alpha", "beta"), None)
+        assert effective_dependency_selection(dep_ref, ctx) == (("alpha", "beta"), None, None)
 
     def test_lockfile_records_the_selection_the_owner_deploys(self):
         from apm_cli.install.phases.lockfile import LockfileBuilder
@@ -125,7 +125,7 @@ class TestEffectiveDependencySelection:
 
     def test_first_party_content_has_no_selection(self):
         ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
-        assert effective_dependency_selection(None, ctx) == (None, None)
+        assert effective_dependency_selection(None, ctx) == (None, None, None)
 
     @pytest.mark.parametrize(
         ("deploy", "extra"),
