@@ -68,23 +68,29 @@ _console_stderr: bool = False
 _stderr_console_instance: Any | None = None
 
 
-def _get_console(*, err: bool = False) -> Any | None:
-    """Get Rich console instance if available (singleton, thread-safe).
+def _get_stderr_console() -> Any | None:
+    """Get a Rich console bound to stderr, even when normal output goes to stdout.
 
-    ``err=True`` returns a console bound to stderr even when normal output
-    goes to stdout, for diagnostics that must never mix with command output.
+    For diagnostics that must never mix with command output (for example a
+    deprecation warning ahead of ``--format json``).
     """
-    global _console_instance, _stderr_console_instance
-    if err and not _console_stderr:
-        if _stderr_console_instance is not None or not RICH_AVAILABLE:
-            return _stderr_console_instance
-        with _console_lock:
-            if _stderr_console_instance is None:
-                try:  # noqa: SIM105
-                    _stderr_console_instance = Console(stderr=True)
-                except Exception:
-                    pass
+    global _stderr_console_instance
+    if _console_stderr:
+        return _get_console()
+    if _stderr_console_instance is not None or not RICH_AVAILABLE:
         return _stderr_console_instance
+    with _console_lock:
+        if _stderr_console_instance is None:
+            try:  # noqa: SIM105
+                _stderr_console_instance = Console(stderr=True)
+            except Exception:
+                pass
+    return _stderr_console_instance
+
+
+def _get_console() -> Any | None:
+    """Get Rich console instance if available (singleton, thread-safe)."""
+    global _console_instance
     if _console_instance is not None:
         return _console_instance
     if not RICH_AVAILABLE:
@@ -143,7 +149,7 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
-    console = _get_console(err=err)
+    console = _get_stderr_console() if err else _get_console()
     if console:
         try:
             style_str = color
