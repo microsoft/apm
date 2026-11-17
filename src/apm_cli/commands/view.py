@@ -602,7 +602,7 @@ def display_versions(
     if is_enforce_only():
         logger.error(
             f"Cannot list versions for '{package}' in registry-only mode: "
-            "the registry proxy exposes no version listing and "
+            "APM does not list versions through the registry proxy and "
             "PROXY_REGISTRY_ONLY blocks version enumeration against the source "
             "host. To list versions, unset PROXY_REGISTRY_ONLY; to install, pin "
             "an exact version tag in apm.yml."

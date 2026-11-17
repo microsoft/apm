@@ -112,15 +112,16 @@ rewrites `apm.lock.yaml`.
 | `apm install --mcp` (MCP servers) | No -- separate registry |
 | `apm marketplace` (`marketplace.json` fetch) | Yes; falls back to GitHub Contents API unless `PROXY_REGISTRY_ONLY=1` |
 | Policy file fetch (`apm-policy.yml`) | No -- uses the GitHub API directly |
-| Ref/version enumeration (`apm view <pkg> versions`, `apm outdated`, semver ranges) | No -- the proxy exposes no listing surface; never queries the upstream host when `PROXY_REGISTRY_ONLY=1` |
+| Ref/version enumeration (`apm view <pkg> versions`, `apm outdated`, semver ranges) | No -- APM fetches exact versions only and does not use vendor listing APIs; never queries the upstream host when `PROXY_REGISTRY_ONLY=1` |
 | Ref-to-SHA lookup (GitHub commits API) | No -- skipped when `PROXY_REGISTRY_ONLY=1`; the lockfile records the ref name |
 
 ### Version enumeration and semver ranges
 
-The proxy serves a package only at a ref it is given
-(`{base}/{owner}/{repo}/zip/refs/tags/{ref}`); it has no endpoint that
-lists the available tags. Resolving a semver range therefore needs a
-version listing that only the upstream host can provide.
+APM fetches a package through the proxy only at a ref it is given
+(`{base}/{owner}/{repo}/zip/refs/tags/{ref}`). It does not call vendor
+listing APIs (for example Artifactory's), so through the proxy APM
+cannot list the available tags. Resolving a semver range therefore needs
+a version listing that only the upstream host can provide.
 
 With `PROXY_REGISTRY_ONLY=1`, APM does not query the upstream host for
 that listing. The consequences are:
@@ -147,11 +148,20 @@ Pin exact versions when running registry-only:
 dependencies:
   apm:
     - myorg/my-package#v1.4.0   # exact upstream tag; resolves through the proxy
-    # - myorg/my-package#1.4.x  # needs a listing the proxy cannot serve
+    # - myorg/my-package#1.4.x  # a range needs a version listing; fails in registry-only mode
 ```
 
-Unset `PROXY_REGISTRY_ONLY` if you need range resolution and can reach
-the upstream host.
+Two routes are supported in registry-only mode:
+
+- **Exact pins plus lockfile replay.** Pin the exact upstream tag; once
+  `apm.lock.yaml` records it, installs replay without a listing.
+- **A server that implements the APM Registry HTTP API.** Its
+  [`GET /v1/packages/{owner}/{repo}/versions`](../../reference/registry-http-api/#31-get-v1packagesownerrepoversions--list-versions)
+  endpoint lists versions, so semver ranges resolve. See
+  [Registries](../../guides/registries/) (experimental).
+
+Unset `PROXY_REGISTRY_ONLY` if you need range resolution from the
+upstream host and can reach it.
 
 ### Nested-group repos (GitLab subgroups behind the proxy)
 
@@ -318,8 +328,8 @@ and `apm cache clean`.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `RuntimeError: PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured for '<dep>'` | `PROXY_REGISTRY_ONLY=1` with no `PROXY_REGISTRY_URL`, or dep is on an unproxied host (ADO, MCP) | Set `PROXY_REGISTRY_URL`, or unset `PROXY_REGISTRY_ONLY` for that dep type |
-| `Cannot resolve the range '<constraint>' for '<dep>' in registry-only mode` | A semver range needs a tag listing the proxy cannot serve; see [Version enumeration and semver ranges](#version-enumeration-and-semver-ranges) | Pin the exact upstream tag (`#v1.4.0`), or unset `PROXY_REGISTRY_ONLY` |
-| `Cannot list versions for '<dep>' in registry-only mode` | `apm view <pkg> versions` needs a tag listing the proxy cannot serve | Unset `PROXY_REGISTRY_ONLY` to list versions; pin the exact upstream tag to install |
+| `Cannot resolve the range '<constraint>' for '<dep>' in registry-only mode` | A semver range needs a tag listing; APM does not list versions through the proxy; see [Version enumeration and semver ranges](#version-enumeration-and-semver-ranges) | Pin the exact upstream tag (`#v1.4.0`) and commit `apm.lock.yaml`, or install from a registry that implements the APM Registry HTTP API |
+| `Cannot list versions for '<dep>' in registry-only mode` | `apm view <pkg> versions` needs a tag listing, which APM does not fetch through the proxy | Unset `PROXY_REGISTRY_ONLY` to list versions; pin the exact upstream tag to install |
 | `apm outdated` shows git deps as `unknown` with `PROXY_REGISTRY_ONLY=1` | Ref enumeration is suppressed rather than querying the upstream host | Expected; check for updates with the mode unset |
 | `ERROR: ... locked to direct VCS hosts` | Lockfile predates the proxy | `apm install --update` |
 | HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN` | Verify the token has read on the upstream repo path |
