@@ -335,6 +335,7 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "PLUGIN_LAYOUT.get(head)",
                 "for primitive_kind in spec.primitive_kinds:",
                 "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+                '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})',
             ),
             "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
         )

@@ -34,6 +34,7 @@ RULE_APPROVAL_OUTCOME = "install-deployment-approval-outcome-routing"
 
 
 RULE_AUDIT_POLICY_DISCOVERY = "install-deployment-audit-policy-discovery"
+RULE_POLICY_DISABLE_SWITCH = "install-deployment-policy-disable-switch-owner"
 
 
 RULE_MANIFEST_INHERITANCE = "install-deployment-manifest-inheritance-includes"
@@ -267,4 +268,53 @@ def check_incomplete_chain_routing(provider: FactsProvider) -> tuple[Violation, 
                     f"handling; missing: {_INCOMPLETE_CHAIN}",
                 )
             )
+    return tuple(findings)
+
+
+_SOURCE_TREE = "src/apm_cli/"
+_POLICY_DISABLE_HELPER_DEF = re.compile(r"^def policy_disabled_by_env\(")
+_POLICY_DISABLE_ENV_READ = re.compile(
+    r"""(?:environ(?:\.get)?\s*[\(\[]|getenv\s*\()\s*["']APM_POLICY_DISABLE["']"""
+)
+
+
+def check_policy_disable_switch_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """APM_POLICY_DISABLE has one reader: policy/discovery.py::policy_disabled_by_env.
+
+    Every command that honours the switch must call the helper so the accepted
+    values cannot drift between install, discovery, and audit.
+    """
+    rule_id = RULE_POLICY_DISABLE_SWITCH
+    owner, owner_fail = _configured(provider, _POLICY_DISCOVERY, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
+    findings: list[Violation] = []
+    if _count_re(owner, _POLICY_DISABLE_HELPER_DEF) != 1:
+        findings.append(
+            _report(
+                rule_id,
+                _POLICY_DISCOVERY,
+                "policy/discovery.py must define policy_disabled_by_env exactly once",
+            )
+        )
+    if _count_re(owner, _POLICY_DISABLE_ENV_READ) != 1:
+        findings.append(
+            _report(
+                rule_id,
+                _POLICY_DISCOVERY,
+                "policy/discovery.py must read APM_POLICY_DISABLE exactly once, "
+                "inside policy_disabled_by_env",
+            )
+        )
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(provider, _SOURCE_TREE, excluded=(_POLICY_DISCOVERY,)),
+            pattern=_POLICY_DISABLE_ENV_READ,
+            message="Read APM_POLICY_DISABLE only via policy/discovery.py::policy_disabled_by_env",
+            configured=False,
+            respect_exempt=False,
+        )
+    )
     return tuple(findings)

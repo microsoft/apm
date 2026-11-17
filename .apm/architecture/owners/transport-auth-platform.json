@@ -198,6 +198,16 @@
       "owner": "deps/artifactory_entry.py (_NoNetrcSession)",
       "selectors": ["src/apm_cli/deps/artifactory_entry.py"],
       "guards": ["transport-platform-artifactory-netrc-isolation"]
+    },
+    {
+      "id": "credential-origin-scope",
+      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts",
+      "owner": "utils/http_credentials.py (strip_cross_origin_credential_headers, CredentialScopedSession); deps/registry_proxy.py (RegistryConfig.headers_for); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, marketplace/client.py, adapters/client/copilot.py",
+      "selectors": [
+        "src/apm_cli/utils/http_credentials.py",
+        "src/apm_cli/deps/registry_proxy.py"
+      ],
+      "guards": ["transport-platform-credential-origin-scope"]
     }
   ]
 }

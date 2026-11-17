@@ -18,9 +18,12 @@ Scenarios:
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -283,3 +286,28 @@ def test_decomposed_stored_directory_still_resolves_to_managed_key(tmp_path: Pat
     # On case- and normalization-insensitive filesystems (macOS, Windows) the
     # entry is the managed file; elsewhere the path does not exist at all.
     assert collision is False
+
+
+class TestLinkedDestination:
+    """A symlinked destination is refused regardless of ownership or force."""
+
+    def _link(self, tmp_path: Path, *, dangling: bool) -> Path:
+        target = tmp_path / "outside.md"
+        if not dangling:
+            target.write_text("outside\n", encoding="utf-8")
+        link = tmp_path / "deployed.md"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+        return link
+
+    @pytest.mark.parametrize("dangling", [True, False])
+    @pytest.mark.parametrize("force", [True, False])
+    def test_linked_destination_is_refused(self, tmp_path: Path, dangling: bool, force: bool):
+        link = self._link(tmp_path, dangling=dangling)
+
+        with pytest.raises(PathTraversalError, match="symlinked destination"):
+            BaseIntegrator.check_collision(link, "deployed.md", {"deployed.md"}, force)
+
+        assert (tmp_path / "outside.md").exists() is not dangling

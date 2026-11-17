@@ -190,6 +190,7 @@ deployments:
 | `lsp_config_provenance` | map of strings | no | `server_name -> declaration owner` using `project:.`, `package:<identity>`, or `bundle:<identity>`. Reconciliation uses this field to preserve bundle and surviving-package entries while removing departed owners. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256:<hex>` for `local_deployed_files`. |
+| `local_staged_files` | list | no | Local bundle instructions staged under `apm_modules/<bundle>/.apm/` as `apm compile` input for targets without native instructions (Codex, Gemini, OpenCode). Not deployment claims: audit does not verify them. `apm prune` removes the staging and these rows. |
 | `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
 
 ## Canonical deployment rows

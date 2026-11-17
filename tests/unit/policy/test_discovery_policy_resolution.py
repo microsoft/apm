@@ -694,7 +694,7 @@ class TestIsGithubHost:
 
 
 class TestGetTokenForHost:
-    def test_returns_github_token_env_for_github_host(self) -> None:
+    def test_resolver_failure_ignores_github_token_env(self) -> None:
         with (
             patch(
                 "apm_cli.core.auth.AuthResolver.resolve",
@@ -703,7 +703,7 @@ class TestGetTokenForHost:
             patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
         ):
             token = _get_token_for_host("github.com")
-        assert token == "mytoken"
+        assert token is None
 
     def test_returns_none_for_non_github_host_on_failure(self) -> None:
         with (
@@ -716,7 +716,7 @@ class TestGetTokenForHost:
             token = _get_token_for_host("dev.azure.com")
         assert token is None
 
-    def test_prefers_github_apm_pat(self) -> None:
+    def test_resolver_failure_ignores_github_apm_pat_env(self) -> None:
         with (
             patch(
                 "apm_cli.core.auth.AuthResolver.resolve",
@@ -725,7 +725,7 @@ class TestGetTokenForHost:
             patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
         ):
             token = _get_token_for_host("github.com")
-        assert token == "apmtoken"
+        assert token is None
 
 
 # ---------------------------------------------------------------------------

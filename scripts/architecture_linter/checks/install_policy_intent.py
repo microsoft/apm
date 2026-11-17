@@ -44,11 +44,13 @@ from scripts.architecture_linter.checks.install_policy_plugin_and_approval impor
     RULE_INCOMPLETE_CHAIN,
     RULE_MANIFEST_INHERITANCE,
     RULE_PLUGIN_BIN,
+    RULE_POLICY_DISABLE_SWITCH,
     check_approval_outcome_routing,
     check_audit_policy_discovery,
     check_incomplete_chain_routing,
     check_manifest_inheritance,
     check_plugin_bin_eligibility,
+    check_policy_disable_switch_owner,
 )
 from scripts.architecture_linter.checks.install_policy_shared import GROUP, _semantic_rule
 from scripts.architecture_linter.checks.install_policy_skill_and_lock import (
@@ -111,6 +113,15 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "Policy discovery reads and parses the git remote through one owner (policy/_remote.py)."
         ),
         check=check_policy_remote_origin_owner,
+    ),
+    Rule(
+        id=RULE_POLICY_DISABLE_SWITCH,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_DISABLE_SWITCH,),
+        description=(
+            "APM_POLICY_DISABLE is read only by policy/discovery.py::policy_disabled_by_env."
+        ),
+        check=check_policy_disable_switch_owner,
     ),
     _semantic_rule(
         RULE_LOCAL_BUNDLE_PREFLIGHT,

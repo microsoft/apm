@@ -1769,6 +1769,13 @@ def test_ambient_http_mcp_registry_requires_opt_in_before_project_writes(
     assert not (project / ".github" / "mcp.json").exists()
 
 
+def _url_after(output: str, prefix: str):
+    """Parse the URL token that immediately follows ``prefix`` in ``output``."""
+    assert prefix in output, output
+    token = output.split(prefix, 1)[1].split(maxsplit=1)[0]
+    return urlparse(token.rstrip(":"))
+
+
 def test_unknown_global_registry_server_changes_no_user_state(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -1811,10 +1818,17 @@ def test_unknown_global_registry_server_changes_no_user_state(
         )
 
     assert result.returncode == 1, (result.stdout, result.stderr)
-    output = result.stdout + result.stderr
-    assert "Check the server name" in output
-    assert "then retry" in output
-    assert "no state was changed" in output
+    output = " ".join((result.stdout + result.stderr).split())
+    # The specific registry miss must render, not the generic fallback that
+    # once masked it (a KeyError on the --registry "flag" source in 0.35.1).
+    assert "MCP registry validation failed" not in output
+    searched = _url_after(output, "Server(s) not found in registry ")
+    assert (searched.hostname, searched.port) == (
+        parsed_registry.hostname,
+        parsed_registry.port,
+    )
+    assert "io.github.apm/missing-server" in output
+    assert 'Search this registry: apm mcp search "io.github.apm/missing-server"' in output
     assert not (isolated.home / ".apm" / "apm.yml").exists()
     assert not (isolated.home / ".apm" / "apm.lock.yaml").exists()
     assert not (isolated.home / ".claude.json").exists()
@@ -1865,10 +1879,16 @@ def test_unreachable_global_registry_changes_no_user_state(
 
     assert result.returncode == 1, (result.stdout, result.stderr)
     output = " ".join((result.stdout + result.stderr).split())
-    assert "MCP registry validation failed" in output
-    assert "Check the server name and registry reachability/configuration" in output
-    assert "then retry" in output
-    assert "no state was changed" in output
+    # The specific connection failure must render, not the generic fallback
+    # that once masked it (a KeyError on the --registry "flag" source in 0.35.1).
+    assert "MCP registry validation failed" not in output
+    unreachable = _url_after(output, "Could not reach MCP registry at ")
+    assert (unreachable.hostname, unreachable.port) == (
+        urlparse(registry_url).hostname,
+        registry_port,
+    )
+    assert f"while validating server '{document['name']}'." in output
+    assert "No state was changed." in output
     assert not (isolated.home / ".apm" / "apm.yml").exists()
     assert not (isolated.home / ".apm" / "apm.lock.yaml").exists()
     assert not (isolated.home / ".claude.json").exists()

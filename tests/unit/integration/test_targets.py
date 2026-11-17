@@ -87,6 +87,20 @@ class TestActiveTargets:
         with pytest.raises(PathTraversalError, match="symlinked target root"):
             resolve_targets(self.root, explicit_target="claude")
 
+    @pytest.mark.parametrize("linked", [".claude/commands", ".claude/skills"])
+    def test_symlinked_primitive_directory_is_rejected(self, linked):
+        outside = self.root / "outside"
+        outside.mkdir()
+        link = self.root / linked
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+
+        with pytest.raises(PathTraversalError, match="symlinked target directory"):
+            resolve_targets(self.root, explicit_target="claude")
+
     def test_only_opencode_returns_opencode(self):
         (self.root / ".opencode").mkdir()
         targets = active_targets(self.root)
