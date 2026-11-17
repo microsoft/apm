@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.install.phases.policy_gate import PolicyViolationError
 from apm_cli.install.phases.policy_target_check import TARGET_CHECK_IDS, run
 from apm_cli.policy.models import CheckResult, CIAuditResult
@@ -74,6 +75,7 @@ class _FakeContext:
     # From caller / CLI
     apm_package: Any = None
     target_override: str | list[str] | None = None
+    target_decision: EffectiveTargetDecision | None = None
 
     # From policy_gate
     policy_fetch: Any = None
@@ -89,13 +91,19 @@ def _make_ctx(
     manifest_target=None,
     deps=None,
 ):
-    """Build a _FakeContext with defaults."""
+    """Build a _FakeContext whose target decision mirrors the pipeline."""
     pkg = _FakePackage(target=manifest_target)
+    decision = (
+        EffectiveTargetDecision(target_override, "--target flag")
+        if target_override is not None
+        else EffectiveTargetDecision(manifest_target, "apm.yml")
+    )
     return _FakeContext(
         logger=logger or MagicMock(),
         deps_to_install=deps or [],
         apm_package=pkg,
-        target_override=target_override,
+        target_override=decision.value,
+        target_decision=decision,
         policy_fetch=policy_fetch,
         policy_enforcement_active=enforcement_active,
     )
@@ -216,6 +224,16 @@ class TestSkipConditions:
 
         run(ctx)  # should not raise
 
+    def test_raw_manifest_target_is_not_a_second_source(self):
+        """Only the shared decision is judged, never ``apm_package.target``."""
+        ctx = _make_ctx(
+            enforcement_active=True,
+            policy_fetch=_make_policy_fetch(enforcement="block", allow=("copilot",)),
+        )
+        ctx.apm_package = _FakePackage(target="claude")
+
+        run(ctx)  # decision is unrestricted -> nothing to judge
+
 
 # =====================================================================
 # Test: block mode
@@ -311,7 +329,8 @@ class TestTargetOverride:
         # Verify effective_target passed to checks is the CLI override
         mock_checks.assert_called_once()
         call_kwargs = mock_checks.call_args
-        assert call_kwargs[1]["effective_target"] == "claude"
+        assert call_kwargs[1]["effective_target"] == ("claude",)
+        assert call_kwargs[1]["effective_target_source"] == "--target flag"
 
     @patch(_PATCH_CHECKS)
     def test_cli_override_fixes_disallowed_manifest_target(self, mock_checks):
@@ -333,7 +352,7 @@ class TestTargetOverride:
         # Verify effective_target passed to checks is the CLI override
         mock_checks.assert_called_once()
         call_kwargs = mock_checks.call_args
-        assert call_kwargs[1]["effective_target"] == "vscode"
+        assert call_kwargs[1]["effective_target"] == ("copilot",)
 
         ctx.logger.policy_violation.assert_not_called()
 
@@ -350,7 +369,7 @@ class TestTargetOverride:
         run(ctx)
 
         mock_checks.assert_called_once()
-        assert mock_checks.call_args.kwargs["effective_target"] == "copilot"
+        assert mock_checks.call_args.kwargs["effective_target"] == ("copilot",)
         ctx.logger.policy_violation.assert_not_called()
 
     @patch(_PATCH_CHECKS)
@@ -369,7 +388,7 @@ class TestTargetOverride:
         run(ctx)
 
         mock_checks.assert_called_once()
-        assert mock_checks.call_args.kwargs["effective_target"] == ["copilot", "claude"]
+        assert mock_checks.call_args.kwargs["effective_target"] == ("copilot", "claude")
 
     def test_plural_override_blocks_when_any_target_is_disallowed(self):
         """A plural target set cannot bypass compilation.target.allow."""
@@ -501,7 +520,7 @@ class TestWithFixtures:
 
         # Verify the override was passed through
         call_kwargs = mock_checks.call_args
-        assert call_kwargs[1]["effective_target"] == "vscode"
+        assert call_kwargs[1]["effective_target"] == ("copilot",)
 
 
 # =====================================================================

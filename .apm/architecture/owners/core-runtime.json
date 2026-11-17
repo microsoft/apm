@@ -10,12 +10,13 @@
     },
     {
       "id": "effective-install-target-selection",
-      "decision": "Effective install target selection",
-      "owner": "core/target_detection.py (EffectiveTargetDecision)",
+      "decision": "Effective target selection and its compilation-target policy projection",
+      "owner": "core/target_detection.py (EffectiveTargetDecision.canonical_targets, canonical_policy_target_names)",
       "selectors": ["src/apm_cli/core/target_detection.py"],
       "guards": [
         "registry-delegation-install-target-selection",
-        "registry-delegation-audit-target-selection"
+        "registry-delegation-audit-target-selection",
+        "registry-delegation-policy-target-projection"
       ]
     },
     {
