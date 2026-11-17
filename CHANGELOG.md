@@ -16,17 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
 - `apm audit --ci` run from `~/.apm` no longer fails with "installed package materialization is missing" after `apm update -g` when the user manifest declares no APM packages (only MCP/LSP servers or your own `~/.apm` content); it still fails closed when the user lockfile records packages or local bundle staging and `~/.apm/apm_modules` is gone. (#3797)
 - After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
+- `apm install -g` no longer reports APM's own converted agents as "files skipped" on a second run: Codex `.toml` agents, Kiro agents and agents whose relative links APM rewrote are now compared with the text APM would write and adopted, even when no lockfile records them. -- by @MohammedAlkindi (closes #3722, #3743)
 
 ### Changed
 
 - `apm init --plugin` and `apm plugin init` no longer write a default `"license": "MIT"` into the new `plugin.json`; choose and add your package's license yourself. (#3799)
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
 - Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
-
-### Fixed
-
-- After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
-- `apm install -g` no longer reports APM's own converted agents as "files skipped" on a second run: Codex `.toml` agents, Kiro agents and agents whose relative links APM rewrote are now compared with the text APM would write and adopted, even when no lockfile records them. -- by @MohammedAlkindi (closes #3722, #3743)
 
 ## [0.36.0] - 2026-11-17
 
