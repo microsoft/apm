@@ -511,24 +511,34 @@ Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.
 
-**On pushed version tag releases:**
-1. Unit tests + Smoke tests
-2. Build binaries (cross-platform)
-3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full non-live integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke and not live` subset plus native startup and isolated release validation.
-4. Create GitHub Release
-5. Publish to PyPI 
+**Release pipeline modes (`scripts/release_plan.py`):**
+- **push** (push to `main`): unit tests and Linux/Windows binaries.
+- **full** (nightly schedule or `repository_dispatch`): every lane. A green
+  full run is promotion evidence for its SHA.
+- **promoted** (pushed `v*` tag whose SHA has a green full run on `main`):
+  builds, binary smoke tests and release validation only, then publishes.
+- A tag without evidence fails closed in `Release Plan`. Either dispatch
+  `manual-build-release` on that SHA and re-run the tag, or set the repository
+  variable `APM_RELEASE_FULL_VALIDATION_TAG` to that exact tag so the re-run
+  validates everything itself; delete the variable afterwards.
 
-The Linux x64 and macOS Apple Silicon full integration steps have 120-minute
-limits and keep `not live` selection with `-n 4 --dist loadgroup` for HOME-mutating
-test grouping. Previous 60-minute limits stopped progressing workers at 78% and
-77%, respectively; the budgets allow setup and tail headroom without excluding
-tests. Linux ARM keeps 60 minutes and Windows 20. The focused Intel step has
-60 minutes: its prior 30-minute limit stopped passing workers at 91%.
-The rough `30 / 0.91` projection is 33 minutes; 60 adds setup/tail headroom,
-not a completion guarantee.
-Its `lifecycle_smoke and not live` selection and four `loadgroup` workers are
-unchanged. Failures and timeouts still block release publication; a larger
-budget is not evidence that a failed assertion is fixed.
+**Full-run lanes:**
+- **Linux x86_64 and arm64**: hermetic integration (`not live and not
+  requires_github_token and not requires_network_integration`) split across
+  runners by `scripts/ci_sharding.py`. Shards are balanced by measured
+  durations and keep xdist groups and heavy modules whole. The nightly run
+  publishes durations; `.github/ci-durations/` holds the fallback seeds.
+  Architecture-linter contracts (`architecture_contract`) run on x86_64 only.
+- **Network lane** (Linux x86_64): `requires_github_token or
+  requires_network_integration`, re-running only failed tests up to twice.
+- **Windows**: `scripts/windows/test-integration.ps1`.
+- **macOS**: still one job per architecture. Apple Silicon runs the unit suite
+  plus `lifecycle_smoke or windows_compat or platform_sensitive`; Intel runs
+  `windows_compat or platform_sensitive`. Mark OS-, filesystem- or
+  shell-sensitive integration tests `platform_sensitive`.
+
+`create-release` requires a pushed tag and every release-bound lane. Only a
+promoted tag may skip integration.
 
 The existing unprivileged `PR Binary Smoke (Linux)` job also runs
 `tests/integration/test_audit_workspace_identity_lifecycle.py` against its built
@@ -539,7 +549,6 @@ release qualification or change required checks.
 
 **Daily scheduled release smoke:**
 - Runs the same promotion validation path once per day.
-- If a build matrix leg fails, downstream Linux/Windows integration and release-validation jobs still run for any platform artifact that was produced.
 - Failing scheduled runs update one `ci/daily-smoke` tracking issue; a later recovered run closes it.
 - This signal is advisory and is not a required PR check.
 
@@ -578,11 +587,12 @@ Runtime setup prefers `GITHUB_TOKEN` for GitHub Models and falls back to `GITHUB
 
 The workflow ensures quality gates at each step:
 
-1. **build-and-test** jobs - Unit tests plus binary builds
-2. **integration-tests** job - Comprehensive non-live runtime scenarios
-3. **release-validation** job - Final shipped-binary validation
-4. **create-release** job - GitHub release creation
-5. **publish-pypi** job - PyPI package publication
+1. **release-plan** job - Chooses push, full or promoted mode
+2. **build-linux-x86**, **build-linux-arm**, **build-windows** jobs - Unit tests plus binary builds
+3. **integration-tests** job (`Integration Tests Summary`) - Requires every sharded integration lane
+4. **release-validation** jobs - Final shipped-binary validation
+5. **create-release** job - GitHub release creation
+6. **publish-pypi** job - PyPI package publication
 
 Each publication stage must succeed before proceeding to the next. Live
 third-party credential acceptance remains a failing gate in the opt-in Auth
@@ -595,8 +605,8 @@ The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap up
 Promotion integration tests run on:
 - **Linux**: ubuntu-24.04 (x86_64), ubuntu-24.04-arm (arm64)
 - **Windows**: windows-latest (x86_64)
-- **macOS Intel**: macos-15-intel (x86_64), with marker-bounded `lifecycle_smoke and not live` integration coverage, native binary startup, and isolated release validation
-- **macOS Apple Silicon**: macos-latest (arm64), with the full non-live integration corpus
+- **macOS Intel**: macos-15-intel (x86_64), with the `windows_compat or platform_sensitive` subset, native binary startup, and isolated release validation
+- **macOS Apple Silicon**: macos-latest (arm64), with unit tests and the `lifecycle_smoke or windows_compat or platform_sensitive` subset
 
 **Python Version**: 3.12 (standardized across all environments)
 **Package Manager**: uv (for fast dependency management and virtual environments)

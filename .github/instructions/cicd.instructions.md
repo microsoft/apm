@@ -40,10 +40,10 @@ integration suite runs only at merge time via GitHub Merge Queue
      `gh workflow run merge-gate.yml -f pr_number=NNN`, or close+reopen.
    - `.github/CODEOWNERS` requires Lead Maintainer review for any change
      to `.github/workflows/**`.
-4. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
-   - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job). Unit tests run on every push for platform-regression signal; **smoke tests are gated to tag/schedule/dispatch only** (promotion boundaries) to avoid duplicating `ci-integration.yml`'s merge-time smoke and to cut redundant codex-binary downloads.
-   - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; tag/schedule/dispatch promotion runs add marker-bounded `lifecycle_smoke and not live` integration coverage and isolated release validation.
-   - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Promotion runs retain the full non-live integration corpus and isolated release validation.
+4. **`build-release.yml`** - `push` to main, `v*` tags, nightly schedule, `repository_dispatch` (`manual-build-release`); no `workflow_dispatch`
+   - **`release-plan`** (`scripts/release_plan.py`) picks a mode: `push` (unit tests + Linux/Windows binaries), `full` (schedule/dispatch: every lane; a green full run is promotion evidence for its SHA) or `promoted` (tag whose SHA has a green full run on main: build, smoke and release validation only). A tag without evidence fails closed; the one-tag override is the repository variable `APM_RELEASE_FULL_VALIDATION_TAG`.
+   - **Linux + Windows** build in `build-linux-x86`, `build-linux-arm`, `build-windows` (check name `Build & Test`). Linux integration is duration-sharded (`integration-plan` + `scripts/ci_sharding.py`, seeds in `.github/ci-durations/`); network-dependent tests run in their own retrying lane; `Integration Tests Summary` requires every lane.
+   - **macOS** stays one job per architecture, never on push. arm64 runs unit tests plus `lifecycle_smoke or windows_compat or platform_sensitive`; Intel runs `windows_compat or platform_sensitive`.
    - Publication jobs do not receive `ADO_APM_PAT`; live ADO PAT acceptance is an explicit `ado_pat_e2e` mode in `auth-acceptance.yml`. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).
 5. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
@@ -51,9 +51,9 @@ integration suite runs only at merge time via GitHub Merge Queue
    - Failures do not block releases - annotated as warnings.
 
 ## Platform Testing Strategy
-- **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows + macOS are tested post-merge (platform-specific issues are rare and the full matrix runs on every push to main).
-- **Post-merge**: Full 5-platform matrix (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64) catches remaining platform-specific issues on main.
-- **Rationale**: ci.yml has always been Linux-only - Windows and macOS are covered by `build-release.yml` on every push to main. This keeps PR feedback fast while still catching platform issues before release.
+- **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.
+- **Post-merge**: Linux and Windows unit tests and binaries on every push; the full 5-platform matrix (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64) runs on full runs (nightly, dispatch) and is promotion evidence for tags.
+- **Rationale**: ci.yml has always been Linux-only - Windows and macOS are covered by `build-release.yml`. This keeps PR feedback fast while still catching platform issues before release.
 
 ## PyInstaller Binary Packaging
 - **CRITICAL**: Uses `--onedir` mode (NOT `--onefile`) for faster CLI startup performance
@@ -80,10 +80,9 @@ integration suite runs only at merge time via GitHub Merge Queue
 ## Release Flow Dependencies
 - **PR workflow**: Tier 1 only - ci.yml (build-and-test, Linux-only) provides fast feedback. Tier 2 does not run until enqueued.
 - **Merge queue workflow**: ci.yml (Tier 1 against tentative merge ref) + ci-integration.yml (Tier 2: build -> smoke-test -> integration-tests -> release-validation). Queue auto-merges on success; ejects on failure.
-- **Push/Release workflow (Linux + Windows)**: build-and-test -> integration-tests -> release-validation -> create-release -> publish-pypi (gh-aw-compat runs in parallel, informational)
+- **Push/Release workflow (Linux + Windows)**: release-plan -> build-linux-x86/build-linux-arm/build-windows -> sharded integration lanes + release-validation -> create-release (pushed tag only) -> publish-pypi (gh-aw-compat runs in parallel, informational)
 - **Homebrew distribution**: `microsoft/homebrew-apm` polls the latest public APM release and updates its formula with its own `GITHUB_TOKEN`; this workflow must not send a cross-repository dispatch or hold a tap credential.
-- **Push/Release workflow (macOS Intel)**: build-and-validate-macos-intel (root node: unit tests + build always + conditional `lifecycle_smoke and not live` integration/release-validation) -> create-release
-- **Push/Release workflow (macOS ARM)**: build-and-validate-macos-arm (root node, tag/schedule/dispatch only; full non-live integration corpus and all phases run) -> create-release
+- **Push/Release workflow (macOS)**: build-and-validate-macos-intel and build-and-validate-macos-arm (full and promoted runs only; marker subsets on full runs) -> create-release
 - **Live ADO PAT acceptance**: manual `auth-acceptance.yml` dispatch with `ado_pat_e2e: true` -> exact `live and requires_ado_pat` marker intersection. Invalid credentials fail with production auth diagnostics but do not block publication.
 - **Tag Triggers**: Only `v*.*.*` tags trigger full release pipeline
 - **Artifact Retention**: 30 days for debugging failed releases
