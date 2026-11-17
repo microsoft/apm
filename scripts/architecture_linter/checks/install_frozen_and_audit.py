@@ -664,7 +664,9 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     if not (
         _body_has(run_replay_body, "integrate_package_primitives(")
         and _body_has(run_replay_body, "skill_subset=")
-        and _body_has(run_replay_body, "package_info.dependency_ref.skill_subset")
+        and _body_has(
+            run_replay_body, "effective_dependency_selection(package_info.dependency_ref)"
+        )
     ):
         findings.append(
             _summary(

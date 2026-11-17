@@ -229,6 +229,7 @@ def test_services_gate_rejects_native_type_without_canonical_ir(tmp_path: Path) 
         integrate_package_primitives(
             package_info,
             project,
+            skill_subset=None,
             targets=[MagicMock(name="target")],
             integrators=integrators,
             force=True,

@@ -173,6 +173,7 @@ class TestIntegratePackagePrimitivesNoTargets:
             result = integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -210,6 +211,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
             result = integrate_package_primitives(
                 pkg_info,
                 project_in_scratch,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -241,6 +243,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
             integrate_package_primitives(
                 pkg_info,
                 project_root,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -276,6 +279,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
             integrate_package_primitives(
                 pkg_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["cursor"]],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -325,6 +329,7 @@ class TestIntegratePackagePrimitivesFormatTargetCollapse:
             return integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -396,6 +401,7 @@ class TestIntegratePackagePrimitivesSubSkills:
             result = integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -425,6 +431,7 @@ class TestIntegratePackagePrimitivesSubSkills:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -473,6 +480,7 @@ class TestSkillPathOutsideProject:
             result = integrate_package_primitives(
                 pkg_info,
                 project_root,
+                skill_subset=None,
                 targets=[cowork_target],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -818,6 +826,7 @@ class TestCopilotAppWorkflowHint:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[mock_target],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),

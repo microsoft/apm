@@ -111,6 +111,7 @@ def test_agent_source_skip_is_actionable_without_deployment_expansion(
         result = integrate_package_primitives(
             package,
             project,
+            skill_subset=None,
             targets=targets,
             integrators=integrators,
             force=False,

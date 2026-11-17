@@ -145,3 +145,7 @@ def test_uninstall_unrelated_package_keeps_survivor_skill_selection(
     if scope == "project":
         audit = run(("audit", "--ci"), "audit")
         assert audit.returncode == 0, _evidence(audit)
+
+    reinstalled = run(("install", *scope_args), "reinstall")
+    assert reinstalled.returncode == 0, _evidence(reinstalled)
+    assert _deployed_skill_dirs(deploy_root) == {"alpha"}, _evidence(reinstalled)

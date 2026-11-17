@@ -121,6 +121,7 @@ def test_instruction_preflight_precedes_excluded_hook_reconciliation(tmp_path: P
         integrate_package_primitives(
             _package_info(package_path, target="copilot"),
             tmp_path / "project",
+            skill_subset=None,
             targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
             integrators=bundle,
             force=False,
@@ -153,6 +154,7 @@ def test_native_plugin_reconciles_excluded_targets(
     integrate_package_primitives(
         _package_info(package_path, target="copilot"),
         tmp_path / "project",
+        skill_subset=None,
         targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
         integrators=_bundle(hook_integrator),
         force=False,
@@ -184,6 +186,7 @@ def _run_with_targets(
             targets=package_targets,
         ),
         tmp_path / "project",
+        skill_subset=None,
         targets=[_hook_only_target(name) for name in install_target_names],
         integrators=_bundle(hook_integrator),
         force=False,
@@ -330,6 +333,7 @@ def test_hooks_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> N
     result = integrate_package_primitives(
         _package_info(package_path),
         project,
+        skill_subset=None,
         targets=[_hook_only_target("claude"), _hook_only_target("codex")],
         integrators=_bundle(HookIntegrator()),
         force=False,
@@ -442,6 +446,7 @@ def test_divergent_hook_files_fail_closed_under_multi_dep_targets(
         integrate_package_primitives(
             _package_info(package_path),
             project,
+            skill_subset=None,
             targets=[_hook_only_target(first), _hook_only_target(second)],
             integrators=_bundle(HookIntegrator()),
             force=False,
@@ -476,6 +481,7 @@ def test_divergent_hook_files_fail_closed_under_single_dep_target(
         integrate_package_primitives(
             _package_info(package_path),
             project,
+            skill_subset=None,
             targets=[_hook_only_target(active), _hook_only_target(excluded)],
             integrators=_bundle(HookIntegrator()),
             force=False,
@@ -523,6 +529,7 @@ def test_copilot_never_absorbs_foreign_per_file_manifest(tmp_path: Path, foreign
         integrate_package_primitives(
             _package_info(package_path),
             project,
+            skill_subset=None,
             targets=[_hook_only_target("copilot")],
             integrators=_bundle(HookIntegrator()),
             force=False,
@@ -547,6 +554,7 @@ def test_kiro_never_absorbs_foreign_per_file_manifest(tmp_path: Path) -> None:
         integrate_package_primitives(
             _package_info(package_path),
             project,
+            skill_subset=None,
             targets=[_hook_only_target("kiro")],
             integrators=_bundle(HookIntegrator()),
             force=False,
@@ -575,6 +583,7 @@ def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> 
     integrate_package_primitives(
         _package_info(tmp_path / "pkg"),
         tmp_path / "project",
+        skill_subset=None,
         targets=[_hook_only_target("claude"), _hook_only_target("codex")],
         integrators=bundle,
         force=False,
