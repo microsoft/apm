@@ -94,7 +94,7 @@ configuration:
 - **Cross-host token leak.** Auth tokens are scoped per host:
   `GITHUB_APM_PAT` is sent only to GitHub hosts, `ADO_APM_PAT` only
   to Azure DevOps. APM never forwards a credential to a host you did
-  not configure it for. See `../authentication/`.
+  not configure it for. See [Authentication](../authentication/).
 
 What these checks do **not** cover, by design:
 
@@ -129,7 +129,7 @@ Removes hidden characters from scanned files in place. Combine with
 
 `apm audit` also runs **install-replay drift detection** by default:
 it replays your install into a scratch tmpdir from the cache and
-diffs the result against your working tree. Four drift kinds get
+diffs the result against your working tree. Five drift kinds get
 reported:
 
 | Kind | Meaning |
@@ -138,6 +138,7 @@ reported:
 | `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. For edits to a remote dependency's files, the text output also suggests [`apm export-patch`](../../reference/cli/export-patch/) to export them as upstream patches before the next install overwrites them. |
 | `orphaned` | A deployed file exists with no current source. Fix: `apm install` (orphan cleanup runs automatically). |
 | `unrecorded` | Install replay produces the same normalized bytes as the project, but no exact or directory `deployed_files` claim covers the path. Shared merge-hook configs compare only APM-owned entries, so user hooks do not create drift; the APM-owned sidecar remains byte-for-byte checked. Fix: `apm install`, then commit the regenerated `apm.lock.yaml`. |
+| `unmanaged-conflict` | A replayed file differs at a path no lockfile entry claims (a skipped user-authored file, a refused skill, or a case-only name variant). Fix: rename the local file or correct the skill/target selection; ordinary `apm install` does not repair it. |
 
 When your project has `.apm/` content, install does not promote a sibling
 `skills/<name>/SKILL.md` at the project root into a project-local skill. Audit
