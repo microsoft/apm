@@ -22,6 +22,7 @@ _HARNESS_HISTORICAL_ENV = "APM_FIXTURE_HISTORICAL_APM"
 _BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 pytestmark = [
+    pytest.mark.platform_sensitive,
     pytest.mark.component,
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
