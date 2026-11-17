@@ -302,9 +302,10 @@ def find_case_equivalent_materialization_path(
 ) -> Path | None:
     """Find a case-equivalent path; optionally allow ambiguous parent prefixes.
 
-    Read-only consumers can match complete paths without treating distinct
-    repositories under case-variant owners as collisions. Relocation callers
-    retain strict prefix collision checks by default.
+    With ``match_complete_path`` only complete package paths count, so
+    distinct repositories under case-variant owners are not collisions
+    (install relocation and read-only consumers use this). The default
+    prefix walk fails on any case-variant prefix.
     """
     desired_parts = _relative_parts(desired, apm_modules_dir)
     policy = _case_policy(dependency)
@@ -390,24 +391,36 @@ def _relocate_case_components(
     staging_session: ResolutionStagingSession,
     reader: MaterializationPathReader,
 ) -> None:
-    """Rename case-different components top-down through the transaction."""
+    """Rename case-different components top-down through the transaction.
+
+    On a case-sensitive file system a case-variant parent may already exist
+    as a distinct directory holding other packages (``test/e`` beside a stale
+    ``Test/C``). The package then moves into that parent; only a distinct
+    directory at the package path itself is a collision.
+    """
     existing_parts = _relative_parts(existing, apm_modules_dir)
     desired_parts = _relative_parts(desired, apm_modules_dir)
-    current_parent = apm_modules_dir
-    for existing_part, desired_part in zip(existing_parts, desired_parts, strict=True):
-        source = current_parent / existing_part
-        target = current_parent / desired_part
-        if existing_part != desired_part:
-            if reader.exists(target):
-                if not reader.samefile(source, target):
+    source_parent = apm_modules_dir
+    target_parent = apm_modules_dir
+    leaf = len(desired_parts) - 1
+    for index, (existing_part, desired_part) in enumerate(
+        zip(existing_parts, desired_parts, strict=True)
+    ):
+        source = source_parent / existing_part
+        target = target_parent / desired_part
+        if source.parts != target.parts:
+            if reader.exists(target) and not reader.samefile(source, target):
+                if index == leaf:
                     raise MaterializationPathCollisionError(
                         "Package directory casing collides between "
                         f"{source} and {target}. Inspect both directories, "
                         "keep the intended package, and run 'apm install' again."
                     )
+                source_parent, target_parent = source, target
+                continue
             staging_session.relocate_path(source, target)
-            reader.invalidate(current_parent)
-        current_parent = target
+            reader.invalidate(source_parent, target_parent)
+        source_parent = target_parent = target
 
 
 def prepare_materialization_path(
@@ -424,11 +437,14 @@ def prepare_materialization_path(
     if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:
         return desired
 
+    # Distinct packages under case-variant owner directories are not a
+    # collision; only two physical paths for this package are.
     existing = find_case_equivalent_materialization_path(
         desired,
         apm_modules_dir,
         dependency=dependency,
         reader=reader,
+        match_complete_path=True,
     )
     if existing is None or existing.parts == desired.parts:
         return desired

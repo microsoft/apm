@@ -40,19 +40,15 @@ from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+from tests.utils.xdist_shared import shared_session_value, sources_digest
 
 pytestmark = [
     pytest.mark.component,
-    # The module-scoped baseline fixture below pays for one linter run across
-    # every owner rule. `--dist loadgroup` (the xdist scheduler this repo's
-    # sharded integration runs use) is the only scheduler that honors
-    # `xdist_group`; without it these cases could be split across workers and
-    # each worker would recompute that baseline.
-    pytest.mark.xdist_group(name="architecture_owner_rule_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
+ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm/architecture")
 
 
 @pytest.mark.parametrize(
@@ -385,6 +381,27 @@ def test_preview_cannot_bypass_offline_graph_authority(path: str, old: str, new:
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
+    """Packed marketplace sources stay on DependencyReference, not just entry coordinates.
+
+    The matrix case for this guard mutates the entry-coordinate half in
+    ref_resolver.py; this proves the packed-source half in resolver.py has teeth.
+    """
+    rule_id = "marketplace-integrations-source-parsing"
+    path = "src/apm_cli/marketplace/resolver.py"
+    old = "dependency = DependencyReference.parse_from_dict(entry)"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "dependency = DependencyReference.parse_from_mapping(entry)", 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+    assert {violation.path for violation in report.violations} == {path}
 
 
 @pytest.mark.parametrize(
@@ -2044,10 +2061,20 @@ def _mutate(case: MutationCase) -> str:
 
 
 @pytest.fixture(scope="module")
-def baseline_violated_rule_ids() -> frozenset[str]:
-    """Run every owner rule once, unmutated, so each case can prove attribution."""
-    report = run_selected_rules(ROOT, tuple(sorted({case.rule_id for case in MUTATIONS})))
-    return frozenset(violation.rule_id for violation in report.violations)
+def baseline_violated_rule_ids(tmp_path_factory: pytest.TempPathFactory) -> frozenset[str]:
+    """Run every owner rule once per session, unmutated, so each case can prove attribution.
+
+    The cases spread across xdist workers; the first worker computes the
+    baseline and the others reuse it, keyed by the rule set and source hash.
+    """
+    rule_ids = tuple(sorted({case.rule_id for case in MUTATIONS}))
+
+    def compute() -> list[str]:
+        report = run_selected_rules(ROOT, rule_ids)
+        return sorted({violation.rule_id for violation in report.violations})
+
+    key = sources_digest(ROOT, ARCHITECTURE_SOURCE_ROOTS, rule_ids)
+    return frozenset(shared_session_value(tmp_path_factory, "owner-baseline", key, compute))
 
 
 def test_matrix_covers_every_registry_guard_exactly_once() -> None:
@@ -2973,6 +3000,12 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
             id="mcp-install-raw-selection",
         ),
         pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "effective_target=deployment_decision.canonical_targets,",
+            "effective_target=[resolved.name for resolved in targets],",
+            id="local-bundle-raw-names",
+        ),
+        pytest.param(
             "src/apm_cli/core/target_detection.py",
             "def canonical_policy_target_name(value: str | None) -> str | None:",
             "def normalize_policy_targets(value):\n    return value\n\n\n"
@@ -2992,7 +3025,9 @@ def test_policy_target_projection_guard_rejects_raw_selections(
     rule_id = "registry_delegation.policy_target_projection"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
 
 
 @pytest.mark.parametrize(
@@ -3038,4 +3073,6 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
     rule_id = "registry_delegation.target_vocabulary"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
+
 ### Fixed
 
 - `compilation.target` policy now judges the targets a project actually selects: `apm audit` reads plural `targets:` (non-compliant manifests that `apm install` already blocked now also fail audit), CSV values such as `target: "claude,copilot"` are split, aliases compare as the target they deploy (`vscode` and `agents` are `copilot`) on both the manifest and policy side, `allow: [all]` allows every target, and inherited alias allow lists no longer merge to "allow nothing". Plural-key tests ported from #3739 -- by @MohammedAlkindi (#3774)
