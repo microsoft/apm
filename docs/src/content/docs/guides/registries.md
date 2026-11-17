@@ -428,6 +428,10 @@ Enabling a default registry (`registries.default` or `registry.<name>.default tr
 
 See [Migration paths -- default registry adoption](../../troubleshooting/migration/#6-default-registry-adoption-git--registry-routing).
 
+### Gateways that redirect encoded identities
+
+Host-qualified identities (for example `gitlab.com/acme/x`) are sent with `%2F` in the path. A gateway that decodes `%2F` and redirects to the decoded path works as long as the redirect stays on the registry's origin and under its URL path. APM refuses any other redirect with `registry redirected outside the configured registry (<origin>); refusing`. See [Registry HTTP API redirects](../../reference/registry-http-api/#17-redirects).
+
 ### Registry names that sanitize to the same env var
 
 Env var names derive from the registry name by uppercasing and mapping `-` and `.` to `_`. Distinct registry names can collapse to the **same** env var:

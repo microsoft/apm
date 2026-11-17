@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Registry installs, lockfile replays and `apm publish` now follow a gateway redirect that stays on the configured registry origin and under its URL path (for example a `307` from a gateway that decodes `%2F`), keeping the method and body for `307`/`308` and at most 3 hops; any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. Registry publish now follows redirects only within the configured registry origin, and marketplace metadata fetches use the shared credential-scoped HTTP owner. Reported with a prototype by @ashky23. (closes #3726, #3785)
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794)
 - Remote MCP servers now reach each harness in its native shape: registry `remotes[].type` is honored, so SSE servers stay SSE on Copilot CLI, Claude Code and VS Code (`type: sse`) and Gemini (`url`); Antigravity gets `serverUrl`, and SSE on Antigravity or Codex is skipped with one warning and exit `0` instead of failing the install. `apm mcp show` prints the real transport, the next `apm install`, `apm update` or `apm install --frozen` rewrites entries an earlier APM wrote in the old shape (user entries are preserved), and `extra:` can no longer add an `httpUrl` or `serverUrl` endpoint. (#3789)
 - Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
 
