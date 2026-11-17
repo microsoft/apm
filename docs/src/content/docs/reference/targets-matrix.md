@@ -113,7 +113,9 @@ canonical targets validator will reject them).
 GitHub Copilot (CLI and IDE).
 
 - **Detection.** `.github/copilot-instructions.md`.
-- **Deploy directory.** `.github/` at project scope; `~/.copilot/` at user scope.
+- **Deploy directory.** `.github/` at project scope; `~/.copilot/` at user scope
+  (a non-blank `COPILOT_HOME` replaces `~/.copilot/`, including MCP and LSP
+  config; skills stay in `~/.agents/skills/` unless `--legacy-skill-paths`).
 - **Supported primitives.** instructions, prompts, agents, skills, hooks, mcp.
 - **File conventions.**
   - instructions: `.github/instructions/<name>.instructions.md` (project scope),

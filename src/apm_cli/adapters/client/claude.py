@@ -475,16 +475,10 @@ class ClaudeClientAdapter(CopilotClientAdapter):
 
         Used for symlink pre-checks before canonical resolution.
         """
-        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-        if config_dir:
-            config_path = Path(config_dir).expanduser()
-            if not config_path.is_absolute():
-                raise PathTraversalError(
-                    "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
-                    "config; set an absolute path or unset it to use ~/.claude.json."
-                )
-            return config_path / ".claude.json"
-        return Path.home() / ".claude.json"
+        from ...integration.targets import configured_user_root
+
+        config_dir = configured_user_root("claude")
+        return (config_dir if config_dir is not None else Path.home()) / ".claude.json"
 
     @classmethod
     def resolve_user_claude_json_path(cls, unresolved_path: Path | None = None) -> Path:

@@ -379,8 +379,9 @@ permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
-`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
-`~/.copilot/mcp-config.json`; Claude Code to
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set to an absolute
+path, otherwise `~/.copilot/mcp-config.json` (relative values are rejected);
+Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
 non-whitespace absolute path (both for installation and stale server cleanup). Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to

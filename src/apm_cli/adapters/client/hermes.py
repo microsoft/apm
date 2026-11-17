@@ -67,9 +67,11 @@ class HermesClientAdapter(CopilotClientAdapter):
 
     def _config_path(self) -> Path:
         """Resolve ``<hermes-home>/config.yaml`` honouring ``$HERMES_HOME``."""
-        from ...integration.targets import resolve_hermes_root
+        from ...integration.targets import resolve_user_root
 
-        return resolve_hermes_root() / "config.yaml"
+        # ``resolve`` collapses ``..`` so ``mkdir(parents=True)`` cannot create
+        # unintended intermediate directories.
+        return resolve_user_root("hermes").resolve(strict=False) / "config.yaml"
 
     @staticmethod
     def _to_hermes_format(copilot_entry: dict, *, enabled: bool = True) -> dict:

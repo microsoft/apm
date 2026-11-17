@@ -386,11 +386,19 @@ Removing managed servers from the selected profile preserves other profiles and
 user-owned entries. Cleanup refuses symlinked config files or profile directories;
 replace the link with a regular file or directory before retrying.
 `apm uninstall -g <package>` removes files and lock rows only under the selected
-profile; a package another profile still uses stays in `~/.apm/apm.yml`.
-Codex homes selected by an absolute `CODEX_HOME` follow the same rule.
 profile; a package another profile still uses stays in `~/.apm/apm.yml`. Only
-the runtime whose profiles share the package (Claude or Hermes) loses files;
-the other runtime's default root and non-profile targets keep theirs.
+the runtime whose profiles share the package loses files; the other runtime's
+default root and non-profile targets keep theirs.
+
+Harness home variables (`COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
+`HERMES_HOME`) share one rule at user scope: unset or blank uses the default
+(`~/.copilot`, `~/.codex`, `~/.claude`, `~/.hermes`), an absolute path selects
+that profile, and a relative path fails with an error naming the variable.
+With `COPILOT_HOME` set, `apm install -g --target copilot` writes instructions,
+agents, hooks, `mcp-config.json`, `lsp-config.json` and plugin settings under
+it (skills too with `--legacy-skill-paths`; otherwise `~/.agents/skills/`).
+Files already under `~/.copilot` stay as another profile's files. The
+`copilot-app` and `copilot-cowork` targets ignore `COPILOT_HOME`.
 
 `apm install` prints a one-line provenance summary before any mutation:
 
@@ -413,11 +421,14 @@ For project LSP installs, `apm install --target claude` writes the
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`, which Claude Code
 discovers as a skills-directory plugin. Global Claude LSP installs use the
 same personal-scope plugin shape at
-`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`.
+`$CLAUDE_CONFIG_DIR/skills/apm-lsp/.claude-plugin/plugin.json` (default
+`~/.claude/...`); global Copilot LSP installs write
+`$COPILOT_HOME/lsp-config.json` (default `~/.copilot/lsp-config.json`).
 
 For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
 `$COPILOT_HOME/mcp-config.json` with `--global` (or
-`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset). `--target vscode`
+`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset or blank; relative
+values are rejected). `--target vscode`
 writes only `.vscode/mcp.json`.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.

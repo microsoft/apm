@@ -16,7 +16,6 @@ from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
-from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
 
@@ -93,16 +92,9 @@ class CodexClientAdapter(MCPClientAdapter):
     def _get_codex_dir(self) -> Path:
         """Return the root directory used for Codex config in the current scope."""
         if self.user_scope:
-            codex_home = os.environ.get("CODEX_HOME", "")
-            if codex_home.strip():
-                codex_home_path = Path(codex_home).expanduser()
-                if not codex_home_path.is_absolute():
-                    raise PathTraversalError(
-                        "CODEX_HOME is set to a non-absolute path; cannot locate the "
-                        "Codex CLI configuration directory."
-                    )
-                return codex_home_path
-            return Path.home() / ".codex"
+            from ...integration.targets import resolve_user_root
+
+            return resolve_user_root("codex")
         return self.project_root / ".codex"
 
     def get_config_path(self) -> str:
