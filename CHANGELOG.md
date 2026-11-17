@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Repository names ending in `g`, `i`, `t` or `.`, such as `git/git`, `jonas/tig` or `owner/gitit`, install again in every form, and URL-form installs no longer write an `apm.yml` entry that cannot be read back; repository path segments made only of dots are rejected, and `apm marketplace build` keeps the leading dot of `./.hidden` plugin sources under `pluginRoot: ./`. -- by @goranai (#3767)
+- Repository names ending in `g`, `i`, `t` or `.`, such as `git/git`, `jonas/tig` or `owner/gitit`, install again in every form, and URL-form installs no longer write an `apm.yml` entry that cannot be read back; repository names made only of dots, or still ending in `.git` once the `.git` suffix is removed (such as `owner/git.git.git`), are rejected; and `apm marketplace build` keeps the leading dot of `./.hidden` plugin sources under `pluginRoot: ./`. -- by @goranai (#3767)
 
 ## [0.36.0] - 2026-11-17
 
