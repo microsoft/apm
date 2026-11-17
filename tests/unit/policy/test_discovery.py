@@ -1014,7 +1014,7 @@ class TestAutoDiscover(unittest.TestCase):
         from apm_cli.core.auth import _redact_secrets
 
         mock_extract.return_value = ("contoso", "github.com", None)
-        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent", not_found=True)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertNoLogs("apm_cli.policy.discovery", level="WARNING"):
@@ -1032,7 +1032,7 @@ class TestAutoDiscover(unittest.TestCase):
         """#3754: an absent .github-private says nothing when .github has the policy."""
         mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.side_effect = [
-            PolicyFetchResult(outcome="absent"),
+            PolicyFetchResult(outcome="absent", not_found=True),
             PolicyFetchResult(policy=ApmPolicy(), source="org:contoso/.github", outcome="found"),
         ]
 
@@ -1040,6 +1040,18 @@ class TestAutoDiscover(unittest.TestCase):
             with self.assertNoLogs("apm_cli.policy.discovery", level="WARNING"):
                 result = _auto_discover(Path(tmpdir), no_cache=True)
         self.assertTrue(result.found)
+        self.assertIsNone(result.discovery_hint)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_cache_only_miss_gets_no_masked_404_hint(self, mock_extract, mock_fetch):
+        """#3754: a cache-only miss sent no request, so it must not claim a 404."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), cache_only=True)
+        self.assertEqual(result.outcome, "absent")
         self.assertIsNone(result.discovery_hint)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")

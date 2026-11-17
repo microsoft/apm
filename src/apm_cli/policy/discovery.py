@@ -999,7 +999,8 @@ def _auto_discover(
             # GitHub answers 404 (not 403) for a private repo the caller
             # cannot read, so an absent .github-private may mask a permission
             # problem. Record it; it only matters if every candidate is absent.
-            if candidate_repo == ".github-private" and _is_github_host(host):
+            # ``not_found`` marks a real 404, not a cache-only miss.
+            if candidate_repo == ".github-private" and _is_github_host(host) and result.not_found:
                 masked_private_hint = _masked_private_policy_hint(org, candidate_repo)
             continue
 
