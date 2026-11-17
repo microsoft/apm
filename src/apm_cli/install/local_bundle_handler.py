@@ -61,7 +61,10 @@ def install_local_bundle(
         verify_bundle_integrity,
     )
     from ..core.scope import InstallScope, get_manifest_path, get_source_root
-    from ..core.target_detection import resolve_manifest_target_decision
+    from ..core.target_detection import (
+        EffectiveTargetDecision,
+        resolve_manifest_target_decision,
+    )
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ..install.services import (
         enforce_agent_plugin_deployment_boundary,
@@ -200,6 +203,9 @@ def install_local_bundle(
         )
         from ..policy.install_preflight import run_policy_preflight
 
+        deployment_decision = EffectiveTargetDecision(
+            [resolved.name for resolved in targets], "bundle deployment targets"
+        )
         policy_fetch, _enforcement_active = run_policy_preflight(
             project_root=source_root,
             apm_deps=(),
@@ -207,7 +213,8 @@ def install_local_bundle(
             no_policy=no_policy,
             logger=logger,
             dry_run=dry_run,
-            effective_target=[resolved.name for resolved in targets],
+            effective_target=deployment_decision.canonical_targets,
+            effective_target_source=deployment_decision.source,
             cache_only=True,
         )
         policy = policy_fetch.policy if policy_fetch is not None else None

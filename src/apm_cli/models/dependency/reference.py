@@ -22,6 +22,7 @@ from ...utils.github_host import (
 )
 from ...utils.path_security import (
     PathTraversalError,
+    decode_url_path_segments,
     parse_url_path_segments,
     validate_path_segments,
 )
@@ -1529,7 +1530,7 @@ class DependencyReference(ProviderCoordinateMixin):
         allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
-            if not re.match(allowed_pattern, part.rstrip(".git")):
+            if not re.match(allowed_pattern, part.removesuffix(".git")):
                 raise ValueError(f"Invalid repository path component: {part}")
 
         quoted_repo = "/".join(urllib.parse.quote(p, safe="") for p in uparts)
@@ -1747,6 +1748,16 @@ class DependencyReference(ProviderCoordinateMixin):
 
         return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
+    @staticmethod
+    def _reject_git_suffixed_repo_name(name: str) -> None:
+        # Parsing removes exactly one ".git" transport suffix, so a name that
+        # still ends in ".git" would be written to apm.yml as a different repo.
+        if name.endswith(".git"):
+            raise ValueError(
+                f"Invalid repository path component: {name}. A repository name "
+                "cannot end in '.git' once its '.git' suffix is removed"
+            )
+
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url, *, allow_percent_encoded: bool = False):
         """Validate a repository path and return its ADO coordinates when applicable."""
@@ -1757,7 +1768,10 @@ class DependencyReference(ProviderCoordinateMixin):
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
             ado_parts = repo_url.split("/")
-            validate_path_segments(repo_url, context="Azure DevOps repository path")
+            validate_path_segments(
+                repo_url, context="Azure DevOps repository path", reject_all_dots=True
+            )
+            cls._reject_git_suffixed_repo_name(ado_parts[2])
             return ado_parts[0], ado_parts[1], ado_parts[2]
 
         segments = repo_url.split("/")
@@ -1770,7 +1784,10 @@ class DependencyReference(ProviderCoordinateMixin):
         )
         if not all(re.match(allowed_pattern, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
-        validate_path_segments(repo_url, context="repository path")
+        validate_path_segments(repo_url, context="repository path", reject_all_dots=True)
+        cls._reject_git_suffixed_repo_name(
+            decode_url_path_segments(segments[-1], context="repository path")[0]
+        )
         for seg in segments:
             if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                 raise ValueError(

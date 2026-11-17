@@ -273,6 +273,11 @@ def _build_policy(data: dict) -> ApmPolicy:
     if not data:
         return ApmPolicy()
 
+    from ..core.target_detection import (
+        canonical_policy_target_name,
+        canonical_policy_target_names,
+    )
+
     cache_data = data.get("cache") or {}
     cache = PolicyCache(
         ttl=cache_data.get("ttl", PolicyCache.ttl),
@@ -313,8 +318,8 @@ def _build_policy(data: dict) -> ApmPolicy:
     strategy_data = comp_data.get("strategy") or {}
     compilation = CompilationPolicy(
         target=CompilationTargetPolicy(
-            allow=_parse_allow(target_data.get("allow")),
-            enforce=target_data.get("enforce"),
+            allow=canonical_policy_target_names(_parse_allow(target_data.get("allow"))),
+            enforce=canonical_policy_target_name(target_data.get("enforce")),
         ),
         strategy=CompilationStrategyPolicy(
             enforce=strategy_data.get("enforce"),

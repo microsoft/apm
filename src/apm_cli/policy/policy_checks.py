@@ -537,12 +537,25 @@ def _check_mcp_self_defined(
 
 
 def _check_compilation_target(
-    raw_yml: dict | None,
+    targets: tuple[str, ...] | None,
     policy: CompilationPolicy,
+    *,
+    source: str = "apm.yml",
 ) -> CheckResult:
-    """Check 11: compilation target matches policy."""
-    enforce = policy.target.enforce
-    allow = policy.target.allow
+    """Check 11: the selected target profiles match compilation-target policy.
+
+    *targets* must be an :attr:`EffectiveTargetDecision.canonical_targets`
+    projection: aliases resolved, ``all`` expanded, MCP-only targets mapped to
+    their primitive profile. ``None`` or empty means nothing is selected.
+    """
+    from ..core.target_detection import (
+        EffectiveTargetDecision,
+        canonical_policy_target_name,
+        canonical_policy_target_names,
+    )
+
+    enforce = canonical_policy_target_name(policy.target.enforce)
+    allow = canonical_policy_target_names(policy.target.allow)
 
     if not enforce and allow is None:
         return CheckResult(
@@ -551,34 +564,36 @@ def _check_compilation_target(
             message="No compilation target restrictions configured",
         )
 
-    target = (raw_yml or {}).get("target")
-    if not target:
+    if not targets:
         return CheckResult(
             name="compilation-target",
             passed=True,
             message="No compilation target set in manifest",
         )
 
-    # Normalize target to a list for uniform checking
-    target_list = target if isinstance(target, list) else [target]
-
+    target_list = list(targets)
     if enforce:
-        if enforce not in target_list:
+        required = (
+            EffectiveTargetDecision("all", "policy").canonical_targets or ()
+            if enforce == "all"
+            else (enforce,)
+        )
+        missing = [name for name in required if name not in target_list]
+        if missing:
             return CheckResult(
                 name="compilation-target",
                 passed=False,
                 message=f"Enforced target '{enforce}' not present in {target_list}",
-                details=[f"target: {target}, enforced: {enforce}"],
+                details=[f"targets: {target_list} (source: {source}), enforced: {enforce}"],
             )
     elif allow is not None:
-        allow_set = set(allow) if isinstance(allow, (list, tuple)) else {allow}
-        disallowed = [t for t in target_list if t not in allow_set]
+        disallowed = [name for name in target_list if name not in allow]
         if disallowed:
             return CheckResult(
                 name="compilation-target",
                 passed=False,
-                message=f"Target(s) {disallowed} not in allowed list {sorted(allow_set)}",
-                details=[f"target: {target}, allowed: {sorted(allow_set)}"],
+                message=f"Target(s) {disallowed} not in allowed list {sorted(allow)}",
+                details=[f"targets: {target_list} (source: {source}), allowed: {sorted(allow)}"],
             )
 
     return CheckResult(
@@ -1197,7 +1212,8 @@ def run_dependency_policy_checks(
     lockfile=None,
     policy: ApmPolicy,
     mcp_deps=None,
-    effective_target: str | list[str] | None = None,
+    effective_target: tuple[str, ...] | None = None,
+    effective_target_source: str = "effective target",
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
@@ -1228,9 +1244,13 @@ def run_dependency_policy_checks(
         resolved set includes MCP entries they are checked against
         ``policy.mcp``.
     effective_target:
-        The post-targets-phase compilation target string, or ``None``.
-        When ``None`` target/compilation checks are **skipped** (they
-        belong to the separate W2-target-aware call).
+        The ``EffectiveTargetDecision.canonical_targets`` projection of the
+        resolved target selection, or ``None``. When ``None``
+        target/compilation checks are **skipped** (they belong to the
+        separate W2-target-aware call).
+    effective_target_source:
+        Where the target selection came from (``apm.yml``, ``--target flag``,
+        ...), named in compilation-target violation details.
     fetch_outcome:
         Human-readable label for diagnostic context (e.g.
         ``"cached"``, ``"fetched"``).  Currently informational only.
@@ -1351,8 +1371,13 @@ def run_dependency_policy_checks(
         ]
     # Target / compilation + manifest tail checks.
     if effective_target is not None:
-        synthetic_yml = {"target": effective_target}
-        remaining_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
+        remaining_checks.append(
+            _check_compilation_target(
+                effective_target,
+                policy.compilation,
+                source=effective_target_source,
+            )
+        )
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
         remaining_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
     for check in remaining_checks:
@@ -1437,12 +1462,6 @@ def run_policy_checks(
     apm_deps = manifest.get_apm_dependencies()
     mcp_deps = manifest.get_mcp_dependencies()
 
-    # Read effective target from raw manifest for the full-project path
-    # NOTE: the wrapper does NOT pass effective_target to the dep seam.
-    # Target checks run as disk-level checks below (reading raw_yml),
-    # because the wrapper has the on-disk manifest.  The install pipeline
-    # will pass effective_target directly (W2-target-aware).
-
     try:
         source_deps = _audit_source_dependencies(manifest, lock)
     except ValueError as exc:
@@ -1463,7 +1482,7 @@ def run_policy_checks(
         lockfile=lock,
         policy=policy,
         mcp_deps=mcp_deps,
-        # effective_target=None: target checks handled below from raw_yml
+        # effective_target=None: the manifest target check runs below.
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
         registries=getattr(manifest, "registries", None),
@@ -1492,8 +1511,19 @@ def run_policy_checks(
 
     # -- Disk-level checks that only apply to full-project audits --
 
-    # Compilation checks (11-13) -- all run from raw_yml in wrapper
-    if _run(_check_compilation_target(raw_yml, policy.compilation)):
+    # Compilation checks (11-13). Audit judges the targets the manifest
+    # declares, through the same projection the install gate uses.
+    from ..core.target_detection import EffectiveTargetDecision
+    from ..models.apm_package import package_target_selection
+
+    manifest_decision = EffectiveTargetDecision(package_target_selection(manifest), "apm.yml")
+    if _run(
+        _check_compilation_target(
+            manifest_decision.canonical_targets,
+            policy.compilation,
+            source=manifest_decision.source,
+        )
+    ):
         return result
     if _run(_check_compilation_strategy(raw_yml, policy.compilation)):
         return result

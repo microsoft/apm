@@ -19,12 +19,15 @@ apm audit [PACKAGE] [OPTIONS]
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. In a project checkout with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, CI mode prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without mutating the checkout. Local dependencies must remain available at their declared paths. Windows long and native 8.3 spellings of the same project use the same project scope. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Global audit also checks resolved external deployment roots such as
-`HERMES_HOME` and `CLAUDE_CONFIG_DIR`. Default audit compares tracked files in
+`HERMES_HOME`, `CLAUDE_CONFIG_DIR` and `COPILOT_HOME`. Default audit compares tracked files in
 those roots for drift. `apm audit --ci` also scans target-governed external
 subtrees for content integrity. Neither mode modifies those roots.
 Auditing the user metadata workspace (`~/.apm`) still requires its installed
-`apm_modules/`; if missing, restore it with `apm install --global`. Project
-scratch replay does not enable cold replay for global installations.
+`apm_modules/` when `apm.lock.yaml` records packages or local bundle staging;
+if missing, restore it with `apm install --global`. A user lockfile with only MCP/LSP servers or your
+own `~/.apm` content needs no `apm_modules/`, so `apm audit --ci` passes after
+`apm update -g` as it does after `apm install -g`. Project scratch replay does
+not enable cold replay for global installations.
 Scratch replay preserves each scope's installed-source layout so relative
 links, including Kiro prompt links, compare against their deployed equivalents.
 

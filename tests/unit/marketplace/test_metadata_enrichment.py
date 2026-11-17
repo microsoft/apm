@@ -33,6 +33,7 @@ from apm_cli.marketplace.builder import (
 )
 from apm_cli.marketplace.drift_check import check_marketplace_drift
 from apm_cli.marketplace.migration import load_marketplace_config
+from tests.utils.metadata_transport import BUILDER_HTTP_SEAM, urlopen_adapter
 
 
 def _write_config(project_root: Path) -> None:
@@ -367,7 +368,7 @@ def test_pack_check_clean_certifies_manifestless_skill_with_version_range(
 
     monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -464,7 +465,7 @@ def test_pack_check_clean_rejects_invalid_manifestless_skill_metadata(
 
     monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
 
     checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
@@ -521,7 +522,7 @@ def test_pack_check_clean_rejects_missing_manifestless_skill_path(
 
     monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -572,7 +573,7 @@ def test_pack_check_clean_rejects_metadata_access_failures(
         raise metadata_error
 
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
 
     checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
