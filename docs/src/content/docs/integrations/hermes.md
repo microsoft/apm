@@ -67,10 +67,12 @@ mcp_servers:
     args: ["-y", "my-mcp-package"]
     env:
       MY_TOKEN: "..."
+    cwd: /srv/my-server   # when declared
+    timeout: 120          # extra keys pass through
     enabled: true
 ```
 
-HTTP servers are written with `url` and optional `headers` instead of `command`/`args`. APM merges into the existing `mcp_servers:` block and preserves every other top-level key in `config.yaml` (model provider, platform settings, and so on). All writes go through APM's YAML helper, so existing comments outside the managed block are the only thing not preserved by a safe-dump rewrite.
+Remote servers are written with `url` and optional `headers` instead of `command`/`args`; an SSE server also gets `transport: sse` (Streamable HTTP needs no `transport` key). Other keys from the [Hermes server reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference), such as `timeout`, `connect_timeout` or `auth`, pass through from `extra:` (or unknown top-level keys) in the `apm.yml` declaration. Entries an earlier APM release wrote without these keys are rewritten on the next `apm install`; a same-name entry you wrote yourself is preserved and reported as a conflict. APM merges into the existing `mcp_servers:` block and preserves every other top-level key in `config.yaml` (model provider, platform settings, and so on). All writes go through APM's YAML helper, so existing comments outside the managed block are the only thing not preserved by a safe-dump rewrite.
 
 ## Skills and instructions
 

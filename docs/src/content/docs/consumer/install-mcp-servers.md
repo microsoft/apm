@@ -288,11 +288,11 @@ and plugin. Servers then install like `apm.yml`-declared self-defined servers.
 ## Resolve a connection name conflict
 
 For every JSON-config target (VS Code, Copilot CLI, Cursor, Gemini, Kiro,
-OpenCode, Windsurf, Antigravity) and for Claude and Codex, a normal package
-update or root override updates an unchanged managed connection. A differing
-native entry is preserved, the affected target is named, and install exits
-`1`; it is never reported as "already configured". JetBrains and Hermes still
-skip an existing connection by name.
+OpenCode, Windsurf, Antigravity) and for Claude, Codex and Hermes, a normal
+package update or root override updates an unchanged managed connection. A
+differing native entry is preserved, the affected target is named, and install
+exits `1`; it is never reported as "already configured". JetBrains still skips
+an existing connection by name.
 Successful writes, including registry entries written before a later
 self-defined conflict, remain recorded. This is not a whole-command rollback.
 
@@ -440,7 +440,8 @@ show` prints the same transport. Each harness gets its own native keys:
 | Antigravity | `serverUrl` | not supported |
 | Codex CLI | `url` | not supported |
 | Cursor, Windsurf, JetBrains Copilot | `type: http`, `url` | `type: http`, `url` |
-| Kiro, Hermes | `url` | `url` |
+| Hermes | `url` | `url`, `transport: sse` |
+| Kiro | `url` | `url` |
 | OpenCode | `type: remote`, `url` | `type: remote`, `url` |
 
 When a harness does not support the transport, APM prints one warning naming
@@ -449,7 +450,8 @@ not recorded for that harness and the install exits `0`, including under
 `apm install --frozen`.
 
 Entries an earlier APM release wrote in a shape the table above replaced (for
-example Antigravity `httpUrl`, or `type: http` for an SSE server) are rewritten
+example Antigravity `httpUrl`, `type: http` for an SSE server, or a Hermes
+entry missing `transport: sse`, `cwd` or extra keys) are rewritten
 on the next `apm install`, `apm update` or `apm install --frozen`, even when
 `apm.yml` did not change. APM rewrites only entries it can prove it wrote; a
 same-name entry you added yourself is preserved and reported as a conflict.

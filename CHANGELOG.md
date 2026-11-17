@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` run from `~/.apm` no longer fails with "installed package materialization is missing" after `apm update -g` when the user manifest declares no APM packages (only MCP/LSP servers or your own `~/.apm` content); it still fails closed when the user lockfile records packages or local bundle staging and `~/.apm/apm_modules` is gone. (#3797)
 - After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
 
+- Hermes MCP servers keep what you declare: stdio `cwd`, `transport: sse` for SSE remotes, and documented extra keys such as `timeout` or `auth` now reach `config.yaml`; the next `apm install` rewrites entries an earlier APM wrote without them, and a same-name entry you wrote yourself is preserved and reported. -- with @Parth-Vasave (#PR_P2)
 ### Changed
 
 - `apm init --plugin` and `apm plugin init` no longer write a default `"license": "MIT"` into the new `plugin.json`; choose and add your package's license yourself. (#3799)
