@@ -2,8 +2,10 @@
 
 ``str.rstrip(".git")`` strips a character *set*, so names such as ``git``,
 ``tig`` or ``gitit`` were emptied and rejected. The canonical validator must
-remove only the literal ``.git`` suffix, reject segments made only of dots,
-and every accepted reference must survive ``apm.yml`` serialization.
+remove only the literal ``.git`` suffix, reject segments made only of dots or
+names that still end in ``.git`` (they would be written back as a different
+repository), and every accepted reference must survive ``apm.yml``
+serialization.
 """
 
 from __future__ import annotations
@@ -35,8 +37,11 @@ PROPERTY_PROFILE = settings(max_examples=60, deadline=None, database=None, print
         ("git@github.com:jonas/tig.git", "jonas/tig"),
     ],
 )
-def test_names_ending_in_git_characters_parse(spec: str, repo_url: str) -> None:
-    assert DependencyReference.parse(spec).repo_url == repo_url
+def test_names_ending_in_git_characters_parse_and_round_trip(spec: str, repo_url: str) -> None:
+    first = DependencyReference.parse(spec)
+    assert first.repo_url == repo_url
+    second = DependencyReference.parse(first.to_apm_yml_entry())
+    assert (second.host, second.repo_url) == (first.host, repo_url)
 
 
 @pytest.mark.parametrize(
@@ -48,9 +53,15 @@ def test_names_ending_in_git_characters_parse(spec: str, repo_url: str) -> None:
         "https://github.com/owner/...",
         "https://github.com/owner/%2E%2E%2E",
         "dev.azure.com/org/proj/...",
+        "owner/git.git.git",
+        "owner/.git.git",
+        "https://github.com/owner/git.git.git",
+        "git@github.com:owner/git.git.git",
+        "gitlab.com/group/tig.git.git",
+        "dev.azure.com/org/proj/git.git.git",
     ],
 )
-def test_empty_or_all_dot_repository_segments_are_rejected(spec: str) -> None:
+def test_unrepresentable_repository_segments_are_rejected(spec: str) -> None:
     with pytest.raises(ValueError):
         DependencyReference.parse(spec)
 
@@ -59,7 +70,7 @@ _OWNER = st.text(string.ascii_letters + string.digits + "-", min_size=1, max_siz
     lambda s: not s.startswith("-") and not s.endswith("-")
 )
 _REPO = st.text(string.ascii_letters + string.digits + "._-", min_size=1, max_size=16).filter(
-    lambda s: s.strip(".") != "" and s != ".git"
+    lambda s: s.removesuffix(".git").strip(".") != "" and not s.removesuffix(".git").endswith(".git")
 )
 
 
