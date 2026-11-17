@@ -35,7 +35,12 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
-from ..utils.http_credentials import CredentialScopedSession, origin_bounded_request, origin_root
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
+)
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
@@ -773,23 +778,37 @@ def _fetch_ado_rest(
         port,
     )
 
-    from ..core.auth_chain import AttemptAuth
+    from ..core.auth_chain import authorization_headers
     from ..core.auth_outcome import raise_for_auth_outcome
 
     def _do_fetch(token, git_env):
-        # ``auth=`` carries exactly the chain-selected credential and keeps
-        # ambient netrc from replacing it.
-        resp = _http_get(
-            url,
-            headers={"User-Agent": "apm-cli"},
-            auth=AttemptAuth(git_env),
-            timeout=30,
-            stream=True,
-            # A sign-in redirect is the auth signal; the classifier sees the
-            # original 3xx and the chain escalates instead of following it.
-            allow_redirects=False,
-        )
+        # Only the chain-selected credential is sent; ambient netrc never
+        # replaces it. A sign-in redirect is the auth signal: it is refused,
+        # not followed, and the classifier escalates on the refused 3xx.
+        refused: RedirectRefusedError | None = None
         try:
+            resp = _http_get(
+                url,
+                headers={"User-Agent": "apm-cli", **authorization_headers(git_env)},
+                ambient_credentials=False,
+                follow_cross_origin_without_credentials=False,
+                timeout=30,
+                stream=True,
+            )
+        except RedirectRefusedError as exc:
+            if exc.response is None:
+                raise
+            refused, resp = exc, exc.response
+        try:
+            if refused is not None:
+                # Sign-in redirects classify as auth failures; any other
+                # refused hop is a plain transport failure.
+                raise_for_auth_outcome(
+                    resp,
+                    host_kind="ado",
+                    credential_presented=bool(token),
+                )
+                raise refused
             if resp.status_code == 404:
                 # Not an auth outcome: the classifier never escalates on it.
                 raise _AdoItemNotFound

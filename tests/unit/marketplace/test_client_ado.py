@@ -80,12 +80,10 @@ def _fake_response(status_code: int, *, text: str = "", content_type: str = "app
 
 
 def _effective_headers(headers: dict | None, kwargs: dict) -> dict:
-    """Headers as sent: explicit headers plus what the ``auth=`` hook applies."""
-    request = SimpleNamespace(headers=dict(headers or {}))
-    auth = kwargs.get("auth")
-    if callable(auth):
-        auth(request)
-    return request.headers
+    """Headers as sent; the redirect owner rejects an ``auth=`` hook."""
+    assert "auth" not in kwargs
+    assert kwargs.get("ambient_credentials") is False
+    return dict(headers or {})
 
 
 class _FakeResolver:
@@ -496,35 +494,68 @@ def test_fetch_ado_rest_raises_is_swallowed_into_fallback() -> None:
     git_fallback.assert_called_once()
 
 
-def test_fetch_ado_signin_redirect_escalates_without_following() -> None:
-    """A 302 to the ADO sign-in host is classified, never followed."""
+def test_ado_rest_fetch_sends_chain_credential_through_real_http_get() -> None:
+    """Unpatched transport: the chain credential reaches the server as a header.
+
+    ``_http_get`` and the redirect owner run for real against a loopback
+    stub. The PAT step gets a sign-in redirect, which must be refused (not
+    followed) and escalated; the bearer step then succeeds.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    seen: list[tuple[str, str]] = []
+
+    class _Stub(BaseHTTPRequestHandler):
+        def do_GET(self):
+            auth = self.headers.get("Authorization", "")
+            seen.append((self.path, auth))
+            if auth == "Bearer jwt-fallback":
+                body = json.dumps(_MANIFEST).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(302)
+            self.send_header("Location", "https://app.vssps.visualstudio.com/_signin?realm=x")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Stub)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    stub_url = f"http://127.0.0.1:{server.server_address[1]}/_apis/git/items?path=marketplace.json"
+
     bearer_provider = MagicMock()
     bearer_provider.is_available.return_value = True
     bearer_provider.get_bearer_token.return_value = "jwt-fallback"
-    redirect_flags: list[object] = []
-
-    def fake_get(url, headers=None, timeout=None, **kwargs):
-        redirect_flags.append(kwargs.get("allow_redirects"))
-        auth = _effective_headers(headers, kwargs).get("Authorization", "")
-        if auth == "Bearer jwt-fallback":
-            return _fake_response(200, text=json.dumps(_MANIFEST))
-        resp = _fake_response(302, text="")
-        resp.headers = {"Location": "https://app.vssps.visualstudio.com/_signin?realm=x"}
-        return resp
-
-    with (
-        patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=False),
-        patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=bearer_provider),
-        patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
-        patch("apm_cli.marketplace.client._fetch_git") as git_fallback,
-    ):
-        result = _fetch_ado(
-            _ado_source(),
-            "marketplace.json",
-            host_info=AuthResolver.classify_host("dev.azure.com"),
-            auth_resolver=AuthResolver(),
-        )
+    helper_store = MagicMock()
+    helper_store.resolve_git_helper_credential.return_value = None
+    try:
+        with (
+            patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=False),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=bearer_provider),
+            patch("apm_cli.utils.github_host.build_ado_api_url", return_value=stub_url),
+        ):
+            result = client_mod._fetch_ado_rest(
+                _ado_source(),
+                "marketplace.json",
+                org="contoso",
+                project="platform",
+                repo="tools",
+                host="dev.azure.com",
+                port=None,
+                auth_resolver=AuthResolver(token_manager=helper_store),
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
 
     assert result == _MANIFEST
-    assert redirect_flags == [False, False]
-    git_fallback.assert_not_called()
+    expected_basic = "Basic " + base64.b64encode(b":stale-pat").decode()
+    assert [auth for _path, auth in seen] == [expected_basic, "Bearer jwt-fallback"]

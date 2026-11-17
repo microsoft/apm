@@ -84,7 +84,12 @@ _ROUTED_CONSUMERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "src/apm_cli/marketplace/client.py",
-        ("auth=AttemptAuth(git_env)", "raise_for_auth_outcome("),
+        (
+            "**authorization_headers(git_env)",
+            "ambient_credentials=False",
+            "follow_cross_origin_without_credentials=False",
+            "raise_for_auth_outcome(",
+        ),
     ),
     (
         "src/apm_cli/policy/discovery.py",
