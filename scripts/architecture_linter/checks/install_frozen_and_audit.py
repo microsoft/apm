@@ -702,17 +702,44 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
 
     audit_gate_calls = _name_calls_in(audit, "_audit_ci_gate")
     audit_gate_body = _awk_body(audit, re.compile(r"^def _audit_ci_gate\("), re.compile(r"^def "))
-    if not _body_has(
-        audit_gate_body,
-        "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
+    materialization_body = _awk_body(
+        owner,
+        re.compile(r"^def resolve_ci_audit_materialization\("),
+        re.compile(r"^(def |class |@)"),
+    )
+    # #3781: one owner decides whether a workspace needs live package
+    # materialization; the user workspace needs it only when packages are locked.
+    if not (
+        _body_has(
+            materialization_body,
+            "get_workspace_deploy_root(project_root) != project_root.resolve()",
+        )
+        and _body_has(materialization_body, "lockfile.get_package_dependencies()")
+        and _body_has(materialization_body, "prepare_ci_audit_replay(")
+        and "resolve_ci_audit_materialization" in audit_gate_calls
+        and not {"get_workspace_deploy_root", "prepare_ci_audit_replay"} & audit_gate_calls
+        and not _body_has(audit_gate_body, "apm_modules")
     ):
         findings.append(
             _summary(
                 rule_id,
-                "src/apm_cli/commands/audit.py",
-                "CI audit must compare resolved workspace identities before refusing global replay",
+                _AUDIT_REPLAY_OWNER,
+                "CI audit must ask resolve_ci_audit_materialization whether a workspace "
+                "needs package materialization (resolved identity; user scope only when "
+                "packages are locked)",
             )
         )
+    findings.extend(
+        _duplicate_definition_lines(
+            provider,
+            rule_id=rule_id,
+            prefix=_SRC_PREFIX,
+            pattern=re.compile(r"installed package materialization is missing"),
+            owner=_AUDIT_REPLAY_OWNER,
+            message="Missing-materialization refusals belong to resolve_ci_audit_materialization",
+            respect_exempt=False,
+        )
+    )
     config_body = _awk_body(
         ci_checks, re.compile(r"^def _check_config_consistency\("), re.compile(r"^def ")
     )
@@ -721,7 +748,6 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     if (
         not _present_re(owner, re.compile(r"^def prepare_ci_audit_replay\("))
-        or "prepare_ci_audit_replay" not in audit_gate_calls
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")

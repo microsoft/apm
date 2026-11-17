@@ -668,20 +668,49 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "audit-replay-command-delegation",
         AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
-        (
-            (
-                "prepared_replay = prepare_ci_audit_replay(",
-                "prepared_replay = prepare_ci_audit_replay_disabled(",
-            ),
+        _replace(
+            "materialization = resolve_ci_audit_materialization(",
+            "materialization = resolve_ci_audit_materialization_disabled(",
         ),
     ),
     CompoundMutation(
         "audit-replay-workspace-identity",
         AUDIT_RULE,
+        "src/apm_cli/install/audit_replay.py",
+        _replace(
+            "get_workspace_deploy_root(project_root) != project_root.resolve()",
+            "get_workspace_deploy_root(project_root) != project_root",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-user-scope-package-predicate",
+        AUDIT_RULE,
+        "src/apm_cli/install/audit_replay.py",
+        _replace(
+            "if lockfile is not None and not lockfile.get_package_dependencies():",
+            "if lockfile is not None and False:",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-command-modules-probe",
+        AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
         _replace(
-            "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
-            "get_workspace_deploy_root(cfg.project_root) != cfg.project_root",
+            "    prepared_replay = materialization.prepared_replay\n",
+            "    prepared_replay = materialization.prepared_replay\n"
+            '    if not (cfg.project_root / "apm_modules").exists():\n'
+            "        prepared_replay = None\n",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-command-owned-refusal",
+        AUDIT_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "    prepared_replay_error = materialization.error\n",
+            "    prepared_replay_error = materialization.error or (\n"
+            '        "installed package materialization is missing"\n'
+            "    )\n",
         ),
     ),
     CompoundMutation(
@@ -689,9 +718,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
         _replace(
-            "                    prepared_replay = prepare_ci_audit_replay(",
-            "                    run_replay(None, None)\n"
-            "                    prepared_replay = prepare_ci_audit_replay(",
+            "    materialization = resolve_ci_audit_materialization(",
+            "    run_replay(None, None)\n    materialization = resolve_ci_audit_materialization(",
         ),
     ),
     CompoundMutation(
