@@ -12,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When several manifests narrow the same dependency with different `skills:` and `targets:`, each skill now deploys only to the harnesses its own declaration selected, instead of every selected skill reaching every selected harness; for example `alpha` for Claude and `gamma` for Copilot no longer cross over. `apm.lock.yaml` records the exact pairing in a new optional `subset_pairings` field (only when needed, so other lockfiles are unchanged), and `apm audit`, `apm uninstall` and `--frozen` read it; OpenAPM proposes this as `req-rs-018`. Upgrade note: a lockfile written by an earlier APM for such a diamond fails `apm install --frozen` with "selection for <dep> changed" until you run `apm install` once and commit `apm.lock.yaml`. (#3769)
 
 ## [0.36.1] - 2026-11-18
+### Added
+
+- New `apm manifest migrate [--global] [--dry-run] [--yes]` rewrites the deprecated top-level `target:` key in `apm.yml` to `targets:`, keeping comments and deploying the same files and MCP destinations (`vscode` stays `vscode`, `agents` becomes `copilot`, `agy` becomes `antigravity`, `target: all` becomes the explicit list `apm install` deploys today); it refuses `intellij`/`copilot-app`, changes nothing on a migrated manifest, and under `CI=true` prints the diff and exits 1. `apm install` never rewrites the manifest. (#3801)
+
+### Deprecated
+
+- The singular top-level `target:` key and the ignored `compilation.target` key in the project or user `apm.yml` now print one warning per run on stderr; exit codes do not change and dependency manifests never warn. Run `apm manifest migrate`; both keys will be removed in v1.0. (#3801)
+
+### Changed
+
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
+
+### Fixed
+
+- Registry installs, lockfile replays and `apm publish` now follow a gateway redirect that stays on the configured registry origin and under its URL path (for example a `307` from a gateway that decodes `%2F`), keeping the method and body for `307`/`308` and at most 3 hops; any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. Registry publish now follows redirects only within the configured registry origin, and marketplace metadata fetches use the shared credential-scoped HTTP owner. Reported with a prototype by @ashky23. (closes #3726, #3785)
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794)
+- Remote MCP servers now reach each harness in its native shape: registry `remotes[].type` is honored, so SSE servers stay SSE on Copilot CLI, Claude Code and VS Code (`type: sse`) and Gemini (`url`); Antigravity gets `serverUrl`, and SSE on Antigravity or Codex is skipped with one warning and exit `0` instead of failing the install. `apm mcp show` prints the real transport, the next `apm install`, `apm update` or `apm install --frozen` rewrites entries an earlier APM wrote in the old shape (user entries are preserved), and `extra:` can no longer add an `httpUrl` or `serverUrl` endpoint. (#3789)
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
+- `apm audit --ci` run from `~/.apm` no longer fails with "installed package materialization is missing" after `apm update -g` when the user manifest declares no APM packages (only MCP/LSP servers or your own `~/.apm` content); it still fails closed when the user lockfile records packages or local bundle staging and `~/.apm/apm_modules` is gone. (#3797)
+- After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
+- `compilation.target` policy now judges the targets a project actually selects: `apm audit` reads plural `targets:` (non-compliant manifests that `apm install` already blocked now also fail audit), CSV values such as `target: "claude,copilot"` are split, aliases compare as the target they deploy (`vscode` and `agents` are `copilot`) on both the manifest and policy side, `allow: [all]` allows every target, and inherited alias allow lists no longer merge to "allow nothing". Plural-key tests ported from #3739 -- by @MohammedAlkindi (#3774)
+- `apm install` rejects `target: intellij` or `target: copilot-app` in `apm.yml` before writing any file (it used to deploy files and a lockfile, then fail); `target: all` no longer prints a contradictory "treating the field as omitted" warning in `apm install` or `apm compile -g` while deploying everywhere; re-running `apm init` keeps the targets `target: all` deploys to; and the docs now say the ignored `compilation.target` field has no effect, so use `targets:`. (#3791)
 
 ### Changed
 
