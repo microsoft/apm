@@ -1270,6 +1270,7 @@ class MarketplaceBuilder:
                             url,
                             base_url=origin_root(url),
                             headers=headers,
+                            ambient_credentials=False,
                             timeout=5,
                             stream=True,
                         )

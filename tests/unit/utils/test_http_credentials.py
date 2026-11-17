@@ -306,3 +306,40 @@ def test_anonymous_request_can_exclude_ambient_netrc(tmp_path, monkeypatch) -> N
         # An auth-chain step opts out of netrc even without a credential header.
         assert "authorization" not in origin.seen[0]
         assert origin.seen[1]["authorization"].startswith("Basic ")
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        # Encoded delimiters that survive the decode limit cannot be judged.
+        f"{_BASE}/%252525252e%252525252e/other",
+        # Dot segments removed before slashes collapse escape the base.
+        "https://registry.example.com/other//../apm/archive",
+    ],
+)
+def test_paths_that_escape_the_base_under_any_normalization_are_refused(target: str) -> None:
+    assert origin_bound_refusal(target, base_url=_BASE) == "outside-base-path"
+
+
+def test_non_ascii_hosts_are_not_matched_through_idna_mappings() -> None:
+    base = "https://fa\u00df.example/apm"
+
+    assert origin_bound_refusal("https://fass.example/apm/x", base_url=base) == "outside-origin"
+    assert origin_bound_refusal("https://FA\u00df.example/apm/x", base_url=base) is None
+
+
+def test_cross_origin_follow_never_applies_ambient_credentials() -> None:
+    session = _ScriptedSession(
+        _ScriptedResponse(302, "https://cdn.example.net/blob"), _ScriptedResponse(200)
+    )
+
+    origin_bounded_request(
+        session,
+        "GET",
+        f"{_BASE}/v1/x",
+        base_url=_BASE,
+        follow_cross_origin_without_credentials=True,
+    )
+
+    assert "auth" not in session.calls[0]
+    assert session.calls[1]["auth"] is not None

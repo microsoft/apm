@@ -142,13 +142,19 @@ def _remove_dot_segments(path: str) -> str:
     return result if result.startswith("/") else "/" + result
 
 
-def _comparable_path(path: str) -> str:
+def _collapse_slashes(path: str) -> str:
+    return re.sub(r"/{2,}", "/", path)
+
+
+def _comparable_paths(path: str) -> tuple[str, ...] | None:
     """Normalize a URL path for the base-path containment check only.
 
     Percent-encoded dots, slashes, backslashes and percent signs are decoded
-    (repeatedly, to defeat double encoding), backslashes become ``/``, empty
-    segments collapse, and dot segments are removed. Decoding delimiters can
-    only add path structure, so the check stays conservative.
+    (repeatedly, to defeat double encoding) and backslashes become ``/``.
+    Clients disagree on whether empty segments collapse before or after dot
+    segments are removed, so both orders are returned and the caller requires
+    every variant to stay in bounds. Returns ``None`` when encoded delimiters
+    survive the decode limit: the path cannot be judged and is refused.
     """
     decoded = path or "/"
     for _ in range(_MAX_PATH_DECODE_ROUNDS):
@@ -158,8 +164,20 @@ def _comparable_path(path: str) -> str:
         if expanded == decoded:
             break
         decoded = expanded
-    decoded = re.sub(r"/{2,}", "/", decoded.replace("\\", "/"))
-    return _remove_dot_segments(decoded if decoded.startswith("/") else "/" + decoded)
+    else:
+        if _ENCODED_PATH_DELIMITER.search(decoded):
+            return None
+    decoded = decoded.replace("\\", "/")
+    if not decoded.startswith("/"):
+        decoded = "/" + decoded
+    return (
+        _collapse_slashes(_remove_dot_segments(decoded)),
+        _remove_dot_segments(_collapse_slashes(decoded)),
+    )
+
+
+def _path_within(path: str, base_path: str) -> bool:
+    return not base_path or path == base_path or path.startswith(base_path + "/")
 
 
 def _comparable_host(hostname: str | None) -> str | None:
@@ -167,12 +185,10 @@ def _comparable_host(hostname: str | None) -> str | None:
     if not hostname or "%" in hostname:
         # ``%`` marks an IPv6 zone ID or a percent-encoded host; both refused.
         return None
-    if hostname.isascii():
-        return hostname.lower()
-    try:
-        return hostname.encode("idna").decode("ascii").lower()
-    except UnicodeError:
-        return None
+    # Non-ASCII hosts compare by exact text: IDNA 2003 (stdlib) and IDNA 2008
+    # (used by the HTTP stack) map some names differently, so an encoded
+    # comparison could match a host the request would not actually contact.
+    return hostname.lower()
 
 
 def _origin_key(url: str) -> tuple[str, str, int] | None:
@@ -214,9 +230,12 @@ def origin_bound_refusal(url: str, *, base_url: str) -> str | None:
         if base is not None and base[0] == "https" and target[0] == "http":
             return REFUSED_HTTPS_DOWNGRADE
         return REFUSED_OUTSIDE_ORIGIN
-    base_path = _comparable_path(urllib.parse.urlsplit(base_url).path).rstrip("/")
-    target_path = _comparable_path(parts.path)
-    if base_path and target_path != base_path and not target_path.startswith(base_path + "/"):
+    base_paths = _comparable_paths(urllib.parse.urlsplit(base_url).path)
+    target_paths = _comparable_paths(parts.path)
+    if base_paths is None or target_paths is None:
+        return REFUSED_OUTSIDE_BASE_PATH
+    base_path = base_paths[1].rstrip("/")
+    if not all(_path_within(path, base_path) for path in target_paths):
         return REFUSED_OUTSIDE_BASE_PATH
     return None
 
@@ -308,6 +327,7 @@ def origin_bounded_request(
             and urllib.parse.urlsplit(target).scheme.lower() == "https"
         ):
             request_headers = _without_credentials(request_headers)
+            kwargs["auth"] = _NO_AMBIENT_CREDENTIALS
             reason = None
         if (
             reason is None
