@@ -70,8 +70,8 @@ class _Scenario:
     def apm(self, *args: str, env: dict[str, str] | None = None) -> CommandResult:
         return self.runner.run(args, cwd=self.project, env=env or self.env)
 
-    def install(self, *extra: str) -> CommandResult:
-        result = self.apm("install", "--no-policy", "--parallel-downloads", "0", *extra)
+    def install(self, *extra: str, env: dict[str, str] | None = None) -> CommandResult:
+        result = self.apm("install", "--no-policy", "--parallel-downloads", "0", *extra, env=env)
         assert result.returncode == 0, result.stdout + result.stderr
         return result
 
@@ -91,7 +91,11 @@ class _Scenario:
         return files
 
     def reset_deployment(self) -> None:
-        for root, keep in ((self.project, _PROJECT_KEEP), (self.home, _HOME_SKIP | {".gitconfig"})):
+        for root, keep in (
+            (self.project, _PROJECT_KEEP),
+            (self.home, _HOME_SKIP | {".gitconfig"}),
+            (self.isolated.config_root, {"apm.yml", "config.json"}),
+        ):
             for child in root.iterdir():
                 if child.name in keep:
                     continue
@@ -178,20 +182,61 @@ def test_migrate_refuses_unmappable_target(tmp_path: Path, apm_binary_path: Path
     assert scenario.manifest.read_text(encoding="utf-8") == original
 
 
+@pytest.mark.parametrize("ci", [False, True], ids=["local", "ci-true"])
 def test_warning_is_stderr_only_once_and_keeps_exit_codes(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, ci: bool
 ) -> None:
     scenario = _Scenario(tmp_path, apm_binary_path, "target: claude")
+    env = {**scenario.env, "CI": "true"} if ci else scenario.env
+    original = scenario.manifest.read_bytes()
 
-    install = scenario.install()
-    frozen = scenario.install("--frozen")
-    compile_result = scenario.apm("compile")
+    install = scenario.install(env=env)
+    frozen = scenario.install("--frozen", env=env)
+    compile_result = scenario.apm("compile", env=env)
+    audit = scenario.apm("audit", "--ci", "--no-policy", env=env)
 
-    assert compile_result.returncode == 0, compile_result.stdout + compile_result.stderr
-    for result in (install, frozen, compile_result):
+    for result in (compile_result, audit):
+        assert result.returncode == 0, result.stdout + result.stderr
+    for result in (install, frozen, compile_result, audit):
         assert _flat(result.stderr).count(_WARNING) == 1
         assert "deprecated 'target:' key" not in result.stdout
-    assert "target: claude" in scenario.manifest.read_text(encoding="utf-8").splitlines()
+    assert scenario.manifest.read_bytes() == original
+
+
+def test_global_migrate_keeps_user_scope_deploys_byte_identical(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _Scenario(tmp_path, apm_binary_path, "targets: [claude]")
+    project_manifest = scenario.manifest.read_bytes()
+    fixture = (scenario.project / "packages" / "fixture").resolve()
+    user_manifest = scenario.isolated.config_root / "apm.yml"
+    user_manifest.write_text(
+        "name: user\n"
+        "version: 1.0.0\n"
+        "# user targets\n"
+        "target: claude,cursor\n"
+        "dependencies:\n"
+        "  apm:\n"
+        f"    - {fixture.as_posix()}\n",
+        encoding="utf-8",
+    )
+
+    legacy_install = scenario.install("-g")
+    legacy = scenario.deployed()
+    scenario.reset_deployment()
+    migrate = scenario.apm("manifest", "migrate", "-g", "--yes")
+    assert migrate.returncode == 0, migrate.stdout + migrate.stderr
+    migrated_install = scenario.install("-g")
+
+    assert "Run 'apm manifest migrate --global' to update it." in _flat(legacy_install.stderr)
+    assert "deprecated 'target:' key" not in migrated_install.stderr
+    migrated_text = user_manifest.read_text(encoding="utf-8")
+    assert "targets: [claude, cursor]" in migrated_text.splitlines()
+    assert "# user targets" in migrated_text
+    assert scenario.manifest.read_bytes() == project_manifest
+    assert any(name.startswith("home/.claude/") for name in legacy)
+    assert any(name.startswith("home/.cursor/") for name in legacy)
+    assert scenario.deployed() == legacy
 
 
 def test_dependency_manifest_with_target_does_not_warn(

@@ -64,10 +64,10 @@ def test_plural_targets_key_does_not_warn(tmp_path, capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_prospective_parse_without_warning_handler_does_not_warn(tmp_path, capsys):
+def test_unknown_key_handler_does_not_control_the_deprecation_warning(tmp_path, capsys):
     _parse(tmp_path / "apm.yml", "target: claude\n", warning_handler=None)
 
-    assert capsys.readouterr().err == ""
+    assert _flat(capsys.readouterr().err) == _TARGET_WARNING
 
 
 def test_user_manifest_warning_points_at_global_migrate(tmp_path, capsys):
@@ -113,5 +113,21 @@ def test_path_only_reader_never_warns_for_dependency_manifest(tmp_path, capsys):
     manifest.write_text("name: dep\nversion: 1.0.0\ntarget: claude\n", encoding="utf-8")
 
     read_manifest_target_declaration(manifest)
+
+    assert capsys.readouterr().err == ""
+
+
+def test_user_and_project_manifests_each_warn_once(tmp_path, capsys):
+    _parse(tmp_path / "home" / ".apm" / "apm.yml", "target: claude\n")
+    _parse(tmp_path / "apm.yml", "target: claude\n")
+    _parse(tmp_path / "apm.yml", "target: claude\n")
+
+    err = "".join(capsys.readouterr().err.split())
+    assert err.count("usesthedeprecated'target:'key") == 2
+    assert err.count("Run'apmmanifestmigrate--global'") == 1
+
+
+def test_prospective_parse_can_opt_out_explicitly(tmp_path, capsys):
+    _parse(tmp_path / "apm.yml", "target: claude\n", warn_deprecated=False)
 
     assert capsys.readouterr().err == ""

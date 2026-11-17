@@ -88,7 +88,6 @@ _RUNTIME_NAME_PATTERN = (
 _TARGET_DECLARATION_OWNERS: frozenset[str] = frozenset(
     {
         "src/apm_cli/models/manifest_targets.py",
-        "src/apm_cli/models/manifest_target_migration.py",
         "src/apm_cli/models/apm_package.py",
         "src/apm_cli/core/apm_yml.py",
         "src/apm_cli/core/target_detection.py",

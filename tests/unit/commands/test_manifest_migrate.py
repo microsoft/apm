@@ -129,3 +129,24 @@ def test_missing_manifest_exits_1(tmp_path):
 
     assert result.exit_code == 1
     assert "No manifest found at" in result.output
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "name: demo\nversion: 1.0.0\ncompilation:\n  target: cursor\n",
+        "name: demo\nversion: 1.0.0\ntarget: claude\ncompilation:\n  target: cursor\n",
+    ],
+    ids=["only-compilation-target", "with-target"],
+)
+def test_leftover_compilation_target_is_pointed_out_but_not_rewritten(tmp_path, body):
+    manifest_path = _write(tmp_path / "apm.yml", body)
+
+    result = _invoke("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "apm.yml still sets 'compilation.target', which APM ignores; delete it by hand."
+        in " ".join(result.output.split())
+    )
+    assert "compilation:\n  target: cursor\n" in manifest_path.read_text(encoding="utf-8")

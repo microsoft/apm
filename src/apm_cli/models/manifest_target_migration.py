@@ -63,6 +63,7 @@ class ManifestMigration:
     original_text: str
     migrated_text: str
     plan: TargetMigrationPlan | None
+    ignored_compilation_target: bool = False
     _document: Any = None
 
     @property
@@ -136,9 +137,7 @@ def plan_target_migration(value: object, *, source_path: Path | None = None) -> 
             f"automatically: 'targets: [{', '.join(targets)}]' would change what APM "
             "deploys. Replace 'target:' with a 'targets:' list by hand."
         )
-    raw_tokens = value.split(",") if isinstance(value, str) else value
-    expanded_all = any(str(token).strip().lower() == "all" for token in raw_tokens or ())
-    return TargetMigrationPlan(targets=targets, expanded_all=expanded_all)
+    return TargetMigrationPlan(targets=targets, expanded_all=legacy_declaration.legacy_all)
 
 
 def _move_key_comments(document: Any, old_key: str, new_key: str | None, position: int) -> None:
@@ -214,8 +213,17 @@ def plan_manifest_migration(path: Path) -> ManifestMigration:
     document = load_yaml_roundtrip_str(text)
     if not isinstance(document, CommentedMap):
         raise ManifestMigrationError(f"{path} must contain a YAML mapping")
+    compilation = document.get("compilation")
+    # architecture-authority-exempt: compilation-target-field
+    ignored_compilation_target = isinstance(compilation, dict) and "target" in compilation
     if _LEGACY_KEY not in document:
-        return ManifestMigration(path=path, original_text=text, migrated_text=text, plan=None)
+        return ManifestMigration(
+            path=path,
+            original_text=text,
+            migrated_text=text,
+            plan=None,
+            ignored_compilation_target=ignored_compilation_target,
+        )
     if _CURRENT_KEY in document:
         try:
             _ = ManifestTargetDeclaration.from_mapping(document, path).selection
@@ -229,5 +237,6 @@ def plan_manifest_migration(path: Path) -> ManifestMigration:
         original_text=text,
         migrated_text=yaml_roundtrip_to_str(document),
         plan=plan,
+        ignored_compilation_target=ignored_compilation_target,
         _document=document,
     )

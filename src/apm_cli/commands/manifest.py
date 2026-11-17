@@ -72,8 +72,15 @@ def migrate(global_: bool, dry_run: bool, yes: bool, verbose: bool) -> None:
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
 
+    compilation_hint = (
+        f"{label} still sets 'compilation.target', which APM ignores; delete it by hand."
+        if migration.ignored_compilation_target
+        else None
+    )
     if not migration.changed:
         logger.success(f"{label} has no 'target:' key -- nothing to migrate", symbol="check")
+        if compilation_hint:
+            logger.info(compilation_hint)
         return
 
     logger.preformatted(migration.diff(label))
@@ -117,4 +124,6 @@ def migrate(global_: bool, dry_run: bool, yes: bool, verbose: bool) -> None:
         logger.success(f"Removed the empty 'target:' key from {label}", symbol="check")
     else:
         logger.success(f"Migrated {label}: 'target:' is now 'targets:'", symbol="check")
+    if compilation_hint:
+        logger.info(compilation_hint)
     logger.info(f"Commit {label} to record the change.")

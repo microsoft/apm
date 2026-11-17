@@ -31,7 +31,8 @@ The rewrite:
 `apm install` and other commands never rewrite the manifest. Run this
 command yourself and commit the result.
 
-`compilation.target` is ignored and not migrated; delete it by hand.
+`compilation.target` is ignored and not migrated; delete it by hand. `migrate`
+reminds you when the manifest still sets it.
 
 ## Options
 
@@ -39,7 +40,7 @@ command yourself and commit the result.
 |------|-------------|
 | `-g`, `--global` | Migrate the user manifest (`~/.apm/apm.yml`) instead of `./apm.yml`. |
 | `--dry-run` | Show the proposed diff without writing. |
-| `-y`, `--yes` | Apply without the confirmation prompt. Required in non-interactive shells. |
+| `-y`, `--yes` | Apply without the confirmation prompt. Required in non-interactive shells. Unlike `apm marketplace migrate`, where `--yes` is an alias of `--force`, this command prompts by default and `--yes` only skips the prompt. |
 | `-v`, `--verbose` | Show detailed output. |
 
 ## Mapping

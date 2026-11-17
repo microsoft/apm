@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 _MANIFEST_TARGET_KEYS: tuple[str, ...] = ("target", "targets")
 _LEGACY_ALL_TARGET = "all"
 
-_deprecated_manifest_keys_warned: set[str] = set()
+_deprecated_manifest_keys_warned: set[tuple[str, str]] = set()
 
 
 def reset_manifest_deprecation_warnings() -> None:
@@ -58,26 +58,27 @@ def _consumer_manifest_scope(manifest_path: Path) -> InstallScope | None:
 
 
 def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path) -> None:
-    """Warn once per process about deprecated keys in a consumer manifest.
+    """Warn once per process and scope about deprecated keys in a consumer manifest.
 
     Covers the singular top-level ``target:`` key and the ignored
     ``compilation.target`` key. Writes to stderr and never changes the exit
     code, so ``--frozen`` and ``--ci`` runs keep their outcome.
     """
     compilation = data.get("compilation")
-    pending = [
+    present = [
         key
-        for key, present in (
+        for key, declared in (
             ("target", "target" in data),
             ("compilation.target", isinstance(compilation, Mapping) and "target" in compilation),
         )
-        if present and key not in _deprecated_manifest_keys_warned
+        if declared
     ]
-    if not pending:
+    if not present:
         return
     scope = _consumer_manifest_scope(manifest_path)
     if scope is None:
         return
+    pending = [key for key in present if (scope.value, key) not in _deprecated_manifest_keys_warned]
 
     from ..core.scope import InstallScope
     from ..utils.console import _rich_warning
@@ -86,7 +87,7 @@ def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path)
     label = ascii(manifest_path.as_posix())[1:-1] if user_scope else "apm.yml"
     migrate_cmd = "apm manifest migrate --global" if user_scope else "apm manifest migrate"
     for key in pending:
-        _deprecated_manifest_keys_warned.add(key)
+        _deprecated_manifest_keys_warned.add((scope.value, key))
         if key == "target":
             message = (
                 f"{label} uses the deprecated 'target:' key. Use 'targets:' (a YAML list). "
