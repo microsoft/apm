@@ -1,9 +1,9 @@
 """Keep Codex agent conversion on the shared install-time link resolver (#2966).
 
 The production Codex branch of ``AgentIntegrator.integrate_agents_for_target``
-must hand ``_write_codex_agent`` the ``BaseIntegrator.resolve_links`` owner and
-report the writer's resolved-link count. The writer must call that owner with
-its own source and target and serialize the resolved body. Direct static
+must hand ``_render_codex_agent`` the ``BaseIntegrator.resolve_links`` owner and
+report the renderer's resolved-link count. The renderer must call that owner
+with its own source and target and serialize the resolved body. Direct static
 callers of ``_write_codex_agent`` (tests, spec conformance) stay exempt.
 """
 
@@ -21,7 +21,7 @@ from scripts.architecture_linter.models import Violation
 GUARD_CODEX_AGENT_LINKS = "install-deployment-codex-agent-link-resolution"
 _CONSUMER = "src/apm_cli/integration/agent_integrator.py"
 _INTEGRATE = "AgentIntegrator.integrate_agents_for_target"
-_WRITER = "AgentIntegrator._write_codex_agent"
+_WRITER = "AgentIntegrator._render_codex_agent"
 _HOOK = "resolve_links"
 _OWNER_CALL = f"self.{_HOOK}"
 _WRITER_CALL = f"{_HOOK}(body, source, target)"
@@ -56,7 +56,7 @@ def check_codex_agent_link_resolution(provider: FactsProvider) -> tuple[Violatio
     writer_calls = [
         node
         for node in index.walk(integrate)
-        if isinstance(node, ast.Call) and ast.unparse(node.func) == "self._write_codex_agent"
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "self._render_codex_agent"
     ]
     if not writer_calls:
         findings.append(
@@ -69,15 +69,15 @@ def check_codex_agent_link_resolution(provider: FactsProvider) -> tuple[Violatio
                 _summary(
                     rule,
                     _CONSUMER,
-                    f"Codex agent deployment must pass {_HOOK}={_OWNER_CALL} to _write_codex_agent",
+                    f"Codex agent deployment must pass {_HOOK}={_OWNER_CALL} to _render_codex_agent",
                 )
             )
-        if _assign_targets(index, call) != ["links_resolved"]:
+        if _assign_targets(index, call) != ["(rendered, links_resolved)"]:
             findings.append(
                 _summary(
                     rule,
                     _CONSUMER,
-                    "Codex agent deployment must report the writer's resolved-link count "
+                    "Codex agent deployment must report the renderer's resolved-link count "
                     "as links_resolved",
                 )
             )
