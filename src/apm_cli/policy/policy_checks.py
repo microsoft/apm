@@ -508,7 +508,9 @@ def _check_mcp_transport(
             violations.append(
                 f"{name}: effective transport unknown ({transports.reason}); "
                 f"cannot check it against allowed {allowed_label} until the MCP "
-                "registry resolves it"
+                "registry resolves it (a declared `transport:` is not enough: "
+                "install writes the transport the registry serves, and "
+                "`transport:` only picks among the ones it offers)"
             )
             continue
         violations.extend(

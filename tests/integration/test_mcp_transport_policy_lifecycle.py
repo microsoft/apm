@@ -223,6 +223,7 @@ def test_unreachable_registry_blocks_with_remedy(tmp_path: Path, apm_binary_path
     declared_output = " ".join((declared.stdout + declared.stderr).split())
     assert declared.returncode != 0, declared_output
     assert "effective transport unknown" in declared_output
+    assert "a declared `transport:` is not enough" in declared_output
     assert (project.root / "apm.yml").read_bytes() == manifest_before
 
     project.write_manifest([_SSE_NAME])
