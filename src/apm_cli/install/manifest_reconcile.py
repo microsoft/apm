@@ -399,17 +399,13 @@ def declared_target_profiles(
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.core.target_catalog import normalize_target_name
     from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
-    from apm_cli.models.manifest_targets import manifest_target_restriction
-    from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    try:
-        data = load_yaml(project_root / "apm.yml")
-    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-        return None
-    if not isinstance(data, dict):
+    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    if declaration is None:
         return None
     try:
-        names = manifest_target_restriction(data)
+        names = declaration.restriction() or []
     except TargetResolutionError:
         return None
     active_by_name = _profiles_by_name(active_targets)

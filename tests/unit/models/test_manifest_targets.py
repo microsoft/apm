@@ -5,9 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from apm_cli.core import apm_yml
-from apm_cli.core.errors import ConflictingTargetsError, UnknownTargetError
+from apm_cli.core.errors import (
+    ConflictingTargetsError,
+    EmptyTargetsListError,
+    UnknownTargetError,
+)
 from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.models.apm_package import (
     APMPackage,
@@ -132,9 +137,41 @@ def test_path_reader_is_lenient_only_on_request(tmp_path: Path):
     dump_yaml({"name": "p", "version": "1.0.0", "targets": ["nope"]}, manifest)
 
     assert read_manifest_target_declaration(tmp_path / "missing.yml") is None
-    assert read_manifest_target_declaration(manifest, lenient=True) is None
+    # Tokens are validated when a view is read, not when the file is loaded.
+    declaration = read_manifest_target_declaration(manifest)
     with pytest.raises(UnknownTargetError):
+        declaration.restriction()
+
+    manifest.write_text("- not\n- a mapping\n", encoding="utf-8")
+    assert read_manifest_target_declaration(manifest, lenient=True) is None
+    with pytest.raises(yaml.YAMLError, match="must contain a YAML object"):
         read_manifest_target_declaration(manifest)
+
+    manifest.write_text("targets: [claude\n", encoding="utf-8")
+    assert read_manifest_target_declaration(manifest, lenient=True) is None
+    with pytest.raises(yaml.YAMLError):
+        read_manifest_target_declaration(manifest)
+
+
+def test_strict_path_reader_refuses_symlinked_manifest(tmp_path: Path):
+    real = tmp_path / "real.yml"
+    dump_yaml({"name": "p", "version": "1.0.0", "targets": ["claude"]}, real)
+    link = tmp_path / "apm.yml"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+
+    with pytest.raises(OSError, match="non-symlink"):
+        read_manifest_target_declaration(link)
+    assert read_manifest_target_declaration(link, lenient=True).restriction() == ["claude"]
+
+
+def test_strict_restriction_rejects_an_empty_singular_target():
+    declaration = _declaration(target=None)
+    assert declaration.restriction() is None
+    with pytest.raises(EmptyTargetsListError):
+        declaration.restriction(allow_empty_singular=False)
 
 
 def test_stand_in_packages_route_through_the_owner():
@@ -144,3 +181,12 @@ def test_stand_in_packages_route_through_the_owner():
     assert package_target_selection(_StandIn()) == ["claude", "cursor"]
     assert manifest_target_restriction({"target": "claude,cursor"}) == ["claude", "cursor"]
     assert manifest_target_restriction(None) == []
+
+
+def test_reinit_prefill_expands_singular_all_with_install_spellings():
+    """Re-init writes the spellings install deploys, so MCP keeps .vscode/mcp.json."""
+    names = _declaration(target="all").prefill_names()
+    assert len(names) > 1
+    assert "vscode" in names
+    assert "copilot" not in names
+    assert _declaration(targets=["all"]).prefill_names() == ["all"]

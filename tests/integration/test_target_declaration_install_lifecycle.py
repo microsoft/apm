@@ -4,10 +4,11 @@ Promise under test (0.36.1 T2 brief, decisions C and D1, fact F12):
 
 * A singular ``target:`` naming a harness that install cannot deploy
   (``intellij``, ``copilot-app``) is rejected before any write: no lockfile,
-  no deployed primitives, no ``.gitignore`` edit.
+  no deployed primitives, no ``.gitignore`` edit, in project and user scope.
 * A singular ``target: all`` keeps expanding to the install set (D1), and the
   MCP phase no longer claims the field is "treated as omitted" in the same
-  run (F10). A plural ``targets: [all]`` still folds, with the warning.
+  run (F10); neither does ``apm compile -g``. A plural ``targets: [all]``
+  still folds, with the warning.
 * The MCP destination depends on the runtime spelling, identically for
   ``target:`` and ``targets:``: ``vscode`` writes ``.vscode/mcp.json`` and
   ``copilot`` writes ``.github/mcp.json`` (F12, regression lock).
@@ -45,6 +46,10 @@ def test_undeployable_singular_target_is_rejected_before_any_write(
 ) -> None:
     with target_policy_world(tmp_path, apm_binary_path, block_policy()) as tw:
         project = tw.consumer("consumer", {"target": token})
+        # A legacy lockfile must not be migrated by a rejected install either.
+        (project / "apm.lock").write_text(
+            'lockfile_version: "1"\ndependencies: []\n', encoding="utf-8"
+        )
         before = tree_snapshot(project)
         result = tw.run(project, "install", step="1-install", expected=(1, 2))
         assert result.returncode == 2, output(result)
@@ -54,6 +59,26 @@ def test_undeployable_singular_target_is_rejected_before_any_write(
         assert not (project / "apm.lock.yaml").exists()
         assert not (project / ".github").exists()
         assert not (project / ".agents").exists()
+
+
+@pytest.mark.parametrize("token", ["intellij", "copilot-app"])
+def test_user_scope_undeployable_singular_target_is_rejected_before_any_write(
+    token: str, tmp_path: Path, apm_binary_path: Path
+) -> None:
+    with target_policy_world(tmp_path, apm_binary_path, block_policy()) as tw:
+        isolated = tw.world.isolated
+        manifest = {"name": "user", "version": "0.1.0", "target": token}
+        manifest["dependencies"] = {"apm": ["contoso/pkg-a#v1.0.0"]}
+        dump_yaml(manifest, isolated.config_root / "apm.yml")
+        before = tree_snapshot(isolated.home)
+        result = tw.run(isolated.work_root, "install", "-g", step="1-install-g", expected=(1, 2))
+        assert result.returncode == 2, output(result)
+        assert token in output(result), output(result)
+        changed = changed_paths(before, tree_snapshot(isolated.home))
+        # CLI bookkeeping (its config and lifecycle locks) is not deployment output.
+        infra = ("config.json", ".apm-lifecycle.lock")
+        assert [path for path in changed if not path.endswith(infra)] == [], changed
+        assert not (isolated.config_root / "apm.lock.yaml").exists()
 
 
 def test_singular_all_expands_without_claiming_it_was_omitted(
@@ -162,3 +187,6 @@ def test_user_scope_singular_all_expands_without_claiming_it_was_omitted(
         assert TREATED_AS_OMITTED not in " ".join(output(result).split()), output(result)
         assert (isolated.home / ".claude/skills/pkg-a-skill/SKILL.md").is_file()
         assert (isolated.home / ".config/opencode/skills/pkg-a-skill/SKILL.md").is_file()
+        # compile -g reads the same declaration through the owner (#3791 F10).
+        result = tw.run(isolated.work_root, "compile", "-g", step="2-compile-g")
+        assert TREATED_AS_OMITTED not in " ".join(output(result).split()), output(result)

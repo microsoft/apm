@@ -22,9 +22,13 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._policy_scope_kit import output
-from tests.integration._target_policy_kit import block_policy, target_policy_world
+from tests.integration._target_policy_kit import (
+    SELF_DEFINED_MCP,
+    block_policy,
+    target_policy_world,
+)
 from tests.utils.local_github_https_fixture import openssl_executable
 
 pytestmark = [
@@ -135,3 +139,10 @@ def test_reinit_keeps_the_singular_all_deployment_set(
             f"re-init narrowed target: all from {expanded} to {after}:\n"
             f"{(project / 'apm.yml').read_text(encoding='utf-8')}"
         )
+        # The rewritten spellings keep the MCP destination target: all had.
+        manifest = load_yaml(project / "apm.yml") or {}
+        manifest.setdefault("dependencies", {})["mcp"] = [dict(SELF_DEFINED_MCP)]
+        dump_yaml(manifest, project / "apm.yml")
+        tw.run(project, "install", step="4-mcp")
+        assert (project / ".vscode/mcp.json").is_file(), "re-init moved MCP off .vscode/mcp.json"
+        assert not (project / ".github/mcp.json").exists(), "re-init redirected MCP to .github"

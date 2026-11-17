@@ -1026,19 +1026,14 @@ def resolve_audit_target_decision(
 
 def read_manifest_target(project_root: Path) -> list[str] | None:
     """Read audit's manifest target hint; manifest checks own parse failures."""
-    import yaml
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    from apm_cli.models.manifest_targets import manifest_target_restriction
-    from apm_cli.utils.yaml_io import load_yaml
-
-    apm_yml = project_root / "apm.yml"
-    if not apm_yml.exists():
+    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    if declaration is None:
         return None
     try:
-        data = load_yaml(apm_yml) or {}
-        tokens = manifest_target_restriction(data)
-        return tokens if tokens else None
-    except (OSError, ValueError, TypeError, yaml.YAMLError, click.UsageError):
+        return declaration.restriction()
+    except (ValueError, TypeError, click.UsageError):
         return None
 
 

@@ -377,13 +377,20 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
     Declared names are normalized before lookup because ``apm.yml`` accepts the
     ``vscode`` alias, which is not a ``KNOWN_TARGETS`` key; matching raw tokens
     would drop it and silently compile nothing.
+
+    The manifest is read strictly through the declaration owner: a broken user
+    manifest fails closed instead of widening to every harness, and singular
+    ``target: all`` expands to every target like ``apm install -g`` does.
     """
-    from ...core.apm_yml import read_declared_target_names
     from ...core.target_catalog import normalize_target_name
     from ...integration.targets import KNOWN_TARGETS
+    from ...models.manifest_targets import read_manifest_target_declaration
 
-    declared = read_declared_target_names(source_root)
-    if declared is None or not declared:
+    declaration = read_manifest_target_declaration(source_root / APM_YML_FILENAME)
+    if declaration is None or declaration.spelling is None:
+        return list(KNOWN_TARGETS.values()), None
+    declared = declaration.restriction(allow_empty_singular=False)
+    if not declared:
         return list(KNOWN_TARGETS.values()), None
     canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
     profiles = (KNOWN_TARGETS.get(name) for name in canonical)

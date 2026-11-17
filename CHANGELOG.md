@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `compilation.target` policy now judges the targets a project actually selects: `apm audit` reads plural `targets:` (non-compliant manifests that `apm install` already blocked now also fail audit), CSV values such as `target: "claude,copilot"` are split, aliases compare as the target they deploy (`vscode` and `agents` are `copilot`) on both the manifest and policy side, `allow: [all]` allows every target, and inherited alias allow lists no longer merge to "allow nothing". Plural-key tests ported from #3739 -- by @MohammedAlkindi (#3774)
-- `apm install` rejects `target: intellij` or `target: copilot-app` in `apm.yml` before writing any file (it used to deploy files and a lockfile, then fail); `target: all` no longer prints a contradictory "treating the field as omitted" warning while installing everywhere; re-running `apm init` keeps the targets `target: all` deploys to; and the docs now say the ignored `compilation.target` field has no effect, so use `targets:`. (#3791)
+- `apm install` rejects `target: intellij` or `target: copilot-app` in `apm.yml` before writing any file (it used to deploy files and a lockfile, then fail); `target: all` no longer prints a contradictory "treating the field as omitted" warning in `apm install` or `apm compile -g` while deploying everywhere; re-running `apm init` keeps the targets `target: all` deploys to; and the docs now say the ignored `compilation.target` field has no effect, so use `targets:`. (#3791)
 
 ## [0.36.0] - 2026-11-17
 

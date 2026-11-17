@@ -435,17 +435,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     if scope is None:
         scope = InstallScope.PROJECT
 
-    # Reject manifest targets install cannot deploy before anything is written.
-    from ..core.errors import TargetResolutionError
-    from ..models.apm_package import package_target_declaration
+    from .phases.targets import reject_undeployable_manifest_targets
 
-    try:
-        package_target_declaration(apm_package).validate_for_install()
-    except TargetResolutionError as exc:
-        if logger:
-            logger.error(str(exc), symbol="")
-            logger.render_summary()
-        raise SystemExit(2) from exc
+    reject_undeployable_manifest_targets(apm_package, logger)  # before any write
 
     apm_deps = apm_package.get_apm_dependencies()
     dev_apm_deps = apm_package.get_dev_apm_dependencies()

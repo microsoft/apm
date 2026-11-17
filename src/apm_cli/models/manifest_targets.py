@@ -105,12 +105,14 @@ class ManifestTargetDeclaration:
         """A valid, nonempty declaration that does not rely on legacy ``all``."""
         return bool(self.selection) and not self.legacy_all
 
-    def restriction(self) -> list[str] | None:
+    def restriction(self, *, allow_empty_singular: bool = True) -> list[str] | None:
         """Declared names that restrict deployment, with legacy ``all`` folded.
 
         Validates with the plural vocabulary, so MCP-only and experimental
         tokens raise. Singular ``all`` folds without the plural deprecation
         warning because install expands it rather than treating it as omitted.
+        Authoritative readers pass ``allow_empty_singular=False`` so an empty
+        singular ``target:`` raises instead of meaning "nothing declared".
         """
         data = dict(self.fields)
         if self.spelling == "target" and "targets" not in data and self.legacy_all:
@@ -122,7 +124,7 @@ class ManifestTargetDeclaration:
             if remaining:
                 parse_targets_field({"target": remaining})
             return None
-        names = parse_targets_field(data)
+        names = parse_targets_field(data, allow_empty_singular=allow_empty_singular)
         return names or None
 
     def authored_names(self) -> list[str]:
@@ -145,14 +147,15 @@ class ManifestTargetDeclaration:
         """
         if self.spelling == "target" and self.legacy_all:
             from ..core.errors import TargetResolutionError
-            from ..core.target_detection import EffectiveTargetDecision
+            from ..core.target_catalog import expand_all
 
             try:
                 selection = self.selection
             except (ValueError, TargetResolutionError):
                 return self.authored_names()
-            if selection is not None:
-                return list(EffectiveTargetDecision(selection, "apm.yml").canonical_targets or ())
+            if selection == _LEGACY_ALL_TARGET:
+                # Spelling-preserving, so ``vscode`` keeps its MCP destination.
+                return list(expand_all("install"))
         return self.authored_names()
 
     def validate_for_install(self) -> None:
@@ -172,25 +175,38 @@ def read_manifest_target_declaration(
     *,
     lenient: bool = False,
 ) -> ManifestTargetDeclaration | None:
-    """Read and validate the target declaration of the apm.yml at *manifest_path*.
+    """Load the target declaration of the apm.yml at *manifest_path*.
 
-    Returns ``None`` when the file is absent. With *lenient*, unreadable or
-    invalid manifests also return ``None`` instead of raising.
+    Returns ``None`` when the file is absent. A strict read is authoritative:
+    a symlink, a non-file, or a document that is not a YAML mapping raises
+    (``OSError`` / ``yaml.YAMLError``), so a broken manifest never reads as
+    "nothing declared" and silently widens the caller's target set. With
+    *lenient*, unreadable or malformed manifests return ``None`` instead.
+    Tokens are validated when a view (``selection``, ``restriction()``) is read.
     """
-    from ..core.errors import TargetResolutionError
     from ..utils.yaml_io import load_yaml
 
-    if not manifest_path.is_file():
-        return None
-    try:
-        data = load_yaml(manifest_path)
-        declaration = ManifestTargetDeclaration.from_mapping(data, manifest_path)
-        _ = declaration.selection
-    except (OSError, ValueError, TypeError, yaml.YAMLError, TargetResolutionError):
-        if lenient:
+    if lenient:
+        try:
+            if not manifest_path.is_file():
+                return None
+            data = load_yaml(manifest_path)
+        except (OSError, ValueError, TypeError, yaml.YAMLError):
             return None
-        raise
-    return declaration
+        if not isinstance(data, Mapping):
+            return None
+        return ManifestTargetDeclaration.from_mapping(data, manifest_path)
+    if manifest_path.is_symlink():
+        raise OSError(f"{manifest_path.name} must be a regular, non-symlink file")
+    if not manifest_path.exists():
+        return None
+    if not manifest_path.is_file():
+        raise OSError(f"{manifest_path.name} must be a regular, non-symlink file")
+    data = load_yaml(manifest_path)
+    if not isinstance(data, Mapping):
+        got = "an empty document" if data is None else str(type(data))
+        raise yaml.YAMLError(f"{manifest_path.name} must contain a YAML object, got {got}")
+    return ManifestTargetDeclaration.from_mapping(data, manifest_path)
 
 
 def manifest_target_restriction(data: Mapping[str, Any] | None) -> list[str]:

@@ -33,6 +33,20 @@ def _raise_target_usage_error(ctx: Any, exc: Exception) -> None:
     raise SystemExit(2) from exc
 
 
+def reject_undeployable_manifest_targets(apm_package: Any, logger: Any) -> None:
+    """Exit 2 before any write when the manifest declares a target install cannot deploy."""
+    from apm_cli.core.errors import TargetResolutionError
+    from apm_cli.models.apm_package import package_target_declaration
+
+    try:
+        package_target_declaration(apm_package).validate_for_install()
+    except TargetResolutionError as exc:
+        if logger:
+            logger.error(str(exc), symbol="")
+            logger.render_summary()
+        raise SystemExit(2) from exc
+
+
 def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
     """Normalize a package target value to the v2 yaml_targets shape."""
     if value is None:
