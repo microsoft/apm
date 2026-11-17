@@ -1523,7 +1523,7 @@ class DependencyReference(ProviderCoordinateMixin):
         allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
-            if not re.match(allowed_pattern, part.rstrip(".git")):
+            if not re.match(allowed_pattern, part.removesuffix(".git")):
                 raise ValueError(f"Invalid repository path component: {part}")
 
         quoted_repo = "/".join(urllib.parse.quote(p, safe="") for p in uparts)
@@ -1751,7 +1751,9 @@ class DependencyReference(ProviderCoordinateMixin):
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
             ado_parts = repo_url.split("/")
-            validate_path_segments(repo_url, context="Azure DevOps repository path")
+            validate_path_segments(
+                repo_url, context="Azure DevOps repository path", reject_all_dots=True
+            )
             return ado_parts[0], ado_parts[1], ado_parts[2]
 
         segments = repo_url.split("/")
@@ -1764,7 +1766,7 @@ class DependencyReference(ProviderCoordinateMixin):
         )
         if not all(re.match(allowed_pattern, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
-        validate_path_segments(repo_url, context="repository path")
+        validate_path_segments(repo_url, context="repository path", reject_all_dots=True)
         for seg in segments:
             if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                 raise ValueError(
