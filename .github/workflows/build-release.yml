@@ -35,10 +35,11 @@ jobs:
   #   push to main      -> push: unit tests + binaries (Linux, Windows)
   #   schedule/dispatch -> full: every suite; a green full run is promotion
   #                        evidence for its SHA
-  #   tag               -> promoted when the SHA already has evidence (build,
-  #                        smoke, release validation); otherwise fail closed,
-  #                        unless vars.APM_RELEASE_FULL_VALIDATION_TAG names
-  #                        this tag (then: full validation, then publish)
+  #   v* tag            -> promoted when the SHA already has evidence (build,
+  #                        smoke, release validation, publish); otherwise
+  #                        full validation in the tag run, then publish.
+  # Releasing is always "push a tag"; nothing publishes without a green full
+  # validation of the exact SHA, earlier or in this run.
   release-plan:
     name: Release Plan
     runs-on: ubuntu-24.04
@@ -67,10 +68,6 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
-          # Manual override for one tag whose SHA has no evidence: set the
-          # repository variable to that exact tag and re-run; the run then
-          # validates everything itself before publishing.
-          FULL_VALIDATION_TAG: ${{ vars.APM_RELEASE_FULL_VALIDATION_TAG }}
         run: python3 scripts/release_plan.py
 
   # Plans duration-balanced integration shards while the binaries build.
@@ -967,7 +964,7 @@ jobs:
 
   # Publication: pushed tags only. Every release-bound lane must have succeeded;
   # integration is skipped only on a promoted tag, whose SHA was already
-  # fully validated (see release-plan).
+  # fully validated (see release-plan). An unpromoted tag runs it here.
   create-release:
     name: Create GitHub Release
     needs:

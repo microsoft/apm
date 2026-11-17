@@ -1,4 +1,4 @@
-"""Release validation modes and fail-closed tag promotion."""
+"""Release validation modes and evidence-gated tag promotion."""
 
 from __future__ import annotations
 
@@ -51,11 +51,6 @@ def _tag(**extra: str) -> dict[str, str]:
         ({"EVENT_NAME": "push", "REF_TYPE": "branch", "REF_NAME": "main"}, "push", False),
         ({"EVENT_NAME": "schedule", "REF_TYPE": "branch", "REF_NAME": "main"}, "full", False),
         ({"EVENT_NAME": "repository_dispatch", "REF_TYPE": "branch"}, "full", False),
-        (
-            {**_tag(), "FULL_VALIDATION_TAG": "v1.2.3"},
-            "full",
-            True,
-        ),
     ],
 )
 def test_events_map_to_modes_without_api_calls(
@@ -74,13 +69,6 @@ def test_events_map_to_modes_without_api_calls(
 def test_unknown_events_fail_closed(event: str) -> None:
     with pytest.raises(ValueError, match="does not handle"):
         release_plan.decide({"EVENT_NAME": event, "REF_TYPE": "tag"}, _fetch([]))
-
-
-def test_override_names_one_exact_tag() -> None:
-    with pytest.raises(release_plan.MissingEvidence):
-        release_plan.decide({**_tag(), "FULL_VALIDATION_TAG": "v1.2.4"}, _fetch([]))
-    with pytest.raises(release_plan.MissingEvidence):
-        release_plan.decide({**_tag(REF_NAME=""), "FULL_VALIDATION_TAG": ""}, _fetch([]))
 
 
 @pytest.mark.parametrize("event", ["schedule", "repository_dispatch"])
@@ -105,15 +93,29 @@ def test_tag_promotes_on_a_full_run_of_the_same_sha(event: str) -> None:
         [{**_run("repository_dispatch"), "status": "in_progress"}],
     ],
 )
-def test_tag_without_full_run_evidence_fails_closed(release: list[dict[str, object]]) -> None:
+def test_tag_without_evidence_validates_fully_then_publishes(
+    release: list[dict[str, object]],
+) -> None:
     """A green main push (even with a green merge queue) is not full validation."""
-    with pytest.raises(release_plan.MissingEvidence, match="no full-validation evidence"):
-        release_plan.decide(_tag(), _fetch(release))
+    plan = release_plan.decide(_tag(), _fetch(release))
+
+    assert (plan.mode, plan.publish, plan.run_unit, plan.full) == ("full", True, True, True)
+    assert plan.evidence.startswith("none:")
+
+
+def test_failed_evidence_lookup_never_promotes() -> None:
+    def fetch(workflow: str, sha: str) -> Sequence[Mapping[str, object]]:
+        raise RuntimeError("gh api: HTTP 502")
+
+    plan = release_plan.decide(_tag(), fetch)
+
+    assert (plan.mode, plan.publish, plan.full) == ("full", True, True)
 
 
 def test_current_run_is_never_its_own_evidence() -> None:
-    with pytest.raises(release_plan.MissingEvidence):
-        release_plan.decide(_tag(RUN_ID="9"), _fetch([_run("schedule", run_id=9)]))
+    plan = release_plan.decide(_tag(RUN_ID="9"), _fetch([_run("schedule", run_id=9)]))
+
+    assert plan.mode == "full"
 
 
 def test_branch_pushes_never_publish_or_look_up_evidence() -> None:
@@ -121,19 +123,22 @@ def test_branch_pushes_never_publish_or_look_up_evidence() -> None:
         raise AssertionError("no evidence lookup expected")
 
     env = {"EVENT_NAME": "push", "REF_TYPE": "branch", "REF_NAME": "v1.2.3", "SHA": SHA}
-    plan = release_plan.decide({**env, "FULL_VALIDATION_TAG": "v1.2.3"}, fetch)
+    plan = release_plan.decide(env, fetch)
 
     assert (plan.mode, plan.publish) == ("push", False)
 
 
-def test_main_writes_outputs_and_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_writes_outputs_and_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output = tmp_path / "out"
     summary = tmp_path / "summary"
     monkeypatch.setattr(release_plan, "github_fetch", lambda repo: _fetch([_run("schedule")]))
 
-    assert release_plan.main({**_tag(), "GITHUB_OUTPUT": str(output)}) == 0
-    assert "mode=promoted\npublish=true\nrun_unit=false\nfull=false\n" in output.read_text()
+    env = {**_tag(), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)}
+    assert release_plan.main(env) == 0
+    assert output.read_text() == "mode=promoted\npublish=true\nrun_unit=false\nfull=false\n"
+    assert "/runs/1" in summary.read_text()
 
+    output.unlink()
     monkeypatch.setattr(release_plan, "github_fetch", lambda repo: _fetch([]))
-    assert release_plan.main({**_tag(), "GITHUB_STEP_SUMMARY": str(summary)}) == 1
-    assert "refused" in summary.read_text()
+    assert release_plan.main({**env, "GITHUB_OUTPUT": str(output)}) == 0
+    assert output.read_text() == "mode=full\npublish=true\nrun_unit=true\nfull=true\n"

@@ -511,16 +511,18 @@ Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.
 
-**Release pipeline modes (`scripts/release_plan.py`):**
+**Releasing:** push a `v*` tag, as before. `scripts/release_plan.py` picks how
+much the run validates:
 - **push** (push to `main`): unit tests and Linux/Windows binaries.
 - **full** (nightly schedule or `repository_dispatch`): every lane. A green
   full run is promotion evidence for its SHA.
-- **promoted** (pushed `v*` tag whose SHA has a green full run on `main`):
-  builds, binary smoke tests and release validation only, then publishes.
-- A tag without evidence fails closed in `Release Plan`. Either dispatch
-  `manual-build-release` on that SHA and re-run the tag, or set the repository
-  variable `APM_RELEASE_FULL_VALIDATION_TAG` to that exact tag so the re-run
-  validates everything itself; delete the variable afterwards.
+- **promoted** (tag whose SHA already has a green full run on `main`): builds,
+  binary smoke tests and release validation only, then publishes (about 5 min).
+- **tag without evidence**: full validation in the tag run, then publishes.
+
+For the fast path, dispatch `manual-build-release` on the `main` commit, wait
+for it to finish green, then tag that commit. Nothing publishes without a
+green full validation of the exact SHA.
 
 **Full-run lanes:**
 - **Linux x86_64 and arm64**: hermetic integration (`not live and not

@@ -9,11 +9,13 @@ Modes (written to $GITHUB_OUTPUT as ``mode``):
 * ``promoted`` -- a release tag whose SHA already has evidence. Binaries are
   built and smoke-tested and release validation runs, but unit and
   integration suites are not repeated.
+* ``full`` with publish -- a release tag without evidence. The tag run
+  validates everything itself, then publishes.
 
-A tag without evidence fails closed. The manual override is the repository
-variable ``APM_RELEASE_FULL_VALIDATION_TAG`` set to that exact tag (passed in
-as FULL_VALIDATION_TAG): the re-run tag run then validates everything itself
-before publishing. The override names one tag, so it cannot linger.
+Releasing is always "push a v* tag"; evidence only makes it faster. Nothing
+publishes without a green full validation of the exact SHA, either earlier
+(evidence) or in the tag run itself. A failed evidence lookup falls back to
+full validation, never to promotion.
 
 Evidence for a SHA is a successful full run (schedule or repository_dispatch)
 of build-release.yml on main for that exact SHA. Only a full run exercises
@@ -53,10 +55,6 @@ class Plan:
         return self.mode == "full"
 
 
-class MissingEvidence(RuntimeError):
-    """The tag's SHA has no full-validation evidence."""
-
-
 def find_evidence(sha: str, fetch: Fetch, *, current_run_id: str = "") -> str:
     """Return the URL of a green full run of sha on main, or ''."""
     for run in fetch(RELEASE_WORKFLOW, sha):
@@ -75,24 +73,28 @@ def find_evidence(sha: str, fetch: Fetch, *, current_run_id: str = "") -> str:
 def decide(env: Mapping[str, str], fetch: Fetch) -> Plan:
     """Map the triggering event to a validation mode, checking tag evidence."""
     event = env.get("EVENT_NAME", "")
-    ref_name = env.get("REF_NAME", "")
     if event in FULL_EVENTS:
         return Plan("full", publish=False)
     if event != "push":
         raise ValueError(f"build-release.yml does not handle event {event!r}")
     if env.get("REF_TYPE", "") != "tag":
         return Plan("push", publish=False)
-    if ref_name and env.get("FULL_VALIDATION_TAG", "") == ref_name:
-        return Plan("full", publish=True, evidence="manual override: full validation in this run")
     sha = env.get("SHA", "")
-    evidence = find_evidence(sha, fetch, current_run_id=env.get("RUN_ID", ""))
-    if not evidence:
-        raise MissingEvidence(
-            f"{ref_name} at {sha} has no full-validation evidence: no successful "
-            f"schedule/repository_dispatch run of {RELEASE_WORKFLOW} on "
-            f"{EVIDENCE_BRANCH} for this SHA."
-        )
-    return Plan("promoted", publish=True, evidence=evidence)
+    try:
+        evidence = find_evidence(sha, fetch, current_run_id=env.get("RUN_ID", ""))
+    except Exception as exc:  # any lookup failure means "no evidence"
+        print(f"::warning title=Evidence lookup failed::{exc}; validating in this run.")
+        evidence = ""
+    if evidence:
+        return Plan("promoted", publish=True, evidence=evidence)
+    return Plan(
+        "full",
+        publish=True,
+        evidence=(
+            f"none: no green schedule/repository_dispatch run of {RELEASE_WORKFLOW} on "
+            f"{EVIDENCE_BRANCH} for {sha}; full validation in this run"
+        ),
+    )
 
 
 def github_fetch(repository: str) -> Fetch:
@@ -120,34 +122,17 @@ def _write(path: str | None, text: str) -> None:
 
 
 def main(env: Mapping[str, str]) -> int:
-    fetch = github_fetch(env.get("REPOSITORY", ""))
-    try:
-        plan = decide(env, fetch)
-    except MissingEvidence as exc:
-        ref = env.get("REF_NAME", "<tag>")
-        repository = env.get("REPOSITORY", "<owner>/<repo>")
-        print(f"::error title=Release promotion refused::{exc}")
-        print(
-            "[x] Refusing to publish an unverified SHA. Either:\n"
-            "    1. produce evidence (full validation of main), then re-run this workflow:\n"
-            f"         gh api repos/{repository}/dispatches -f event_type=manual-build-release\n"
-            "    2. or override for this one tag (validate everything in the re-run):\n"
-            f"         gh variable set APM_RELEASE_FULL_VALIDATION_TAG --body {ref}\n"
-            "       then re-run this workflow, and delete the variable afterwards."
-        )
-        _write(env.get("GITHUB_STEP_SUMMARY"), f"### Release promotion refused\n\n{exc}\n")
-        return 1
+    plan = decide(env, github_fetch(env.get("REPOSITORY", "")))
     outputs = {
         "mode": plan.mode,
         "publish": str(plan.publish).lower(),
         "run_unit": str(plan.run_unit).lower(),
         "full": str(plan.full).lower(),
-        "evidence": plan.evidence,
     }
     _write(env.get("GITHUB_OUTPUT"), "".join(f"{key}={value}\n" for key, value in outputs.items()))
     summary = f"### Release plan\n\nmode: `{plan.mode}`, publish: `{str(plan.publish).lower()}`\n"
     if plan.evidence:
-        summary += f"\nPromotion evidence: {plan.evidence}\n"
+        summary += f"\nEvidence: {plan.evidence}\n"
     _write(env.get("GITHUB_STEP_SUMMARY"), summary)
     print(f"[i] mode={plan.mode} publish={str(plan.publish).lower()} evidence={plan.evidence}")
     return 0
