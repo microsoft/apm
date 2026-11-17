@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install -g` no longer reports APM's own converted agents as "files skipped" on a second run: Codex `.toml` agents, Kiro agents and agents whose relative links APM rewrote are now compared with the text APM would write and adopted, even when no lockfile records them. -- by @MohammedAlkindi (closes #3722, #3743)
+### Changed
+
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 
 ## [0.36.0] - 2026-11-17
 
