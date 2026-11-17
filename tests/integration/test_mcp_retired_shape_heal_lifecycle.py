@@ -192,9 +192,14 @@ def test_foreign_entry_in_a_retired_shape_is_never_taken_over(scene: HarnessScen
         document = json.loads(path.read_text(encoding="utf-8"))
         document[key]["heal-foreign"] = entry
         path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    # Exactly what APM 0.36 would have written for Hermes, but never recorded.
+    hermes_path = scene.config_path("hermes", user=False)
+    hermes_document = yaml.safe_load(hermes_path.read_text(encoding="utf-8"))
+    hermes_document["mcp_servers"]["heal-foreign"] = {"url": foreign_url, "enabled": True}
+    hermes_path.write_text(yaml.safe_dump(hermes_document), encoding="utf-8")
     foreign = {
-        "copilot": _entry(scene, "copilot", "heal-foreign", user=False),
-        "claude": _entry(scene, "claude", "heal-foreign", user=False),
+        harness: _entry(scene, harness, "heal-foreign", user=False)
+        for harness in ("copilot", "claude", "hermes")
     }
 
     result = scene.run(*_command("install", user=False))
@@ -376,6 +381,16 @@ def test_frozen_heal_keeps_ownership_of_fingerprinted_registry_entries(
     owners = set(_targets(user)) - {"antigravity"}
     assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
     scene.ok(*_command("install-frozen", user=user))
+    healed = scene.native_bytes(_targets(user), user=user)
+    mtimes = {
+        harness: scene.config_path(harness, user=user).stat().st_mtime_ns
+        for harness in _targets(user)
+    }
+    # A second --frozen run sees the healed entries as APM's own and writes nothing.
+    scene.ok(*_command("install-frozen", user=user))
+    assert scene.native_bytes(_targets(user), user=user) == healed
+    for harness, mtime in mtimes.items():
+        assert scene.config_path(harness, user=user).stat().st_mtime_ns == mtime, harness
 
     scene.ok(*_command("install", user=user))
     assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)

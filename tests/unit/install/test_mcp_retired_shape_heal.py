@@ -86,21 +86,77 @@ def test_retired_shape_heal_matrix(
     assert _compare(tmp_path, native, managed=managed, fingerprint=fingerprint) is expected
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("runtime", ["copilot", "hermes"])
 @pytest.mark.parametrize(
-    ("native", "expected"),
+    ("edit", "expected"),
     [
-        (_CURRENT, NativeMcpConnectionState.UPDATE_MANAGED),
-        ({**_CURRENT, "headers": {"X-Edit": "user"}}, NativeMcpConnectionState.CONFLICT),
-        ({**_CURRENT, "type": "streamable-http"}, NativeMcpConnectionState.CONFLICT),
+        ("none", NativeMcpConnectionState.MATCHING_MANAGED),
+        ("added-key", NativeMcpConnectionState.CONFLICT),
+        ("reshaped", NativeMcpConnectionState.CONFLICT),
     ],
     ids=["frozen-healed", "edited-after-heal", "user-reshaped"],
 )
 def test_frozen_heal_keeps_the_retired_receipt_verifiable(
-    tmp_path: Path, native: dict, expected: NativeMcpConnectionState
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: str,
+    edit: str,
+    expected: NativeMcpConnectionState,
 ) -> None:
-    """--frozen heals without writing the lock, so the receipt still fingerprints _RETIRED."""
-    fingerprint = mcp_native_hash(_RETIRED)
-    assert _compare(tmp_path, native, managed=True, fingerprint=fingerprint) is expected
+    """--frozen heals without writing the lock, so the receipt still fingerprints the retired render."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    client = ClientFactory.create_client(runtime, project_root=tmp_path)
+    current = client.render_server_config(_INFO)
+    (retired,) = client.legacy_managed_renders(_INFO)
+    native = dict(current)
+    if edit == "added-key":
+        native["headers"] = {"X-Edit": "user"}
+    elif edit == "reshaped":
+        native.update(
+            {
+                key: "streamable-http"
+                for key in current.keys() - {"url"}
+                if current[key] != retired.get(key)
+            }
+        )
+    stale: set[str] = set()
+
+    state = compare_native_mcp_connection(
+        client,
+        "io.example/heal",
+        requested_info=_INFO,
+        stored_config=_REGISTRY,
+        managed=True,
+        existing_configs={"heal": native},
+        native_hash=mcp_native_hash(client.managed_server_config(retired)),
+        registry_request=True,
+        declaration_changed=False,
+        stale_receipts=stale,
+    )
+
+    assert state is expected
+    # A healed entry needs no write; the caller only refreshes its receipt.
+    assert stale == ({"io.example/heal"} if edit == "none" else set())
+
+
+@pytest.mark.windows_compat
+def test_every_runtime_with_retired_shapes_compares_native_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retired-shape heal runs only through native comparison, inherited opt-outs included."""
+    from apm_cli.adapters.client._remote_shapes import REMOTE_SHAPES, remote_shape_of
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    healing = [
+        runtime
+        for runtime in REMOTE_SHAPES
+        if remote_shape_of(ClientFactory.create_client(runtime, project_root=tmp_path)).retired
+    ]
+    assert "hermes" in healing
+    for runtime in healing:
+        client = ClientFactory.create_client(runtime, project_root=tmp_path)
+        assert client.compares_native_connections is True, runtime
 
 
 def test_self_defined_vscode_streamable_alias_heals_without_fingerprint(tmp_path: Path) -> None:

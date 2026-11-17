@@ -157,13 +157,15 @@ def retain_native_receipt(
     name: str,
     *,
     requested_info: dict | None,
+    replace: bool = False,
 ) -> None:
     """Keep a fingerprint for a managed entry that already matched, without writing.
 
     A lock rebuilt without its deployment rows would otherwise lose the receipt
-    of an unchanged managed connection on the next install.
+    of an unchanged managed connection on the next install. *replace* refreshes
+    a receipt :func:`compare_native_mcp_connection` reported as stale.
     """
-    if native_hashes is None or name in native_hashes.get(runtime, {}):
+    if native_hashes is None or (not replace and name in native_hashes.get(runtime, {})):
         return
     fingerprint = written_native_hash(client, name, requested_info=requested_info)
     if fingerprint is not None:
@@ -184,12 +186,15 @@ def compare_native_mcp_connection(
     env_overrides: dict | None = None,
     runtime_vars: dict | None = None,
     declaration_changed: bool = True,
+    stale_receipts: set[str] | None = None,
 ) -> NativeMcpConnectionState:
     """Compare a connection with its requested and previously recorded native shapes.
 
     An APM-written entry whose declaration did not change is kept as written on
     adapters that do not refresh environment-derived renders, so a different
-    credential source or resolved value never churns the native file.
+    credential source or resolved value never churns the native file. *name*
+    is added to *stale_receipts* when the recorded fingerprint predates a
+    ``--frozen`` heal, so the caller refreshes the receipt without a write.
     """
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -218,7 +223,6 @@ def compare_native_mcp_connection(
     comparison = native
     matches_baseline = False
     retired_shape = False
-    stale_receipt = False
     if managed and isinstance(stored_config, dict):
         try:
             dependency = MCPDependency.from_dict(stored_config)
@@ -246,7 +250,7 @@ def compare_native_mcp_connection(
                 matches_baseline = mcp_native_hash(comparable) == native_hash
                 if not matches_baseline:
                     # A --frozen heal rewrote the shape but kept the lock receipt.
-                    stale_receipt = _healed_since_receipt(
+                    matches_baseline = _healed_since_receipt(
                         client,
                         native,
                         baseline_info,
@@ -254,7 +258,8 @@ def compare_native_mcp_connection(
                         native_hash=native_hash,
                         render_env=render_env,
                     )
-                    matches_baseline = stale_receipt
+                    if matches_baseline and stale_receipts is not None:
+                        stale_receipts.add(name)
                 if matches_baseline and managed_fields is not None:
                     managed_fields.update(comparable)
             # An entry an earlier APM release rendered differently (expanded
@@ -298,7 +303,7 @@ def compare_native_mcp_connection(
             if registry_request
             else client.matches_managed_server_config(requested_native, requested)
         )
-        if matches_request and not stale_receipt:
+        if matches_request:
             return (
                 NativeMcpConnectionState.MATCHING_MANAGED
                 if matches_baseline
@@ -306,8 +311,7 @@ def compare_native_mcp_connection(
             )
     if not matches_baseline:
         return NativeMcpConnectionState.CONFLICT
-    # A stale receipt is rewritten (same bytes) so the lock records the healed entry.
-    if retired_shape or stale_receipt:
+    if retired_shape:
         return NativeMcpConnectionState.UPDATE_MANAGED
     if not declaration_changed and not client.refreshes_environment_renders:
         return NativeMcpConnectionState.MATCHING_MANAGED
@@ -358,6 +362,11 @@ def managed_unsupported_connection(
     return None
 
 
+def _shape_delta(current: dict, legacy: dict) -> set[str]:
+    """Keys whose value differs between the current and a legacy render (the shape change)."""
+    return {key for key in current.keys() | legacy.keys() if current.get(key) != legacy.get(key)}
+
+
 def _in_retired_shape(
     client: Any,
     native: object,
@@ -387,9 +396,7 @@ def _in_retired_shape(
     for legacy in client.legacy_managed_renders(info, **render_env):
         if fingerprint is None and client.matches_managed_server_config(native, legacy):
             return True
-        shape_keys = {
-            key for key in current.keys() | legacy.keys() if current.get(key) != legacy.get(key)
-        }
+        shape_keys = _shape_delta(current, legacy)
         if fingerprint and all(native.get(key) == legacy.get(key) for key in shape_keys):
             return True
     return False
@@ -415,9 +422,7 @@ def _healed_since_receipt(
     if info is None or current is None:
         return False
     for legacy in client.legacy_managed_renders(info, **render_env):
-        shape_keys = {
-            key for key in current.keys() | legacy.keys() if current.get(key) != legacy.get(key)
-        }
+        shape_keys = _shape_delta(current, legacy)
         if not shape_keys or any(native.get(key) != current.get(key) for key in shape_keys):
             continue
         unhealed = {key: value for key, value in native.items() if key not in shape_keys}
