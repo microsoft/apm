@@ -82,6 +82,7 @@ from ..install.errors import (
     RequiredIntegrationError,
 )
 from ..install.locking import serialized_lifecycle
+from ..install.lsp.integration import LspPreflight
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import (
@@ -253,13 +254,9 @@ def _run_mcp_lsp_integration(
     """
     from apm_cli.core.scope import InstallScope, get_modules_dir
     from apm_cli.install.lsp import run_lsp_integration
-    from apm_cli.install.lsp.integration import prepare_lsp_integration
+    from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
     from apm_cli.install.mcp import run_mcp_integration
-    from apm_cli.models.apm_package import (
-        APMPackage,
-        canonical_package_target_config,
-        clear_apm_yml_cache,
-    )
+    from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
     from apm_cli.policy.install_preflight import PolicyBlockError
 
     clear_apm_yml_cache()
@@ -279,8 +276,7 @@ def _run_mcp_lsp_integration(
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
     # Declared LSP without a capable target fails before any MCP write (#3727).
-    apm_config = {"scripts": apm_package.scripts or {}}
-    apm_config.update(canonical_package_target_config(apm_package))
+    apm_config = lsp_target_config(apm_package)
     prepared_lsp = prepare_lsp_integration(
         apm_package=apm_package,
         apm_modules_path=apm_modules_path,
@@ -847,7 +843,7 @@ def _run_dep_update_locked(
             logger=logger,
             plan_callback=_plan_callback,
             target=target,
-            require_lsp_targets=True,
+            lsp_preflight=LspPreflight(),
         )
     except FrozenInstallError as e:
         _rich_error(str(e))

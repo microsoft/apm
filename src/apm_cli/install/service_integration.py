@@ -84,14 +84,10 @@ def run_service_integrations(
             user_scope=ctx.scope is InstallScope.USER,
         )
 
-    from apm_cli.install.lsp.integration import prepare_lsp_integration
-    from apm_cli.models.apm_package import canonical_package_target_config
+    from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
 
     apm_modules_path = get_modules_dir(ctx.scope)
-    apm_config = {
-        "scripts": apm_package.scripts or {},
-        **canonical_package_target_config(apm_package),
-    }
+    apm_config = lsp_target_config(apm_package)
     selected_target = target_decision.value if target_decision else explicit_target
     # Declared LSP without a capable target fails here, before any MCP or LSP
     # write (#3727).

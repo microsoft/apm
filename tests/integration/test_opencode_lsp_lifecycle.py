@@ -168,3 +168,62 @@ def test_target_without_lsp_support_fails_before_any_write(lsp_scene: _LspScene)
         if p.is_file() and p not in home_before
     }
     assert {p for p in new_home if "skills" in p} == set(), new_home
+
+
+_APM_STATE_DIRS = (".apm", ".apm-local", ".cache")
+
+
+def _home_files(home: Path) -> dict[str, bytes]:
+    """Harness files under HOME; APM's own state (locks, config, cache) is excluded."""
+    return {
+        path.relative_to(home).as_posix(): path.read_bytes()
+        for path in home.rglob("*")
+        if path.is_file() and path.relative_to(home).parts[0] not in _APM_STATE_DIRS
+    }
+
+
+def test_exclude_that_empties_the_lsp_targets_fails_before_any_write(
+    lsp_scene: _LspScene,
+) -> None:
+    lsp_scene.declare()
+    before = _project_files(lsp_scene.project)
+
+    result = lsp_scene.scene.install("cursor,opencode", user=False, extra=("--exclude", "opencode"))
+
+    assert result.returncode != 0, describe(result)
+    assert "LSP" in result.stdout + result.stderr
+    assert _project_files(lsp_scene.project) == before, "target files written before LSP gate"
+
+
+def test_user_scope_without_lsp_support_fails_before_any_write(lsp_scene: _LspScene) -> None:
+    (lsp_scene.scene.home / ".cursor").mkdir()
+    lsp_scene.declare(user=True)
+    before = _home_files(lsp_scene.scene.home)
+
+    result = lsp_scene.scene.install("cursor", user=True)
+
+    assert result.returncode != 0, describe(result)
+    assert _home_files(lsp_scene.scene.home) == before, "user files written before LSP gate"
+    assert not (lsp_scene.scene.manifest_root(True) / "apm.lock.yaml").exists()
+
+
+def test_update_without_lsp_support_fails_before_any_write(lsp_scene: _LspScene) -> None:
+    (lsp_scene.project / ".cursor").mkdir()
+    lsp_scene.declare()
+    lsp_scene.scene.ok("install", "--no-policy", "--target", "opencode")
+    before = _project_files(lsp_scene.project)
+
+    result = lsp_scene.scene.run("update", "--yes", "--no-policy", "--target", "cursor")
+
+    assert result.returncode != 0, describe(result)
+    assert _project_files(lsp_scene.project) == before, "update wrote before the LSP gate"
+
+
+def test_only_apm_is_not_gated_by_lsp_support(lsp_scene: _LspScene) -> None:
+    (lsp_scene.project / ".cursor").mkdir()
+    lsp_scene.declare()
+
+    result = lsp_scene.scene.install("cursor", user=False, extra=("--only", "apm"))
+
+    assert result.returncode == 0, describe(result)
+    assert any("kit-skill" in path for path in _project_files(lsp_scene.project))

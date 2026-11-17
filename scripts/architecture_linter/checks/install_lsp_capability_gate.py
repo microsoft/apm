@@ -37,8 +37,8 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
         "require_lsp_capable_target(supported_target_runtimes, bundle=True)",
         "require_lsp_capable_target(self.target_runtimes)",
     ),
-    _INSTALL_COMMAND: ("require_lsp_targets=ctx.install_mode is InstallMode.ALL",),
-    _UPDATE_COMMAND: ("require_lsp_targets=True",),
+    _INSTALL_COMMAND: ("lsp_preflight=LspPreflight.for_install(ctx)",),
+    _UPDATE_COMMAND: ("lsp_preflight=LspPreflight(),",),
     _LOCAL_BUNDLE: ("require_lsp_capable_target(",),
 }
 
@@ -55,10 +55,29 @@ def _first_line(facts: object, needle: str) -> int | None:
     return next((index for index, line in enumerate(lines) if needle in line), None)
 
 
+def _count(facts: object, needle: str) -> int:
+    return sum(needle in line for line in getattr(facts, "lines", ()))
+
+
 def check_lsp_capability_gate(provider: FactsProvider) -> tuple[Violation, ...]:
     """The LSP capability gap is refused by one owner, before any target write."""
     rule_id = GUARD_LSP_CAPABILITY_GATE
     findings: list[Violation] = []
+    owner, failures = _facts_for(provider, _OWNER, rule_id)
+    findings.extend(failures)
+    # The preflight and the service phase must share one target resolution.
+    if not failures and (
+        _count(owner, "LSPIntegrator.resolve_target_runtimes(") != 1
+        or _count(owner, "_resolve_lsp_target_runtimes(") < 3
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _OWNER,
+                "preflight_lsp_targets and prepare_lsp_integration must both resolve "
+                "LSP targets through _resolve_lsp_target_runtimes",
+            )
+        )
     for path in _python_paths(provider, "src/apm_cli/"):
         if path == _OWNER:
             continue

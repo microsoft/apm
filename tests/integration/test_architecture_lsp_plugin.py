@@ -205,8 +205,13 @@ def test_multitarget_lsp_preflight_bypass_is_rejected() -> None:
             "    prepared_lsp.require_capable_target()\n",
             "",
         ),
+        (
+            "src/apm_cli/install/lsp/integration.py",
+            "        _resolve_lsp_target_runtimes(\n            project_root=ctx.project_root,",
+            "        LSPIntegrator.resolve_target_runtimes(\n            project_root=ctx.project_root,",
+        ),
     ],
-    ids=["second-refusal-site", "mcp-before-gate"],
+    ids=["second-refusal-site", "mcp-before-gate", "second-target-resolution"],
 )
 def test_lsp_capability_gate_split_is_rejected(path: str, old: str, new: str) -> None:
     """A second capability-gap refusal, or MCP writes before the gate, are rejected."""

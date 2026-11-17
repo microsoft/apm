@@ -212,7 +212,7 @@ class InstallService:
             lockfile_only=request.lockfile_only,
             trust_bin=request.trust_bin,
             transaction=request.transaction,
-            require_lsp_targets=request.require_lsp_targets,
+            lsp_preflight=request.lsp_preflight,
         )
 
     # -- Lifecycle script helpers ------------------------------------------

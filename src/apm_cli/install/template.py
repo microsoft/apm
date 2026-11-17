@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 _MATERIALIZATION_UNSET = object()
 
 
-def _effective_allow(ctx) -> dict | None:
+def effective_allow_map(ctx) -> dict | None:
     """Return the effective (deny-wins) allow-map for the install context.
 
     Builds the #1873 trust context from three layers and materialises the
@@ -197,7 +197,7 @@ def preflight_skill_materializations(
             ),
             dep_target_subset=dependency.target_subset,
             ctx=ctx,
-            allow_executables=_effective_allow(ctx),
+            allow_executables=effective_allow_map(ctx),
             trust_bin=ctx.trust_bin,
         )
         plans[materialization.dep_key] = plan
@@ -529,7 +529,7 @@ def _integrate_materialization(
             skill_subset=effective_skill_subset,
             dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
-            allow_executables=_effective_allow(ctx),
+            allow_executables=effective_allow_map(ctx),
             trust_bin=getattr(ctx, "trust_bin", None),
             deployment_plan=deployment_plan,
         )

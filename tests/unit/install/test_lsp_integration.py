@@ -911,8 +911,9 @@ class TestOpenCodeLspIntegration:
 class TestLspCapabilityPreflight:
     """Declared LSP with no capable target fails before any target write (#3727)."""
 
-    def _ctx(self, tmp_path, *, target="cursor", require=True):
+    def _ctx(self, tmp_path, *, target="cursor", require=True, exclude=None):
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.lsp.integration import LspPreflight
         from apm_cli.models.dependency.reference import DependencyReference
 
         dep_ref = DependencyReference.parse("acme/lsp-kit")
@@ -929,7 +930,7 @@ class TestLspCapabilityPreflight:
         root.scripts = {}
         root.target = None
         return SimpleNamespace(
-            require_lsp_targets=require,
+            lsp_preflight=LspPreflight(exclude=exclude) if require else None,
             lockfile_only=False,
             apm_modules_dir=tmp_path / "apm_modules",
             apm_package=root,
@@ -946,7 +947,7 @@ class TestLspCapabilityPreflight:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
         with (
-            patch("apm_cli.install.template._effective_allow", return_value=None),
+            patch("apm_cli.install.template.effective_allow_map", return_value=None),
             pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
         ):
             preflight_lsp_targets(self._ctx(tmp_path))
@@ -954,13 +955,23 @@ class TestLspCapabilityPreflight:
     def test_capable_target_passes(self, tmp_path) -> None:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
-        with patch("apm_cli.install.template._effective_allow", return_value=None):
+        with patch("apm_cli.install.template.effective_allow_map", return_value=None):
             preflight_lsp_targets(self._ctx(tmp_path, target="opencode"))
+
+    def test_excluded_capable_target_fails_like_the_service_phase(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with (
+            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
+        ):
+            preflight_lsp_targets(self._ctx(tmp_path, target="opencode", exclude="opencode"))
 
     def test_untrusted_lsp_package_does_not_trip_the_gate(self, tmp_path) -> None:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
-        with patch("apm_cli.install.template._effective_allow", return_value={"other/pkg": {}}):
+        with patch("apm_cli.install.template.effective_allow_map", return_value={"other/pkg": {}}):
             preflight_lsp_targets(self._ctx(tmp_path))
 
     def test_callers_without_lsp_integration_skip_the_gate(self, tmp_path) -> None:

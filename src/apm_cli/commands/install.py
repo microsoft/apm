@@ -35,6 +35,7 @@ from apm_cli.install.errors import (
 )
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
+from apm_cli.install.lsp.integration import LspPreflight
 from apm_cli.install.manifest_helpers import (
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
@@ -1942,7 +1943,7 @@ def _install_apm_packages(ctx, outcome):
                 refresh=ctx.refresh,
                 trust_bin=ctx.trust_bin,
                 transaction=ctx.transaction,
-                require_lsp_targets=ctx.install_mode is InstallMode.ALL,
+                lsp_preflight=LspPreflight.for_install(ctx),
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(

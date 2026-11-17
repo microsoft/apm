@@ -384,7 +384,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     transaction: InstallTransaction | None = None,
     frozen: bool = False,
     trust_transitive_mcp: bool = False,
-    require_lsp_targets: bool = False,
+    lsp_preflight=None,
 ):
     """Install APM package dependencies.
 
@@ -556,7 +556,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         lockfile_only=lockfile_only,
         trust_bin=trust_bin,
         transaction=transaction,
-        require_lsp_targets=require_lsp_targets,
+        lsp_preflight=lsp_preflight,
     )
 
     # ------------------------------------------------------------------

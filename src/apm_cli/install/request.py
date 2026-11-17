@@ -52,9 +52,9 @@ class InstallRequest:
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
     trust_transitive_mcp: bool = False
     trust_bin: bool | None = None
-    # The caller integrates LSP servers after the pipeline, so declared LSP
-    # without a capable target must fail before the pipeline writes (#3727).
-    require_lsp_targets: bool = False
+    # Set when the caller integrates LSP after the pipeline: declared LSP
+    # without a capable target fails before the pipeline writes (#3727).
+    lsp_preflight: Any = None  # LspPreflight | None
 
     # --frozen: refuse to install if lockfile is missing or stale relative
     # to apm.yml.  Enforced in InstallService.run() BEFORE delegating to
