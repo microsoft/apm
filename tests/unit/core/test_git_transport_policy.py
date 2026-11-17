@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
@@ -218,7 +219,12 @@ def test_git_transport_policy_matrix(
         assert "GIT_CONFIG_GLOBAL" not in env
         assert "GIT_CONFIG_NOSYSTEM" not in env
     else:
-        assert env["GIT_ASKPASS"] == "echo"
+        # HTTPS ADO children get no askpass on POSIX, so a 401 fails with
+        # "terminal prompts disabled" instead of echoing prompt text as Basic.
+        ado_https_posix = (
+            kind == "ado" and remote_url.startswith("https://") and sys.platform != "win32"
+        )
+        assert env["GIT_ASKPASS"] == ("" if ado_https_posix else "echo")
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
 
     if kind == "generic" and expects_isolation:

@@ -21,6 +21,9 @@ from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
 from scripts.architecture_linter.checks.contracts_legacy import LEGACY_CHECKS
+from scripts.architecture_linter.checks.contracts_strip_charset import (
+    check_strip_charset_literals,
+)
 from scripts.architecture_linter.checks.contracts_structural_authorities import (
     find_binary_selection_violations,
     find_ratchet_authority_violations,
@@ -85,6 +88,7 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
+_GUARD_STRIP_CHARSET = "contracts-tooling-strip-charset"
 
 _GUARD_LOCKFILE_SYMLINK_WRITE = "contracts-tooling-lockfile-symlink-write-guard"
 
@@ -2009,6 +2013,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_GENERATION_FOOTER,
         "Generated-content footer wording stays owned by compilation/footer.py.",
         lambda provider: check_generation_footer_authority(provider, _GUARD_GENERATION_FOOTER),
+    ),
+    _owner_rule(
+        _GUARD_STRIP_CHARSET,
+        "Prefix/suffix removal uses removeprefix/removesuffix, never a strip character set.",
+        lambda provider: check_strip_charset_literals(provider, _GUARD_STRIP_CHARSET),
     ),
     _structural_rule(
         _CONTRACT_RULE_ID,

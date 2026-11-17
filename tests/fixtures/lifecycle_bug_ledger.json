@@ -344,6 +344,43 @@
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_target_only_install_keeps_claims_whose_recorded_target_left",
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_deleting_all_local_content_cleans_its_deployments"
       ]
+    },
+    {
+      "issue": 3752,
+      "fixed_in": "0.36.1",
+      "summary": "Azure DevOps installs, validation, lock replay and update ignored the Git credential helper when no ADO_APM_PAT or Azure CLI token was available, although git clone succeeded with the same helper.",
+      "failure_modes": ["auth", "routing"],
+      "properties": ["auth.credentials_isolated", "lockfile.frozen_preserves_bytes", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_cli_install_uses_credential_helper_without_pat_or_az",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_manifest_install_frozen_update_outdated_through_credential_helper",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_user_scope_install_through_credential_helper",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_pat_keeps_precedence_over_credential_helper"
+      ]
+    },
+    {
+      "issue": 3753,
+      "fixed_in": "0.36.1",
+      "summary": "When the Azure CLI failed to issue a token, the error claimed Azure DevOps rejected a bearer token and dropped the Azure CLI's own reason.",
+      "failure_modes": ["auth", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_azure_cli_failure_diagnostic_lifecycle.py::test_azure_cli_token_failure_reports_aadsts_cause_not_a_rejected_token",
+        "tests/integration/test_azure_cli_failure_diagnostic_lifecycle.py::test_azure_cli_failure_verbose_keeps_bearer_token_phrase_readable"
+      ]
+    },
+    {
+      "issue": 3758,
+      "fixed_in": "0.36.1",
+      "summary": "Org policy hosted on Azure DevOps was reported as a fetch failure when the anonymous request was redirected to sign-in, so the credential chain never ran and lifecycle scripts were suppressed under fetch_failure_default block.",
+      "failure_modes": ["auth", "outcome"],
+      "properties": ["auth.credentials_isolated", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_policy_status_follows_signin_redirect_into_credential_helper",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_compile_lifecycle_runs_when_ado_policy_needs_credential_helper",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_uninstall_lifecycle_runs_when_ado_policy_needs_credential_helper",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block"
+      ]
     }
   ],
   "lifecycle_contracts": [

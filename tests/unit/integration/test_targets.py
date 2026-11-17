@@ -1,5 +1,6 @@
 """Tests for active_targets() resolution in targets.py."""
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -667,18 +668,180 @@ class TestHermesTarget:
         # Home-relative when HERMES_HOME lives under $HOME.
         assert profile.root_dir == "hq/.myhermes"
 
-    def test_resolve_hermes_root_default(self, monkeypatch, tmp_path):
-        from apm_cli.integration.targets import resolve_hermes_root
 
-        monkeypatch.delenv("HERMES_HOME", raising=False)
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-        assert resolve_hermes_root() == tmp_path / ".hermes"
+_USER_ROOTS = {
+    "claude": ("CLAUDE_CONFIG_DIR", ".claude"),
+    "codex": ("CODEX_HOME", ".codex"),
+    "copilot": ("COPILOT_HOME", ".copilot"),
+    "hermes": ("HERMES_HOME", ".hermes"),
+}
 
-    def test_resolve_hermes_root_env_override(self, monkeypatch, tmp_path):
-        from apm_cli.integration.targets import resolve_hermes_root
 
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "custom"))
-        assert resolve_hermes_root() == tmp_path / "custom"
+def _routed_user_roots(target: str) -> dict[str, Path]:
+    """Return the user root every routed call site selects for *target*, physically."""
+    from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+    home = Path.home()
+    profile = KNOWN_TARGETS[target].for_scope(user_scope=True)
+    roots = {"for_scope": home / profile.root_dir}
+    if target == "copilot":
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+        from apm_cli.copilot_plugins.settings import copilot_home
+
+        adapter = CopilotClientAdapter(registry_url="https://registry.invalid", user_scope=True)
+        roots["mcp"] = Path(adapter.get_config_path()).parent
+        roots["plugin-settings"] = copilot_home()
+        roots["lsp"] = _LSP_TARGET_SPECS["copilot"].path(home, user_scope=True).parent
+    elif target == "claude":
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+        roots["lsp"] = _LSP_TARGET_SPECS["claude"].path(home, user_scope=True).parents[3]
+        if os.environ.get("CLAUDE_CONFIG_DIR", "").strip():
+            roots["mcp"] = ClaudeClientAdapter.resolve_user_claude_json_path().parent
+    elif target == "codex":
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(registry_url="https://registry.invalid", user_scope=True)
+        roots["mcp"] = adapter._get_codex_dir()
+    else:
+        from apm_cli.adapters.client.hermes import HermesClientAdapter
+
+        roots["mcp"] = HermesClientAdapter(user_scope=True)._config_path().parent
+    return {site: path.resolve(strict=False) for site, path in roots.items()}
+
+
+class TestHarnessUserRootOwner:
+    """One owner resolves every harness user-root variable (#3745)."""
+
+    @staticmethod
+    def _home(monkeypatch, tmp_path: Path) -> Path:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        for env_var, _default in _USER_ROOTS.values():
+            monkeypatch.delenv(env_var, raising=False)
+        return home
+
+    def test_owner_covers_every_user_root_variable(self):
+        from apm_cli.integration.targets import USER_ROOT_ENV_VARS, USER_ROOT_VARIABLES
+
+        assert {name: env for name, (env, _d) in _USER_ROOTS.items()} == USER_ROOT_ENV_VARS
+        for name, variable in USER_ROOT_VARIABLES.items():
+            assert variable.default_dir == KNOWN_TARGETS[name].effective_root(user_scope=True)
+            assert variable.evidence_url.startswith("https://")
+
+    @pytest.mark.parametrize("target", sorted(_USER_ROOTS))
+    @pytest.mark.parametrize("value", [None, "", "   "])
+    def test_unset_or_blank_selects_the_default(self, monkeypatch, tmp_path, target, value):
+        from apm_cli.integration.targets import configured_user_root, resolve_user_root
+
+        home = self._home(monkeypatch, tmp_path)
+        env_var, default_dir = _USER_ROOTS[target]
+        if value is not None:
+            monkeypatch.setenv(env_var, value)
+
+        assert configured_user_root(target) is None
+        assert resolve_user_root(target) == home / default_dir
+        assert KNOWN_TARGETS[target].for_scope(user_scope=True).root_dir == default_dir
+        assert set(_routed_user_roots(target).values()) == {(home / default_dir).resolve()}
+
+    @pytest.mark.parametrize("target", sorted(_USER_ROOTS))
+    def test_absolute_under_home_is_home_relative(self, monkeypatch, tmp_path, target):
+        home = self._home(monkeypatch, tmp_path)
+        env_var, _default = _USER_ROOTS[target]
+        monkeypatch.setenv(env_var, str(home / "profiles" / target))
+
+        assert KNOWN_TARGETS[target].for_scope(user_scope=True).root_dir == f"profiles/{target}"
+        assert set(_routed_user_roots(target).values()) == {(home / "profiles" / target).resolve()}
+
+    @pytest.mark.parametrize("target", sorted(_USER_ROOTS))
+    def test_absolute_outside_home_is_absolute(self, monkeypatch, tmp_path, target):
+        self._home(monkeypatch, tmp_path)
+        env_var, _default = _USER_ROOTS[target]
+        outside = (tmp_path / "elsewhere" / target).resolve()
+        monkeypatch.setenv(env_var, str(outside))
+
+        assert Path(KNOWN_TARGETS[target].for_scope(user_scope=True).root_dir) == outside
+        assert set(_routed_user_roots(target).values()) == {outside}
+
+    @pytest.mark.parametrize("target", sorted(_USER_ROOTS))
+    def test_relative_value_is_rejected_at_every_call_site(self, monkeypatch, tmp_path, target):
+        from apm_cli.integration.targets import resolve_user_root, scoped_profile_or_none
+
+        self._home(monkeypatch, tmp_path)
+        env_var, default_dir = _USER_ROOTS[target]
+        monkeypatch.setenv(env_var, f"relative/{target}")
+        message = (
+            rf"{env_var} is set to a non-absolute path.*must be an absolute path.*~/{default_dir}"
+        )
+
+        with pytest.raises(PathTraversalError, match=message):
+            resolve_user_root(target)
+        with pytest.raises(PathTraversalError, match=message):
+            KNOWN_TARGETS[target].for_scope(user_scope=True)
+        with pytest.raises(PathTraversalError, match=message):
+            self._adapter_root(target)
+        assert scoped_profile_or_none(KNOWN_TARGETS[target], user_scope=True) is None
+
+    @staticmethod
+    def _adapter_root(target: str) -> Path:
+        if target == "copilot":
+            from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+            adapter = CopilotClientAdapter(registry_url="https://registry.invalid", user_scope=True)
+            return Path(adapter.get_config_path())
+        if target == "claude":
+            from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+            return ClaudeClientAdapter.resolve_user_claude_unresolved_path()
+        if target == "codex":
+            from apm_cli.adapters.client.codex import CodexClientAdapter
+
+            adapter = CodexClientAdapter(registry_url="https://registry.invalid", user_scope=True)
+            return adapter._get_codex_dir()
+        from apm_cli.adapters.client.hermes import HermesClientAdapter
+
+        return HermesClientAdapter(user_scope=True)._config_path()
+
+    def test_relative_copilot_home_does_not_break_other_profiles(self, monkeypatch, tmp_path):
+        from apm_cli.integration.targets import selected_user_profiles
+
+        self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("COPILOT_HOME", "relative/copilot")
+
+        assert set(selected_user_profiles()) == {"claude", "codex", "hermes"}
+
+    def test_user_scope_detection_follows_copilot_home(self, monkeypatch, tmp_path):
+        from apm_cli.integration.targets import active_targets_user_scope
+
+        home = self._home(monkeypatch, tmp_path)
+        (home / ".claude").mkdir()
+        copilot_home = tmp_path / "copilot-home"
+        copilot_home.mkdir()
+        monkeypatch.setenv("COPILOT_HOME", str(copilot_home))
+
+        names = {profile.name for profile in active_targets_user_scope()}
+
+        assert {"claude", "copilot"} <= names
+
+    def test_canvas_refusal_is_decided_by_the_owner(self, monkeypatch, tmp_path):
+        from apm_cli.integration.canvas_integrator import CanvasIntegrator
+
+        home = self._home(monkeypatch, tmp_path)
+        assert not CanvasIntegrator._copilot_home_is_nondefault()
+        monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
+        assert not CanvasIntegrator._copilot_home_is_nondefault()
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "elsewhere"))
+        assert CanvasIntegrator._copilot_home_is_nondefault()
+
+    def test_lsp_labels_name_the_selected_root(self, monkeypatch, tmp_path):
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        self._home(monkeypatch, tmp_path)
+        spec = _LSP_TARGET_SPECS["copilot"]
+        assert spec.label(user_scope=True) == "~/.copilot/lsp-config.json"
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "custom"))
+        assert spec.label(user_scope=True) == f"{(tmp_path / 'custom').as_posix()}/lsp-config.json"
 
 
 class TestCodexHomeUserScope:

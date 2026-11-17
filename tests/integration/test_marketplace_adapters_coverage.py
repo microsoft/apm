@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tarfile
 import time
 import zipfile
@@ -662,9 +663,9 @@ class TestHermesClientAdapter:
     def _make_adapter(self, tmp_path: Path) -> HermesClientAdapter:
         adapter = HermesClientAdapter(project_root=tmp_path)
         # Redirect config to tmp_path so tests are hermetic
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=tmp_path / ".hermes",
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(tmp_path / ".hermes")},
         ):
             pass  # just warm up
         return adapter
@@ -696,9 +697,9 @@ class TestHermesClientAdapter:
 
     def test_update_config_creates_file(self, tmp_path: Path) -> None:
         hermes_home = tmp_path / ".hermes"
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=hermes_home,
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(hermes_home)},
         ):
             adapter = HermesClientAdapter(project_root=tmp_path)
             server_entry = {"command": "npx", "args": ["-y", "mcp-server"]}
@@ -718,9 +719,9 @@ class TestHermesClientAdapter:
             yaml.dump({"model_provider": "openai", "mcp_servers": {}}),
             encoding="utf-8",
         )
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=hermes_home,
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(hermes_home)},
         ):
             adapter = HermesClientAdapter(project_root=tmp_path)
             adapter.update_config({"new-server": {"command": "python"}})
@@ -730,9 +731,9 @@ class TestHermesClientAdapter:
 
     def test_get_current_config_missing_file(self, tmp_path: Path) -> None:
         hermes_home = tmp_path / ".hermes"
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=hermes_home,
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(hermes_home)},
         ):
             adapter = HermesClientAdapter(project_root=tmp_path)
             result = adapter.get_current_config()

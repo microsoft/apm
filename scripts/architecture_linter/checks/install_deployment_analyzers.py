@@ -13,6 +13,10 @@ check function's definition order) stays visible and auditable in one place.
 
 from __future__ import annotations
 
+from scripts.architecture_linter.checks.install_agent_render_adopt import (
+    GUARD_AGENT_RENDER_ADOPT,
+    check_agent_render_then_adopt,
+)
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
     _GUARD_CLEANUP_RELEASE,
@@ -220,6 +224,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
+    ),
+    _rule(
+        GUARD_AGENT_RENDER_ADOPT,
+        "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
+        check_agent_render_then_adopt,
     ),
     _rule(
         GUARD_CONSUMER_MANIFEST_REWRITE,

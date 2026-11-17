@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-from apm_cli.core.auth import BearerFallbackOutcome
 from apm_cli.install import validation
 
 
@@ -39,12 +38,6 @@ class TestProxyBypassGuard:
         resolver.resolve_for_dep.return_value = ctx
         resolver.resolve_for_remote.return_value = ctx
         resolver.git_env_for_remote.return_value = {}
-        resolver.execute_with_bearer_fallback.side_effect = (
-            lambda _dep, primary, _bearer, _is_failure: BearerFallbackOutcome(
-                primary(),
-                False,
-            )
-        )
 
         # Single-call shim: invoke the operation once unauth.
         def _fake_fallback(host, op, **kwargs):

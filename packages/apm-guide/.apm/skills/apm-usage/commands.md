@@ -386,11 +386,19 @@ Removing managed servers from the selected profile preserves other profiles and
 user-owned entries. Cleanup refuses symlinked config files or profile directories;
 replace the link with a regular file or directory before retrying.
 `apm uninstall -g <package>` removes files and lock rows only under the selected
-profile; a package another profile still uses stays in `~/.apm/apm.yml`.
-Codex homes selected by an absolute `CODEX_HOME` follow the same rule.
 profile; a package another profile still uses stays in `~/.apm/apm.yml`. Only
-the runtime whose profiles share the package (Claude or Hermes) loses files;
-the other runtime's default root and non-profile targets keep theirs.
+the runtime whose profiles share the package loses files; the other runtime's
+default root and non-profile targets keep theirs.
+
+Harness home variables (`COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
+`HERMES_HOME`) share one rule at user scope: unset or blank uses the default
+(`~/.copilot`, `~/.codex`, `~/.claude`, `~/.hermes`), an absolute path selects
+that profile, and a relative path fails with an error naming the variable.
+With `COPILOT_HOME` set, `apm install -g --target copilot` writes instructions,
+agents, hooks, `mcp-config.json`, `lsp-config.json` and plugin settings under
+it (skills too with `--legacy-skill-paths`; otherwise `~/.agents/skills/`).
+Files already under `~/.copilot` stay as another profile's files. The
+`copilot-app` and `copilot-cowork` targets ignore `COPILOT_HOME`.
 
 `apm install` prints a one-line provenance summary before any mutation:
 
@@ -413,11 +421,14 @@ For project LSP installs, `apm install --target claude` writes the
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`, which Claude Code
 discovers as a skills-directory plugin. Global Claude LSP installs use the
 same personal-scope plugin shape at
-`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`.
+`$CLAUDE_CONFIG_DIR/skills/apm-lsp/.claude-plugin/plugin.json` (default
+`~/.claude/...`); global Copilot LSP installs write
+`$COPILOT_HOME/lsp-config.json` (default `~/.copilot/lsp-config.json`).
 
 For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
 `$COPILOT_HOME/mcp-config.json` with `--global` (or
-`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset). `--target vscode`
+`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset or blank; relative
+values are rejected). `--target vscode`
 writes only `.vscode/mcp.json`.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
@@ -613,7 +624,7 @@ rewriting files. Explicit `--file` remains user-directed.
 
 Native Copilot Agent Plugins replay through the canonical package loader, with or without a plugin `apm.yml`. A clean install or reinstall can audit successfully. Set the consumer's `targets: [copilot]` in `apm.yml`; audit has no `--target` flag. Invalid native manifests fail replay instead of entering legacy conversion. Admitted local native cache units are compared with a scratch copy of their original source using install's validated copying; modified or missing cached skills fail audit. Remote native units use the recorded package content hash, including in cold-cache CI. Run `apm install` to restore drift or establish a missing remote hash. Cache files remain outside deployed-file tracking, and native registration files are not covered by this content comparison.
 
-Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: in a project with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, it prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first, but local dependency sources must be available at their declared paths. Windows long and native 8.3 spellings of the same project retain project scope; they do not require a global install. Auditing the actual user metadata workspace (`~/.apm`) still refuses missing modules and requires `apm install --global`. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
+Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: in a project with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, it prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first, but local dependency sources must be available at their declared paths. Windows long and native 8.3 spellings of the same project retain project scope; they do not require a global install. Auditing the actual user metadata workspace (`~/.apm`) still refuses missing modules when its lockfile records packages or local bundle staging and requires `apm install --global`; a user lockfile with only MCP/LSP servers or `~/.apm` content needs no `apm_modules/`. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
 
 `config-consistency` respects dependency MCP deliberately omitted by `apm install --only apm` or the secure default refusal of transitive self-defined MCP. Install records evidence bound to that dependency and authored declaration, before plugin-root expansion; empty MCP fields alone are not evidence. Direct MCP admission supersedes old omission evidence for that server. Root and previously admitted MCP still participate in drift checks, and a later skills-only install preserves their baseline. Unknown, damaged or stale evidence requires repeating the intended selection: use `apm install --only apm`, or `apm install --global --target agent-skills --only apm` for global skills-only. Do not enable MCP or add `--trust-transitive-mcp` merely to pass audit. The MCP consistency check does not rewrite the lockfile or runtime configuration. See the [config-consistency reference](https://microsoft.github.io/apm/reference/baseline-checks/#config-consistency) for the full contract.
 

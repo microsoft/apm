@@ -1,0 +1,8 @@
+name: consumer
+version: 1.0.0
+targets: [copilot]
+dependencies:
+  apm:
+    - git: https://dev.azure.com/contoso/platform/_git/agent-skills
+      path: skills/ado-helper
+      ref: main

@@ -687,6 +687,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Root replacement matching becomes host- and endpoint-blind.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-strip-charset",
+        rule_id="contracts-tooling-strip-charset",
+        path="src/apm_cli/models/dependency/reference.py",
+        old='part.removesuffix(".git")',
+        new='part.rstrip(".git")',
+        intent="Repository segment validation strips a .git character set again (#3715).",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-claude-mcp-paths",
         rule_id="mutation_writes.claude_mcp_paths",
         path="src/apm_cli/integration/mcp_integrator.py",
@@ -698,9 +706,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-copilot-cli-mcp-paths",
         rule_id="mutation_writes.copilot_cli_mcp_paths",
         path="src/apm_cli/adapters/client/copilot.py",
-        old='"COPILOT_HOME"',
-        new='"COPILOT_CFG_DIR"',
-        intent="Copilot adapter stops owning the COPILOT_HOME MCP config root.",
+        old='resolve_user_root("copilot") / "mcp-config.json"',
+        new='Path.home() / ".copilot" / "mcp-config.json"',
+        intent="Copilot adapter bypasses the owner-selected COPILOT_HOME user root.",
     ),
     MutationCase(
         guard_id="hooks-integrations-hook-command-vocabulary",
@@ -829,6 +837,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="include_scoped_in_user_root_context: bool = False",
         new="include_scoped_in_user_root_context: bool = True",
         intent="TargetProfile flips the user-root scoped-instruction eligibility default.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-agent-render-then-adopt",
+        rule_id="install-deployment-agent-render-then-adopt",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="expected_content=rendered,",
+        new="expected_content=None,",
+        intent="Agent adoption compares the raw source instead of the rendered text (#3722).",
     ),
     MutationCase(
         guard_id="install-deployment-audit-replay",
@@ -1368,6 +1384,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Compilation gains a direct write that bypasses CompiledOutputWriter.",
     ),
     MutationCase(
+        guard_id="registry-delegation-harness-user-root-resolution",
+        rule_id="registry_delegation.harness_user_root_resolution",
+        path="src/apm_cli/integration/lsp_integrator.py",
+        old="return resolve_user_root(self.runtime)",
+        new='return Path(os.environ.get("COPILOT_HOME") or Path.home() / ".copilot")',
+        intent="LSP user config re-reads COPILOT_HOME outside the user-root owner.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-install-target-selection",
         rule_id="registry_delegation.install_target_selection",
         path="src/apm_cli/install/pipeline.py",
@@ -1391,6 +1415,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '    return "[i]" if check.informational else "[+]"'
         ),
         intent="Doctor status icons hard-code glyphs instead of console STATUS_SYMBOLS.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-policy-target-projection",
+        rule_id="registry_delegation.policy_target_projection",
+        path="src/apm_cli/policy/policy_checks.py",
+        old="            manifest_decision.canonical_targets,\n",
+        new="            raw_yml,\n",
+        intent="Audit judges compilation-target policy from the raw manifest dict.",
     ),
     MutationCase(
         guard_id="registry-delegation-process-interrupt-signals",
@@ -1442,9 +1474,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-ado-validation-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/install/validation.py",
-        old="        fallback = auth_resolver.execute_with_bearer_fallback(",
-        new="        fallback = _bypass_ado_bearer_fallback(",
-        intent="Install validation bypasses canonical ADO PAT-to-bearer fallback.",
+        old="            run_result = auth_resolver.try_with_fallback(",
+        new="            run_result = _bypass_ado_auth_chain(",
+        intent="Install validation bypasses the canonical ADO credential chain.",
     ),
     MutationCase(
         guard_id="transport-platform-ado-validation-caller-config",
@@ -1464,9 +1496,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-ado-validation-clone-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/deps/clone_engine.py",
-        old="                    fallback = host.auth_resolver.execute_with_bearer_fallback(",
-        new="                    fallback = _execute_ado_bearer_fallback_locally(",
-        intent="Clone execution bypasses AuthResolver's PAT-to-bearer owner.",
+        old='                    host.auth_resolver.try_with_fallback(\n                        dep_host or "dev.azure.com",',
+        new='                    _run_ado_chain_locally(\n                        dep_host or "dev.azure.com",',
+        intent="Clone execution bypasses AuthResolver's ADO credential chain.",
     ),
     MutationCase(
         guard_id="transport-platform-ado-validation-helper-suppression",
@@ -1491,6 +1523,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="                    with _NoNetrcSession() as session:",
         new="                    with _requests.Session() as session:",
         intent="Direct Artifactory entry requests regain ambient netrc credentials.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-auth-outcome-owner",
+        rule_id="transport-platform-auth-outcome-owner",
+        path="src/apm_cli/policy/discovery.py",
+        old="        if response.status_code != 200:\n            raise AuthAttemptFailed(response=response)\n        return response\n\n    try:\n        resp = auth_resolver.try_with_fallback(",
+        new="        if response.status_code in (401, 403):\n            raise AuthAttemptFailed(response=response)\n        return response\n\n    try:\n        resp = auth_resolver.try_with_fallback(",
+        intent="ADO policy fetch regrows a local 401/403 auth classification.",
     ),
     MutationCase(
         guard_id="transport-platform-authenticated-egress",
@@ -3011,3 +3051,49 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
     report = run_selected_rules(ROOT, (_HOST_CRED_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(v.rule_id == _HOST_CRED_RULE for v in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/policy_target_check.py",
+            "effective_target=target_decision.canonical_targets,",
+            'effective_target=getattr(ctx.apm_package, "target", None),',
+            id="install-gate-raw-manifest",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "effective_target=target_decision.canonical_targets,",
+            "effective_target=target_decision.value,",
+            id="mcp-install-raw-selection",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "effective_target=deployment_decision.canonical_targets,",
+            "effective_target=[resolved.name for resolved in targets],",
+            id="local-bundle-raw-names",
+        ),
+        pytest.param(
+            "src/apm_cli/core/target_detection.py",
+            "def canonical_policy_target_name(value: str | None) -> str | None:",
+            "def normalize_policy_targets(value):\n    return value\n\n\n"
+            "def canonical_policy_target_name(value: str | None) -> str | None:",
+            id="sibling-normalizer",
+        ),
+    ],
+)
+def test_policy_target_projection_guard_rejects_raw_selections(
+    path: str, old: str, new: str
+) -> None:
+    """Every compilation-target policy seam judges the canonical projection (#3732)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.policy_target_projection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

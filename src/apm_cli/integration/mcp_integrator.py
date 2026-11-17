@@ -15,7 +15,6 @@ import builtins
 import copy
 import json
 import logging
-import os
 import re
 import shutil
 import warnings
@@ -1025,11 +1024,9 @@ class MCPIntegrator:
 
         if "hermes" in target_runtimes:
             from apm_cli.factory import ClientFactory
+            from apm_cli.integration.targets import resolve_user_root
 
-            hermes_home = os.environ.get("HERMES_HOME", "").strip()
-            unresolved_cfg = (
-                Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
-            ) / "config.yaml"
+            unresolved_cfg = resolve_user_root("hermes") / "config.yaml"
             if _reject_symlink_config(
                 unresolved_cfg,
                 "Hermes config.yaml",
