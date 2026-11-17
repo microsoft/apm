@@ -173,7 +173,7 @@ Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemin
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS
 ```
 
-Teach your coding agent to use APM with the official guide (an expert agent plus the `apm-usage` skill):
+Teach your coding agent to use APM with the [official guide](https://github.com/microsoft/apm/tree/main/packages/apm-guide) (an expert agent plus the `apm-usage` skill):
 
 ```bash
 apm install microsoft/apm/packages/apm-guide#v0.35.1
