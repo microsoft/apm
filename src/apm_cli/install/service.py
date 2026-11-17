@@ -43,6 +43,26 @@ class InstallNotAvailableError(RuntimeError):
     """Raised when the APM dependency subsystem failed to import."""
 
 
+def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
+    """One ``--frozen`` refusal line for an unrecorded service claim."""
+    return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"
+
+
+def frozen_services_error(reasons: list[str]) -> Exception:
+    """The ``--frozen`` refusal for service claims the lockfile cannot replay."""
+    from apm_cli.install.errors import FrozenInstallError
+
+    return FrozenInstallError(
+        "--frozen cannot replay the selected native services.",
+        reasons=reasons,
+        tip=(
+            "Tip: native MCP/LSP configs were not changed. Rerun the same "
+            "install command without --frozen, retaining the intended --target, "
+            "--only, --root DIR or --global options, then commit apm.lock.yaml."
+        ),
+    )
+
+
 class InstallService:
     """Application service for the APM install pipeline.
 
@@ -68,15 +88,26 @@ class InstallService:
         lsp_target_servers: dict[str, set[str]],
         current_mcp: CurrentMcpConfigView | None,
         user_scope: bool,
-    ) -> None:
+        project_root: Path | None = None,
+        mcp_declared_transports: dict[str, str | None] | None = None,
+    ) -> frozenset[tuple[str, str]]:
         """Refuse unrecorded service claims before either service mutates native state.
 
         MCP claims every server on every target. LSP claims are per target
         (*lsp_target_servers* maps each selected runtime to the servers it can
         express), so a server a target skips is never required to be owned there.
+
+        Returns the MCP ``(server, runtime)`` pairs that may be unclaimed only
+        because the runtime refuses the server's remote transport (never
+        claimed) and whose native config has no entry for it. The MCP stage
+        skips them once the registry payload confirms the refusal and raises
+        this same error otherwise.
         """
-        from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
+        from apm_cli.adapters.client._remote_shapes import may_refuse_remote
+        from apm_cli.install.mcp.ownership import (
+            migrate_legacy_project_target_servers,
+            native_mcp_entry_present,
+        )
 
         mcp_ownership = {
             target: set(names) for target, names in lockfile.mcp_target_servers.items()
@@ -95,26 +126,31 @@ class InstallService:
                     f"  - MCP server {name!a} cannot reproduce its locked config "
                     "from the available source declarations"
                 )
+        deferred: set[tuple[str, str]] = set()
         claims = [("MCP", target, mcp_servers, mcp_ownership) for target in mcp_targets] + [
             ("LSP", target, names, lockfile.lsp_target_servers)
             for target, names in lsp_target_servers.items()
         ]
         for service, target, names, recorded in claims:
             for name in sorted(names - set(recorded.get(target, ()))):
-                reasons.append(
-                    f"  - {service} server {name!a} target {target!a} "
-                    "ownership is not recorded in apm.lock.yaml"
-                )
+                if (
+                    service == "MCP"
+                    and name in lockfile.mcp_servers
+                    and may_refuse_remote(target, (mcp_declared_transports or {}).get(name))
+                    and not native_mcp_entry_present(
+                        target,
+                        name,
+                        stored_config=lockfile.mcp_configs.get(name),
+                        project_root=project_root,
+                        user_scope=user_scope,
+                    )
+                ):
+                    deferred.add((name, target))
+                    continue
+                reasons.append(frozen_unrecorded_reason(service, name, target))
         if reasons:
-            raise FrozenInstallError(
-                "--frozen cannot replay the selected native services.",
-                reasons=reasons,
-                tip=(
-                    "Tip: native MCP/LSP configs were not changed. Rerun the same "
-                    "install command without --frozen, retaining the intended --target, "
-                    "--only, --root DIR or --global options, then commit apm.lock.yaml."
-                ),
-            )
+            raise frozen_services_error(reasons)
+        return frozenset(deferred)
 
     def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.

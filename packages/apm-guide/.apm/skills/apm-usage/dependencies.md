@@ -664,7 +664,8 @@ dependencies:
     # Unknown keys (e.g. oauth) are passthrough: preserved and written into
     # the generated config for EVERY installed harness. Keys that collide with
     # a modeled or adapter-owned field
-    # (command/url/headers/env/environment/http_headers/id/...) are rejected.
+    # (command/url/httpUrl/serverUrl/headers/env/environment/http_headers/id/...)
+    # are rejected.
     # Top-level enabled is modeled for OpenCode; extra.enabled remains reserved.
     - name: slack
       registry: false
@@ -674,6 +675,15 @@ dependencies:
         clientId: "<pre-registered-client-id>"
         callbackPort: 3118
 ```
+
+Remote transport: `http`/`streamable-http` are Streamable HTTP; registry servers
+take it from `remotes[].type` (missing = Streamable HTTP). Native keys per
+harness: Copilot CLI, Claude, VS Code `type: http|sse` + `url`; Gemini `httpUrl`
+(Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`. SSE on
+Antigravity or Codex is skipped with one warning, not recorded, exit 0 (also
+under `--frozen`). The next
+install, update or `install --frozen` rewrites APM-written entries left in an
+older APM shape (for example Antigravity `httpUrl`); user entries are preserved.
 
 For a recognized GitHub MCP server, automatic auth follows the target's
 runtime support and uses the selected token environment variable name on

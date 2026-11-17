@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Remote MCP servers now reach each harness in its native shape: registry `remotes[].type` is honored, so SSE servers stay SSE on Copilot CLI, Claude Code and VS Code (`type: sse`) and Gemini (`url`); Antigravity gets `serverUrl`, and SSE on Antigravity or Codex is skipped with one warning and exit `0` instead of failing the install. `apm mcp show` prints the real transport, the next `apm install`, `apm update` or `apm install --frozen` rewrites entries an earlier APM wrote in the old shape (user entries are preserved), and `extra:` can no longer add an `httpUrl` or `serverUrl` endpoint. (#3789)
 - Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
 
 ### Changed
 
+- `apm init --plugin` and `apm plugin init` no longer write a default `"license": "MIT"` into the new `plugin.json`; choose and add your package's license yourself. (#3799)
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
 - Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 

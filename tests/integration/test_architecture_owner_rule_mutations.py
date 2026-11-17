@@ -767,6 +767,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Shared MCP model stops denying the OpenCode environment alias.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-remote-shape-table",
+        rule_id="mutation_writes.mcp_remote_shape_table",
+        path="src/apm_cli/adapters/client/antigravity.py",
+        old='    remote_shape = remote_shape_row("antigravity")\n',
+        new="",
+        intent="Antigravity silently inherits Gemini's remote shape row (httpUrl).",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-mcp-remote-transport-normalization",
+        rule_id="mutation_writes.mcp_remote_transport_normalization",
+        path="src/apm_cli/adapters/client/kiro.py",
+        old='remote, runtime_label="Kiro", server_name=server_name',
+        new='{"transport": remote.get("transport_type")}, runtime_label="Kiro"',
+        intent="Kiro re-derives the remote transport from the raw legacy key.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-target-selection",
         rule_id="mutation_writes.mcp_target_selection",
         path="src/apm_cli/integration/mcp_integrator_install.py",

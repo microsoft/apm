@@ -130,8 +130,8 @@ class TestCopilotRemoteTransportValidation(unittest.TestCase):
             }
 
             config = adapter._format_server_config(server_info)
-            # Copilot CLI always emits type="http" for auth compatibility.
-            self.assertEqual(config["type"], "http")
+            # Copilot CLI distinguishes SSE from Streamable HTTP (``http``).
+            self.assertEqual(config["type"], "sse" if transport == "sse" else "http")
             self.assertEqual(config["url"], "https://example.com/mcp")
 
     def test_remote_skips_entries_without_url(self):

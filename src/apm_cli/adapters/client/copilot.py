@@ -13,12 +13,14 @@ from typing import ClassVar
 import click
 
 from ...core.token_manager import GitHubTokenManager
+from ...mcp_transport import canonical_remote_transport
 from ...models.dependency.mcp import TrustedEnvLiteral
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname, unambiguous_https_hostname
 from ._mcp_runtime_args import process_v01_value_hint_arg
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .base import (
     _ENV_PLACEHOLDER_RE,
     _ENV_VAR_RE,
@@ -45,6 +47,7 @@ class CopilotClientAdapter(MCPClientAdapter):
     _client_label: str = "Copilot CLI"
     target_name: str = "copilot"
     mcp_servers_key: str = "mcpServers"
+    remote_shape = remote_shape_row("copilot")
 
     # Wording for the post-install env-var diagnostics, so subclasses that
     # reuse them (Claude Code) name their own config file and launch command.
@@ -484,27 +487,15 @@ class CopilotClientAdapter(MCPClientAdapter):
             # URL error path when no remote is usable.
             remote = self._select_remote_with_url(remotes) or remotes[0]
 
-            # Validate transport_type from registry: default to "http" when
-            # missing/empty, raise ValueError for unsupported values. Mirrors
-            # the VS Code adapter check introduced in PR #656 so registry data
-            # with, e.g. transport_type="grpc" fails loudly instead of silently
-            # producing a garbage config.
-            transport = (remote.get("transport_type") or "").strip()
-            if not transport:
-                transport = "http"
-            elif transport not in ("sse", "http", "streamable-http"):
-                raise ValueError(
-                    f"Unsupported remote transport '{transport}' for Copilot. "
-                    f"Server: {server_info.get('name', 'unknown')}. "
-                    f"Supported transports: http, sse, streamable-http."
-                )
-
-            # Copilot CLI writes "type": "http" for all remote servers so
-            # authentication flows (headers) are consistent regardless of the
-            # underlying transport advertised by the registry.
+            server_name = server_info.get("name", "unknown")
+            transport = canonical_remote_transport(
+                remote, runtime_label="Copilot", server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
             config = {
-                "type": "http",
-                "url": (remote.get("url") or "").strip(),
+                **shape.render(transport, (remote.get("url") or "").strip()),
                 "tools": ["*"],  # Required by Copilot CLI specification
                 "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
             }

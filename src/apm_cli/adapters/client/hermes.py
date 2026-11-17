@@ -31,6 +31,7 @@ import yaml
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success
 from ...utils.yaml_io import load_yaml, yaml_to_str
+from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
 # Credential-bearing config file mode: owner read/write only. Hermes' config.yaml
@@ -53,6 +54,8 @@ class HermesClientAdapter(CopilotClientAdapter):
     Registry formatting reuses :class:`CopilotClientAdapter`, then entries are
     converted to Hermes' on-disk shape via :meth:`_to_hermes_format`.
     """
+
+    remote_shape = remote_shape_row("hermes")
 
     supports_user_scope: bool = True
     # Non-JSON or JetBrains-managed config: no native content comparison yet.
