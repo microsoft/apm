@@ -190,3 +190,19 @@ def test_direct_construction_rejects_axes_that_change_meaning_on_replay(pairing)
     """An empty, blank or padded axis would decode differently from the lock."""
     with pytest.raises(ValueError, match="non-empty"):
         SkillTargetSelection((pairing,))
+
+
+def test_explicitly_empty_edge_pairs_nothing_and_never_widens() -> None:
+    """An explicitly empty axis selects nothing, unlike None (all)."""
+    from apm_cli.models.dependency.subsets import EdgeSelection, merge_edge_selections
+
+    empty = EdgeSelection(("org/a",), (), ("claude",))
+    node = merge_edge_selections([empty, EdgeSelection((), ("beta",), ("copilot",))])
+    assert node.skill_subset == ("beta",)
+    assert not node.pairing.selects_target("claude")
+    assert node.pairing.skills_for_target("copilot") == ("beta",)
+
+    only_empty = merge_edge_selections([EdgeSelection(("org/a",), (), None)] * 2)
+    assert only_empty.pairing is None
+    assert only_empty.skill_subset == ()
+    assert only_empty.subset_pairings is None
