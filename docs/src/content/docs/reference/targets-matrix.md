@@ -51,8 +51,8 @@ stable but explicit-only. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
-It emits the
+separate root-context compile for `codex`, `gemini`, `opencode`, `hermes`, and
+`grok-build`. It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -82,7 +82,7 @@ runtime-specific configuration while compile only generates project output. Use
 
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
-| copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
+| copilot  | `.github/copilot-instructions.md` or `.github/mcp.json` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
 | claude   | `.claude/` directory, or `CLAUDE.md` file     |
 | grok-build | `.grok/` directory                          |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
@@ -219,7 +219,7 @@ Gemini CLI.
 Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
 - **Detection.** None -- explicit-only for auto-detection. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity` or list it in `apm.yml` `targets:`; it is not part of `--target all`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
-- **Deploy directory.** `.agents/` (project scope); `~/.gemini/` (user scope).
+- **Deploy directory.** `.agents/` (project scope); `~/.gemini/antigravity-cli/` (user scope, skills only; instructions and hooks are project-scope only; user MCP goes to `~/.gemini/config/mcp_config.json`).
 - **Supported primitives.** instructions, skills, hooks, mcp.
 - **File conventions.**
   - instructions: `.agents/rules/<name>.md` (formatted natively with `trigger: glob` and `globs` frontmatter mapped from the package `applyTo` patterns)
