@@ -1219,7 +1219,7 @@
       },
       "target": {
         "allow": [
-          "vscode"
+          "copilot"
         ],
         "enforce": null
       }
@@ -1525,11 +1525,7 @@
         "enforce": "distributed"
       },
       "target": {
-        "allow": [
-          "vscode",
-          "claude",
-          "all"
-        ],
+        "allow": null,
         "enforce": null
       }
     },

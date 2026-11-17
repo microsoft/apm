@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -167,17 +167,23 @@ def test_unsupported_skip_keeps_an_entry_edited_after_apm_wrote_it(tmp_path: Pat
     assert claims == {"antigravity": set()}
 
 
+@pytest.mark.windows_compat
 def test_unsupported_skip_keeps_the_claim_when_removal_fails(tmp_path: Path) -> None:
     from apm_cli.install.errors import RequiredIntegrationError
 
     path = _antigravity_with(tmp_path, {"heal": {"httpUrl": _URL}})
     claims = {"antigravity": {"io.example/heal"}}
-    path.parent.chmod(0o500)  # readable, not writable: the rewrite fails
-    try:
-        with pytest.raises(RequiredIntegrationError):
-            _skip(tmp_path, claims, {}, MagicMock())
-    finally:
-        path.parent.chmod(0o700)
+    # Fail the exact write the cleanup owner performs; permission bits are not
+    # enforced the same way on every platform (Windows ignores POSIX modes).
+    with (
+        patch(
+            "apm_cli.integration.mcp_integrator.atomic_write_text",
+            side_effect=OSError("simulated write failure"),
+        ) as write,
+        pytest.raises(RequiredIntegrationError),
+    ):
+        _skip(tmp_path, claims, {}, MagicMock())
+    write.assert_called_once()
 
     assert claims == {"antigravity": {"io.example/heal"}}
     assert "heal" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]

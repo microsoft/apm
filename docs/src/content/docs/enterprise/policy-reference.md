@@ -254,10 +254,18 @@ Whether to trust MCP servers declared by transitive dependencies. Default: `fals
 
 ### `target.allow` / `target.enforce`
 
-Control which compilation targets are permitted. With multi-target support, these policies apply to every item in the target list:
+Control which compilation targets are permitted. These policies apply to every target in the selection:
 
-- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: copilot` requires `copilot` to appear in `target: [claude, copilot]`).
-- **`allow`**: Every target in the list must be in the allowed set. Rejects any target not listed.
+- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: copilot` requires `copilot` to appear in `targets: [claude, copilot]`).
+- **`allow`**: Every target in the list must be in the allowed set. Rejects any target not listed. `all` in the list allows every target.
+
+Both sides are compared as the target each spelling deploys:
+
+- `targets:`, `target:`, CSV (`target: "claude,copilot"`), and list forms are the same declaration.
+- Aliases resolve before comparison: `vscode` and `agents` are `copilot`, `agy` is `antigravity`, and `intellij` (MCP-only) is judged as `copilot`.
+- `target: all` is judged as every target it installs. `targets: [all]` is treated as omitted, so it has nothing to judge.
+
+`apm install` judges its effective target selection (`--target`, then `apm.yml`, then `apm config target`, then auto-detection). `apm audit` judges the targets `apm.yml` declares; a manifest without a target declaration passes this check.
 
 ```yaml
 compilation:

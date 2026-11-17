@@ -25,6 +25,8 @@ Scenarios per integrator:
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
@@ -222,6 +224,66 @@ class TestTryAdoptIdenticalDeployMode:
             is True
         )
         assert adopted == [target]
+
+
+# ---------------------------------------------------------------------------
+# is_content_identical_to_text -- rendered-content adoption primitive (#3722)
+# ---------------------------------------------------------------------------
+
+
+class TestIsContentIdenticalToText:
+    """Edge cases of the comparison behind ``_check_adopt_or_skip(expected_content=...)``.
+
+    Every agent writer (and the prompt/instruction writers) adopts by
+    comparing the on-disk target with the text it would write, so this
+    primitive decides "adopted" versus "skipped" for rendered output.
+    """
+
+    @pytest.mark.parametrize(
+        ("target_bytes", "expected", "lf_normalized", "identical"),
+        [
+            (b"a\nb\n", "a\nb\n", True, True),
+            (b"a\nb\n", "a\r\nb\r\n", True, True),
+            (b"a\nb\n", "a\r\nb\r\n", False, False),
+            # A stale CRLF target is rewritten to LF, never adopted (apm#1889).
+            (b"a\r\nb\r\n", "a\r\nb\r\n", True, False),
+            (b"a\nb\n", "a\nc\n", True, False),
+        ],
+    )
+    def test_compares_target_with_what_would_be_written(
+        self,
+        tmp_path: Path,
+        target_bytes: bytes,
+        expected: str,
+        lf_normalized: bool,
+        identical: bool,
+    ) -> None:
+        target = tmp_path / "agent.toml"
+        target.write_bytes(target_bytes)
+        assert (
+            BaseIntegrator.is_content_identical_to_text(
+                target, expected, lf_normalized_deploy=lf_normalized
+            )
+            is identical
+        )
+
+    def test_missing_target_is_not_identical(self, tmp_path: Path) -> None:
+        assert BaseIntegrator.is_content_identical_to_text(tmp_path / "absent.md", "x\n") is False
+
+    def test_symlink_target_is_not_identical(self, tmp_path: Path) -> None:
+        decoy = tmp_path / "decoy.md"
+        decoy.write_text("x\n", encoding="utf-8")
+        target = tmp_path / "agent.md"
+        target.symlink_to(decoy)
+        assert (
+            BaseIntegrator.is_content_identical_to_text(target, "x\n", lf_normalized_deploy=True)
+            is False
+        )
+
+    def test_unreadable_target_is_not_identical(self, tmp_path: Path) -> None:
+        target = tmp_path / "agent.md"
+        target.mkdir()
+        assert BaseIntegrator.is_content_identical_to_text(target, "x\n") is False
 
 
 # ---------------------------------------------------------------------------

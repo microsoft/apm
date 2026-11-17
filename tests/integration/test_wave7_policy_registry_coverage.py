@@ -479,46 +479,46 @@ class TestCheckMcpSelfDefined:
 class TestCheckCompilationTarget:
     def test_no_restrictions_configured(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce=None, allow=None))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        result = _check_compilation_target(("copilot",), policy)
         assert result.passed
         assert "No compilation target restrictions" in result.message
 
     def test_no_target_in_manifest(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({}, policy)
+        result = _check_compilation_target((), policy)
         assert result.passed
         assert "No compilation target set" in result.message
 
-    def test_raw_yml_none_with_enforce(self):
+    def test_no_selection_with_enforce(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         result = _check_compilation_target(None, policy)
         assert result.passed
 
     def test_enforce_matches(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        result = _check_compilation_target(("copilot",), policy)
         assert result.passed
         assert "Compilation target compliant" in result.message
 
     def test_enforce_mismatch(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        result = _check_compilation_target(("claude",), policy)
         assert not result.passed
         assert "not present" in result.message
 
     def test_allow_list_matches(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode", "claude")))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        result = _check_compilation_target(("copilot",), policy)
         assert result.passed
 
     def test_allow_list_rejects(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        result = _check_compilation_target(("claude",), policy)
         assert not result.passed
 
     def test_target_as_list(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": ["vscode", "claude"]}, policy)
+        result = _check_compilation_target(("copilot", "claude"), policy)
         assert result.passed
 
 
@@ -781,7 +781,7 @@ class TestRunDependencyPolicyChecks:
         policy = ApmPolicy(
             compilation=CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         )
-        result = run_dependency_policy_checks([], policy=policy, effective_target="claude")
+        result = run_dependency_policy_checks([], policy=policy, effective_target=("claude",))
         assert not result.passed
         names = [c.name for c in result.checks]
         assert "compilation-target" in names
@@ -829,7 +829,7 @@ class TestRunDependencyPolicyChecks:
             [],
             policy=policy,
             fail_fast=False,
-            effective_target="claude",
+            effective_target=("claude",),
             manifest_includes=None,
             mcp_deps=[mcp],
         )

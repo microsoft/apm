@@ -301,7 +301,8 @@ def _first_line_after(facts: FileFacts, needle: str, *, after: int) -> int | Non
 def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]:
     """Copilot CLI MCP config paths must come from the Copilot adapter.
 
-    Ports the AC1 guard: the Copilot adapter owns ``COPILOT_HOME``, the MCP
+    Ports the AC1 guard: the Copilot adapter owns ``mcp-config.json`` under the
+    user root that ``integration/targets.py`` selects (``COPILOT_HOME``), the MCP
     integrator constructs clients through ``ClientFactory.create_client``, and
     no other module hard-codes ``.github/mcp.json`` / ``mcp-config.json``.
     """
@@ -311,10 +312,13 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
     if not failures:
         findings.extend(
             _require(
-                _has_fixed(facts_by_path[_COPILOT_OWNER], "COPILOT_HOME"),
+                _has_fixed(
+                    facts_by_path[_COPILOT_OWNER],
+                    'resolve_user_root("copilot") / "mcp-config.json"',
+                ),
                 rule_id,
                 _COPILOT_OWNER,
-                "Copilot adapter must own the COPILOT_HOME MCP config root",
+                "Copilot adapter must place mcp-config.json under the owner-selected user root",
             )
         )
         findings.extend(
@@ -368,10 +372,10 @@ def _check_claude_mcp_paths(provider: FactsProvider) -> Iterable[Violation]:
     )
     return (
         *_require(
-            _has_fixed(facts_by_path[owner], "CLAUDE_CONFIG_DIR"),
+            _has_fixed(facts_by_path[owner], 'configured_user_root("claude")'),
             rule_id,
             owner,
-            "Claude adapter must own the CLAUDE_CONFIG_DIR MCP config root",
+            "Claude adapter must select .claude.json under the owner-selected user root",
         ),
         *_require(
             guarded and not hardcoded,

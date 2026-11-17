@@ -22,6 +22,7 @@ from apm_cli.integration._shared import (
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.path_security import PathTraversalError
 
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -44,20 +45,27 @@ class _LSPTargetSpec:
     runtime: str
     project_relative_path: tuple[str, ...]
     user_relative_path: tuple[str, ...]
+    """Config path relative to the runtime's user root (``resolve_user_root``)."""
     language_key: str
     startup_timeout_key: str
     project_servers_key: str | None
     user_servers_key: str | None
     project_label: str
-    user_label: str
     project_config_defaults: tuple[tuple[str, str], ...] = ()
     user_config_defaults: tuple[tuple[str, str], ...] = ()
     cleanup_empty_relative_dirs: tuple[tuple[str, ...], ...] = ()
+    user_cleanup_empty_relative_dirs: tuple[tuple[str, ...], ...] = ()
+
+    def user_root(self) -> Path:
+        """Return the runtime's user root through the harness user-root owner."""
+        from apm_cli.integration.targets import resolve_user_root
+
+        return resolve_user_root(self.runtime)
 
     def path(self, project_root: Path, *, user_scope: bool) -> Path:
         """Return the config path for this target and scope."""
         if user_scope:
-            return Path.home().joinpath(*self.user_relative_path)
+            return self.user_root().joinpath(*self.user_relative_path)
         return project_root.joinpath(*self.project_relative_path)
 
     def servers_key(self, *, user_scope: bool) -> str | None:
@@ -66,7 +74,11 @@ class _LSPTargetSpec:
 
     def label(self, *, user_scope: bool) -> str:
         """Return a human-readable config path label."""
-        return self.user_label if user_scope else self.project_label
+        if user_scope:
+            from apm_cli.integration.targets import user_root_display
+
+            return "/".join((user_root_display(self.runtime), *self.user_relative_path))
+        return self.project_label
 
     def config_defaults(self, *, user_scope: bool) -> tuple[tuple[str, str], ...]:
         """Return required top-level defaults for this target and scope."""
@@ -74,8 +86,10 @@ class _LSPTargetSpec:
 
     def cleanup_empty_dirs(self, project_root: Path, *, user_scope: bool) -> tuple[Path, ...]:
         """Return APM-owned directories this target may remove when empty."""
-        root = Path.home() if user_scope else project_root
-        return tuple(root.joinpath(*parts) for parts in self.cleanup_empty_relative_dirs)
+        if user_scope:
+            root = self.user_root()
+            return tuple(root.joinpath(*parts) for parts in self.user_cleanup_empty_relative_dirs)
+        return tuple(project_root.joinpath(*parts) for parts in self.cleanup_empty_relative_dirs)
 
 
 @dataclass(frozen=True)
@@ -97,36 +111,32 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
             ".claude-plugin",
             "plugin.json",
         ),
-        user_relative_path=(
-            ".claude",
-            "skills",
-            "apm-lsp",
-            ".claude-plugin",
-            "plugin.json",
-        ),
+        user_relative_path=("skills", "apm-lsp", ".claude-plugin", "plugin.json"),
         language_key=_CLAUDE_LANGUAGE_KEY,
         startup_timeout_key=_CLAUDE_STARTUP_TIMEOUT_KEY,
         project_servers_key=_LSP_SERVERS_KEY,
         user_servers_key=_LSP_SERVERS_KEY,
         project_label=".claude/skills/apm-lsp/.claude-plugin/plugin.json",
-        user_label="~/.claude/skills/apm-lsp/.claude-plugin/plugin.json",
         project_config_defaults=(("name", "apm-lsp"),),
         user_config_defaults=(("name", "apm-lsp"),),
         cleanup_empty_relative_dirs=(
             (".claude", "skills", "apm-lsp", ".claude-plugin"),
             (".claude", "skills", "apm-lsp"),
         ),
+        user_cleanup_empty_relative_dirs=(
+            ("skills", "apm-lsp", ".claude-plugin"),
+            ("skills", "apm-lsp"),
+        ),
     ),
     "copilot": _LSPTargetSpec(
         runtime="copilot",
         project_relative_path=(".github", "lsp.json"),
-        user_relative_path=(".copilot", "lsp-config.json"),
+        user_relative_path=("lsp-config.json",),
         language_key=_COPILOT_LANGUAGE_KEY,
         startup_timeout_key=_COPILOT_STARTUP_TIMEOUT_KEY,
         project_servers_key=_LSP_SERVERS_KEY,
         user_servers_key=_LSP_SERVERS_KEY,
         project_label=".github/lsp.json",
-        user_label="~/.copilot/lsp-config.json",
     ),
 }
 
@@ -344,12 +354,19 @@ class LSPIntegrator:
                 target for target in target_decision.lsp_targets if target in _LSP_TARGET_SPECS
             ]
         else:
+            from apm_cli.integration.targets import user_root_exists
+
             candidates = []
-            if find_runtime_binary("copilot") is not None:
+            if find_runtime_binary("copilot") is not None or (
+                user_scope and user_root_exists("copilot")
+            ):
                 candidates.append("copilot")
-            if (project_root_path / ".claude").is_dir() or find_runtime_binary(
-                "claude"
-            ) is not None:
+            claude_root = (
+                user_root_exists("claude")
+                if user_scope
+                else (project_root_path / ".claude").is_dir()
+            )
+            if claude_root or find_runtime_binary("claude") is not None:
                 candidates.append("claude")
 
         if exclude:
@@ -424,8 +441,21 @@ class LSPIntegrator:
     ) -> Path:
         """Resolve a target config through the canonical deployment-path gate."""
         if user_scope:
-            user_root = Path.home()
-            relative_path = Path(*spec.user_relative_path).as_posix()
+            user_root = spec.user_root()
+            relative = Path(*spec.user_relative_path)
+            # Validate from HOME when the root lives there, so a symlinked
+            # ``~/.claude`` or ``~/.copilot`` stays rejected; a configured
+            # root outside HOME must not be a symlink either.
+            home = Path.home()
+            if user_root.is_relative_to(home):
+                relative = user_root.relative_to(home) / relative
+                user_root = home
+            elif user_root.is_symlink():
+                raise PathTraversalError(
+                    "Refusing deployment through a symlinked path component: "
+                    f"{user_root.as_posix()}"
+                )
+            relative_path = relative.as_posix()
             return BaseIntegrator.resolve_deploy_path(
                 relative_path,
                 user_root,

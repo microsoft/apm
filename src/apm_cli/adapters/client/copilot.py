@@ -125,11 +125,9 @@ class CopilotClientAdapter(MCPClientAdapter):
             str: Path to the MCP configuration file.
         """
         if self.user_scope:
-            configured_home = os.environ.get("COPILOT_HOME", "").strip()
-            copilot_home = (
-                Path(configured_home).expanduser() if configured_home else Path.home() / ".copilot"
-            )
-            return str(copilot_home / "mcp-config.json")
+            from ...integration.targets import resolve_user_root
+
+            return str(resolve_user_root("copilot") / "mcp-config.json")
         return str(self.project_root / ".github" / "mcp.json")
 
     def update_config(self, config_updates):
