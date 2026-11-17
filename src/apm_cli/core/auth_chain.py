@@ -13,7 +13,7 @@ Invariants:
   repository path the caller derived from the dependency reference, caches the
   answer per (host, port, path), and presents it as ``Basic
   username:password`` -- the same header Git itself would send.
-* APM never calls ``git credential approve`` or ``reject``.
+* APM never stores or erases a helper credential (no approve or reject call).
 """
 
 from __future__ import annotations

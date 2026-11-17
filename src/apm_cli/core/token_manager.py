@@ -301,7 +301,7 @@ class GitHubTokenManager:
         Returns the helper's username and password together with the exact
         (host, port, path) the helper was asked for, so callers present the
         credential the way Git would (``Basic username:password``). APM never
-        calls ``git credential approve`` or ``reject``.
+        stores or erases a helper credential (no approve or reject call).
         """
         host_field = _format_credential_host(host, port)
         stdin_lines = ["protocol=https", f"host={host_field}"]

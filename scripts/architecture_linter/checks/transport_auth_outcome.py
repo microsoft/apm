@@ -47,7 +47,11 @@ _LEGACY_SIGNALS = re.compile(
     r"|\bis_public_github_auth_failure\("
 )
 _HELPER_FILL = re.compile(r"\bresolve_git_helper_credential\(")
-_CREDENTIAL_STORE_MUTATION = re.compile(r"""["']credential["']\s*,\s*["'](?:approve|reject)["']""")
+# Argv lists, shell strings, and f-strings that would mutate the user's store.
+_CREDENTIAL_STORE_MUTATION = re.compile(
+    r"""["']credential["']\s*,\s*["'](?:approve|reject)["']"""
+    r"|\bcredential\s+(?:approve|reject)\b"
+)
 # Hand-rolled auth classification that the routed call sites must not regrow.
 _LOCAL_CLASSIFICATION = re.compile(
     r"status_code\s*(?:==|in)\s*[\(\{\[]?\s*40[13]\b"
