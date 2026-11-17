@@ -221,6 +221,7 @@ class APMDependencyResolver:
         # Every declaring edge per node identity (``get_unique_key``), recorded
         # before any dedup so the selection merge sees all of them (#3735).
         self._edge_selections: dict[str, list[EdgeSelection]] = {}
+        self._edge_parents: dict[str, list[DependencyNode]] = {}
 
     @property
     def marketplace_provenance(self) -> dict[str, dict[str, str]]:
@@ -734,6 +735,7 @@ class APMDependencyResolver:
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
         self._edge_selections = {}
+        self._edge_parents = {}
         self.replacement_index = build_replacement_index(root_package.replace_rules or [])
         consumer_root = root_package.source_path or root_apm_yml.parent
         modules_dir = self._apm_modules_dir or root_apm_yml.parent / "apm_modules"
@@ -1082,9 +1084,36 @@ class APMDependencyResolver:
         while ancestor is not None:
             chain.append(ancestor.get_display_name())
             ancestor = ancestor.parent
-        self._edge_selections.setdefault(dep_ref.get_unique_key(), []).append(
+        key = dep_ref.get_unique_key()
+        self._edge_selections.setdefault(key, []).append(
             EdgeSelection.from_dependency(dep_ref, reversed(chain))
         )
+        if parent_node is not None:
+            self._edge_parents.setdefault(key, []).append(parent_node)
+
+    @staticmethod
+    def _select_nearest_parent(
+        node: DependencyNode, declaring_parents: Iterable[DependencyNode]
+    ) -> None:
+        """Make the recorded parent the nearest declaring parent, ties by lowest key.
+
+        Equal-depth parents otherwise win by manifest order, which would make
+        ``resolved_by`` (and so the lockfile bytes) depend on declaration order.
+        """
+        if node.parent is None:
+            return
+        nearest = [parent for parent in declaring_parents if parent.depth == node.depth - 1]
+        if not nearest:
+            return
+        chosen = min(
+            nearest,
+            key=lambda parent: (parent.dependency_ref.get_unique_key(), parent.get_id()),
+        )
+        if chosen is node.parent:
+            return
+        node.parent = chosen
+        if all(child is not node for child in chosen.children):
+            chosen.children.append(node)
 
     def _apply_edge_selections(self, tree: DependencyTree) -> None:
         """Give every node the merged selection of all edges that declared it.
@@ -1108,6 +1137,7 @@ class APMDependencyResolver:
                 allow_insecure=selection.allow_insecure,
                 selection_contributors=selection.contributors,
             )
+            self._select_nearest_parent(node, self._edge_parents.get(key, ()))
             if selection.divergent_aliases and key not in warned:
                 warned.add(key)
                 tree.resolution_warnings.append(_alias_divergence_warning(dep_ref, selection))

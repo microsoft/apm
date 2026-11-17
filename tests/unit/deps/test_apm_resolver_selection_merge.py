@@ -76,6 +76,13 @@ SIBLINGS = {
 def test_sibling_parents_union_independent_of_order(tmp_path: Path, order: list[str]) -> None:
     graph = _resolve(tmp_path, order, SIBLINGS)
     assert _bundle_ref(graph).skill_subset == ["alpha", "beta", "delta", "gamma"]
+    bundle_node = next(
+        node
+        for node in graph.dependency_tree.nodes.values()
+        if node.dependency_ref.repo_url == BUNDLE
+    )
+    # Equal-depth parents tie-break by lowest parent key, never manifest order.
+    assert bundle_node.parent.dependency_ref.repo_url == "org/a"
 
 
 def test_depth_three_chain_unions_every_level(tmp_path: Path) -> None:

@@ -155,6 +155,9 @@ azure-skills/
 from the bundle (repeatable). The selection is **persisted** in `apm.yml`
 (as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
 subsequent bare `apm install` commands are deterministic.
+If two packages you depend on both declare the same bundle with different
+`skills:`, APM deploys the union of both selections; a declaration without
+`skills:` deploys the whole bundle.
 Selection controls deployed skills, not sparse checkout or the package root;
 use `path` to select a subdirectory instead.
 For nested skill bundles, the selector must match a deployable skill path;
