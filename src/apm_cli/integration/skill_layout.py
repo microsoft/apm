@@ -11,6 +11,7 @@ both layouts.
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -27,7 +28,8 @@ def _records_legacy_skill_layout(profile: TargetProfile, recorded: tuple[str, ..
     if mapping is None or mapping.deploy_root is None:
         return False
     legacy = _targets.apply_legacy_skill_paths([profile])[0]
-    prefix = f"{legacy.skills_rel_root}/".replace("\\", "/")
+    # A user root equal to HOME scopes to "." while paths record as "skills/...".
+    prefix = posixpath.normpath(legacy.skills_rel_root.replace("\\", "/")) + "/"
     return any(path.startswith(prefix) for path in recorded)
 
 

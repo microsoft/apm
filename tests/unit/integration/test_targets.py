@@ -528,6 +528,17 @@ class TestRecordedSkillLayout:
         targets = resolve_audit_targets(tmp_path, lockfile=lock)
         assert self._roots(targets) == {"copilot": expected}
 
+    def test_user_root_equal_to_home_recovers_legacy_layout(self, tmp_path, monkeypatch):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        assert profile.root_dir == "."
+        resolved = resolve_skill_layout([profile], recorded_paths=["skills/alpha/SKILL.md"])
+        assert resolved[0].primitives["skills"].deploy_root is None
+
     @pytest.mark.parametrize(("profile", "legacy"), list(_converged_skill_profiles()))
     def test_every_converged_target_recovers_its_recorded_layout(self, profile, legacy):
         from apm_cli.integration.skill_layout import resolve_skill_layout
