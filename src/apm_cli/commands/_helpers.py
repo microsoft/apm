@@ -692,10 +692,14 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     # Add targets field if present in config (plural list form -- canonical).
     # Older callers may still pass a singular CSV "target" string; honor that
     # for backwards compatibility but normalise on disk to plural list form.
+    # These read the init config, not a manifest.
     # architecture-authority-exempt: bootstrap-writer
     if config.get("targets"):
+        # architecture-authority-exempt: bootstrap-writer
         apm_yml_data["targets"] = list(config["targets"])
+    # architecture-authority-exempt: bootstrap-writer
     elif config.get("target"):
+        # architecture-authority-exempt: bootstrap-writer
         raw = config["target"]
         if isinstance(raw, list):
             apm_yml_data["targets"] = list(raw)

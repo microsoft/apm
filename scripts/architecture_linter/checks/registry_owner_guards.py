@@ -335,8 +335,8 @@ def _raw_target_read(node: ast.AST, path: str) -> str | None:
         return f"{name} outside the declaration owner"
     if name == "_package_field":
         return "_package_field stand-in read"
-    if name == "get" and node.args and _is_target_key(node.args[0]):
-        return f"raw .get({node.args[0].value!r}) read"
+    if name in {"get", "pop", "setdefault"} and node.args and _is_target_key(node.args[0]):
+        return f"raw .{name}({node.args[0].value!r}) read"
     if (
         name == "getattr"
         and len(node.args) >= 2
@@ -350,22 +350,23 @@ def _raw_target_read(node: ast.AST, path: str) -> str | None:
 def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -> str | None:
     """Return the exemption concept declared for *node*, if any.
 
-    The marker may sit on the flagged lines, on a header line of an enclosing
-    statement, or on the line directly above one, up to the enclosing def.
+    The marker must sit on a line of the innermost statement holding *node*
+    (only its header, for a compound statement) or alone on the line directly
+    above that statement. It never covers a sibling or nested statement.
     """
-    candidates = set(range(node.lineno, (getattr(node, "end_lineno", None) or node.lineno) + 1))
-    current: ast.AST | None = node
-    while current is not None and not isinstance(current, (*FUNCTION_NODES, ast.ClassDef)):
-        if isinstance(current, ast.stmt):
-            body = getattr(current, "body", None)
-            header_end = (
-                body[0].lineno - 1
-                if isinstance(body, list) and body
-                else (current.end_lineno or current.lineno)
-            )
-            candidates.update(range(current.lineno - 1, header_end + 1))
-        current = index.parent(current)
-    for line in sorted(candidates):
+    statement: ast.AST | None = node
+    while statement is not None and not isinstance(statement, ast.stmt):
+        statement = index.parent(statement)
+    anchor = statement if statement is not None else node
+    first = anchor.lineno
+    last = getattr(anchor, "end_lineno", None) or first
+    body = getattr(anchor, "body", None)
+    if isinstance(anchor, ast.stmt) and isinstance(body, list) and body:
+        last = max(first, body[0].lineno - 1)
+    candidates = list(range(first, last + 1))
+    if 1 < first <= len(lines) + 1 and lines[first - 2].lstrip().startswith("#"):
+        candidates.append(first - 1)
+    for line in candidates:
         if 0 < line <= len(lines):
             marker = lines[line - 1].partition(EXEMPT_MARKER)[2].strip()
             if marker:

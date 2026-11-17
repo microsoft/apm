@@ -205,6 +205,7 @@ class CompilationConfig:
                     config.resolve_links = compilation_config["resolve_links"]
                 # architecture-authority-exempt: compilation-target-field
                 if "target" in compilation_config:
+                    # architecture-authority-exempt: compilation-target-field
                     config.target = compilation_config["target"]
 
                 # Distributed compilation settings (Task 7)

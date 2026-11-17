@@ -3060,6 +3060,41 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             "# architecture-authority-exempt: anything-goes",
             id="unknown-exemption-concept",
         ),
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            '        apm_yml_data["targets"] = list(config["targets"])\n',
+            '        apm_yml_data["targets"] = list(config["targets"])\n'
+            "        leaked = package.targets\n",
+            id="exempt-block-does-not-cover-nested-read",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/local_bundle.py",
+            '    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata\n',
+            '    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata\n'
+            '    leaked = lockfile.get("targets")\n',
+            id="trailing-marker-does-not-cover-next-line",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = package_source["targets"]\n',
+            id="raw-subscript",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    declared = "targets" in vars(package)\n',
+            id="raw-key-test",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = dict(vars(package)).pop("targets", None)\n',
+            id="raw-pop",
+        ),
     ],
 )
 def test_manifest_target_declaration_guard_rejects_raw_readers(
