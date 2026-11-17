@@ -2962,6 +2962,12 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
             id="mcp-install-raw-selection",
         ),
         pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "effective_target=deployment_decision.canonical_targets,",
+            "effective_target=[resolved.name for resolved in targets],",
+            id="local-bundle-raw-names",
+        ),
+        pytest.param(
             "src/apm_cli/core/target_detection.py",
             "def canonical_policy_target_name(value: str | None) -> str | None:",
             "def normalize_policy_targets(value):\n    return value\n\n\n"
@@ -2981,4 +2987,6 @@ def test_policy_target_projection_guard_rejects_raw_selections(
     rule_id = "registry_delegation.policy_target_projection"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
