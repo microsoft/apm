@@ -746,6 +746,46 @@ class TestGrokBuildLocalBundleDeployment:
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
+    def test_packed_markdown_agents_are_skipped_for_codex_with_one_warning_each(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.services import integrate_local_bundle
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"agents/rev.agent.md": "# Rev\n", "agents/lint.md": "# Lint\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+        diagnostics = DiagnosticCollector()
+        bundle_info = LocalBundleInfo(
+            source_dir=bundle,
+            plugin_json={"id": "test-plugin"},
+            package_id="test-plugin",
+            lockfile=yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8")),
+            pack_targets=["claude"],
+        )
+
+        result = integrate_local_bundle(
+            bundle_info,
+            project,
+            targets=(KNOWN_TARGETS["codex"],),
+            diagnostics=diagnostics,
+            scope=InstallScope.PROJECT,
+        )
+
+        assert result["deployed_files"] == []
+        assert result["skipped"] == 2
+        assert not (project / ".codex" / "agents").exists()
+        warnings = sorted(w.message for w in diagnostics.by_category()[CATEGORY_WARNING])
+        assert len(warnings) == 2
+        assert "'agents/lint.md' for target codex" in warnings[0]
+        assert "'agents/rev.agent.md' for target codex" in warnings[1]
+        assert all("codex_agent (.toml)" in message for message in warnings)
+
     @pytest.mark.parametrize(
         "target_name",
         sorted(KNOWN_TARGETS),

@@ -2,6 +2,13 @@
   "version": 1,
   "owners": [
     {
+      "id": "local-bundle-compile-staging",
+      "decision": "Local bundle instructions staged under apm_modules/<slug>/.apm/ for compile-only targets are lockfile-proven compile input, never deployment claims",
+      "owner": "deps/lockfile.py (local_staging_slug, LockFile.local_staged_files, local_staging_slugs, absent_staging_slugs, retire_local_staging -- apm prune is the only retirement path) written by core/deployment_ledger.py (record_local_bundle_files staged=) from install/services.py (integrate_local_bundle staged_files)",
+      "selectors": ["src/apm_cli/install/local_bundle_handler.py"],
+      "guards": ["install-deployment-bundle-compile-staging"]
+    },
+    {
       "id": "single-file-package-materialization",
       "decision": "Single-file dependency package layout, local source admission and the local package image shared by install, uninstall refresh and audit replay",
       "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, materialize_local_package, compute_local_package_hash, materialize_local_package_for_replay); DependencyReference owns suffix vocabulary",

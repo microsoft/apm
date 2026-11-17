@@ -23,7 +23,9 @@ _APM_PRIMITIVE_SUFFIXES = (
     ".md",
 )
 
-_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
+# Target formats that need a primitive renderer; an opaque bundle copy would
+# write plugin-native Markdown under their extension (#3706).
+_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})
 
 
 def bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:

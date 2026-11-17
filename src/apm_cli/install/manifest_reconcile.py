@@ -554,6 +554,7 @@ def surviving_deployed_paths(
         )
         survivors.update(files)
     survivors.update(lockfile.local_deployed_files)
+    survivors.update(lockfile.local_staged_files)
     survivors.update(DeploymentLedgerCodec.local_bundle_values(ledger))
     # A directory claim cannot authorize removal of a surviving member.
     parents = {
