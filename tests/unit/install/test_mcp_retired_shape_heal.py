@@ -167,6 +167,7 @@ def test_unsupported_skip_keeps_an_entry_edited_after_apm_wrote_it(tmp_path: Pat
     assert claims == {"antigravity": set()}
 
 
+@pytest.mark.windows_compat
 def test_unsupported_skip_keeps_the_claim_when_removal_fails(tmp_path: Path) -> None:
     from apm_cli.install.errors import RequiredIntegrationError
 
