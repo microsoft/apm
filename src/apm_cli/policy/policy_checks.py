@@ -470,9 +470,9 @@ def _effective_mcp_transports(
 ) -> Mapping[str, EffectiveTransport]:
     """Resolve each server's effective canonical transports for check 9.
 
-    Resolution can query the MCP registry (registry servers without a
-    declared ``transport:``), so it runs only when ``mcp.transport.allow``
-    is configured.
+    Resolution queries the MCP registry for every registry server, with or
+    without a declared ``transport:`` (install writes what the registry
+    serves), so it runs only when ``mcp.transport.allow`` is configured.
     """
     if policy.transport.allow is None or not mcp_deps:
         return {}

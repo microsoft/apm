@@ -393,11 +393,21 @@ class TestTransportUnknownUnderWarn:
         policy = ApmPolicy(enforcement="warn", mcp=base.mcp, dependencies=base.dependencies)
         dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="http")
         logger = _make_logger()
-        with _patch_discover(_make_fetch_result(policy=policy)):
+        with (
+            _patch_discover(_make_fetch_result(policy=policy)),
+            patch.object(logger, "policy_violation") as mock_violation,
+        ):
             _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"), mcp_deps=[dep], logger=logger
             )
         assert active is True
+        unknown = [
+            c
+            for c in mock_violation.call_args_list
+            if "effective transport unknown" in str(c.kwargs.get("reason", c.args))
+        ]
+        assert unknown, mock_violation.call_args_list
+        assert all(c.kwargs.get("severity") == "warn" for c in unknown)
 
 
 # -- Test: self_defined rule -------------------------------------------
