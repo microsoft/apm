@@ -5,7 +5,8 @@ re-read only the selected subtree (#3571 scope).  An unrelated local package
 whose apm.yml is being edited -- invalid YAML, or a dependency that is not
 published yet -- must neither fail the targeted command nor be fetched into
 apm_modules behind the lockfile's back.  The next full install then
-reconciles the edit.
+reconciles the edit.  ``f`` is named on the command line, so it is declared
+under ``GENERIC_HOST`` and validated without the github.com API.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tests.integration._dependency_graph_world import (
+    GENERIC_HOST,
     NO_POLICY,
     World,
     remote,
@@ -24,14 +26,17 @@ from tests.integration._dependency_graph_world import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
+_F = f"{GENERIC_HOST}/test/f"
+
 
 def _world(tmp_path: Path, apm_binary_path: Path) -> World:
     world = World.create(tmp_path, apm_binary_path)
+    world.serve_on(GENERIC_HOST)
     for name in ("c", "d", "f", "g"):
         world.publish(name)
     write_package(world.project / "packages" / "a", "a", [remote("c")])
     write_package(world.project / "packages" / "b", "b", [remote("d")])
-    world.manifest(["./packages/a", "./packages/b", remote("f")])
+    world.manifest(["./packages/a", "./packages/b", remote("f", GENERIC_HOST)])
     world.apm("install", NO_POLICY)
     return world
 
@@ -64,9 +69,9 @@ def test_targeted_commands_skip_unselected_local_edit(
 
     for command in (
         ("install", "./packages/a", NO_POLICY),
-        ("install", "test/f", NO_POLICY),
-        ("install", "--update", "test/f", NO_POLICY),
-        ("update", "test/f", "--yes"),
+        ("install", _F, NO_POLICY),
+        ("install", "--update", _F, NO_POLICY),
+        ("update", _F, "--yes"),
     ):
         world.apm(*command)
         _assert_untouched(world, lock_before, modules_before)
