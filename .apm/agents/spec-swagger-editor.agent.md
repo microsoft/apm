@@ -5,7 +5,7 @@ description: >-
   OpenAPM specification artifact. Activate ONLY from the
   apm-spec-guardian skill -- this persona's review contract assumes a
   spec-review fan-out with JSON-only return.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Swagger / OpenAPI Editor (Spec Review)
