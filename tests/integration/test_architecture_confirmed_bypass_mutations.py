@@ -124,6 +124,13 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         new="        return check.symbol",
     ),
     BypassMutation(
+        name="policy-discovery-stdlib-warning",
+        rule_id="registry_delegation.output_diagnostics",
+        path="src/apm_cli/policy/discovery.py",
+        old="masked_private_hint = _masked_private_policy_hint(org, candidate_repo)",
+        new='logger.warning("%s", _masked_private_policy_hint(org, candidate_repo))',
+    ),
+    BypassMutation(
         name="agent-plugin-duplicate-exemption",
         rule_id="marketplace-integrations-agent-plugin-contract",
         path="src/apm_cli/marketplace/resolver.py",
