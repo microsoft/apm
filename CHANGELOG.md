@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `compilation.target` policy now judges the targets a project actually selects: `apm audit` reads plural `targets:` (non-compliant manifests that `apm install` already blocked now also fail audit), CSV values such as `target: "claude,copilot"` are split, aliases compare as the target they deploy (`vscode` and `agents` are `copilot`) on both the manifest and policy side, `allow: [all]` allows every target, and inherited alias allow lists no longer merge to "allow nothing". Plural-key tests ported from #3739 -- by @MohammedAlkindi (#3774)
 - After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
+- `compilation.target` policy now judges the targets a project actually selects: `apm audit` reads plural `targets:` (non-compliant manifests that `apm install` already blocked now also fail audit), CSV values such as `target: "claude,copilot"` are split, aliases compare as the target they deploy (`vscode` and `agents` are `copilot`) on both the manifest and policy side, `allow: [all]` allows every target, and inherited alias allow lists no longer merge to "allow nothing". Plural-key tests ported from #3739 -- by @MohammedAlkindi (#3774)
 
 ## [0.36.0] - 2026-11-17
 
