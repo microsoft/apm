@@ -16,7 +16,7 @@ from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.git_sparse import apply_sparse_cone, validate_materialized_symlinks
 from apm_cli.utils.path_security import PathTraversalError
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.platform_sensitive]
 
 
 def _commit_symlink_repo(

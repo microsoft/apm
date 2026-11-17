@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm uninstall` (project and `-g`) no longer redeploys every skill of a surviving package that selects skills with `skills:`; survivors are rebuilt with the same selection `apm install` deploys, so every deployed skill is recorded in `apm.lock.yaml`. Skill directories left behind by earlier versions are not tracked by APM; delete them manually. (#3784)
 - A dependency declared by several parents with different `skills:` or `targets:` now deploys and locks the sorted union of every declaration, whatever the manifest order; a declaration without the field selects everything. `apm uninstall` of one parent narrows the union, `apm audit --ci` checks every locked dependency against it, and a parent whose `skills:` matches no skill fails naming that parent. Upgrading changes `skill_subset`/`target_subset` in `apm.lock.yaml` for such dependencies, and `apm install --frozen` with an older lockfile fails naming the dependency: run `apm install` once and commit `apm.lock.yaml`. -- by @azevedo-luis (#3786)
+### Changed
+
+- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
+- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 
 ## [0.36.0] - 2026-11-17
 

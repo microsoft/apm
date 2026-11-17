@@ -374,7 +374,8 @@ def test_inventory_commands_name_the_conflicted_lockfile(
     assert result.exit_code == 1, output
     assert "contains unresolved git merge conflict markers" in output
     assert "restore a known-good lockfile" in output
-    assert "apm.lock.yaml" in output
+    # Rich soft-wraps long paths at the console width; compare without whitespace.
+    assert "".join(str(lockfile_path).split()) in "".join(output.split())
     assert "parse apm.yml" not in output
     assert lockfile_path.read_bytes() == original
     assert installed.is_dir()
