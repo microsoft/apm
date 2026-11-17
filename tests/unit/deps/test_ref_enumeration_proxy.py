@@ -136,6 +136,9 @@ class TestGitSemverResolverRegistryOnly:
         assert "exact version" in hint and "apm.lock.yaml" in hint
         assert "APM Registry HTTP API" in hint
         assert "/v1/packages/{owner}/{repo}/versions" in hint
+        # The upstream escape hatch stays named (installed-CLI contract in
+        # tests/integration/test_registry_only_enumeration_contract.py).
+        assert "unset PROXY_REGISTRY_ONLY" in hint
         # It must not repeat the refuted claim that proxies have no listing.
         assert "exposes no" not in hint
 
