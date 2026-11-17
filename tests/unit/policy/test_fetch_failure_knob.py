@@ -255,6 +255,22 @@ class TestPolicyGateFailClosed:
         run(ctx)
         assert ctx.policy_enforcement_active is False
 
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    @patch(_PATCH_DISCOVER)
+    def test_absent_with_hint_is_silent_by_default(self, mock_discover, mock_warning, mock_info):
+        """#3754: default install with no org policy prints nothing, hint included."""
+        from apm_cli.core.command_logger import InstallLogger
+
+        fetch = _fetch("absent", source="")
+        fetch.discovery_hint = "foo/.github-private returned 404."
+        mock_discover.return_value = fetch
+        ctx = _FakeCtx(logger=InstallLogger(verbose=False), policy_fetch_failure_default="warn")
+        run(ctx)
+        assert ctx.policy_enforcement_active is False
+        mock_warning.assert_not_called()
+        mock_info.assert_not_called()
+
 
 class TestPolicyGateCachedStale:
     """cached_stale reads fetch_failure off the cached ApmPolicy."""
