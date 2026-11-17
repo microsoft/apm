@@ -317,7 +317,7 @@ describe("POST /start-session", () => {
 
     it("starts with investigation and an explicit human approval gate, not label authority", async () => {
         const before = mockState.sessionCalls.length;
-        await postJSON("/start-session", { number: 99, title: "Accepted by triage", model: "claude-opus-4.6" });
+        await postJSON("/start-session", { number: 99, title: "Accepted by triage", model: "claude-opus-5.5" });
         await new Promise(r => setTimeout(r, 10));
         const prompt = mockState.sessionCalls[before].prompt;
         assert.match(prompt, /kickoff\.mode "plan"/);
