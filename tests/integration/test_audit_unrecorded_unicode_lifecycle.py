@@ -24,6 +24,7 @@ from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
 pytestmark = [
+    pytest.mark.platform_sensitive,
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.lifecycle_smoke,

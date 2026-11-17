@@ -310,6 +310,17 @@ def _has_runtime_version(name: str, minimum: str) -> bool:
     return found is not None and tuple(int(part) for part in found.groups()) >= floor
 
 
+def pytest_itemcollected(item: pytest.Item) -> None:
+    """Classify architecture-linter contracts before `-m` selection runs.
+
+    Every tests/integration/test_architecture_* module lints repository source
+    text, so its outcome does not depend on the host OS. CI runs them once on
+    Linux and deselects them with `not architecture_contract` elsewhere.
+    """
+    if item.path.name.startswith("test_architecture_"):
+        item.add_marker(pytest.mark.architecture_contract)
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-skip items whose marker precondition is not met.
 

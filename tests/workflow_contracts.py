@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from typing import Any
 import yaml
 
 WorkflowNode = dict[str, Any]
+
+_ENV_REFERENCE = re.compile(r"^\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
 
 
 def load_workflow(path: Path) -> WorkflowNode:
@@ -56,13 +59,20 @@ def effective_env(
     job: WorkflowNode,
     step: WorkflowNode,
 ) -> dict[str, Any]:
-    """Merge workflow, job, and step environments using Actions precedence."""
+    """Merge workflow, job, and step environments using Actions precedence.
+
+    A value that is exactly ``${{ env.NAME }}`` resolves against the scopes
+    above it, as Actions does, so contracts see the effective string.
+    """
     merged: dict[str, Any] = {}
     for node in (workflow, job, step):
         env = node.get("env", {})
         if not isinstance(env, dict):
             raise AssertionError("workflow env must be a mapping")
-        merged.update(env)
+        outer = dict(merged)
+        for key, value in env.items():
+            reference = _ENV_REFERENCE.match(value) if isinstance(value, str) else None
+            merged[key] = outer.get(reference.group(1), value) if reference else value
     return merged
 
 
