@@ -706,9 +706,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-copilot-cli-mcp-paths",
         rule_id="mutation_writes.copilot_cli_mcp_paths",
         path="src/apm_cli/adapters/client/copilot.py",
-        old='"COPILOT_HOME"',
-        new='"COPILOT_CFG_DIR"',
-        intent="Copilot adapter stops owning the COPILOT_HOME MCP config root.",
+        old='resolve_user_root("copilot") / "mcp-config.json"',
+        new='Path.home() / ".copilot" / "mcp-config.json"',
+        intent="Copilot adapter bypasses the owner-selected COPILOT_HOME user root.",
     ),
     MutationCase(
         guard_id="hooks-integrations-hook-command-vocabulary",
@@ -1374,6 +1374,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             "class DirectoryAnalysis:"
         ),
         intent="Compilation gains a direct write that bypasses CompiledOutputWriter.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-harness-user-root-resolution",
+        rule_id="registry_delegation.harness_user_root_resolution",
+        path="src/apm_cli/integration/lsp_integrator.py",
+        old="return resolve_user_root(self.runtime)",
+        new='return Path(os.environ.get("COPILOT_HOME") or Path.home() / ".copilot")',
+        intent="LSP user config re-reads COPILOT_HOME outside the user-root owner.",
     ),
     MutationCase(
         guard_id="registry-delegation-install-target-selection",
