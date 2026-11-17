@@ -752,7 +752,9 @@ class APMPackage:
         # The declaration owner validates ``target:`` with the --target
         # vocabulary and ``targets:`` with the manifest vocabulary, and rejects
         # a manifest that declares both.
-        target_declaration = ManifestTargetDeclaration.from_mapping(data, source_manifest)
+        target_declaration = ManifestTargetDeclaration.from_manifest(
+            data, source_manifest, warn_deprecated=warning_handler is not None
+        )
         selection = target_declaration.selection
         target_value = selection if target_declaration.spelling == "target" else None
         targets_value = selection if target_declaration.spelling == "targets" else None

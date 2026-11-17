@@ -3353,6 +3353,25 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             '    raw_targets = dict(vars(package)).pop("targets", None)\n',
             id="raw-pop",
         ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "import builtins\n",
+            "import builtins\n\n"
+            "from apm_cli.models.manifest_target_migration import plan_manifest_migration\n",
+            id="install-imports-manifest-rewrite",
+        ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "import builtins\n",
+            "import builtins\n\n_NOTICE = \"apm.yml uses the deprecated 'target:' key.\"\n",
+            id="deprecation-warning-outside-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/manifest.py",
+            "from ..models.manifest_target_migration import (",
+            "from ..models.manifest_rewrite import (",
+            id="migrate-command-bypasses-rewrite-owner",
+        ),
     ],
 )
 def test_manifest_target_declaration_guard_rejects_raw_readers(

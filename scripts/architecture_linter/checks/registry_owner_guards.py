@@ -88,6 +88,7 @@ _RUNTIME_NAME_PATTERN = (
 _TARGET_DECLARATION_OWNERS: frozenset[str] = frozenset(
     {
         "src/apm_cli/models/manifest_targets.py",
+        "src/apm_cli/models/manifest_target_migration.py",
         "src/apm_cli/models/apm_package.py",
         "src/apm_cli/core/apm_yml.py",
         "src/apm_cli/core/target_detection.py",
@@ -412,6 +413,84 @@ def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -
     return None
 
 
+# The deprecated singular ``target:`` key (#3762): one warning emitter in the
+# declaration owner and one rewrite path, reachable only from the explicit
+# ``apm manifest migrate`` command. Install never rewrites the manifest.
+_TARGET_DEPRECATION_OWNER = "src/apm_cli/models/manifest_targets.py"
+_TARGET_DEPRECATION_FUNCTION = "_warn_deprecated_manifest_keys"
+_TARGET_DEPRECATION_PHRASE = "uses the deprecated 'target:' key"
+_TARGET_MIGRATION_MODULE = "manifest_target_migration"
+_TARGET_MIGRATION_OWNER = "src/apm_cli/models/manifest_target_migration.py"
+_TARGET_MIGRATION_COMMAND = "src/apm_cli/commands/manifest.py"
+
+
+def _target_deprecation_findings(
+    rule_id: str, path: str, facts: FileFacts, emitters: set[str], importers: set[str]
+) -> list[Violation]:
+    findings: list[Violation] = []
+    if any(
+        definition.name == _TARGET_DEPRECATION_FUNCTION and definition.kind == "function"
+        for definition in facts.definitions
+    ):
+        emitters.add(path)
+    if path != _TARGET_DEPRECATION_OWNER:
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "the deprecated 'target:' warning must be emitted only by "
+                f"{_TARGET_DEPRECATION_OWNER}::{_TARGET_DEPRECATION_FUNCTION}",
+                line=literal.line,
+                column=literal.column + 1,
+            )
+            for literal in facts.literals
+            if _TARGET_DEPRECATION_PHRASE in literal.value_repr
+        )
+    if path == _TARGET_MIGRATION_OWNER:
+        return findings
+    for fact in facts.imports:
+        module = (fact.module or "").split(".")[-1]
+        if module != _TARGET_MIGRATION_MODULE and _TARGET_MIGRATION_MODULE not in fact.names:
+            continue
+        importers.add(path)
+        if path != _TARGET_MIGRATION_COMMAND:
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "only 'apm manifest migrate' may rewrite apm.yml's 'target:' key; "
+                    "install and other commands must never rewrite the manifest",
+                    line=fact.line,
+                    column=fact.column + 1,
+                )
+            )
+    return findings
+
+
+def _target_deprecation_wiring(
+    rule_id: str, emitters: set[str], importers: set[str]
+) -> list[Violation]:
+    findings: list[Violation] = []
+    if emitters != {_TARGET_DEPRECATION_OWNER}:
+        findings.append(
+            violation(
+                rule_id,
+                _TARGET_DEPRECATION_OWNER,
+                f"{_TARGET_DEPRECATION_FUNCTION} must be defined exactly once, "
+                f"in {_TARGET_DEPRECATION_OWNER}",
+            )
+        )
+    if _TARGET_MIGRATION_COMMAND not in importers:
+        findings.append(
+            violation(
+                rule_id,
+                _TARGET_MIGRATION_COMMAND,
+                f"'apm manifest migrate' must route through {_TARGET_MIGRATION_OWNER}",
+            )
+        )
+    return findings
+
+
 def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     """Package manifest targets are read only through the declaration owner.
 
@@ -420,15 +499,21 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     package's ``target``/``targets`` attributes or keys, or call the target
     field parsers. Reads of a different decision carry
     ``# architecture-authority-exempt: <concept>`` naming it.
+
+    The deprecated ``target:`` key has one warning emitter in the declaration
+    owner and one rewrite module, imported only by ``apm manifest migrate``.
     """
     rule_id = "registry_delegation.target_vocabulary"
     findings: list[Violation] = []
+    emitters: set[str] = set()
+    importers: set[str] = set()
     for path in _python_paths(provider, under=_SRC):
-        if path in _TARGET_DECLARATION_OWNERS:
-            continue
         facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
         if read_failures:
             findings.extend(read_failures)
+            continue
+        findings.extend(_target_deprecation_findings(rule_id, path, facts, emitters, importers))
+        if path in _TARGET_DECLARATION_OWNERS:
             continue
         index = provider.tree_index(path)
         if index is None:
@@ -455,6 +540,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
                     column=getattr(node, "col_offset", 0) + 1,
                 )
             )
+    findings.extend(_target_deprecation_wiring(rule_id, emitters, importers))
     return findings
 
 

@@ -49,7 +49,7 @@ version:       <string>                  # REQUIRED
 description:   <string>
 author:        <string>
 license:       <string>
-target:        <enum | list<enum>>
+targets:       <list<enum>>               # 'target:' is deprecated
 type:          <enum>
 scripts:       <map<string, string>>
 includes:      <enum | list<string>>
@@ -168,6 +168,23 @@ actionable nudge (the authoring path only).
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
+:::caution[Deprecated: the singular `target:` key]
+`target:` is deprecated in favor of `targets:` (a YAML list) and will be removed in v1.0.
+When your project `apm.yml` (or `~/.apm/apm.yml`) uses it, APM prints one warning per run
+on stderr; exit codes do not change. Dependency manifests never trigger the warning.
+Run [`apm manifest migrate`](../cli/manifest/) to rewrite the key in place. It keeps
+comments and deploys exactly the same files and MCP configuration:
+
+| `target:` | `targets:` after migrate |
+|---|---|
+| `claude,cursor` or `[claude, cursor]` | `[claude, cursor]` |
+| `vscode` | `[vscode]` (MCP config stays in `.vscode/mcp.json`) |
+| `agents` | `[copilot]` |
+| `agy` | `[antigravity]` |
+| `all` | the explicit list `apm install` deploys today; remove the ones you do not use |
+| `intellij`, `copilot-app` | refused: no `targets:` equivalent; remove the token from `target:` and pass `--target <name>` to `apm install` |
+:::
+
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
 The exception is `target: all` on its own: `apm install` and `apm compile` select every supported target, and `compilation.target` policy judges that full set.
@@ -178,23 +195,22 @@ Once set, the field is authoritative.
 
 ```yaml
 # Single target
-target: copilot
+targets: [copilot]
 
 # Multiple targets (flow-list form)
-target: [claude, copilot]
+targets: [claude, copilot]
 
 # Multiple targets (block-list form, equivalent)
-target:
+targets:
   - claude
   - copilot
 ```
 
 When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets.
 
-A plural `targets:` form is also accepted; use a YAML list in new manifests.
-A scalar remains accepted as a one-item compatibility input. Declaring both
-fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
-supported for backward compatibility. The `vscode` alias is accepted in either
+Use `targets:` with a YAML list in new manifests. A scalar remains accepted
+as a one-item compatibility input. Declaring both fields is a parse error.
+The deprecated `target:` key remains supported until v1.0. The `vscode` alias is accepted in either
 form and normalized to `copilot`; `agents` remains a CLI-only alias.
 MCP-only and experimental `--target` values such as `intellij` and
 `copilot-app` are not manifest targets: `apm install` rejects them in
@@ -965,7 +981,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `target` | `enum<string>` | unset | Same values as Section 3.6 | Ignored by `apm compile`, which uses `--target`, then the top-level `targets:` (Section 3.6), then auto-detection. Declare outputs with `targets:` instead. |
+| `target` | `enum<string>` | unset | Same values as Section 3.6 | **Deprecated and ignored.** `apm compile` always uses the targets resolved from `--target`, `targets:` (Section 3.6), or auto-detection. APM warns when the project or user manifest sets it; remove it. It will be removed in v1.0. |
 | `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory target files (e.g. `AGENTS.md`, `CLAUDE.md`). `single-file` generates one monolithic file at `output`. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
@@ -1200,7 +1216,7 @@ version: 1.0.0
 description: AI-native web application
 author: Contoso
 license: MIT
-target: [claude, copilot]
+targets: [claude, copilot]
 type: hybrid
 includes: auto
 

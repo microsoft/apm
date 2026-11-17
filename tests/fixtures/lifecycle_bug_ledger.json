@@ -580,6 +580,8 @@
         "list": {"disposition": "semantic_na", "reason": "Lists project run scripts; none are declared by this passive package."},
         "lock": {"disposition": "applicable", "reason": "Resolves lock state while preserving deployed files and ownership.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
         "lock export": {"disposition": "applicable", "reason": "Exports real A/B commit identities as CycloneDX and SPDX.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "manifest": {"disposition": "semantic_na", "reason": "Manifest maintenance dispatch; this lifecycle declares targets with the current key."},
+        "manifest migrate": {"disposition": "semantic_na", "reason": "Rewrites a deprecated top-level target: key; this fixture has none, so no installed resource changes."},
         "marketplace": {"disposition": "semantic_na", "reason": "Marketplace dispatch; no marketplace catalog participates in direct Git dependencies."},
         "marketplace add": {"disposition": "semantic_na", "reason": "Adds a discovery catalog source, not a direct dependency."},
         "marketplace audit": {"disposition": "semantic_na", "reason": "Audits against marketplace sources absent from this fixture."},

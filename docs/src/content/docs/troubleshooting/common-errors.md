@@ -23,6 +23,18 @@ Fix: run `apm init` to scaffold a manifest, or `cd` into the project that owns t
 
 See also: [`apm init` reference](../../reference/cli/init/)
 
+### `[!] apm.yml uses the deprecated 'target:' key`
+
+```
+[!] apm.yml uses the deprecated 'target:' key. Use 'targets:' (a YAML list). Run 'apm manifest migrate' to update it. 'target:' will be removed in v1.0.
+```
+
+Cause: the project `apm.yml` (or `~/.apm/apm.yml`) declares the singular `target:` key. It still works, prints once per run on stderr, and does not change the exit code. Starting with v1.0, `target:` will be a parse error.
+
+Fix: run `apm manifest migrate` (add `--global` for `~/.apm/apm.yml`) and commit the result. The migrated manifest deploys the same files. If it reports `Target 'intellij' has no 'targets:' equivalent`, remove `intellij` from `target:` and pass `--target intellij` to `apm install` instead.
+
+See also: [`apm manifest` reference](../../reference/cli/manifest/), [Manifest schema: targets](../../reference/manifest-schema/#36-target-and-targets)
+
 ### `lockfile not found at <path>; run 'apm install' to generate it`
 
 ```
