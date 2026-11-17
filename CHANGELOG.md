@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `apm install -g --target copilot` now honors `COPILOT_HOME` for Copilot CLI instructions, agents, hooks, MCP and LSP config, plugin settings and `--legacy-skill-paths` skills, and `apm uninstall -g`, `apm audit` and target detection use the same root. `COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HERMES_HOME` now share one rule: a relative value fails with an error naming the variable instead of resolving against the current directory. Upgrade note: if you set `COPILOT_HOME`, your next `apm install -g` deploys Copilot user primitives there; files already under `~/.copilot` stay in place as another profile's files. (#3782)
 ### Changed
 
 - The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
 - Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
+
+### Fixed
+
+- `apm install -g --target copilot` now honors `COPILOT_HOME` for Copilot CLI instructions, agents, hooks, MCP and LSP config, plugin settings and `--legacy-skill-paths` skills, and `apm uninstall -g`, `apm audit` and target detection use the same root. `COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HERMES_HOME` now share one rule: a relative value fails with an error naming the variable instead of resolving against the current directory. Upgrade note: if you set `COPILOT_HOME`, your next `apm install -g` deploys Copilot user primitives there; files already under `~/.copilot` stay in place as another profile's files. (#3782)
 
 ## [0.36.0] - 2026-11-17
 
