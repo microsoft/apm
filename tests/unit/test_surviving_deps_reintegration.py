@@ -504,6 +504,57 @@ def test_uninstall_survivor_rebuild_honors_package_target_restriction(
     assert not (tmp_path / ".cursor/hooks.json").exists()
 
 
+def test_uninstall_keeps_the_recorded_legacy_skill_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#3773: cleanup and survivor rebuild follow the install's --legacy-skill-paths layout."""
+    monkeypatch.chdir(tmp_path)
+    survivor = tmp_path / "apm_modules" / "acme" / "survivor"
+    survivor.mkdir(parents=True)
+    (survivor / "apm.yml").write_text("name: survivor\nversion: 1.0.0\n", encoding="utf-8")
+    skill_text = "---\nname: survivor\ndescription: test survivor\n---\n"
+    (survivor / "SKILL.md").write_text(skill_text, encoding="utf-8")
+    (tmp_path / "apm.yml").write_text(
+        "name: root\nversion: 0.0.0\ntargets:\n  - copilot\n"
+        "dependencies:\n  apm:\n    - acme/survivor\n",
+        encoding="utf-8",
+    )
+    legacy = tmp_path / ".github" / "skills"
+    for name, text in (("survivor", skill_text), ("gone", "---\nname: gone\n---\n")):
+        (legacy / name).mkdir(parents=True)
+        (legacy / name / "SKILL.md").write_text(text, encoding="utf-8")
+    survivors = LockFile()
+    survivors.add_dependency(
+        LockedDependency(
+            repo_url="acme/survivor",
+            depth=1,
+            deployed_files=[".github/skills/survivor"],
+        )
+    )
+
+    observed: list[list[str]] = []
+
+    def _record_integration(*_args, **kwargs):
+        observed.append([t.skills_rel_root for t in kwargs["targets"] if t.supports("skills")])
+        return {"deployed_files": []}
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives", _record_integration
+    )
+
+    _sync_integrations_after_uninstall(
+        APMPackage.from_apm_yml(tmp_path / "apm.yml"),
+        tmp_path,
+        {".github/skills/gone"},
+        MagicMock(),
+        lockfile=survivors,
+    )
+
+    assert sorted(p.name for p in legacy.iterdir()) == ["survivor"]
+    assert observed == [[".github/skills"]]
+
+
 def test_uninstall_rejects_invalid_survivor_before_wiping_hooks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

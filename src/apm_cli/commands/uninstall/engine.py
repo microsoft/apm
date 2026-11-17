@@ -1144,14 +1144,21 @@ def _sync_integrations_after_uninstall(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.hook_reintegration import preflight_survivor_hooks
-    from ...integration.targets import resolve_targets
+    from ...integration.skill_layout import (
+        recorded_deployed_paths,
+        resolve_reintegration_targets,
+    )
     from ...primitives.discovery import clear_discovery_cache
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     config_target = list(apm_package.canonical_targets)
     _explicit = config_target or None
-    _resolved_targets = resolve_targets(
-        project_root, user_scope=user_scope, explicit_target=_explicit
+    # Removed and surviving packages together carry the install's skill layout.
+    _resolved_targets = resolve_reintegration_targets(
+        project_root,
+        user_scope=user_scope,
+        explicit_target=_explicit,
+        recorded_paths=(*(all_deployed_files or ()), *recorded_deployed_paths(lockfile)),
     )
     require_valid_survivors = bool(all_deployed_files) or _native_hook_state_exists(
         project_root,
@@ -1222,11 +1229,11 @@ def _sync_integrations_after_uninstall(
     sync_managed = all_deployed_files if lockfile is not None or all_deployed_files else None
     if sync_managed is not None:
         # Partition against default KNOWN_TARGETS for legacy/project-scope
-        # paths, then merge with resolved targets for user-scope paths.
-        # This ensures both .github/ (legacy) and .copilot/ (resolved)
-        # prefixes are recognized during uninstall cleanup.
+        # paths, then merge with resolved targets for user-scope paths and
+        # the recorded skill layout (e.g. .github/skills/ after an install
+        # with --legacy-skill-paths).
         _buckets = BaseIntegrator.partition_managed_files(sync_managed)
-        if user_scope and _resolved_targets:
+        if _resolved_targets:
             _scope_buckets = BaseIntegrator.partition_managed_files(
                 sync_managed, targets=_resolved_targets
             )

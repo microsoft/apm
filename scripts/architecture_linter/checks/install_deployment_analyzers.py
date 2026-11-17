@@ -91,6 +91,10 @@ from scripts.architecture_linter.checks.install_single_file import (
 from scripts.architecture_linter.checks.install_single_file import (
     check_single_file_materialization,
 )
+from scripts.architecture_linter.checks.install_skill_layout import (
+    GUARD_SKILL_LAYOUT,
+    check_skill_layout,
+)
 from scripts.architecture_linter.checks.install_skill_preflight import (
     GUARD_SKILL_PREFLIGHT,
     check_skill_preflight,
@@ -266,6 +270,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_SKILLS_ROOT,
         "Skills roots come from TargetProfile.skills_rel_root, not open-coded <root>/skills.",
         check_skills_root_derivation,
+    ),
+    _rule(
+        GUARD_SKILL_LAYOUT,
+        "Skill layout routes through resolve_skill_layout; rebuilds recover the recorded layout.",
+        check_skill_layout,
     ),
     *EXTRA_RULES,
 )
