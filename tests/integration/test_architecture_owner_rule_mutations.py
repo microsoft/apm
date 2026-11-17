@@ -1761,6 +1761,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="MCP warnings stop classifying host literals through utils/net.py.",
     ),
     MutationCase(
+        guard_id="transport-platform-origin-bounded-redirect",
+        rule_id="transport-platform-origin-bounded-redirect",
+        path="src/apm_cli/deps/registry/client.py",
+        old="            return origin_bounded_request(\n                self._session,\n",
+        new="            return self._session.request(\n",
+        intent="Registry requests bypass the origin-bounded redirect owner.",
+    ),
+    MutationCase(
         guard_id="transport-platform-ref-freshness",
         rule_id="transport-platform-ref-freshness",
         path="src/apm_cli/install/helpers/ref_seed.py",

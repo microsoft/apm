@@ -36,7 +36,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
-from ..utils.http_credentials import CredentialScopedSession
+from ..utils.http_credentials import CredentialScopedSession, origin_bounded_request, origin_root
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
@@ -64,7 +64,6 @@ _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
 _HTTP_SESSION = CredentialScopedSession()
-_HTTP_SESSION.max_redirects = 5
 
 # Candidate locations for marketplace.json in a repository (priority order)
 _MARKETPLACE_PATHS = [
@@ -227,12 +226,25 @@ def _read_stale_meta(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def _http_get(url: str, **kwargs: object):
-    """Issue HTTP GET through a shared session without persisting cookies."""
+def _http_get(url: str, *, headers: dict[str, str] | None = None, **kwargs: object):
+    """Issue HTTP GET through a shared session without persisting cookies.
+
+    Redirects follow the shared origin-bounded owner: credentials are re-sent
+    only within the request's origin, and a hop to another HTTPS origin is
+    followed without any credential header.
+    """
     cookies = getattr(_HTTP_SESSION, "cookies", None)
     if cookies is not None:
         cookies.clear()
-    response = _HTTP_SESSION.get(url, **kwargs)
+    response = origin_bounded_request(
+        _HTTP_SESSION,
+        "GET",
+        url,
+        base_url=origin_root(url),
+        headers=headers,
+        follow_cross_origin_without_credentials=True,
+        **kwargs,
+    )
     if cookies is not None:
         cookies.clear()
     return response
