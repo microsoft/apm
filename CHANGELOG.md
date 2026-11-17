@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release tags that are promoted without re-running integration now publish to PyPI and deploy docs again; `repository_dispatch` `publish-existing-tag` re-publishes a released tag that never reached PyPI. (#3794, #3796)
+
 ### Changed
 
+- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
 - Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
 
 ### Fixed
 
 - `compilation.target` policy now judges the targets a project actually selects: `apm audit` reads plural `targets:` (non-compliant manifests that `apm install` already blocked now also fail audit), CSV values such as `target: "claude,copilot"` are split, aliases compare as the target they deploy (`vscode` and `agents` are `copilot`) on both the manifest and policy side, `allow: [all]` allows every target, and inherited alias allow lists no longer merge to "allow nothing". Plural-key tests ported from #3739 -- by @MohammedAlkindi (#3774)
+- After `apm install --legacy-skill-paths`, `apm audit --ci` no longer reports the per-client skills (`.github/skills/`, `~/.copilot/skills/`) as drift, and `apm uninstall` keeps surviving skills in that layout instead of copying them into `.agents/skills/` and removes an uninstalled package's legacy-layout skills; both reuse the layout recorded in `apm.lock.yaml`. (#3793)
 
 ## [0.36.0] - 2026-11-17
 
