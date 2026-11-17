@@ -8,6 +8,7 @@ orchestrator -- without requiring live network calls or runtimes.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1043,6 +1044,17 @@ class TestOpenCodeTarget:
         assert count == 1
         path = tmp_path / ".config" / "opencode" / "opencode.json"
         assert json.loads(path.read_text())["lsp"]["gopls"]["extensions"] == [".go"]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+    def test_user_scope_config_is_owner_only(self, tmp_path):
+        path = tmp_path / ".config" / "opencode" / "opencode.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"mcp": {"m": {}}}))
+        path.chmod(0o644)
+        with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
+            LSPIntegrator.install([_gopls_dep()], user_scope=True, target_runtimes=["opencode"])
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert json.loads(path.read_text())["mcp"] == {"m": {}}
 
     def test_remove_stale_keeps_mcp(self, tmp_path):
         path = tmp_path / "opencode.json"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import json
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -164,6 +165,7 @@ class _PreparedTargetConfig:
     content: str
     changed: builtins.set
     created_servers_key: bool = False
+    owner_only: bool = False
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -746,23 +748,33 @@ class LSPIntegrator:
             content=json.dumps(config, indent=2) + "\n",
             changed=changed,
             created_servers_key=created_servers_key,
+            owner_only=user_scope,
         )
 
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
         prepared.path.parent.mkdir(parents=True, exist_ok=True)
-        LSPIntegrator._atomic_write_config(prepared.path, prepared.content)
+        LSPIntegrator._atomic_write_config(
+            prepared.path, prepared.content, owner_only=prepared.owner_only
+        )
         return prepared.changed
 
     @staticmethod
-    def _atomic_write_config(config_path: Path, content: str) -> None:
+    def _atomic_write_config(config_path: Path, content: str, *, owner_only: bool) -> None:
         """Replace *config_path* atomically so an interrupted write never truncates it.
 
-        A new file gets the mode a plain ``open()`` would give it; an existing
-        file keeps its mode.
+        User-scope configs can carry literal ``env`` values, so they stay
+        owner-only (``0600``) like user-scope MCP configs. A project config
+        keeps its existing mode, or gets the mode a plain ``open()`` would.
         """
-        atomic_write_text(config_path, content, new_file_mode=umask_file_mode(config_path))
+        if not owner_only:
+            atomic_write_text(config_path, content, new_file_mode=umask_file_mode(config_path))
+            return
+        if config_path.is_file():
+            os.chmod(config_path, 0o600)
+        atomic_write_text(config_path, content, new_file_mode=0o600)
+        os.chmod(config_path, 0o600)
 
     @staticmethod
     def _write_target_config(
@@ -840,7 +852,9 @@ class LSPIntegrator:
                     except OSError:
                         break
             else:
-                LSPIntegrator._atomic_write_config(config_path, json.dumps(config, indent=2) + "\n")
+                LSPIntegrator._atomic_write_config(
+                    config_path, json.dumps(config, indent=2) + "\n", owner_only=user_scope
+                )
         return removed
 
     # ------------------------------------------------------------------

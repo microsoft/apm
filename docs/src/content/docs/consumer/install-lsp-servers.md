@@ -49,6 +49,8 @@ Claude Code discovers LSP servers from the APM-managed plugin manifest at
 key of `opencode.json` or `~/.config/opencode/opencode.json`. At user scope,
 `CLAUDE_CONFIG_DIR` and `COPILOT_HOME` replace `~/.claude` and `~/.copilot`
 (see [harness home variables](../../reference/environment-variables/#harness-home-variables)).
+User-scope LSP config files are written owner-only (`0600`), like user-scope
+MCP configs, because `env` values may hold secrets.
 This generated shape matches each runtime's documented discovery contract.
 
 `opencode.json` also holds your other OpenCode settings, so APM never rewrites
