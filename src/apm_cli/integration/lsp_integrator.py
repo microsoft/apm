@@ -22,6 +22,7 @@ from apm_cli.integration._shared import (
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.path_security import PathTraversalError
 
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -436,11 +437,17 @@ class LSPIntegrator:
             user_root = spec.user_root()
             relative = Path(*spec.user_relative_path)
             # Validate from HOME when the root lives there, so a symlinked
-            # ``~/.claude`` or ``~/.copilot`` stays rejected.
+            # ``~/.claude`` or ``~/.copilot`` stays rejected; a configured
+            # root outside HOME must not be a symlink either.
             home = Path.home()
             if user_root.is_relative_to(home):
                 relative = user_root.relative_to(home) / relative
                 user_root = home
+            elif user_root.is_symlink():
+                raise PathTraversalError(
+                    "Refusing deployment through a symlinked path component: "
+                    f"{user_root.as_posix()}"
+                )
             relative_path = relative.as_posix()
             return BaseIntegrator.resolve_deploy_path(
                 relative_path,

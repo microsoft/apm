@@ -474,6 +474,41 @@ class TestInstallUserScope:
 
         assert not (outside / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json").exists()
 
+    @pytest.mark.parametrize(
+        ("env_var", "target", "config"),
+        [
+            ("CLAUDE_CONFIG_DIR", "claude", ("skills", "apm-lsp", ".claude-plugin", "plugin.json")),
+            ("COPILOT_HOME", "copilot", ("lsp-config.json",)),
+        ],
+    )
+    def test_rejects_symlinked_configured_root_outside_home(
+        self, tmp_path, monkeypatch, env_var, target, config
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        alias = tmp_path / "profile-alias"
+        try:
+            alias.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+        monkeypatch.setenv(env_var, str(alias))
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with (
+            patch("apm_cli.integration.lsp_integrator.Path.home", return_value=home),
+            pytest.raises(RequiredIntegrationError, match="symlinked path component"),
+        ):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                user_scope=True,
+                target_runtimes=[target],
+                fail_on_write_error=True,
+            )
+
+        assert not outside.joinpath(*config).exists()
+
 
 class TestInstallCopilotTarget:
     def test_writes_project_lsp_json_with_file_extensions(self, tmp_path):
