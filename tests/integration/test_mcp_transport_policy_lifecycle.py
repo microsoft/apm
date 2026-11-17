@@ -136,6 +136,23 @@ def test_registry_sse_remote_blocked_before_any_write(
         seeded, _checks = project.audit("transport-policy-seed")
         assert seeded.returncode == 0, seeded.stdout + seeded.stderr
 
+        # --registry wins over a default registry that cannot answer.
+        project.env["MCP_REGISTRY_URL"] = "http://127.0.0.1:9"
+        flagged = project.run(
+            "install",
+            "--mcp",
+            _SSE_NAME,
+            "--registry",
+            registry.url,
+            scenario="transport-policy-mcp-registry-flag",
+        )
+        flagged_output = " ".join((flagged.stdout + flagged.stderr).split())
+        assert flagged.returncode != 0, flagged_output
+        assert "transport 'sse' not in allowed [stdio, streamable-http]" in flagged_output
+        assert "unreachable" not in flagged_output
+        assert (project.root / "apm.yml").read_bytes() == manifest_before
+        project.env["MCP_REGISTRY_URL"] = registry.url
+
         direct = project.run("install", "--mcp", _SSE_NAME, scenario="transport-policy-mcp-blocked")
         direct_output = " ".join((direct.stdout + direct.stderr).split())
         assert direct.returncode != 0, direct_output

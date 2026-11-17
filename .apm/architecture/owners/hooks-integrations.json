@@ -93,7 +93,7 @@
     {
       "id": "mcp-remote-transport-normalization",
       "decision": "MCP remote transport vocabulary: registry v0.1 type, legacy transport_type and manifest transport normalized to streamable-http or sse, recorded at ingestion and read by every adapter and apm mcp show",
-      "owner": "mcp_transport.py (canonical_remote_transport, TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE, CANONICAL_REMOTE_TRANSPORTS)",
+      "owner": "mcp_transport.py (canonical_remote_transport, TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE, CANONICAL_REMOTE_TRANSPORTS; policy projection canonical_transport_name(s), POLICY_TRANSPORTS, TRANSPORT_STDIO, server_write_transports)",
       "selectors": ["src/apm_cli/mcp_transport.py"],
       "guards": ["hooks-integrations-mcp-remote-transport-normalization"]
     },

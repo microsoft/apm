@@ -27,6 +27,7 @@ _POLICY_PARSER = "src/apm_cli/policy/parser.py"
 _POLICY_CHECKS = "src/apm_cli/policy/policy_checks.py"
 _RESOLVER = "src/apm_cli/integration/mcp_transport_resolution.py"
 _MCP_INSTALL = "src/apm_cli/integration/mcp_integrator_install.py"
+_MCP_TRANSPORT = "src/apm_cli/mcp_transport.py"
 
 # A raw transport read: a dependency/server ``.transport`` attribute (the
 # policy schema's ``<policy>.transport.allow`` is the only allowed shape) or
@@ -55,7 +56,7 @@ _REQUIRED: tuple[tuple[str, tuple[str, ...], str], ...] = (
     (
         _RESOLVER,
         (
-            "server_write_transports(info)",
+            "server_write_transports(server_info, selected_remote=MCPClientAdapter.selected_remote)",
             "frozenset({canonical_transport_name(declared)})",
             "_overlaid_server_infos(",
             "MCPIntegrator._build_self_defined_info(",
@@ -64,8 +65,13 @@ _REQUIRED: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         _MCP_INSTALL,
-        ("checked = policy_checked_registry_info(",),
-        "install must write the registry snapshot org policy judged",
+        ("checked = policy_checked_registry_info(", "unverified = unverified_policy_fallbacks("),
+        "install must write the registry snapshot org policy judged, and nothing policy did not check",
+    ),
+    (
+        _MCP_TRANSPORT,
+        ("return _ALIASES.get(token, token)", "transports.add(TRANSPORT_STDIO)"),
+        "policy transport names and server projection must reuse the owner's alias table",
     ),
 )
 

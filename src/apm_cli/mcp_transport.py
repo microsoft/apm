@@ -21,7 +21,7 @@ Ref: https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.jso
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -124,20 +124,24 @@ class UnresolvedTransport:
     reason: str
 
 
-def server_write_transports(server_info: Mapping[str, Any]) -> frozenset[str]:
+def server_write_transports(
+    server_info: Mapping[str, Any],
+    *,
+    selected_remote: Callable[[dict], Mapping | None],
+) -> frozenset[str]:
     """Every canonical transport APM may write for one resolved server.
 
-    *server_info* is the (overlaid) server info handed to the client adapters.
-    Adapters differ in whether a package or a remote wins, so a server offering
-    both reports both. Raises ``ValueError`` for an unsupported remote
-    transport, as the adapters do.
+    *server_info* is the (overlaid) server info handed to the client adapters;
+    *selected_remote* is the adapters' remote choice
+    (``MCPClientAdapter.selected_remote``), whose result covers every adapter
+    that renders a remote. Adapters differ in whether a package or a remote
+    wins, so a server offering both reports both. Raises ``ValueError`` for an
+    unsupported remote transport, as the adapters do.
     """
-    from .adapters.client.base import MCPClientAdapter
-
     if server_info.get("_raw_stdio"):
         return frozenset({TRANSPORT_STDIO})
     transports: set[str] = set()
-    remote = MCPClientAdapter.selected_remote(dict(server_info))
+    remote = selected_remote(dict(server_info))
     if remote is not None:
         transports.add(
             canonical_remote_transport(remote, server_name=str(server_info.get("name") or ""))

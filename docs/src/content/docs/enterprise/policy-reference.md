@@ -239,7 +239,7 @@ The check judges the transport APM will actually write, not only the `transport:
 - A self-defined server (`registry: false`) is checked against its declared `transport:`, offline.
 - A registry server is looked up in the same MCP registry install uses (its `registry:` URL, else `MCP_REGISTRY_URL` or `apm config set mcp-registry-url`). A remote counts as its registry transport; a package counts as `stdio`.
 - A registry server that offers both a package and a remote is checked on both, because harnesses differ in which one they write. To pick one, declare `transport:` for that server in `apm.yml`. A declared `transport:` only narrows the check when the server offers it; otherwise the transport install writes is checked.
-- If APM cannot resolve a registry server (registry unreachable or server not found), its declared `transport:` is checked. Without one, the check fails with `effective transport unknown` and the reason; declare `transport:` for the server to check it offline.
+- If APM cannot resolve a registry server (registry unreachable or server not found), its declared `transport:` is checked, and install refuses to write any other transport for it. Without one, the check fails with `effective transport unknown` and the reason; declare `transport:` for the server to check it offline.
 
 The lookup only happens when `mcp.transport.allow` is set. `apm install`, `apm install --mcp`, `apm update` and `apm audit --ci` reach the same verdict, and a blocked server is rejected before any MCP config or `apm.yml` write.
 

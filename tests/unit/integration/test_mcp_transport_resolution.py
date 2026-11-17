@@ -10,10 +10,11 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.integration import mcp_transport_resolution as resolution
+from apm_cli.integration.mcp_transport_resolution import write_transports
 from apm_cli.mcp_transport import (
     UnresolvedTransport,
+    canonical_remote_transport,
     canonical_transport_name,
-    server_write_transports,
 )
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
@@ -35,17 +36,15 @@ DUAL_SERVER = {
 
 
 class _FakeClient:
-    def __init__(self, registry_url, servers, calls, unreachable=False):
+    def __init__(self, registry_url, state):
         self.registry_url = registry_url or "https://registry.example"
-        self._servers = servers
-        self._calls = calls
-        self._unreachable = unreachable
+        self._state = state
 
     def find_server_by_reference(self, name):
-        self._calls.append((self.registry_url, name))
-        if self._unreachable:
+        self._state["calls"].append((self.registry_url, name))
+        if self._state["unreachable"]:
             raise ConnectionError("boom")
-        return self._servers.get(name)
+        return self._state["servers"].get(name)
 
 
 @pytest.fixture
@@ -54,7 +53,7 @@ def fake_registry():
     state = {"servers": {}, "calls": [], "unreachable": False}
 
     def _client(registry_url):
-        return _FakeClient(registry_url, state["servers"], state["calls"], state["unreachable"])
+        return _FakeClient(registry_url, state)
 
     resolution.clear_registry_info_memo()
     with patch.object(resolution, "_registry_client", _client):
@@ -71,16 +70,36 @@ def _transport_check(result):
 
 
 class TestOwnerProjection:
+    def test_first_remote_without_url_is_skipped_like_adapters(self):
+        info = {
+            "remotes": [{"type": "sse"}, {"type": "streamable-http", "url": "https://h.example"}]
+        }
+        assert write_transports(info) == frozenset({"streamable-http"})
+
+    @pytest.mark.parametrize(
+        "info",
+        [SSE_SERVER, HTTP_SERVER, DUAL_SERVER],
+        ids=["sse", "streamable-http", "dual"],
+    )
+    def test_every_adapter_remote_is_covered(self, info):
+        from apm_cli.factory import _MCP_CLIENT_REGISTRY
+
+        projected = write_transports(dict(info))
+        for adapter in _MCP_CLIENT_REGISTRY.values():
+            remote = adapter.selected_remote(dict(info))
+            if remote is not None:
+                assert canonical_remote_transport(remote) in projected, adapter.__name__
+
     def test_http_alias_is_streamable_http(self):
         assert canonical_transport_name("http") == "streamable-http"
         assert canonical_transport_name(" SSE ") == "sse"
 
     def test_package_and_remote_report_both(self):
-        assert server_write_transports(DUAL_SERVER) == frozenset({"stdio", "sse"})
+        assert write_transports(DUAL_SERVER) == frozenset({"stdio", "sse"})
 
     def test_raw_stdio_is_stdio_only(self):
         info = {"_raw_stdio": {"command": "node"}, "remotes": SSE_SERVER["remotes"]}
-        assert server_write_transports(info) == frozenset({"stdio"})
+        assert write_transports(info) == frozenset({"stdio"})
 
 
 class TestRegistryRemoteTransport:
@@ -176,6 +195,44 @@ class TestDeclaredTransport:
         assert fake_registry["calls"] == []
 
 
+class TestDeclaredFallbackIsEnforcedAtInstall:
+    def test_flaky_registry_cannot_swap_in_an_unchecked_transport(self, fake_registry, tmp_path):
+        """Policy saw only the declared http; install must not then write sse."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        name = SSE_SERVER["name"]
+        dep = MCPDependency.from_dict({"name": name, "transport": "http"})
+        fake_registry["unreachable"] = True
+        result = run_dependency_policy_checks(
+            [], policy=_policy("stdio", "streamable-http"), mcp_deps=[dep]
+        )
+        assert _transport_check(result).passed
+
+        operations = MagicMock()
+        operations.registry_client.registry_url = "https://registry.example"
+        operations.validate_servers_exist.side_effect = lambda names, **kwargs: (names, [])
+        operations.check_servers_needing_installation.return_value = [name]
+        operations.batch_fetch_server_info.return_value = {name: SSE_SERVER}
+        operations.collect_environment_variables.return_value = {}
+        operations.collect_runtime_variables.return_value = {}
+        install = MagicMock(return_value=True)
+        with (
+            patch("apm_cli.registry.operations.MCPServerOperations", return_value=operations),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
+                side_effect=lambda runtimes, **_kwargs: runtimes,
+            ),
+            patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime", install),
+            pytest.raises(RuntimeError, match="unverified"),
+        ):
+            run_mcp_install(
+                mcp_deps=[dep], runtime="copilot", project_root=tmp_path, logger=MagicMock()
+            )
+        install.assert_not_called()
+
+
 class TestUnresolvedTransport:
     def test_not_found_is_actionable_violation(self, fake_registry):
         result = run_dependency_policy_checks(
@@ -211,19 +268,35 @@ class TestPolicyInstallParity:
         )
         assert _transport_check(result).passed
 
-    def test_install_writes_the_snapshot_policy_judged(self, fake_registry, tmp_path):
+    @pytest.mark.parametrize("dep_registry", [None, "https://corp.example/"])
+    def test_install_writes_the_snapshot_policy_judged(
+        self, fake_registry, tmp_path, monkeypatch, dep_registry
+    ):
         """A registry that answers differently later cannot change what is written."""
         from unittest.mock import MagicMock
 
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+        from apm_cli.integration.mcp_integrator_install import (
+            _registry_group_key,
+            run_mcp_install,
+        )
+        from apm_cli.registry.client import SimpleRegistryClient
 
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://default.example/")
         name = SSE_SERVER["name"]
         fake_registry["servers"][name] = SSE_SERVER
-        dep = MCPDependency.from_string(name)
+        dep = (
+            MCPDependency.from_string(name)
+            if dep_registry is None
+            else MCPDependency.from_dict({"name": name, "registry": dep_registry})
+        )
+        real_url = SimpleRegistryClient(_registry_group_key(dep)).registry_url
+        monkeypatch.setattr(
+            resolution, "_registry_client", lambda url: _FakeClient(real_url, fake_registry)
+        )
         assert resolution.resolve_effective_mcp_transports([dep]) == {name: frozenset({"sse"})}
 
         operations = MagicMock()
-        operations.registry_client.registry_url = "https://registry.example"
+        operations.registry_client.registry_url = real_url
         operations.validate_servers_exist.side_effect = lambda names, **kwargs: (names, [])
         operations.check_servers_needing_installation.return_value = [name]
         operations.batch_fetch_server_info.return_value = {name: HTTP_SERVER}
@@ -250,7 +323,7 @@ class TestPolicyInstallParity:
                 mcp_deps=[dep], runtime="copilot", project_root=tmp_path, logger=MagicMock()
             )
 
-        assert server_write_transports(written[name]) == frozenset({"sse"})
+        assert write_transports(written[name]) == frozenset({"sse"})
         assert written[name]["remotes"][0]["url"] == SSE_SERVER["remotes"][0]["url"]
         operations.batch_fetch_server_info.assert_not_called()
 

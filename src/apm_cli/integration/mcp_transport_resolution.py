@@ -28,6 +28,9 @@ EffectiveTransport = frozenset[str] | UnresolvedTransport
 # Process-local memo of registry lookups keyed by (registry URL, name), so the
 # install gate and the pre-write preflight do not query the registry twice.
 _REGISTRY_INFO_MEMO: dict[tuple[str, str], dict[str, Any] | UnresolvedTransport] = {}
+# Registry servers whose policy verdict used the declared ``transport:``
+# because the registry could not be read; keyed like the memo.
+_DECLARED_FALLBACKS: dict[tuple[str, str], frozenset[str]] = {}
 _MEMO_LOCK = threading.Lock()
 
 
@@ -42,10 +45,41 @@ def policy_checked_registry_info(registry_url: str, name: str) -> dict[str, Any]
     return copy.deepcopy(info) if isinstance(info, dict) else None
 
 
+def write_transports(server_info: dict[str, Any]) -> frozenset[str]:
+    """Canonical transports the client adapters would write for *server_info*."""
+    from ..adapters.client.base import MCPClientAdapter
+
+    return server_write_transports(server_info, selected_remote=MCPClientAdapter.selected_remote)
+
+
+def unverified_policy_fallbacks(registry_url: str, server_infos: dict[str, Any]) -> list[str]:
+    """Names policy accepted on a declared transport that install would not write.
+
+    When the registry was unreadable during the policy check, policy judged
+    the declared ``transport:``. If install later obtains registry data whose
+    overlaid info writes another transport, that write was never checked.
+    """
+    with _MEMO_LOCK:
+        judged = {name: _DECLARED_FALLBACKS.get((registry_url, name)) for name in server_infos}
+    unverified = []
+    for name, transports in judged.items():
+        if transports is None:
+            continue
+        info = server_infos.get(name)
+        try:
+            written = write_transports(info) if isinstance(info, dict) else frozenset()
+        except ValueError:
+            written = frozenset({"unsupported"})
+        if not written <= transports:
+            unverified.append(name)
+    return sorted(unverified)
+
+
 def clear_registry_info_memo() -> None:
     """Forget memoized registry lookups (tests and long-lived callers)."""
     with _MEMO_LOCK:
         _REGISTRY_INFO_MEMO.clear()
+        _DECLARED_FALLBACKS.clear()
 
 
 def _dep_name(dep: Any) -> str:
@@ -67,7 +101,7 @@ def _is_registry_dep(dep: Any) -> bool:
 
 def _project(info: dict[str, Any]) -> EffectiveTransport:
     try:
-        return server_write_transports(info)
+        return write_transports(info)
     except ValueError as exc:
         return UnresolvedTransport(f"registry data is not usable: {exc}")
 
@@ -91,8 +125,12 @@ def _registry_client(registry_url: str | None) -> Any:
 
 def _fetch_registry_infos(
     registry_url: str | None, names: list[str]
-) -> dict[str, dict[str, Any] | UnresolvedTransport]:
-    """Look up *names* in one registry, memoized per process."""
+) -> tuple[str | None, dict[str, dict[str, Any] | UnresolvedTransport]]:
+    """Look up *names* in one registry, memoized per process.
+
+    Returns the resolved registry URL (``None`` when the registry
+    configuration is unusable) and the per-name result.
+    """
     from concurrent.futures import ThreadPoolExecutor
 
     from ..registry.client import redact_mcp_registry_url
@@ -100,7 +138,7 @@ def _fetch_registry_infos(
     try:
         client = _registry_client(registry_url)
     except ValueError as exc:
-        return dict.fromkeys(names, UnresolvedTransport(f"MCP registry is not usable: {exc}"))
+        return None, dict.fromkeys(names, UnresolvedTransport(f"MCP registry is not usable: {exc}"))
     resolved_url = client.registry_url
     safe_url = redact_mcp_registry_url(resolved_url)
     found: dict[str, dict[str, Any] | UnresolvedTransport] = {}
@@ -118,10 +156,12 @@ def _fetch_registry_infos(
             for name, info in zip(missing, looked_up, strict=True):
                 _REGISTRY_INFO_MEMO[(resolved_url, name)] = info
                 found[name] = info
-    return found
+    return resolved_url, found
 
 
-def _registry_transports(deps: list[Any]) -> dict[str, EffectiveTransport]:
+def _registry_transports(
+    deps: list[Any],
+) -> tuple[dict[str, EffectiveTransport], dict[str, str | None]]:
     from .mcp_integrator_install import _overlaid_server_infos, _registry_group_key
 
     groups: dict[str | None, list[Any]] = {}
@@ -129,8 +169,9 @@ def _registry_transports(deps: list[Any]) -> dict[str, EffectiveTransport]:
         groups.setdefault(_registry_group_key(dep), []).append(dep)
 
     result: dict[str, EffectiveTransport] = {}
+    resolved_urls: dict[str, str | None] = {}
     for registry_url, group in groups.items():
-        infos = _fetch_registry_infos(registry_url, [_dep_name(dep) for dep in group])
+        resolved_url, infos = _fetch_registry_infos(registry_url, [_dep_name(dep) for dep in group])
         known = {name: info for name, info in infos.items() if isinstance(info, dict)}
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -146,7 +187,8 @@ def _registry_transports(deps: list[Any]) -> dict[str, EffectiveTransport]:
             name = _dep_name(dep)
             raw = infos[name]
             result[name] = raw if isinstance(raw, UnresolvedTransport) else _project(overlaid[name])
-    return result
+            resolved_urls[name] = resolved_url
+    return result, resolved_urls
 
 
 def resolve_effective_mcp_transports(
@@ -160,8 +202,9 @@ def resolve_effective_mcp_transports(
     ``transport:`` narrows the result only when the server offers it. A
     server offering both a package and a remote reports both. When the
     registry cannot resolve the server, a declared ``transport:`` is used
-    as-is (install cannot write that server without the registry), else the
-    result is an :class:`UnresolvedTransport`. Self-defined servers resolve
+    as-is and recorded, so install refuses to write anything else for it
+    (:func:`unverified_policy_fallbacks`); without one the result is an
+    :class:`UnresolvedTransport`. Self-defined servers resolve
     offline: their declaration is exactly what install writes.
     """
     from ._shared import deduplicate_deps
@@ -170,7 +213,7 @@ def resolve_effective_mcp_transports(
     # First declaration wins, as in install.
     deps = deduplicate_deps(list(mcp_deps))
     registry_deps = [dep for dep in deps if _is_registry_dep(dep)]
-    looked_up = _registry_transports(registry_deps) if registry_deps else {}
+    looked_up, resolved_urls = _registry_transports(registry_deps) if registry_deps else ({}, {})
 
     result: dict[str, EffectiveTransport] = {}
     for dep in deps:
@@ -182,6 +225,10 @@ def resolve_effective_mcp_transports(
             effective = looked_up[name]
             if isinstance(effective, UnresolvedTransport) and declared is not None:
                 effective = frozenset({canonical_transport_name(declared)})
+                registry_url = resolved_urls.get(name)
+                if registry_url is not None:
+                    with _MEMO_LOCK:
+                        _DECLARED_FALLBACKS[(registry_url, name)] = effective
             result[name] = effective
         elif declared is not None:
             result[name] = frozenset({canonical_transport_name(declared)})

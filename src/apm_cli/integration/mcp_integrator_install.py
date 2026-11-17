@@ -278,7 +278,10 @@ def _install_registry_group(  # noqa: PLR0913
         retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
-    from apm_cli.integration.mcp_transport_resolution import policy_checked_registry_info
+    from apm_cli.integration.mcp_transport_resolution import (
+        policy_checked_registry_info,
+        unverified_policy_fallbacks,
+    )
 
     configured_count = 0
     failed_installations: list[str] = []
@@ -371,6 +374,17 @@ def _install_registry_group(  # noqa: PLR0913
             server_info_cache = _overlaid_server_infos(
                 operations, servers_to_install, group_dep_map, known=known
             )
+            unverified = unverified_policy_fallbacks(
+                operations.registry_client.registry_url, server_info_cache
+            )
+            if unverified:
+                logger.error(
+                    "Org policy checked the declared transport of "
+                    f"{_ascii_names(unverified)} because the MCP registry was unavailable, "
+                    "but the registry now offers a different transport; retry when the "
+                    "registry is reachable. No MCP config was written for them."
+                )
+                raise RuntimeError(f"Cannot install {len(unverified)} unverified server(s)")
 
             # Collect env and runtime variables
             shared_env_vars = operations.collect_environment_variables(
