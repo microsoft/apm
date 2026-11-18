@@ -125,6 +125,12 @@ class TestPackTargetAllIsUniversal:
         # Older `apm pack` recorded "minimal" for projects with no target folder.
         assert check_target_mismatch(["minimal"], ["claude"]) is None
 
+    def test_check_target_mismatch_ignores_unknown_pack_targets(self) -> None:
+        # pack.target is informational: a name from a newer APM must not crash install.
+        assert check_target_mismatch(["future-harness"], ["claude"]) is None
+        warning = check_target_mismatch(["future-harness", "copilot"], ["opencode"])
+        assert warning is not None and "copilot" in warning and "future-harness" not in warning
+
     def test_check_target_mismatch_still_warns_on_real_mismatch(self) -> None:
         warning = check_target_mismatch(["copilot"], ["opencode"])
         assert warning is not None

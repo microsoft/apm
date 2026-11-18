@@ -506,15 +506,20 @@ def check_target_mismatch(
     """
     if not bundle_targets:
         return None
-    bundle_set = {t.strip() for t in bundle_targets if t and t.strip()}
-    # Issue #1207: ``"all"`` (or empty after stripping) means target-agnostic.
-    # Such bundles cover any install target, so no mismatch warning is
-    # appropriate. ``"minimal"`` is what older ``apm pack`` recorded for a
-    # project with no target folder; it names no target either.
-    if bundle_set & {"all", "minimal"}:
+    from ..core.target_catalog import accepted_target_values
+    from ..core.target_detection import normalize_target_name
+
+    # ``pack.target`` is informational metadata: ignore names this CLI does
+    # not know (e.g. ``"minimal"``, which older ``apm pack`` recorded for a
+    # project with no target folder, or a target from a newer APM) instead
+    # of failing the install.
+    known = accepted_target_values()
+    bundle_set = {t.strip() for t in bundle_targets if t and t.strip() in known}
+    # Issue #1207: ``"all"`` (or nothing known) means target-agnostic. Such
+    # bundles cover any install target, so no mismatch warning is appropriate.
+    if not bundle_set or "all" in bundle_set:
         return None
     install_set = {t.strip() for t in install_targets if t and t.strip()}
-    from ..core.target_detection import normalize_target_name
 
     normalized_install = {normalize_target_name(target) for target in install_set}
     missing = sorted(
