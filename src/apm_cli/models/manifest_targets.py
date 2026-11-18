@@ -266,25 +266,6 @@ class ManifestTargetDeclaration:
             return []
         return [name.strip() for name in str(value).split(",") if name.strip()]
 
-    def prefill_names(self) -> list[str]:
-        """Names a re-init writes as ``targets:`` without changing what deploys.
-
-        Singular ``target: all`` expands at install, so it is written as that
-        explicit set; plural ``targets: [all]`` already means omitted.
-        """
-        if self.spelling == "target" and self.legacy_all:
-            from ..core.errors import TargetResolutionError
-            from ..core.target_catalog import expand_all
-
-            try:
-                selection = self.selection
-            except (ValueError, TargetResolutionError):
-                return self.authored_names()
-            if selection == _LEGACY_ALL_TARGET:
-                # Spelling-preserving, so ``vscode`` keeps its MCP destination.
-                return list(expand_all("install"))
-        return self.authored_names()
-
     def validate_for_install(self) -> None:
         """Reject declared targets ``apm install`` cannot deploy.
 
@@ -306,18 +287,20 @@ def read_manifest_target_declaration(
 
     Returns ``None`` when the file is absent. A strict read is authoritative:
     a symlink, a non-file, or a document that is not a YAML mapping raises
-    (``OSError`` / ``yaml.YAMLError``), so a broken manifest never reads as
+    (``OSError`` / ``yaml.YAMLError``), and a manifest the read owner refuses
+    (duplicate key, YAML anchor or alias) raises ``InvalidManifestError``, so
+    a broken manifest never reads as
     "nothing declared" and silently widens the caller's target set. With
     *lenient*, unreadable or malformed manifests return ``None`` instead.
     Tokens are validated when a view (``selection``, ``restriction()``) is read.
     """
-    from ..utils.yaml_io import load_yaml
+    from .manifest_io import load_manifest
 
     if lenient:
         try:
             if not manifest_path.is_file():
                 return None
-            data = load_yaml(manifest_path)
+            data = load_manifest(manifest_path)
         except (OSError, ValueError, TypeError, yaml.YAMLError):
             return None
         if not isinstance(data, Mapping):
@@ -329,7 +312,7 @@ def read_manifest_target_declaration(
         return None
     if not manifest_path.is_file():
         raise OSError(f"{manifest_path.name} must be a regular, non-symlink file")
-    data = load_yaml(manifest_path)
+    data = load_manifest(manifest_path)
     if not isinstance(data, Mapping):
         got = "an empty document" if data is None else str(type(data))
         raise yaml.YAMLError(f"{manifest_path.name} must contain a YAML object, got {got}")

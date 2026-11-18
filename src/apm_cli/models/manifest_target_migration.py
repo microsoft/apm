@@ -1,9 +1,12 @@
 """Rewrite the deprecated top-level ``target:`` key of apm.yml to ``targets:``.
 
-Only ``apm manifest migrate`` uses this module: install and every other
-command never rewrite the manifest. The rewrite is comment-preserving and
-touches only the top-level key; dependency ``targets:`` subsets are left
-alone.
+The one target rewrite mapping for apm.yml. ``apm manifest migrate`` rewrites
+the key in place (comment-preserving, top-level key only; dependency
+``targets:`` subsets are left alone), and the ``apm init`` re-init carries the
+declared targets into its new manifest through :func:`rewritten_manifest_targets`.
+Install and every other command never rewrite the manifest. A rewritten
+manifest is parsed back with :func:`verify_rewritten_manifest` before it is
+written, so no rewrite can leave a manifest APM then rejects.
 
 Mapping (each selected target is spelled by its MCP runtime identity, so the
 MCP destination does not move):
@@ -29,10 +32,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import click
+import yaml
+
 from ..core.errors import TargetResolutionError
 from ..core.target_detection import AgentsTargetDeprecationWarning, EffectiveTargetDecision
 from ..utils.atomic_io import atomic_write_text
 from ..utils.yaml_io import load_yaml_roundtrip_str, yaml_roundtrip_to_str
+from .manifest_io import load_manifest_text, read_manifest_text
 from .manifest_targets import ManifestTargetDeclaration
 
 _LEGACY_KEY = "target"
@@ -89,6 +96,32 @@ class ManifestMigration:
         """
         if self.changed:
             atomic_write_text(self.path, self.migrated_text)
+
+
+def _error_text(exc: Exception) -> str:
+    text = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+    return text.strip().removeprefix("[x] ")
+
+
+def verify_rewritten_manifest(path: Path, text: str) -> None:
+    """Refuse a rewritten manifest that APM would reject when it reads it back.
+
+    Parses *text* with the apm.yml read checks and validates its target
+    declaration the way install does. Call before writing *text* to *path*.
+
+    Raises:
+        ManifestMigrationError: The rewrite would leave an invalid manifest.
+    """
+    try:
+        data = load_manifest_text(path, text)
+        if not isinstance(data, dict):
+            raise ValueError(f"{path} must contain a YAML mapping")
+        ManifestTargetDeclaration.from_mapping(data, path).validate_for_install()
+    except (ValueError, TypeError, yaml.YAMLError, click.UsageError) as exc:
+        raise ManifestMigrationError(
+            f"Refusing to write {path.name}: APM would reject the rewritten manifest. "
+            f"{_error_text(exc)}"
+        ) from None
 
 
 def _no_equivalent(token: str) -> ManifestMigrationError:
@@ -155,6 +188,34 @@ def plan_target_migration(
     return TargetMigrationPlan(targets=targets, expanded_all=legacy_declaration.legacy_all)
 
 
+def rewritten_manifest_targets(declaration: ManifestTargetDeclaration) -> list[str]:
+    """Return the ``targets:`` list a rewrite of *declaration* writes.
+
+    Singular ``target:`` values map exactly as ``apm manifest migrate``
+    rewrites them; a plural ``targets:`` list is kept. Empty when nothing is
+    declared.
+
+    Raises:
+        ManifestMigrationError: The declaration is invalid or a token has no
+            ``targets:`` equivalent.
+    """
+    fields = dict(declaration.fields)
+    try:
+        if declaration.spelling == _LEGACY_KEY:
+            plan = plan_target_migration(fields[_LEGACY_KEY], source_path=declaration.source_path)
+            return list(plan.targets or ())
+        names = declaration.authored_names()
+        if names:
+            # Also refuses a manifest that declares both keys.
+            rewritten = {**fields, _CURRENT_KEY: names}
+            _ = ManifestTargetDeclaration.from_mapping(rewritten, declaration.source_path).selection
+        return names
+    except ManifestMigrationError:
+        raise
+    except (ValueError, TypeError, click.UsageError) as exc:
+        raise ManifestMigrationError(_error_text(exc)) from None
+
+
 def _comment_tokens(entry: Any) -> list[Any]:
     tokens: list[Any] = []
     for slot in entry or ():
@@ -208,22 +269,6 @@ def _replace_sequence_items(sequence: Any, items: tuple[str, ...]) -> Any:
     return sequence
 
 
-def _detached_sequence(sequence: Any) -> Any:
-    """Copy *sequence* with its comments and style, but not its anchor.
-
-    An anchored ``target:`` list may be aliased elsewhere in the manifest;
-    rewriting a copy keeps those aliases unchanged.
-    """
-    from ruamel.yaml.comments import CommentedSeq
-
-    copy = CommentedSeq(list(sequence))
-    copy.ca.items.update(sequence.ca.items)
-    copy.ca.comment = sequence.ca.comment
-    if sequence.fa.flow_style():
-        copy.fa.set_flow_style()
-    return copy
-
-
 def _flow_comments_to_block(sequence: Any) -> None:
     """Switch a commented flow list to block style so its comments survive.
 
@@ -259,7 +304,7 @@ def _rewrite_document(document: Any, plan: TargetMigrationPlan) -> None:
     fits_flow = len(", ".join(plan.targets)) <= _FLOW_LIST_MAX_WIDTH
     if isinstance(legacy_value, CommentedSeq):
         # Rewrite the authored list so per-item comments survive.
-        sequence = _detached_sequence(legacy_value) if legacy_value.anchor.value else legacy_value
+        sequence = legacy_value
         if sequence.fa.flow_style() and sequence.ca.items:
             _flow_comments_to_block(sequence)
         value = _replace_sequence_items(sequence, plan.targets)
@@ -290,12 +335,13 @@ def plan_manifest_migration(path: Path, *, user_scope: bool = False) -> Manifest
     Raises:
         OSError: The manifest cannot be read.
         yaml.YAMLError: The manifest is not valid YAML.
-        ValueError: The legacy value is invalid, or both keys are present.
+        ValueError: The legacy value is invalid, both keys are present, or
+            the manifest uses a YAML anchor, alias or duplicate top-level key.
         ManifestMigrationError: The value cannot be migrated.
     """
     from ruamel.yaml.comments import CommentedMap
 
-    text = path.read_text(encoding="utf-8")
+    text = read_manifest_text(path)
     document = load_yaml_roundtrip_str(text)
     if not isinstance(document, CommentedMap):
         raise ManifestMigrationError(f"{path} must contain a YAML mapping")
@@ -318,10 +364,12 @@ def plan_manifest_migration(path: Path, *, user_scope: bool = False) -> Manifest
 
     plan = plan_target_migration(document[_LEGACY_KEY], source_path=path, user_scope=user_scope)
     _rewrite_document(document, plan)
+    migrated_text = yaml_roundtrip_to_str(document)
+    verify_rewritten_manifest(path, migrated_text)
     return ManifestMigration(
         path=path,
         original_text=text,
-        migrated_text=yaml_roundtrip_to_str(document),
+        migrated_text=migrated_text,
         plan=plan,
         ignored_compilation_target=ignored_compilation_target,
     )

@@ -92,7 +92,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-mf-017](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-017) | MUST | 4.7 | producer | active | 1 | - |
 | [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 1 | - |
 | [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 1 | - |
-| [req-mf-020](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-020) | MUST | 4.1 | consumer | active | 1 | - |
+| [req-mf-020](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-020) | MUST | 4.1 | consumer | active | 3 | - |
 | [req-mf-021](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-021) | MUST | 4.8 | producer | active | 1 | - |
 | [req-mf-022](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-022) | MUST | 4.3.2 | consumer | active | 2 | - |
 | [req-mf-023](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-023) | MUST | 4.5 | consumer | active | 1 | - |

@@ -3,9 +3,9 @@
 ``apm install PKG`` and ``apm uninstall PKG`` stopped stripping comments in
 #2000/#2012. The other commands that rewrite the consumer manifest --
 ``apm approve``, ``apm deny`` and ``apm install --mcp`` -- must honour the
-same promise: comments, flow-style lists, anchors/aliases, unknown
-extension fields and top-level key order survive, and an install/uninstall
-round trip restores the original bytes.
+same promise: comments, flow-style lists, unknown extension fields and
+top-level key order survive, and an install/uninstall round trip restores the
+original bytes. (YAML anchors and aliases are refused on read, #3858.)
 """
 
 from __future__ import annotations
@@ -26,12 +26,12 @@ _MANIFEST = """\
 name: consumer   # project name
 version: 0.1.0
 x-shared:
-  rule: &rule ./pkgs/alpha   # anchored entry
+  rule: ./pkgs/alpha   # extension entry
 target: [claude]   # flow-style list
 dependencies:
   # Direct APM packages
   apm:
-    - *rule
+    - ./pkgs/alpha
 executables: {}   # executable gate on
 """
 _COMMENTS = tuple(line.split("#", 1)[1].strip() for line in _MANIFEST.splitlines() if "#" in line)
@@ -61,13 +61,13 @@ def _assert_authoring_kept(manifest: Path, step: str) -> str:
     missing = [comment for comment in _COMMENTS if comment not in text]
     assert not missing, f"{step}: comments dropped {missing}\n{text}"
     assert "target: [claude]" in text, f"{step}: flow style lost\n{text}"
-    assert "&rule ./pkgs/alpha" in text and "- *rule" in text, f"{step}: alias lost\n{text}"
+    assert "rule: ./pkgs/alpha" in text, f"{step}: extension entry lost\n{text}"
     order = [line.split(":", 1)[0] for line in text.splitlines() if line[:1].isalpha()]
     assert tuple(key for key in order if key in _TOP_LEVEL) == _TOP_LEVEL, f"{step}: {order}"
     return text
 
 
-def test_manifest_rewrites_preserve_comments_layout_and_aliases(
+def test_manifest_rewrites_preserve_comments_and_layout(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))

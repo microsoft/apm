@@ -413,14 +413,29 @@ def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -
 
 
 # The deprecated singular ``target:`` key (#3762): one warning emitter in the
-# declaration owner and one rewrite path, reachable only from the explicit
-# ``apm manifest migrate`` command. Install never rewrites the manifest.
+# declaration owner and one target rewrite mapping (#3857), reachable only from
+# the commands that rewrite an existing apm.yml: ``apm manifest migrate`` and
+# the ``apm init`` re-init (whose scaffold writer verifies the rewrite parses).
+# Install never rewrites the manifest.
 _TARGET_DEPRECATION_OWNER = "src/apm_cli/models/manifest_targets.py"
 _TARGET_DEPRECATION_FUNCTION = "_warn_deprecated_manifest_keys"
 _TARGET_DEPRECATION_PHRASE = "uses the deprecated 'target:' key"
 _TARGET_MIGRATION_MODULE = "manifest_target_migration"
 _TARGET_MIGRATION_OWNER = "src/apm_cli/models/manifest_target_migration.py"
 _TARGET_MIGRATION_COMMAND = "src/apm_cli/commands/manifest.py"
+_TARGET_REINIT_COMMAND = "src/apm_cli/commands/init.py"
+_TARGET_SCAFFOLD_WRITER = "src/apm_cli/commands/_helpers.py"
+_TARGET_REWRITE_IMPORTERS: frozenset[str] = frozenset(
+    {_TARGET_MIGRATION_COMMAND, _TARGET_REINIT_COMMAND, _TARGET_SCAFFOLD_WRITER}
+)
+# Each rewrite path must call the owner, not only import it.
+_TARGET_REWRITE_CALLS: dict[str, str] = {
+    _TARGET_MIGRATION_OWNER: "verify_rewritten_manifest(path, migrated_text)",
+    _TARGET_REINIT_COMMAND: "return rewritten_manifest_targets(",
+    _TARGET_SCAFFOLD_WRITER: "verify_rewritten_manifest(out_file, content)",
+}
+# Authored (unvalidated) names feed only the rewrite mapping.
+_TARGET_AUTHORED_NAMES_CALL = ".authored_names("
 
 
 def _target_deprecation_findings(
@@ -445,20 +460,41 @@ def _target_deprecation_findings(
             for literal in facts.literals
             if _TARGET_DEPRECATION_PHRASE in literal.value_repr
         )
+    required_call = _TARGET_REWRITE_CALLS.get(path)
+    if required_call is not None and not any(required_call in line for line in facts.lines):
+        findings.append(
+            violation(
+                rule_id,
+                path,
+                f"apm.yml target rewrites must call the rewrite owner: {required_call}",
+            )
+        )
     if path == _TARGET_MIGRATION_OWNER:
         return findings
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            "authored target names feed only the apm.yml target rewrite mapping; "
+            f"use {_TARGET_MIGRATION_OWNER}::rewritten_manifest_targets",
+            line=number,
+        )
+        for number, line in enumerate(facts.lines, start=1)
+        if _TARGET_AUTHORED_NAMES_CALL in line
+    )
     for fact in facts.imports:
         module = (fact.module or "").split(".")[-1]
         if module != _TARGET_MIGRATION_MODULE and _TARGET_MIGRATION_MODULE not in fact.names:
             continue
         importers.add(path)
-        if path != _TARGET_MIGRATION_COMMAND:
+        if path not in _TARGET_REWRITE_IMPORTERS:
             findings.append(
                 violation(
                     rule_id,
                     path,
-                    "only 'apm manifest migrate' may rewrite apm.yml's 'target:' key; "
-                    "install and other commands must never rewrite the manifest",
+                    "only 'apm manifest migrate' and the 'apm init' re-init may rewrite "
+                    "apm.yml's targets; install and other commands must never rewrite "
+                    "the manifest",
                     line=fact.line,
                     column=fact.column + 1,
                 )
@@ -479,14 +515,14 @@ def _target_deprecation_wiring(
                 f"in {_TARGET_DEPRECATION_OWNER}",
             )
         )
-    if _TARGET_MIGRATION_COMMAND not in importers:
-        findings.append(
-            violation(
-                rule_id,
-                _TARGET_MIGRATION_COMMAND,
-                f"'apm manifest migrate' must route through {_TARGET_MIGRATION_OWNER}",
-            )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"this apm.yml target rewrite must route through {_TARGET_MIGRATION_OWNER}",
         )
+        for path in sorted(_TARGET_REWRITE_IMPORTERS - importers)
+    )
     return findings
 
 

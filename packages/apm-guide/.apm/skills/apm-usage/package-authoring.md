@@ -58,6 +58,9 @@ backfills one from the other:
   exclusively in `apm.yml`.
 - `name` and `version` must be non-empty strings. Quote numeric versions so
   YAML does not parse them as numbers.
+- `apm.yml` must not use YAML anchors or aliases (`&name`, `*name`, or
+  `<<: *name`). Every command that reads the manifest refuses one with the
+  file and line (OpenAPM req-mf-020(b)); write each value out in full.
 
 The corrected OpenAPM v0.1 candidate uses
 `https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.48.schema.json`

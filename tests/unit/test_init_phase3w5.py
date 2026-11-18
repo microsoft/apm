@@ -184,6 +184,35 @@ class TestReadExistingTargets:
         result = _read_existing_targets(tmp_path)
         assert result == []
 
+    @pytest.mark.parametrize(
+        ("declared", "expected"),
+        [
+            ({"target": "agents"}, ["copilot"]),
+            ({"target": "agents,claude"}, ["copilot", "claude"]),
+            ({"target": "agy"}, ["antigravity"]),
+        ],
+    )
+    def test_legacy_target_uses_the_migrate_mapping(self, tmp_path, declared, expected):
+        """#3857: a re-init never writes a ``targets:`` token APM rejects."""
+        from apm_cli.commands.init import _read_existing_targets
+
+        (tmp_path / "apm.yml").write_text(yaml.safe_dump(declared))
+        assert _read_existing_targets(tmp_path) == expected
+
+    def test_unmappable_target_is_refused(self, tmp_path):
+        from apm_cli.commands.init import _read_existing_targets
+        from apm_cli.models.manifest_target_migration import ManifestMigrationError
+
+        (tmp_path / "apm.yml").write_text(yaml.safe_dump({"target": "intellij"}))
+        with pytest.raises(ManifestMigrationError, match="'intellij' has no 'targets:'"):
+            _read_existing_targets(tmp_path)
+
+    def test_anchored_manifest_returns_empty(self, tmp_path):
+        from apm_cli.commands.init import _read_existing_targets
+
+        (tmp_path / "apm.yml").write_text("x: &t [claude]\ntargets: *t\n")
+        assert _read_existing_targets(tmp_path) == []
+
 
 # ---------------------------------------------------------------------------
 # _resolve_init_targets
@@ -293,6 +322,41 @@ class TestResolveInitTargets:
                 logger=logger,
             )
         assert result == ["copilot"]
+
+    def test_unmappable_existing_target_exits_before_writing_when_non_interactive(self, tmp_path):
+        from apm_cli.commands.init import _resolve_init_targets
+
+        (tmp_path / "apm.yml").write_text("target: intellij\n")
+        logger = self._make_logger()
+        with (
+            patch("apm_cli.commands.init._stdin_is_tty", return_value=False),
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            _resolve_init_targets(
+                tmp_path, target_flag=None, yes=True, apm_yml_exists=True, logger=logger
+            )
+        assert excinfo.value.code == 1
+        assert "'intellij' has no 'targets:' equivalent" in logger.error.call_args.args[0]
+        assert (tmp_path / "apm.yml").read_text() == "target: intellij\n"
+
+    def test_unmappable_existing_target_warns_and_prompts_when_interactive(self, tmp_path):
+        from apm_cli.commands.init import _resolve_init_targets
+
+        (tmp_path / "apm.yml").write_text("target: intellij\n")
+        logger = self._make_logger()
+        with (
+            patch("apm_cli.commands.init._stdin_is_tty", return_value=True),
+            patch("apm_cli.commands.init.detect_signals", return_value=[]),
+            patch(
+                "apm_cli.commands.init._prompt_target_selection", return_value=["claude"]
+            ) as prompt,
+        ):
+            result = _resolve_init_targets(
+                tmp_path, target_flag=None, yes=False, apm_yml_exists=True, logger=logger
+            )
+        assert result == ["claude"]
+        assert prompt.call_args.args[0] == set()
+        assert "'intellij' has no 'targets:' equivalent" in logger.warning.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------

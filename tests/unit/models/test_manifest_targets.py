@@ -194,13 +194,17 @@ def test_stand_in_packages_route_through_the_owner():
     assert manifest_target_restriction(None) == []
 
 
-def test_reinit_prefill_expands_singular_all_with_install_spellings():
-    """Re-init writes the spellings install deploys, so MCP keeps .vscode/mcp.json."""
-    names = _declaration(target="all").prefill_names()
+def test_reinit_rewrite_expands_singular_all_through_the_migrate_plan():
+    """Re-init writes the list ``apm manifest migrate`` writes for ``target: all``."""
+    from apm_cli.models.manifest_target_migration import (
+        plan_target_migration,
+        rewritten_manifest_targets,
+    )
+
+    names = rewritten_manifest_targets(_declaration(target="all"))
     assert len(names) > 1
-    assert "vscode" in names
-    assert "copilot" not in names
-    assert _declaration(targets=["all"]).prefill_names() == ["all"]
+    assert names == list(plan_target_migration("all").targets)
+    assert rewritten_manifest_targets(_declaration(targets=["all"])) == ["all"]
 
 
 @pytest.mark.parametrize(

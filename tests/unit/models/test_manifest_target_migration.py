@@ -8,10 +8,13 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.target_detection import EffectiveTargetDecision
+from apm_cli.models.manifest_io import ManifestAnchorError
 from apm_cli.models.manifest_target_migration import (
     ManifestMigrationError,
     plan_manifest_migration,
     plan_target_migration,
+    rewritten_manifest_targets,
+    verify_rewritten_manifest,
 )
 from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 
@@ -268,16 +271,64 @@ def test_removing_empty_key_keeps_its_comment(tmp_path, original, migrated):
     assert plan_manifest_migration(manifest).migrated_text == migrated
 
 
-def test_anchored_list_is_rewritten_without_changing_its_aliases(tmp_path):
-    manifest = _write(
-        tmp_path / "apm.yml",
-        "name: demo\ntarget: &t\n  - agy\ncompilation:\n  exclude: *t\n",
-    )
+def test_anchored_manifest_is_refused_before_planning(tmp_path):
+    original = "name: demo\ntarget: &t\n  - agy\ncompilation:\n  exclude: *t\n"
+    manifest = _write(tmp_path / "apm.yml", original)
 
-    migrated = plan_manifest_migration(manifest).migrated_text
+    with pytest.raises(ManifestAnchorError, match=r"YAML anchor '&t' on line 2"):
+        plan_manifest_migration(manifest)
+    assert manifest.read_text(encoding="utf-8") == original
 
-    assert "targets:\n  - antigravity\n" in migrated
-    assert "compilation:\n  exclude:\n    - agy\n" in migrated
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        pytest.param({}, [], id="nothing-declared"),
+        pytest.param({"target": "agents"}, ["copilot"], id="agents-to-copilot"),
+        pytest.param({"target": "agents,claude"}, ["copilot", "claude"], id="csv"),
+        pytest.param({"target": "agy"}, ["antigravity"], id="agy-to-antigravity"),
+        pytest.param({"targets": ["claude", "cursor"]}, ["claude", "cursor"], id="plural-kept"),
+    ],
+)
+def test_rewrite_targets_use_the_migrate_mapping(fields, expected):
+    declaration = ManifestTargetDeclaration.from_mapping(fields)
+
+    assert rewritten_manifest_targets(declaration) == expected
+
+
+def test_rewrite_of_target_all_is_the_migrate_plan():
+    declaration = ManifestTargetDeclaration.from_mapping({"target": "all"})
+
+    assert rewritten_manifest_targets(declaration) == list(plan_target_migration("all").targets)
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        pytest.param(
+            {"target": "intellij"}, "'intellij' has no 'targets:' equivalent", id="intellij"
+        ),
+        pytest.param({"target": "foo"}, "'foo' is not a valid target", id="unknown"),
+        pytest.param({"targets": ["agents"]}, "Unknown target 'agents'", id="plural-alias"),
+        pytest.param(
+            {"target": "claude", "targets": ["claude"]}, "both 'target:' and 'targets:'", id="both"
+        ),
+    ],
+)
+def test_rewrite_targets_refuse_what_apm_would_reject(fields, message):
+    declaration = ManifestTargetDeclaration.from_mapping(fields)
+
+    with pytest.raises(ManifestMigrationError, match=message) as excinfo:
+        rewritten_manifest_targets(declaration)
+    assert not str(excinfo.value).startswith("[x]")
+
+
+def test_verify_refuses_a_rewrite_apm_would_reject(tmp_path):
+    with pytest.raises(ManifestMigrationError, match=r"Unknown target 'agents'"):
+        verify_rewritten_manifest(tmp_path / "apm.yml", "name: demo\ntargets:\n- agents\n")
+    with pytest.raises(ManifestMigrationError, match=r"YAML anchor '&t' on line 1"):
+        verify_rewritten_manifest(tmp_path / "apm.yml", "x: &t [claude]\ntargets: *t\n")
+    verify_rewritten_manifest(tmp_path / "apm.yml", "name: demo\ntargets:\n- copilot\n")
 
 
 def test_multiline_flow_list_keeps_item_comments(tmp_path):
