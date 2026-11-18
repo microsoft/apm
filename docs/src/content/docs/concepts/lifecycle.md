@@ -16,7 +16,7 @@ APM has five lifecycle steps. Most projects use all five; small ones use three.
                                           +--> back to install (fix drift)
 ```
 
-`init` scaffolds the project. `install` resolves dependencies, scans them, and writes the lockfile. `compile` transforms primitives into the formats each agent harness expects. `run` invokes a script declared in `apm.yml`. `audit` rebuilds the deployed context in scratch and diffs it against your working tree to catch drift before it ships.
+`init` scaffolds the project. `install` resolves dependencies, scans them, deploys primitives into each harness's native directory, and writes the lockfile. `compile` aggregates instructions into context files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`. `run` invokes a script declared in `apm.yml`. `audit` rebuilds the deployed context in scratch and diffs it against your working tree to catch drift before it ships.
 
 You will use `install` and `run` daily, `audit` in CI, and `init` and `compile` rarely.
 
@@ -40,7 +40,7 @@ targets](../primitives-and-targets/) for what each target receives.
 
 **Common surprises**
 
-- Re-running `apm init` in a directory that already has `apm.yml` warns and exits unless you pass `-y` (which overwrites the manifest).
+- Re-running `apm init` in a directory that already has `apm.yml` warns and asks before overwriting it; `-y` overwrites without asking.
 - `targets:` must contain at least one target. Omit the field (or leave legacy `target:` blank) when you want auto-detection at compile time.
 
 **Read more:** [`apm init` reference](/apm/reference/cli/init/), [package anatomy](/apm/concepts/package-anatomy/).
@@ -82,7 +82,7 @@ After narrowing `targets:`, run `apm install` to reconcile obsolete target outpu
 apm compile [--target <list>]
 ```
 
-Transforms the primitives in `.apm/` (and dependencies under `apm_modules/`) into harness-native files: `AGENTS.md` for Codex, `GEMINI.md` for Gemini, populated `.cursor/`, `.opencode/`, `.windsurf/`, `.kiro/` directories, and so on.
+Aggregates instructions from `.apm/` (and dependencies under `apm_modules/`) into root or distributed context files: `CLAUDE.md` for Claude and `AGENTS.md` for most other targets (Gemini also gets `GEMINI.md`, Copilot also gets `.github/copilot-instructions.md`). See [output layout per target](../../reference/cli/compile/#output-layout-per-target).
 
 `apm install` deploys individual primitives but does not run aggregate
 compilation. Run `apm compile` explicitly to generate root or distributed

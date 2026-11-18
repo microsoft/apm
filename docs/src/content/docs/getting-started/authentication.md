@@ -6,6 +6,8 @@ sidebar:
 
 APM works without tokens for public packages on github.com. Authentication is needed for private repositories, enterprise hosts (`*.ghe.com`, GHES), GitLab (private or API access), and Azure DevOps.
 
+To see which credential APM resolves for a GitHub or GitLab host, or to create one if there is none, run `apm auth <host>` (for example `apm auth github.com`). See [`apm auth`](../../reference/cli/auth/).
+
 ## CLI bootstrap and release lookup
 
 Installing or updating the CLI queries public release metadata authenticated-first when an environment token is available, with narrowly scoped anonymous recovery for a rejected token. This is separate from private-package authentication and anonymous-first public-package Git operations. See [Public release metadata](../installation/#public-release-metadata) for token precedence and retry restrictions.
@@ -457,9 +459,9 @@ For GitHub and GHES, APM sends repository API requests with `Authorization: toke
 | Package source | Host | Auth behavior | Fallback |
 |---|---|---|---|
 | Bare shorthand | `default_host()` | Host-class-specific chain above | Depends on classified host |
-| `github.com/org/repo` | github.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
-| `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
-| GHES via `GITHUB_HOST` | ghes.company.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| `github.com/org/repo` | github.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| `contoso.ghe.com/org/repo` | *.ghe.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
+| GHES via `GITHUB_HOST` | ghes.company.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
 | GitLab (`gitlab.com` or host listed in `GITLAB_HOST` / `APM_GITLAB_HOSTS`) | gitlab.com or self-managed | HTTPS/API: `GITLAB_APM_PAT` -> `GITLAB_TOKEN` -> credential helper; REST uses `PRIVATE-TOKEN`; SSH uses native SSH auth; GitHub env vars excluded | Sparse-fetch REST requires exhausted same-origin effective HTTPS; otherwise native transport access |
 | `dev.azure.com/org/proj/repo` | ADO (cloud) | `ADO_APM_PAT` -> AAD bearer via `az` -> git credential fill | Auth-only |
 | ADO Server via `ADO_HOST` / `APM_ADO_HOSTS` | on-prem ADO | `ADO_APM_PAT` -> git credential fill | Auth-only |

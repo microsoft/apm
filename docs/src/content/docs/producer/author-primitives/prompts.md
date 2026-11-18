@@ -6,7 +6,7 @@ description: Ship a parameterized, single-purpose AI workflow as a .prompt.md pr
 A prompt is a single-purpose, parameterized AI workflow. Write one
 Markdown file with frontmatter; `apm install` deploys it as a Copilot prompt,
 a Claude `/command`, a Grok Build command, a Cursor command, an OpenCode
-command, a Gemini TOML command, and a Windsurf workflow.
+command, a Gemini TOML command, a Kiro prompt, and a Windsurf workflow.
 
 Use a prompt when the consumer invokes the workflow on demand
 ("review this PR", "draft a release note"). Use a
@@ -29,13 +29,12 @@ my-package/
 ```
 
 Files at the package root (`<pkg>/*.prompt.md`) are also discovered
-for backward compatibility, but `.apm/prompts/` is canonical and
-what `apm init` scaffolds.
+for backward compatibility, but `.apm/prompts/` is canonical.
 
 ## Frontmatter
 
 Five keys are preserved by the cross-tool transform. Anything else
-is dropped at compile time and surfaced via diagnostics so consumers
+is dropped at install time and surfaced via diagnostics so consumers
 on lossy targets see a warning, not silent data loss.
 
 | Key | Type | Purpose |
@@ -93,6 +92,7 @@ and `command_integrator.py`.
 | opencode | `.opencode/commands/<name>.md` | shared command transform |
 | gemini | `.gemini/commands/<name>.toml` | TOML command |
 | windsurf | `.windsurf/workflows/<name>.md` | workflow |
+| kiro | `.kiro/prompts/<name>.md` | body only (frontmatter dropped); `${input:name}` is not expanded |
 | codex | (none) | Codex has no prompts or commands primitive |
 
 For the broader primitive-by-target reach map, see

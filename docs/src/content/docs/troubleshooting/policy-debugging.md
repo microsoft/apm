@@ -14,24 +14,42 @@ This page walks the diagnosis end to end.
 
 ## 1. Read the failure
 
-A policy block looks roughly like this:
+You usually meet a policy block in `apm install` first. It names the
+policy source, the check that fired, and the offending dependencies:
 
 ```text
-[x] policy: dependency-allowlist
-    severity: error
-    message:  Dependency 'acme-corp/internal-skills' is not on the
-              org allowlist.
-    evidence: apm.yml -> dependencies.apm[2]
-    source:   acme-corp/.github/apm-policy.yml
+[!] Policy: org:acme-corp/.github -- enforcement=block
+[x] Policy violation: dependency-allowlist -- 1 dependency(ies) not in allow list: github.com/contoso/agent-skills: not in allowed sources
+  Blocked by org policy at org:acme-corp/.github -- remove `dependency-allowlist` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Install blocked by org policy -- see violations above
+```
+
+`apm install` exits `1` and writes nothing; a package you were adding is
+removed from `apm.yml` again. Until [#3835](https://github.com/microsoft/apm/issues/3835) is fixed, the
+`Blocked by` hint names the check, not the dependency: act on the
+dependencies listed in the violation line.
+
+`apm audit --ci` reports the same check as a failed row in its check
+table, then lists the offending entries:
+
+```text
+  dependency-allowlist details:
+    - github.com/contoso/agent-skills: not in allowed sources
+
+[x] 1 of 11 check(s) failed
 ```
 
 Three things to extract before doing anything else:
 
-- **Rule id** (`dependency-allowlist`) -- pin it; you will reuse it in the
-  next steps.
-- **Severity** (`error` blocks; `warning` does not).
-- **Source** -- the org policy file that owns the rule. If you do not
-  recognize it, jump straight to step 2.
+- **Check name** (`dependency-allowlist`) -- pin it; you will reuse it in
+  the next steps.
+- **Enforcement** -- `enforcement=block` fails the command. Under `warn`,
+  `apm install` continues and lists the finding under `policy warning`
+  in its summary.
+- **Source** -- the policy that ruled (`org:<org>/.github` when
+  auto-discovered from your git remote). Only `apm install` prints it; if
+  you do not recognize it, or you are reading audit output, jump
+  straight to step 2.
 
 ## 2. Ask "which policy ruled on me?"
 
@@ -86,7 +104,8 @@ Common surprises:
   `dependency.deny` still applies -- denies always win.
 - A child sets `mcp.transport.allow: [stdio, http]` but the parent
   pinned `[http]` -- the child's broader list is ignored.
-- Severity can only be raised by a child, never lowered.
+- `enforcement` can only be raised by a child (`off` -> `warn` ->
+  `block`), never lowered.
 
 The full merge semantics live in
 [Policy schema -> Merge rules (tighten-only)](../../reference/policy-schema/#merge-rules).
@@ -195,7 +214,7 @@ Pick the right ask:
 When you open the PR against the org policy repo:
 
 1. Link the failing CI run (or the `apm policy status` JSON output).
-2. Quote the exact rule id and source line.
+2. Quote the exact check name and violation line.
 3. Link the org policy file you are amending so reviewers do not have
    to hunt for it.
 
