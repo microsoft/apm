@@ -18,7 +18,8 @@ selection                               must share EffectiveTargetDecision"
 registry-delegation-policy-target-      Compilation-target policy judges
 projection                              EffectiveTargetDecision.canonical_targets
 registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
-                                        owner check
+                                        owner check; #3754 policy discovery
+                                        returns diagnostics as data
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -140,6 +141,14 @@ _DOCTOR_RAW_SYMBOLS: frozenset[str] = frozenset({"[!]", "[x]", "[i]", "[+]"})
 
 
 _DOCTOR_OWNER_NAME = "STATUS_SYMBOLS"
+
+# #3754: policy discovery returns diagnostics as PolicyFetchResult data; only
+# CommandLogger may render them. A stdlib ``logger.<level>`` call here reaches
+# the root handler on every install and bypasses verbose gating.
+_POLICY_DISCOVERY_FILE = "src/apm_cli/policy/discovery.py"
+_USER_FACING_LOG_LEVELS: frozenset[str] = frozenset(
+    {"info", "warning", "warn", "error", "exception", "critical"}
+)
 
 
 _COMPILATION_PREFIX = "src/apm_cli/compilation/"
@@ -825,29 +834,65 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
 
 
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
+    """User-facing output must route through the CommandLogger / console owner.
+
+    Combines the AC12 doctor-status guard with the #3754 policy-discovery
+    guard; both report under ``registry_delegation.output_diagnostics``.
+    """
+    rule_id = "registry_delegation.output_diagnostics"
+    return (
+        *_doctor_status_findings(provider, rule_id),
+        *_policy_discovery_output_findings(provider, rule_id),
+    )
+
+
+def _policy_discovery_output_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Policy discovery must not emit user-facing stdlib ``logger`` output."""
+    _facts, failures = checked_facts(provider, _POLICY_DISCOVERY_FILE, rule_id, require_python=True)
+    if failures:
+        return list(failures)
+    index = provider.tree_index(_POLICY_DISCOVERY_FILE)
+    return [
+        violation(
+            rule_id,
+            _POLICY_DISCOVERY_FILE,
+            f"policy discovery must return diagnostics as PolicyFetchResult data for "
+            f"CommandLogger, not logger.{node.func.attr}()",
+            line=node.lineno,
+            column=node.col_offset + 1,
+        )
+        for node in (() if index is None else index.nodes)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _USER_FACING_LOG_LEVELS
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "logger"
+    ]
+
+
+def _doctor_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
     """Doctor status symbols must come from ``utils/console.py::STATUS_SYMBOLS``.
 
     Ports the AC12 doctor-status guard: within ``_doctor_status_icon`` no raw
     status glyph may appear as a string constant, the name must come from the
     console owner, and each actual return expression must consume that owner.
     """
-    rule_id = "registry_delegation.output_diagnostics"
     _facts, failures = checked_facts(provider, _DOCTOR_FILE, rule_id, require_python=True)
     if failures:
-        return failures
+        return list(failures)
 
     index = provider.tree_index(_DOCTOR_FILE)
     definitions = (
         () if index is None else direct_definitions(index, _DOCTOR_FUNCTION, kinds=FUNCTION_NODES)
     )
     if not definitions:
-        return (
+        return [
             violation(
                 rule_id,
                 _DOCTOR_FILE,
                 "doctor status owner function _doctor_status_icon is missing",
-            ),
-        )
+            )
+        ]
 
     findings: list[Violation] = []
     function = definitions[-1]
@@ -1584,7 +1629,10 @@ RULES: tuple[Rule, ...] = (
         id="registry_delegation.output_diagnostics",
         group=GROUP,
         guard_ids=("registry-delegation-output-diagnostics",),
-        description="User-facing status symbols must come from utils/console.py STATUS_SYMBOLS.",
+        description=(
+            "User-facing status symbols must come from utils/console.py STATUS_SYMBOLS; "
+            "policy discovery returns diagnostics as data, not logger output."
+        ),
         check=_check_output_diagnostics,
     ),
     Rule(

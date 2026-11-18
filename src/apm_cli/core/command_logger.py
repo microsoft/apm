@@ -715,6 +715,7 @@ class InstallLogger(CommandLogger):
         source: str = "",
         error: str | None = None,
         host_org: str | None = None,
+        hint: str | None = None,
     ):
         """Log a policy-discovery non-success outcome.
 
@@ -732,6 +733,8 @@ class InstallLogger(CommandLogger):
                 cache_miss_fetch_fail, garbage_response, cached_stale).
             host_org: Optional org slug for ``absent`` outcome (verbose
                 hint).  Auto-derived from ``source`` when not provided.
+            hint: Optional discovery diagnostic (``PolicyFetchResult.
+                discovery_hint``), shown with ``absent`` in verbose mode only.
         """
         err_text = error or "unknown"
 
@@ -742,6 +745,8 @@ class InstallLogger(CommandLogger):
                 return
             org = host_org or _strip_source_prefix(source) or "this project"
             _rich_info(f"No org policy found for {org}", symbol="info")
+            if hint:
+                _rich_info(hint, symbol="info")
             return
 
         if outcome == "no_git_remote":

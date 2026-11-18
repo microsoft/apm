@@ -110,6 +110,24 @@ class TestPolicyDiscoveryMiss:
         assert "No org policy found for acme/.github" in msg
 
     @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_absent_hint_silent_in_non_verbose(self, mock_warning, mock_info):
+        """#3754: the masked-404 hint never prints in default mode."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_discovery_miss(outcome="absent", source="", hint="acme/.github-private hint")
+        mock_info.assert_not_called()
+        mock_warning.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_absent_hint_visible_in_verbose(self, mock_info, mock_warning):
+        logger = InstallLogger(verbose=True)
+        logger.policy_discovery_miss(outcome="absent", source="", hint="acme/.github-private hint")
+        messages = [args[0][0] for args in mock_info.call_args_list]
+        assert "acme/.github-private hint" in messages
+        mock_warning.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
     def test_absent_explicit_host_org(self, mock_info):
         logger = InstallLogger(verbose=True)
         logger.policy_discovery_miss(outcome="absent", source="ignored", host_org="explicit/org")

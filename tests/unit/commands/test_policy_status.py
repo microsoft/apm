@@ -200,6 +200,21 @@ class TestStatusAbsentOutcome:
         assert "none" in result.output  # extends + rules
         assert _ascii_only(result.output)
 
+    def test_shows_masked_404_hint(self, runner):
+        """#3754: `apm policy status` is where the masked-404 hint is visible."""
+        result_obj = PolicyFetchResult(
+            outcome="absent",
+            discovery_hint="contoso/.github-private returned 404.",
+        )
+        with patch(
+            "apm_cli.commands.policy.discover_policy_with_chain",
+            return_value=result_obj,
+        ):
+            table = runner.invoke(policy_group, ["status"])
+            as_json = runner.invoke(policy_group, ["status", "--json"])
+        assert "contoso/.github-private returned 404." in table.output
+        assert json.loads(as_json.output)["discovery_hint"] == result_obj.discovery_hint
+
 
 class TestStatusCachedStaleOutcome:
     def test_renders_stale_with_refresh_error(self, runner):
