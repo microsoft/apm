@@ -11,17 +11,23 @@ Find plugins in a registered marketplace by name or keyword.
 
 ```bash
 apm search QUERY@MARKETPLACE [OPTIONS]
+apm marketplace search QUERY@MARKETPLACE [OPTIONS]
 ```
 
-`apm search` is the top-level marketplace search command. It reuses the marketplace search implementation and accepts the `QUERY@MARKETPLACE` expression and options shown below.
+Both command forms use the same search implementation and accept the
+`QUERY@MARKETPLACE` expression and options shown below.
 
 ## Description
 
-`apm search` queries a single marketplace registered in the local marketplace registry and returns plugins whose name or description matches `QUERY`. The `QUERY@MARKETPLACE` expression is required: the marketplace name disambiguates which registered source to search, and prevents accidental wide scans across every marketplace.
+Search one marketplace registered in the local marketplace registry for
+plugins whose name or description matches `QUERY`. The marketplace name
+disambiguates the source and prevents scans across every registered marketplace.
 
 The marketplace must be registered first with `apm marketplace add`. To list registered marketplaces, run `apm marketplace list`. To browse every plugin in a marketplace without filtering, use `apm marketplace browse <name>`.
 
-Results print as a table with plugin name, description, and the install expression. Pipe the install expression directly into [`apm install`](../install/) to add a hit to your manifest.
+Text output is a table with plugin name, description, and install expression.
+Pipe an install expression into [`apm install`](../install/) to add a result
+to your manifest.
 
 ## Arguments
 
@@ -36,7 +42,33 @@ The expression is split on the last `@`, so queries containing `@` are preserved
 | Option              | Default | Description                          |
 | ------------------- | ------- | ------------------------------------ |
 | `--limit N`         | `20`    | Maximum number of results to display |
+| `--format`, `-f`    | `text`  | Output format: `text` or `json`      |
 | `-v`, `--verbose`   |         | Show detailed output and tracebacks  |
+
+## JSON output
+
+Use `--format json` or `-f json` to emit a version-1 document on stdout.
+Text remains the default. Success output has `data` as an array:
+
+```json
+{"schema_version":1,"data":[{"name":"code-review","description":"Reviews changes","install":"code-review@skills"}]}
+```
+
+Each result contains `name`, `description`, and `install`; a missing
+description is `null`. A successful search with no matches returns
+`{"schema_version":1,"data":[]}` and exits `0`. The existing `--limit`
+selects results first; JSON then sorts only those selected results
+case-insensitively by `name`.
+
+URL-bearing values in descriptions have userinfo, query strings, and
+fragments removed; embedded APM-internal cache paths are replaced with
+`[internal-cache]`.
+
+Progress and diagnostics go to stderr. Handled failures write
+`{"schema_version":1,"error":"<code>"}` to stderr and exit nonzero. The
+stable error codes are `invalid_search_expression`, `marketplace_not_found`,
+and `marketplace_search_failed`; raw exception text is not included in the
+code. Click parser and option errors retain their normal usage-error output.
 
 ## Examples
 
@@ -44,6 +76,12 @@ Search the `skills` marketplace for security-related plugins:
 
 ```bash
 apm search security@skills
+```
+
+The marketplace-group spelling is an alias for the same search:
+
+```bash
+apm marketplace search security@skills
 ```
 
 Limit results to the top five matches:
@@ -63,7 +101,8 @@ apm install code-review@skills
 | Code | Meaning                                                                 |
 | ---- | ----------------------------------------------------------------------- |
 | `0`  | Search completed (including zero matches)                               |
-| `1`  | Invalid expression, marketplace not registered, or unexpected error     |
+| `1`  | Handled search failure, including an invalid expression or unregistered marketplace |
+| `2`  | Click usage or option error                                               |
 
 ## Related
 

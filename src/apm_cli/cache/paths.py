@@ -41,6 +41,17 @@ HTTP_BUCKET = "http_v1"
 _temp_cache_dir: str | None = None
 
 
+def cache_roots_for_display() -> tuple[Path, ...]:
+    """Return internal cache locations without creating directories for a report."""
+    roots = [Path(_platform_default())]
+    override = os.environ.get("APM_CACHE_DIR", "").strip()
+    if override:
+        roots.append(Path(override).expanduser())
+    if _temp_cache_dir is not None:
+        roots.append(Path(_temp_cache_dir))
+    return tuple(roots)
+
+
 def get_cache_root(*, no_cache: bool = False) -> Path:
     """Resolve the cache root directory.
 

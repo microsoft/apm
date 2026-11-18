@@ -249,8 +249,8 @@ def _get_package_display_info(package_path: Path) -> dict[str, str]:
         }
 
 
-def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
-    """Get detailed package information for the info command."""
+def _get_detailed_package_info(package_path: Path, *, for_json: bool = False) -> dict[str, Any]:
+    """Get package details, optionally preserving absent metadata as null."""
     try:
         apm_yml_path = package_path / APM_YML_FILENAME
         if apm_yml_path.exists():
@@ -263,7 +263,9 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
             # SKILL.md description is intentionally NOT borrowed -- it is
             # an agent invocation matcher, not a human tagline.
             is_hybrid = (package_path / "SKILL.md").exists()
-            if package.description:
+            if for_json:
+                desc = package.description or None
+            elif package.description:
                 desc = package.description
             elif is_hybrid:
                 desc = (
@@ -273,10 +275,10 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
                 desc = "No description"
             return {
                 "name": package.name,
-                "version": package.version or "unknown",
+                "version": package.version or (None if for_json else "unknown"),
                 "description": desc,
-                "author": package.author or "Unknown",
-                "source": package.source or "local",
+                "author": package.author or (None if for_json else "Unknown"),
+                "source": package.source or (None if for_json else "local"),
                 "install_path": str(package_path.resolve()),
                 "context_files": _get_detailed_context_counts(package_path),
                 "workflows": workflow_count,
@@ -287,10 +289,10 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
             primitives = _count_primitives(package_path)
             return {
                 "name": package_path.name,
-                "version": "unknown",
-                "description": "No apm.yml found",
-                "author": "Unknown",
-                "source": "unknown",
+                "version": None if for_json else "unknown",
+                "description": None if for_json else "No apm.yml found",
+                "author": None if for_json else "Unknown",
+                "source": None if for_json else "unknown",
                 "install_path": str(package_path.resolve()),
                 "context_files": _get_detailed_context_counts(package_path),
                 "workflows": workflow_count,
@@ -299,6 +301,21 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
     except Exception as e:
         identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
         if identity is not None:
+            if for_json:
+                data = load_yaml(package_path / APM_YML_FILENAME)
+                _, workflow_count = _count_package_files(package_path)
+                primitives = _count_primitives(package_path)
+                return {
+                    "name": identity["name"],
+                    "version": data.get("version") or None,
+                    "description": data.get("description") or None,
+                    "author": data.get("author") or None,
+                    "source": data.get("source") or None,
+                    "install_path": str(package_path.resolve()),
+                    "context_files": _get_detailed_context_counts(package_path),
+                    "workflows": workflow_count,
+                    "hooks": primitives.get("hooks", 0),
+                }
             # Tolerant display: a readable manifest with incomplete identity
             # (e.g. empty/missing version) renders gracefully -- symmetric with
             # `deps list` -- instead of masking the package behind an error.
@@ -313,6 +330,8 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
                 "workflows": 0,
                 "hooks": 0,
             }
+        if for_json:
+            raise
         return {
             "name": package_path.name,
             "version": "error",

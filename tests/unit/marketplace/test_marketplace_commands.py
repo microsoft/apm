@@ -1,13 +1,16 @@
 """Tests for marketplace CLI commands using CliRunner."""
 
-import json  # noqa: F401
+import json
 import re
-from unittest.mock import MagicMock, patch  # noqa: F401
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.marketplace.errors import MarketplaceNotFoundError
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -789,6 +792,145 @@ class TestMarketplaceAdd:
 class TestMarketplaceList:
     """marketplace list."""
 
+    def test_json_sources_are_safe(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Sources cannot disclose URL secrets or internal cache locations."""
+        from apm_cli.cli import cli
+        from apm_cli.config import CONFIG_DIR
+
+        monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+        cache = tmp_path / "download-cache"
+        monkeypatch.setenv("APM_CACHE_DIR", str(cache))
+        local = Path.home() / "catalog"
+        monkeypatch.setattr(
+            "apm_cli.marketplace.registry.get_registered_marketplaces",
+            lambda: [
+                SimpleNamespace(
+                    name="remote",
+                    url="https://person:secret@catalog.example.com/marketplace.json?token=hidden#private",
+                    path="",
+                    ref="",
+                    kind="url",
+                ),
+                MarketplaceSource(name="local", url=str(local)),
+                MarketplaceSource(name="file", url=local.as_uri()),
+                SimpleNamespace(
+                    name="ssh",
+                    kind="git",
+                    ref="",
+                    path="",
+                    url="ssh://person:secret@git.example.com/org/repo?token=hidden#private",
+                ),
+                SimpleNamespace(
+                    name="scp",
+                    kind="git",
+                    ref="",
+                    path="",
+                    url="person@git.example.com:org/repo?token=hidden#private",
+                ),
+                SimpleNamespace(name="invalid", kind="local", url="file://[", ref="", path=""),
+                MarketplaceSource(name="cached", url=str(cache / "checkout")),
+                MarketplaceSource(
+                    name="legacy", url=str(Path(CONFIG_DIR) / "cache" / "marketplace")
+                ),
+            ],
+        )
+        result = runner.invoke(cli, ["marketplace", "list", "-fjson"])
+        assert result.exit_code == 0, result.output
+        sources = {row["name"]: row["source"] for row in json.loads(result.stdout)["data"]}
+        assert sources["local"] == "~/catalog"
+        assert sources["file"] == "~/catalog"
+        assert sources["cached"] is None
+        assert sources["legacy"] is None
+        assert sources["invalid"] is None
+        remote = urlparse(sources["remote"])
+        assert (remote.scheme, remote.hostname, remote.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert (remote.username, remote.password, remote.query, remote.fragment) == (
+            None,
+            None,
+            "",
+            "",
+        )
+        for key in ("ssh", "scp"):
+            parsed = urlparse(sources[key])
+            assert (parsed.scheme, parsed.hostname, parsed.path) == (
+                "ssh",
+                "git.example.com",
+                "/org/repo",
+            )
+            assert (parsed.username, parsed.password, parsed.query, parsed.fragment) == (
+                None,
+                None,
+                "",
+                "",
+            )
+        assert result.stderr == ""
+        assert not cache.exists()
+
+    def test_json_unresolvable_source_is_null(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A local path that cannot be checked for cache containment fails closed."""
+        from apm_cli.cli import cli
+
+        original_resolve = Path.resolve
+        denied = tmp_path / "unreadable"
+
+        def resolve(path: Path, strict: bool = False) -> Path:
+            if path == denied:
+                raise OSError("permission denied")
+            return original_resolve(path, strict=strict)
+
+        monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+        monkeypatch.setattr(Path, "resolve", resolve)
+        monkeypatch.setattr(
+            "apm_cli.marketplace.registry.get_registered_marketplaces",
+            lambda: [
+                SimpleNamespace(name="denied", kind="local", url=str(denied), ref="", path="")
+            ],
+        )
+        result = runner.invoke(cli, ["marketplace", "list", "-f", "json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["data"] == [
+            {"name": "denied", "source": None, "ref": None, "path": None}
+        ]
+        assert result.stderr == ""
+
+    def test_json_list_schema_and_order(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """JSON reports only the public fields, sorted without case sensitivity."""
+        from apm_cli.cli import cli
+
+        monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+        monkeypatch.setattr(
+            "apm_cli.marketplace.registry.get_registered_marketplaces",
+            lambda: [
+                MarketplaceSource(name="Zebra", owner="acme", repo="plugins"),
+                MarketplaceSource(name="alpha", ref="", path=""),
+            ],
+        )
+        result = runner.invoke(cli, ["marketplace", "list", "--format", "json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout) == {
+            "schema_version": 1,
+            "data": [
+                {"name": "alpha", "source": None, "ref": None, "path": None},
+                {
+                    "name": "Zebra",
+                    "source": "acme/plugins",
+                    "ref": "main",
+                    "path": "marketplace.json",
+                },
+            ],
+        }
+        assert result.stderr == ""
+
     def test_empty_list(self, runner):
         from apm_cli.commands.marketplace import marketplace
 
@@ -811,6 +953,50 @@ class TestMarketplaceList:
 class TestMarketplaceBrowse:
     """marketplace browse NAME."""
 
+    def test_json_browse_schema_and_stderr(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Browse emits full metadata without progress or notices on stdout."""
+        from apm_cli.cli import cli
+        from apm_cli.core.command_logger import CommandLogger
+
+        monkeypatch.setattr(
+            "apm_cli.cli._check_and_notify_updates",
+            lambda: CommandLogger("update").warning("A newer version is available"),
+        )
+        monkeypatch.setattr(
+            "apm_cli.marketplace.registry.get_marketplace_by_name",
+            lambda name: MarketplaceSource(name=name, owner="acme", repo="plugins"),
+        )
+        monkeypatch.setattr(
+            "apm_cli.marketplace.client.fetch_marketplace",
+            lambda *args, **kwargs: MarketplaceManifest(
+                name="acme",
+                plugins=(
+                    MarketplacePlugin(name="Zebra"),
+                    MarketplacePlugin(
+                        name="alpha", description="Long " + "description " * 12, version="1.2"
+                    ),
+                ),
+            ),
+        )
+        result = runner.invoke(cli, ["marketplace", "browse", "acme", "-f", "json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout) == {
+            "schema_version": 1,
+            "data": [
+                {
+                    "name": "alpha",
+                    "description": "Long " + "description " * 12,
+                    "version": "1.2",
+                    "install": "alpha@acme",
+                },
+                {"name": "Zebra", "description": None, "version": None, "install": "Zebra@acme"},
+            ],
+        }
+        assert "\x1b" not in result.stdout
+        assert "newer version" in result.stderr
+
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
     def test_browse_shows_plugins(self, mock_get, mock_fetch, runner):
@@ -827,6 +1013,304 @@ class TestMarketplaceBrowse:
         result = runner.invoke(marketplace, ["browse", "acme"])
         assert result.exit_code == 0
         assert "security-checks" in result.output
+
+
+@pytest.mark.parametrize("command", [["search"], ["marketplace", "search"]])
+def test_json_search_preserves_limit_selection(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """Both entrypoints sort only the selected results and keep full descriptions."""
+    from apm_cli.cli import cli
+
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr(
+        "apm_cli.marketplace.registry.get_marketplace_by_name",
+        lambda name: MarketplaceSource(name=name, owner="acme", repo="plugins"),
+    )
+    monkeypatch.setattr(
+        "apm_cli.marketplace.client.search_marketplace",
+        lambda query, source: [
+            MarketplacePlugin(name="Zebra", description="Useful " * 20),
+            MarketplacePlugin(name="beta"),
+            MarketplacePlugin(name="aardvark"),
+        ],
+    )
+    result = runner.invoke(cli, [*command, "query@acme", "--limit", "2", "--format=json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "data": [
+            {"name": "beta", "description": None, "install": "beta@acme"},
+            {"name": "Zebra", "description": "Useful " * 20, "install": "Zebra@acme"},
+        ],
+    }
+    assert "\x1b" not in result.stdout
+    assert "Searching" in result.stderr
+
+
+@pytest.mark.parametrize("command", [["search"], ["marketplace", "search"]])
+@pytest.mark.parametrize(
+    ("expression", "code"),
+    [
+        ("invalid", "invalid_search_expression"),
+        ("@acme", "invalid_search_expression"),
+        ("query@", "invalid_search_expression"),
+        ("query@missing", "marketplace_not_found"),
+        ("query@acme", "marketplace_search_failed"),
+    ],
+)
+def test_json_search_handled_errors(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+    expression: str,
+    code: str,
+) -> None:
+    """Handled search failures emit stable error documents only on stderr."""
+    from apm_cli.cli import cli
+    from apm_cli.marketplace.errors import MarketplaceNotFoundError
+
+    def lookup(name: str) -> MarketplaceSource:
+        if name == "missing":
+            raise MarketplaceNotFoundError(name)
+        return MarketplaceSource(name=name, owner="acme", repo="plugins")
+
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr("apm_cli.marketplace.registry.get_marketplace_by_name", lookup)
+    monkeypatch.setattr(
+        "apm_cli.marketplace.client.search_marketplace",
+        MagicMock(side_effect=RuntimeError("private diagnostic")),
+    )
+    result = runner.invoke(cli, [*command, expression, "-f", "json", "--verbose"])
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    document = json.loads(result.stderr.strip().splitlines()[-1])
+    assert document == {"schema_version": 1, "error": code}
+    assert "private diagnostic" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["marketplace", "list"],
+        ["marketplace", "browse", "acme"],
+        ["search", "query@acme"],
+        ["marketplace", "search", "query@acme"],
+    ],
+)
+def test_json_empty_results(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """Every discovery command treats an empty result as a successful JSON list."""
+    from apm_cli.cli import cli
+
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr("apm_cli.marketplace.registry.get_registered_marketplaces", lambda: [])
+    monkeypatch.setattr(
+        "apm_cli.marketplace.registry.get_marketplace_by_name",
+        lambda name: MarketplaceSource(name=name, owner="acme", repo="plugins"),
+    )
+    monkeypatch.setattr(
+        "apm_cli.marketplace.client.fetch_marketplace",
+        lambda *args, **kwargs: MarketplaceManifest(name="acme"),
+    )
+    monkeypatch.setattr("apm_cli.marketplace.client.search_marketplace", lambda *args: [])
+    result = runner.invoke(cli, [*command, "-f", "json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {"schema_version": 1, "data": []}
+
+
+@pytest.mark.parametrize(
+    ("command", "target", "error", "code"),
+    [
+        (
+            ["marketplace", "list"],
+            "apm_cli.marketplace.registry.get_registered_marketplaces",
+            RuntimeError("private diagnostic"),
+            "marketplace_list_failed",
+        ),
+        (
+            ["marketplace", "browse", "missing"],
+            "apm_cli.marketplace.registry.get_marketplace_by_name",
+            MarketplaceNotFoundError("missing"),
+            "marketplace_not_found",
+        ),
+        (
+            ["marketplace", "browse", "broken"],
+            "apm_cli.marketplace.registry.get_marketplace_by_name",
+            KeyError("private diagnostic"),
+            "marketplace_fetch_failed",
+        ),
+        (
+            ["marketplace", "browse", "acme"],
+            "apm_cli.marketplace.client.fetch_marketplace",
+            RuntimeError("private diagnostic"),
+            "marketplace_fetch_failed",
+        ),
+    ],
+)
+def test_json_list_browse_handled_errors(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+    target: str,
+    error: Exception,
+    code: str,
+) -> None:
+    """List/browse failures keep stdout empty and never serialize raw exceptions."""
+    from apm_cli.cli import cli
+
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr(
+        "apm_cli.marketplace.registry.get_marketplace_by_name",
+        lambda name: MarketplaceSource(name=name, owner="acme", repo="plugins"),
+    )
+    monkeypatch.setattr(target, MagicMock(side_effect=error))
+    result = runner.invoke(cli, [*command, "--format", "json", "--verbose"])
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr.strip().splitlines()[-1]) == {
+        "schema_version": 1,
+        "error": code,
+    }
+    assert "private diagnostic" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["marketplace", "browse", "acme"],
+        ["search", "query@acme"],
+        ["marketplace", "search", "query@acme"],
+    ],
+)
+def test_json_metadata_sanitization(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, command: list[str], tmp_path: Path
+) -> None:
+    """Untrusted optional metadata cannot bypass source sanitization or the allowlist."""
+    from apm_cli.cli import cli
+
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("APM_CACHE_DIR", str(cache))
+    description = (
+        "See https://person:secret@docs.example.com/guide?token=hidden#private "
+        f"and {cache / 'checkout'}"
+    )
+    plugins = (
+        SimpleNamespace(
+            name="plugin",
+            description=description,
+            version={"unexpected": "metadata"},
+            secret="excluded",
+        ),
+        SimpleNamespace(name="missing", description=["unexpected"], version=None),
+        SimpleNamespace(name="invalid", description="https://[broken", version=None),
+        SimpleNamespace(name="embedded", description="See https://[broken please", version=None),
+    )
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr(
+        "apm_cli.marketplace.registry.get_marketplace_by_name",
+        lambda name: MarketplaceSource(name=name, owner="acme", repo="plugins"),
+    )
+    monkeypatch.setattr(
+        "apm_cli.marketplace.client.fetch_marketplace",
+        lambda *args, **kwargs: SimpleNamespace(plugins=plugins),
+    )
+    monkeypatch.setattr("apm_cli.marketplace.client.search_marketplace", lambda *args: plugins)
+    result = runner.invoke(cli, [*command, "-f", "json"])
+    assert result.exit_code == 0, result.output
+    embedded, invalid, missing, plugin = json.loads(result.stdout)["data"]
+    assert embedded["description"] == "See [redacted-url] please"
+    assert invalid["description"] is None
+    assert missing["description"] is None
+    assert set(plugin) == (
+        {"name", "description", "install", "version"}
+        if "browse" in command
+        else {"name", "description", "install"}
+    )
+    assert plugin["description"].endswith("and [internal-cache]")
+    parsed = urlparse(plugin["description"].split()[1])
+    assert (
+        parsed.hostname,
+        parsed.path,
+        parsed.username,
+        parsed.password,
+        parsed.query,
+        parsed.fragment,
+    ) == ("docs.example.com", "/guide", None, None, "", "")
+    if "browse" in command:
+        assert plugin["version"] is None
+
+
+@pytest.mark.parametrize(
+    ("command", "headline"),
+    [
+        (["marketplace", "list"], "Registered Marketplaces"),
+        (["marketplace", "browse", "acme"], "Plugins in 'acme'"),
+        (["search", "query@acme"], "Search Results:"),
+        (["marketplace", "search", "query@acme"], "Search Results:"),
+    ],
+)
+@pytest.mark.parametrize("rich_output", [True, False])
+def test_text_output_is_unchanged(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+    headline: str,
+    rich_output: bool,
+) -> None:
+    """The opt-in format option does not change default text tables or selection."""
+    from apm_cli.cli import cli
+
+    source = MarketplaceSource(name="acme", owner="acme", repo="plugins")
+    plugins = (
+        MarketplacePlugin(name="zebra", description="Useful"),
+        MarketplacePlugin(name="Alpha"),
+    )
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    if not rich_output:
+        monkeypatch.setattr("apm_cli.commands.marketplace._get_console", lambda: None)
+    monkeypatch.setattr(
+        "apm_cli.marketplace.registry.get_registered_marketplaces", lambda: [source]
+    )
+    monkeypatch.setattr("apm_cli.marketplace.registry.get_marketplace_by_name", lambda name: source)
+    monkeypatch.setattr(
+        "apm_cli.marketplace.client.fetch_marketplace",
+        lambda *args, **kwargs: MarketplaceManifest(name="acme", plugins=plugins),
+    )
+    monkeypatch.setattr("apm_cli.marketplace.client.search_marketplace", lambda *args: plugins)
+    default = runner.invoke(cli, command)
+    explicit = runner.invoke(cli, [*command, "--format", "text"])
+    assert default.exit_code == explicit.exit_code == 0
+    assert default.stdout == explicit.stdout
+    assert default.stderr == explicit.stderr == ""
+    assert (headline if rich_output else "acme") in default.stdout
+    if "list" not in command:
+        assert default.stdout.index("zebra") < default.stdout.index("Alpha")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["marketplace", "list", "-f", "xml"],
+        ["marketplace", "browse", "-f", "json"],
+        ["search", "-f", "json"],
+        ["marketplace", "search", "-f", "json"],
+    ],
+)
+def test_json_parser_errors_remain_click_usage_errors(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """Pre-callback parser errors retain Click's existing non-JSON boundary."""
+    from apm_cli.cli import cli
+
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    result = runner.invoke(cli, command)
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Usage:" in result.stderr
+    assert "Error:" in result.stderr
+    assert "schema_version" not in result.stderr
 
 
 class TestMarketplaceUpdate:
