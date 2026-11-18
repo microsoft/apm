@@ -36,7 +36,7 @@ Write `apm-policy.yml` and test it before it bites.
 Make the policy authoritative on every pull request.
 
 - [Enforce in CI](./enforce-in-ci/) -- wire `apm audit --ci` as a required check.
-- [Drift detection](./drift-detection/) -- the eight non-bypassable lockfile baselines and what each catches.
+- [Drift detection](./drift-detection/) -- the non-bypassable lockfile baselines and what each catches.
 - [GitHub rulesets](./github-rulesets/) -- the GitHub-side config that makes the check unbypassable.
 
 ## Operate
