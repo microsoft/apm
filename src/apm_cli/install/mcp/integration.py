@@ -334,7 +334,7 @@ def run_mcp_integration(  # noqa: PLR0913
         mcp_apm_config.update(canonical_package_target_config(apm_package))
         package_target_declaration(apm_package).validate_for_install()
     except TargetResolutionError as exc:
-        logger.error(str(exc), symbol="")
+        logger.error(str(exc), symbol="error")
         logger.render_summary()
         raise SystemExit(2) from exc
 

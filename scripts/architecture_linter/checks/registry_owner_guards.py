@@ -146,6 +146,14 @@ _DOCTOR_OWNER_NAME = "STATUS_SYMBOLS"
 # CommandLogger may render them. A stdlib ``logger.<level>`` call here reaches
 # the root handler on every install and bypasses verbose gating.
 _POLICY_DISCOVERY_FILE = "src/apm_cli/policy/discovery.py"
+# Target-resolution messages are plain text; the CLI output owner adds the
+# one status symbol (#3871).
+_TARGET_ERROR_MESSAGE_FILES: tuple[str, ...] = (
+    "src/apm_cli/core/errors.py",
+    "src/apm_cli/core/apm_yml.py",
+)
+_STATUS_PREFIX_LITERAL = re.compile(r"""(?:^|[\s(=,])[rbuf]{0,2}["']\[[x!i+*>]\] """)
+_STATUS_PREFIX_STRIP = re.compile(r"""(?:removeprefix|replace|lstrip)\(\s*["']\[[x!i+*>]\] ["']""")
 _USER_FACING_LOG_LEVELS: frozenset[str] = frozenset(
     {"info", "warning", "warn", "error", "exception", "critical"}
 )
@@ -425,11 +433,13 @@ _TARGET_REWRITE_OWNER = _TARGET_DEPRECATION_OWNER
 _TARGET_MIGRATION_MODULE = "manifest_target_migration"
 _TARGET_MIGRATION_OWNER = "src/apm_cli/models/manifest_target_migration.py"
 _TARGET_MIGRATION_COMMAND = "src/apm_cli/commands/manifest.py"
-# Each rewrite path must call the owner. The scaffold writer verifies only
-# when asked, so both init writes must ask.
+# Each rewrite path must call the owner. The scaffold writer used by init and
+# every bootstrap verifies what it renders, and the user-manifest bootstrap
+# spells its targets through the owner (#3870).
 _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
     _TARGET_REWRITE_OWNER: (
         "def rewrite_target_names(",
+        "def bootstrap_target_names(",
         "def verify_rewritten_manifest(",
     ),
     _TARGET_MIGRATION_OWNER: (
@@ -438,13 +448,25 @@ _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/commands/init.py": (
         "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
-        "_create_minimal_apm_yml(config, plugin=plugin, verify=True)",
-        "target_path=staged_manifest, verify=True)",
     ),
-    "src/apm_cli/commands/_helpers.py": ("verify_rewritten_manifest(out_file, content)",),
+    "src/apm_cli/install/mcp/command.py": (
+        'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
+    ),
+    "src/apm_cli/commands/install.py": (
+        "from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap",
+        "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes,",
+    ),
+    "src/apm_cli/commands/_helpers.py": ("    verify_rewritten_manifest(out_file, content)",),
 }
 # Authored (unvalidated) names feed only the rewrite mapping.
 _TARGET_AUTHORED_NAMES_CALL = ".authored_names("
+
+
+def _has_rewrite_call(line: str, required: str) -> bool:
+    # An indented token pins the statement to that nesting level.
+    if required[:1].isspace():
+        return line.rstrip() == required
+    return required in line
 
 
 def _target_deprecation_findings(
@@ -476,7 +498,7 @@ def _target_deprecation_findings(
             f"apm.yml target rewrites must call the rewrite owner: {required_call}",
         )
         for required_call in _TARGET_REWRITE_CALLS.get(path, ())
-        if not any(required_call in line for line in facts.lines)
+        if not any(_has_rewrite_call(line, required_call) for line in facts.lines)
     )
     if path != _TARGET_REWRITE_OWNER:
         findings.extend(
@@ -972,8 +994,47 @@ def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
     rule_id = "registry_delegation.output_diagnostics"
     return (
         *_doctor_status_findings(provider, rule_id),
+        *_target_error_status_findings(provider, rule_id),
         *_policy_discovery_output_findings(provider, rule_id),
     )
+
+
+def _target_error_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Target error messages carry no status symbol, and nobody strips one (#3871)."""
+    findings: list[Violation] = []
+    for path in _TARGET_ERROR_MESSAGE_FILES:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "target error messages must be plain text; CommandLogger or Click adds "
+                "the status symbol",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _STATUS_PREFIX_LITERAL.search(line)
+        )
+    for path in _python_paths(provider, under=_SRC):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "do not strip a status symbol from a message; keep messages plain and let "
+                "the CLI output owner add it",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _STATUS_PREFIX_STRIP.search(line)
+        )
+    return findings
 
 
 def _policy_discovery_output_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:

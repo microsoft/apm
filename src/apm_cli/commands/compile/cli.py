@@ -432,7 +432,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
         logger.error(
             f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
-            symbol="",
+            symbol="error",
         )
         return 1
     except yaml.YAMLError as exc:

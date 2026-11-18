@@ -644,6 +644,11 @@ def test_replacement_failure_preserves_previous_owned_bytes_without_fallback(
     result = fixture.run()
     assert result.returncode != 0, result.stdout + result.stderr
     assert "replacement" in (result.stdout + result.stderr).lower()
+    if failure == "invalid":
+        # #3871: the error names the replacement, not APM's staging directory.
+        output = " ".join((result.stdout + result.stderr).split())
+        assert "Downloaded dependency '../local-base' (replacement for '" in output, output
+        assert ".apm-resolution-staging" not in output, output
     assert _snapshot(fixture.consumer.root) == before
     fixture.assert_bytes("LOCAL")
 

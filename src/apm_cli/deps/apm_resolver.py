@@ -1,8 +1,10 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
+import contextlib
 import inspect
 import logging
 import os
+import re
 import threading
 from collections import deque
 from collections.abc import Callable, Iterable
@@ -12,6 +14,7 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
+from ..core.errors import TargetResolutionError
 from ..models.apm_package import APMPackage, DependencyReference
 from ..models.dependency.materialization import nested_materialization_pairs
 from ..models.dependency.replacement import build_replacement_index
@@ -133,6 +136,9 @@ class ActivationCallback(Protocol):
     """Publish a validated download candidate and return its live path."""
 
     def __call__(self, candidate_path: Path) -> Path: ...
+
+
+_TRAILING_RETRY = re.compile(r",? then retry\.?$")
 
 
 class DownloadedPackageError(RuntimeError):
@@ -1632,6 +1638,17 @@ class APMDependencyResolver:
                 str(exc),
                 had_existing_install,
             )
+        except TargetResolutionError as exc:
+            # The rendered "Fix with one of" commands are for the consumer's own
+            # manifest; for a dependency keep only what is wrong with it.
+            summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
+            parts = [line.strip().rstrip(".") for line in summary.splitlines() if line.strip()]
+            self._raise_downloaded_package_error(
+                downloaded_candidate,
+                dep_ref,
+                f"{apm_yml_path}: " + ". ".join(parts),
+                had_existing_install,
+            )
         # Ensure source is set for tracking. TODO(#940): the cache key
         # already considers source_path; this post-construction mutation
         # of ``source`` (a separate field) is safe today but has the same
@@ -1704,13 +1721,37 @@ class APMDependencyResolver:
         detail: str,
         had_existing_install: bool,
     ) -> NoReturn:
-        """Raise a specific fail-closed error for newly downloaded candidates."""
+        """Raise a specific fail-closed error for newly downloaded candidates.
+
+        Paths inside the staged candidate are shown relative to the package,
+        so the error names the dependency and its in-package path rather than
+        APM's private staging directory.
+        """
         if downloaded_candidate is None:
             raise ValueError(detail)
+        detail = APMDependencyResolver._package_relative_detail(detail, downloaded_candidate)
+        # The hint below carries the one "retry"; drop the manifest owner's own.
+        detail = _TRAILING_RETRY.sub("", detail.rstrip()).rstrip(".")
+        label = f"'{dep_ref.get_display_name()}'"
+        if dep_ref.replacement is not None:
+            label += f" (replacement for '{dep_ref.replacement.original.get_display_name()}')"
         raise DownloadedPackageError(
-            f"Downloaded dependency '{dep_ref.get_display_name()}' is invalid: "
-            f"{detail}. {APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
+            f"Downloaded dependency {label} is invalid: "
+            f"{detail}. "
+            f"{APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
         )
+
+    @staticmethod
+    def _package_relative_detail(detail: str, candidate: Path) -> str:
+        """Rewrite paths under the staged *candidate* as package-relative paths."""
+        roots = {str(candidate)}
+        with contextlib.suppress(OSError):
+            roots.add(str(candidate.resolve()))
+        for root in sorted(roots, key=len, reverse=True):
+            for separator in {os.sep, "/"}:
+                detail = detail.replace(root + separator, "")
+            detail = detail.replace(root, "the package root")
+        return detail
 
     @staticmethod
     def _replacement_failure_hint(had_existing_install: bool) -> str:

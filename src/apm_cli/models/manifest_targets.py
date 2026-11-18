@@ -282,13 +282,22 @@ class ManifestTargetDeclaration:
 
 
 class TargetRewriteError(ValueError):
-    """A declaration has no ``targets:`` list that deploys exactly the same."""
+    """A declaration has no ``targets:`` list that deploys exactly the same.
+
+    ``token`` names the target with no ``targets:`` spelling, when that is
+    the reason.
+    """
+
+    def __init__(self, message: str, *, token: str | None = None) -> None:
+        super().__init__(message)
+        self.token = token
 
 
 def _no_targets_equivalent(token: str) -> TargetRewriteError:
     return TargetRewriteError(
         f"Target '{token}' has no 'targets:' equivalent. Remove '{token}' from "
-        f"'target:' in apm.yml and pass '--target {token}' to 'apm install' instead."
+        f"'target:' in apm.yml and pass '--target {token}' to 'apm install' instead.",
+        token=token,
     )
 
 
@@ -353,6 +362,22 @@ def rewrite_target_names(declaration: ManifestTargetDeclaration) -> tuple[str, .
     return targets
 
 
+def bootstrap_target_names(names: Iterable[str]) -> tuple[str, ...]:
+    """Return the ``targets:`` a new manifest records for explicitly selected targets.
+
+    The selection is spelled through :func:`rewrite_target_names`, so a new
+    manifest never records a token the manifest reader rejects.
+
+    Raises:
+        TargetRewriteError: A selected target has no ``targets:`` spelling
+            (``.token`` names it).
+    """
+    selected = list(names)
+    if not selected:
+        return ()
+    return rewrite_target_names(ManifestTargetDeclaration.from_mapping({"target": selected})) or ()
+
+
 def verify_rewritten_manifest(path: Path, text: str) -> None:
     """Refuse a rewritten apm.yml that APM would reject when it reads it back.
 
@@ -373,7 +398,7 @@ def verify_rewritten_manifest(path: Path, text: str) -> None:
         detail = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
         raise TargetRewriteError(
             f"Refusing to write {path.name}: APM would reject the rewritten manifest. "
-            f"{detail.strip().removeprefix('[x] ')}"
+            f"{detail.strip()}"
         ) from exc
 
 

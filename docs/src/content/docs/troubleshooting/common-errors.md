@@ -172,7 +172,9 @@ Fix: run `apm compile --dry-run --verbose` to see what was discovered and why ea
 
 See also: [Compile zero-output warning](../compile-zero-output-warning/), [`apm compile` reference](../../reference/cli/compile/)
 
-### `[x] No harness detected`
+Target-resolution errors print with `Error:` or `[x]` in front, depending on the command.
+
+### `No harness detected`
 
 ```
 [x] No harness detected
@@ -184,7 +186,7 @@ Fix: pass `--target <harness>` on the command, or declare `targets:` in `apm.yml
 
 See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matrix](../../reference/targets-matrix/)
 
-### `[x] Multiple harnesses detected: <a>, <b>`
+### `Multiple harnesses detected: <a>, <b>`
 
 Cause: APM found markers for more than one harness and cannot pick.
 
@@ -192,10 +194,11 @@ Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. 
 
 See also: [`apm targets` reference](../../reference/cli/targets/)
 
-### `[x] Unknown target '<value>'`
+### `Unknown target '<value>'`
 
 ```
-[x] Unknown target '<value>'
+Error: Unknown target '<value>'
+
 Valid targets: claude, copilot, cursor, ...
 ```
 

@@ -29,7 +29,7 @@ def _package_target_value(apm_package: Any) -> str | list[str] | None:
 def _raise_target_usage_error(ctx: Any, exc: Exception) -> None:
     """Render target field user errors consistently before exiting."""
     if ctx.logger:
-        ctx.logger.error(str(exc), symbol="")
+        ctx.logger.error(str(exc), symbol="error")
     raise SystemExit(2) from exc
 
 
@@ -42,7 +42,7 @@ def reject_undeployable_manifest_targets(apm_package: Any, logger: Any) -> None:
         package_target_declaration(apm_package).validate_for_install()
     except TargetResolutionError as exc:
         if logger:
-            logger.error(str(exc), symbol="")
+            logger.error(str(exc), symbol="error")
             logger.render_summary()
         raise SystemExit(2) from exc
 
@@ -419,7 +419,7 @@ def _resolve_targets_by_scope(
         )
     except _click.UsageError as exc:
         if ctx.logger:
-            ctx.logger.error(str(exc), symbol="")
+            ctx.logger.error(str(exc), symbol="error")
         raise SystemExit(2) from exc
 
     from apm_cli.utils.console import _rich_info
