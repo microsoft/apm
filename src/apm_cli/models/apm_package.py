@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from ..core.target_catalog import normalize_target_name
 from .dependency import (
     DependencyReference,
     GitReferenceType,
@@ -30,6 +29,7 @@ from .manifest_targets import (
     _LEGACY_ALL_TARGET,
     _MANIFEST_TARGET_KEYS,
     ManifestTargetDeclaration,
+    canonical_target_names,
 )
 from .validation import (
     InvalidVirtualPackageExtensionError,
@@ -533,9 +533,7 @@ class APMPackage:
             raw_targets.extend(self.target)
         elif isinstance(self.target, str):
             raw_targets.append(self.target)
-        self.canonical_targets = tuple(
-            name if name == "all" else normalize_target_name(name) for name in raw_targets
-        )
+        self.canonical_targets = canonical_target_names(raw_targets)
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -966,18 +964,19 @@ def canonical_package_targets(package: object) -> tuple[str, ...]:
         return tuple(canonical)
     plural = getattr(package, "targets", None)
     if isinstance(plural, list) and plural:
-        return tuple(name if name == "all" else normalize_target_name(name) for name in plural)
+        return canonical_target_names(plural)
     singular = getattr(package, "target", None)
     values = singular if isinstance(singular, list) else [singular]
-    return tuple(
-        name if name == "all" else normalize_target_name(name)
-        for name in values
-        if isinstance(name, str) and name
-    )
+    return canonical_target_names(name for name in values if isinstance(name, str) and name)
 
 
 def canonical_package_target_config(package: object) -> dict[str, object]:
     """Project canonical targets into the compatibility config shape.
+
+    The projection is canonical and lossy: ``vscode`` becomes ``copilot``.
+    MCP destination fidelity (``.vscode/mcp.json``) comes from the
+    spelling-preserving ``selection`` that builds the effective target
+    decision, which MCP and LSP installs consult before this config.
 
     Conflicting singular and plural fields remain present so the canonical
     parser can reject the authoring error before any MCP write.
