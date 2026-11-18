@@ -1,8 +1,10 @@
 """Package-level manifest target declaration (``target:`` / ``targets:``).
 
-Canonical owner of how an apm.yml's package targets are read. Dependency
-``targets:`` subsets, ``compilation.target``, and policy targets are separate
-decisions owned elsewhere.
+Canonical owner of how an apm.yml's package targets are read, including the
+once-per-process deprecation warning for the singular ``target:`` key (and the
+ignored ``compilation.target``) in the consumer manifest. Dependency
+``targets:`` subsets, ``compilation.target`` resolution, and policy targets are
+separate decisions owned elsewhere.
 """
 
 from __future__ import annotations
@@ -11,16 +13,92 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import click
 import yaml
 
 from ..core.apm_yml import parse_targets_field
 from ..core.target_catalog import normalize_target_name
 from ..core.target_detection import parse_target_field
 
+if TYPE_CHECKING:
+    from ..core.scope import InstallScope
+
 _MANIFEST_TARGET_KEYS: tuple[str, ...] = ("target", "targets")
 _LEGACY_ALL_TARGET = "all"
+
+_deprecated_manifest_keys_warned: set[tuple[str, str]] = set()
+
+
+def reset_manifest_deprecation_warnings() -> None:
+    """Re-arm the once-per-process deprecation warnings. For tests only."""
+    _deprecated_manifest_keys_warned.clear()
+
+
+def _consumer_manifest_scope(manifest_path: Path) -> InstallScope | None:
+    """Return the scope whose consumer manifest is *manifest_path*, else None.
+
+    Only the project ``apm.yml`` and the user ``~/.apm/apm.yml`` are consumer
+    manifests; dependency manifests under ``apm_modules/`` never match.
+    """
+    from ..core.scope import InstallScope, get_manifest_path
+
+    try:
+        resolved = manifest_path.resolve()
+    except OSError:
+        return None
+    for scope in (InstallScope.USER, InstallScope.PROJECT):
+        try:
+            if get_manifest_path(scope).resolve() == resolved:
+                return scope
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path) -> None:
+    """Warn once per process and scope about deprecated keys in a consumer manifest.
+
+    Covers the singular top-level ``target:`` key and the ignored
+    ``compilation.target`` key. Writes to stderr and never changes the exit
+    code, so ``--frozen`` and ``--ci`` runs keep their outcome.
+    """
+    compilation = data.get("compilation")
+    present = [
+        key
+        for key, declared in (
+            ("target", "target" in data),
+            ("compilation.target", isinstance(compilation, Mapping) and "target" in compilation),
+        )
+        if declared
+    ]
+    if not present:
+        return
+    scope = _consumer_manifest_scope(manifest_path)
+    if scope is None:
+        return
+    pending = [key for key in present if (scope.value, key) not in _deprecated_manifest_keys_warned]
+
+    from ..core.scope import InstallScope
+    from ..utils.console import _rich_warning
+
+    user_scope = scope is InstallScope.USER
+    label = ascii(manifest_path.as_posix())[1:-1] if user_scope else "apm.yml"
+    migrate_cmd = "apm manifest migrate --global" if user_scope else "apm manifest migrate"
+    for key in pending:
+        _deprecated_manifest_keys_warned.add((scope.value, key))
+        if key == "target":
+            message = (
+                f"{label} uses the deprecated 'target:' key. Use 'targets:' (a YAML list). "
+                f"Run '{migrate_cmd}' to update it. 'target:' will be removed in v1.0."
+            )
+        else:
+            message = (
+                f"{label} sets 'compilation.target', which APM ignores (targets come from "
+                "'targets:' or auto-detection). Delete it by hand; v1.0 will reject it."
+            )
+        _rich_warning(message, symbol="warning", err=True)
 
 
 def _authored_target_tokens(value: Any) -> list[str]:
@@ -59,6 +137,33 @@ class ManifestTargetDeclaration:
             tuple((key, data[key]) for key in _MANIFEST_TARGET_KEYS if key in data),
             source_path,
         )
+
+    @classmethod
+    def from_manifest(
+        cls,
+        data: Mapping[str, Any],
+        manifest_path: Path,
+        *,
+        warn_deprecated: bool = True,
+    ) -> ManifestTargetDeclaration:
+        """Capture the declaration of the apm.yml at *manifest_path*.
+
+        When *manifest_path* is the consumer manifest (project ``apm.yml`` or
+        ``~/.apm/apm.yml``), warns once per process on stderr about the
+        deprecated ``target:`` key and the ignored ``compilation.target``.
+        An invalid declaration does not warn: the caller reports its error.
+        """
+        declaration = cls.from_mapping(data, manifest_path)
+        if warn_deprecated and declaration._is_valid():
+            _warn_deprecated_manifest_keys(data, manifest_path)
+        return declaration
+
+    def _is_valid(self) -> bool:
+        try:
+            _ = self._validated
+        except (ValueError, TypeError, click.UsageError):
+            return False
+        return True
 
     @property
     def spelling(self) -> str | None:
@@ -206,7 +311,7 @@ def read_manifest_target_declaration(
             return None
         if not isinstance(data, Mapping):
             return None
-        return ManifestTargetDeclaration.from_mapping(data, manifest_path)
+        return ManifestTargetDeclaration.from_manifest(data, manifest_path)
     if manifest_path.is_symlink():
         raise OSError(f"{manifest_path.name} must be a regular, non-symlink file")
     if not manifest_path.exists():
@@ -217,7 +322,7 @@ def read_manifest_target_declaration(
     if not isinstance(data, Mapping):
         got = "an empty document" if data is None else str(type(data))
         raise yaml.YAMLError(f"{manifest_path.name} must contain a YAML object, got {got}")
-    return ManifestTargetDeclaration.from_mapping(data, manifest_path)
+    return ManifestTargetDeclaration.from_manifest(data, manifest_path)
 
 
 def manifest_target_restriction(data: Mapping[str, Any] | None) -> list[str]:

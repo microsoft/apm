@@ -102,7 +102,7 @@ def test_native_findings_identify_only_the_offending_field(
         if ci_mode:
             assert f"unicode: .claude/settings.json{expected}" in " ".join(result.output.split())
         return
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     if output_format == "json":
         if ci_mode:
             check = next(c for c in report["checks"] if c["name"] == "content-integrity")

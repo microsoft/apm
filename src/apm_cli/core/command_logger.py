@@ -184,6 +184,10 @@ class CommandLogger:
         """Log a blank line through the shared console output path."""
         _rich_echo("")
 
+    def preformatted(self, text: str):
+        """Render preformatted text (a diff or snippet) without a status symbol."""
+        _rich_echo(text.rstrip("\n"), soft_wrap=True)
+
     def package_inline_warning(self, message: str):
         """Log an inline warning under a package block (verbose only).
 

@@ -46,13 +46,13 @@ To pin targets in the manifest:
 
 ```yaml
 # apm.yml
-target:
+targets:
   - claude
   - copilot
   - cursor
 ```
 
-The `target:` field accepts either a YAML list or a CSV string. See [Manifest schema](../../reference/manifest-schema/#36-target-and-targets).
+The `targets:` field takes a YAML list. The older `target:` key is deprecated; run `apm manifest migrate` to update it. See [Manifest schema](../../reference/manifest-schema/#36-target-and-targets).
 
 ## Primitive flow per target
 

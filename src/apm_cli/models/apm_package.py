@@ -604,6 +604,7 @@ class APMPackage:
         manifest_path: Path | None = None,
         create_config: bool = True,
         warning_handler: Callable[[list[str], Path], None] | None = _warn_unknown_manifest_keys,
+        warn_deprecated: bool = True,
     ) -> "APMPackage":
         """Construct a package from already interpreted manifest data.
 
@@ -624,6 +625,8 @@ class APMPackage:
             warning_handler: Receives unknown keys and their manifest path.
                 Defaults to a terminal warning. Use ``None`` for a prospective
                 parse whose source manifest is diagnosed separately.
+            warn_deprecated: Warn once per process when *manifest_path* is
+                the consumer manifest and uses a deprecated key.
 
         Returns:
             A package with all compatibility projections populated.
@@ -752,7 +755,9 @@ class APMPackage:
         # The declaration owner validates ``target:`` with the --target
         # vocabulary and ``targets:`` with the manifest vocabulary, and rejects
         # a manifest that declares both.
-        target_declaration = ManifestTargetDeclaration.from_mapping(data, source_manifest)
+        target_declaration = ManifestTargetDeclaration.from_manifest(
+            data, source_manifest, warn_deprecated=warn_deprecated
+        )
         selection = target_declaration.selection
         target_value = selection if target_declaration.spelling == "target" else None
         targets_value = selection if target_declaration.spelling == "targets" else None

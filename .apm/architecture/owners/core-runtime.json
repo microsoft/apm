@@ -10,9 +10,12 @@
     },
     {
       "id": "manifest-target-declaration",
-      "decision": "Package manifest target declaration: target:/targets: spelling, token validation, legacy all, and the views readers consume",
-      "owner": "models/manifest_targets.py (ManifestTargetDeclaration, read_manifest_target_declaration) via models/apm_package.py (APMPackage.target_declaration, package_target_declaration)",
-      "selectors": ["src/apm_cli/models/manifest_targets.py"],
+      "decision": "Package manifest target declaration: target:/targets: spelling, token validation, legacy all, the views readers consume, the deprecated target: warning, and the explicit target: to targets: rewrite",
+      "owner": "models/manifest_targets.py (ManifestTargetDeclaration, read_manifest_target_declaration, _warn_deprecated_manifest_keys) via models/apm_package.py (APMPackage.target_declaration, package_target_declaration); models/manifest_target_migration.py, reachable only from commands/manifest.py (apm manifest migrate)",
+      "selectors": [
+        "src/apm_cli/models/manifest_targets.py",
+        "src/apm_cli/models/manifest_target_migration.py"
+      ],
       "guards": ["registry-delegation-manifest-target-declaration"]
     },
     {
