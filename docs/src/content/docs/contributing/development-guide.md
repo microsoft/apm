@@ -422,6 +422,7 @@ consistency with the repository pin, and action-pin consistency.
 
 The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
 pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Python uses a standard Ubuntu ARM64 runner; Actions analysis stays on x86_64.
 Keep the workflow path, `analyze` job ID, and language matrix stable: they
 identify the analysis configurations GitHub compares against the base branch.
 PR results do not replace results for the merge queue's separate commit.
