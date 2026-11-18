@@ -531,3 +531,24 @@ def test_partial_install_keeps_unhealed_retired_claims_for_the_retry(
     assert project.read_json(".mcp.json")["mcpServers"] == {"vs-a": managed, "vs-b": managed}
     assert not (project.root / ".vscode/mcp.json").exists()
     assert "vscode" not in project.lock()["mcp_target_servers"]
+
+
+def test_legacy_vscode_claim_never_adopts_an_identical_user_root_entry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A .vscode/mcp.json entry fingerprints like its .mcp.json twin; the user's twin stays."""
+    project = _Project(tmp_path, apm_binary_path)
+    entry = {"type": "stdio", "command": "echo", "args": []}
+    project.write_json(".mcp.json", {"mcpServers": {"echo": entry}})
+    project.write_json(".vscode/mcp.json", {"servers": {"echo": entry}, "inputs": []})
+    project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
+    _seed_036_lock(project, [_ECHO], {"vscode": ["echo"]})
+
+    project.install()
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": entry}
+
+    project.manifest(targets=["copilot"])
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": entry}
+    assert not (project.root / ".vscode/mcp.json").exists()

@@ -307,6 +307,47 @@ def test_unhealed_claims_round_trip_under_copilot_by_fingerprint(tmp_path: Path)
     assert claims == {"copilot": {"done"}}
 
 
+def test_kept_vscode_claim_never_settles_against_an_identical_root_entry(tmp_path: Path) -> None:
+    """A .vscode stdio entry fingerprints like its .mcp.json twin; the receipt tells them apart."""
+    entry = {"type": "stdio", "command": "echo", "args": []}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"echo": entry}})
+    _write(tmp_path / ".vscode/mcp.json", {"servers": {"echo": entry}})
+    configs = {"echo": _ECHO}
+    claims: dict[str, set[str]] = {}
+    hashes: dict[str, dict[str, str]] = {}
+    restore_pending_retired_claims(
+        _split({"vscode": {"echo"}}, {}, tmp_path),
+        {},
+        target_servers=claims,
+        native_hashes=hashes,
+        project_root=tmp_path,
+        stored_configs=configs,
+    )
+    assert hashes["copilot"]["echo"] != mcp_native_hash(entry)
+
+    again = _split(claims, hashes, tmp_path, version="0.37.0", stored_configs=configs)
+
+    assert again.names == {"vscode": {"echo"}}
+    assert claims == {"copilot": set()}
+
+
+def test_newer_lock_live_claim_is_not_retired_by_an_identical_retired_copy(
+    tmp_path: Path,
+) -> None:
+    """A 0.37 root fingerprint never names a user's identical .vscode/mcp.json copy."""
+    entry = {"type": "stdio", "command": "echo", "args": []}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"echo": {**entry, "args": ["edited"]}}})
+    _write(tmp_path / ".vscode/mcp.json", {"servers": {"echo": entry}})
+    claims = {"copilot": {"echo"}}
+
+    retired = _split(
+        claims, {"copilot": {"echo": mcp_native_hash(entry)}}, tmp_path, version="0.37.0"
+    )
+
+    assert retired.names == {}
+    assert claims == {"copilot": {"echo"}}
+
+
 def test_retired_entries_move_only_after_their_replacement_is_owned() -> None:
     retired = {"copilot": {"written", "failed", "dropped"}, "vscode": {"written"}}
 
@@ -464,9 +505,17 @@ def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
     _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT}})
     dump_yaml({"name": "app", "version": "1.0.0"}, tmp_path / "apm.yml")
     from apm_cli.adapters.client.copilot import CopilotClientAdapter
+    from apm_cli.install.mcp.retired_destinations import _retired_receipt
 
-    legacy = CopilotClientAdapter(project_root=tmp_path, user_scope=False)
-    github_hash = mcp_native_hash(legacy.managed_server_config(_LEGACY_COPILOT))
+    comparable = CopilotClientAdapter(
+        project_root=tmp_path, user_scope=False
+    ).managed_server_config(_LEGACY_COPILOT)
+    # A raw 0.36 lock records the plain fingerprint; a kept 0.37 claim, the receipt.
+    github_hash = (
+        mcp_native_hash(comparable)
+        if version == "0.36.1"
+        else _retired_receipt("copilot", comparable)
+    )
     lock = LockFile(apm_version=version)
     lock.mcp_servers = ["echo"]
     lock.mcp_configs = {"echo": _ECHO}

@@ -22,6 +22,7 @@ retired file only once its replacement exists (:func:`healable_names`).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
@@ -88,7 +89,7 @@ def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
     Only such lockfiles name entries in the retired files; a newer lock's
     ``copilot`` ownership refers to ``.mcp.json`` and never heals anything.
     """
-    if not apm_version:
+    if not isinstance(apm_version, str) or not apm_version:
         return True
     from packaging.version import InvalidVersion, Version
 
@@ -228,21 +229,19 @@ def _retired_key(name: str, stored: object, servers: Mapping[str, Any]) -> str |
     )
 
 
-def _retired_entry_hashes(
+def _retired_entries(
     names: Mapping[str, set[str]],
     *,
     project_root: Path,
     stored_configs: Mapping[str, Any],
     proof: Mapping[str, Mapping[str, str]] | None = None,
-) -> dict[str, dict[str, str]]:
-    """Fingerprint each named entry found in its retired file.
+) -> dict[str, dict[str, dict]]:
+    """The comparable form of each named entry found in its retired file.
 
-    With *proof*, only entries APM provably wrote are fingerprinted (the
-    recorded fingerprint, or that release's render of the same declaration).
+    With *proof*, only entries APM provably wrote are returned (the recorded
+    fingerprint, or that release's render of the same declaration).
     """
-    from apm_cli.install.mcp.ownership import mcp_native_hash
-
-    found_hashes: dict[str, dict[str, str]] = {}
+    entries: dict[str, dict[str, dict]] = {}
     for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
         wanted = names.get(destination.runtime) or set()
         found = _read_retired(destination, project_root) if wanted else None
@@ -263,10 +262,24 @@ def _retired_entry_hashes(
                 native_hash=proof.get(destination.runtime, {}).get(name),
             ):
                 continue
-            found_hashes.setdefault(destination.runtime, {})[name] = mcp_native_hash(
-                client.managed_server_config(servers[key])
+            entries.setdefault(destination.runtime, {})[name] = client.managed_server_config(
+                servers[key]
             )
-    return found_hashes
+    return entries
+
+
+# Kept claims record a receipt, not a plain fingerprint: a sha256 over this
+# domain, the retired file and the entry. It never equals an entry's plain
+# fingerprint, so no reader (nor an older APM) mistakes it for proof of a
+# .mcp.json write, and it names the file the claim belongs to.
+_RETIRED_RECEIPT_DOMAIN = "apm-retired-mcp-receipt:v1"
+_RETIRED_PATHS = {d.runtime: d.relative_path for d in RETIRED_PROJECT_MCP_DESTINATIONS}
+
+
+def _retired_receipt(runtime: str, comparable: dict) -> str:
+    encoded = json.dumps(comparable, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    payload = f"{_RETIRED_RECEIPT_DOMAIN}\n{_RETIRED_PATHS[runtime]}\n{encoded}"
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -294,12 +307,12 @@ def split_mcp_claims(
     live claims; the returned claims (keyed by retired runtime, with their
     recorded fingerprints as proof) are for the heal alone.
 
-    A ``copilot`` claim names a retired file when its recorded fingerprint
-    matches that file's entry (how :func:`restore_pending_retired_claims`
-    keeps an unhealed claim); a name whose fingerprint matches its
-    ``.mcp.json`` entry is settled and live. A lock written before 0.37 is
-    also translated by version: its ``vscode`` claims and its other unsettled
-    ``copilot`` claims name the retired files.
+    A ``copilot`` claim names a retired file when it records that file's
+    receipt for the entry there (how :func:`restore_pending_retired_claims`
+    keeps an unhealed claim). A lock written before 0.37 is also translated by
+    version: its ``vscode`` claims and its ``copilot`` claims not settled in
+    ``.mcp.json`` (fingerprint matching the entry there) name the retired
+    files. In a newer lock any other claim is live.
     """
     if user_scope:
         return RetiredMcpClaims({}, {})
@@ -313,31 +326,34 @@ def split_mcp_claims(
         "copilot": {},
         "vscode": {name: vscode_hashes[name] for name in vscode if name in vscode_hashes},
     }
-    candidates = set(copilot or ()) - _settled_in_root_mcp_json(
-        recorded, project_root, stored_configs
-    )
-    found = _retired_entry_hashes(
-        {"copilot": candidates, "vscode": candidates},
+    # A kept claim's receipt names its retired file; it is matched first, so
+    # an identical .mcp.json entry can never make it look settled.
+    from apm_cli.install.mcp.ownership import mcp_native_hash
+
+    copilot_names = set(copilot or ())
+    entries = _retired_entries(
+        {"copilot": copilot_names, "vscode": copilot_names},
         project_root=project_root,
         stored_configs=stored_configs,
     )
-    raw = lock_predates_root_mcp_json(apm_version)
-    for name in candidates:
-        runtime = next(
-            (
-                runtime
-                for runtime in ("copilot", "vscode")
-                if name in recorded and found.get(runtime, {}).get(name) == recorded[name]
-            ),
-            "copilot" if raw else None,
-        )
-        if runtime is not None:
-            names[runtime].add(name)
-    for name in names["copilot"] | (names["vscode"] & candidates):
-        runtime = "copilot" if name in names["copilot"] else "vscode"
-        if name in recorded:
-            hashes[runtime][name] = recorded[name]
-    moved = names["copilot"] | (names["vscode"] & candidates)
+    kept: set[str] = set()
+    for name in copilot_names:
+        for runtime in ("copilot", "vscode"):
+            entry = entries.get(runtime, {}).get(name)
+            if entry is not None and recorded.get(name) == _retired_receipt(runtime, entry):
+                names[runtime].add(name)
+                hashes[runtime][name] = mcp_native_hash(entry)
+                kept.add(name)
+                break
+    live = {name: fingerprint for name, fingerprint in recorded.items() if name not in kept}
+    candidates = (
+        copilot_names - kept - _settled_in_root_mcp_json(live, project_root, stored_configs)
+    )
+    moved = set(kept)
+    if lock_predates_root_mcp_json(apm_version):
+        names["copilot"] |= candidates
+        hashes["copilot"].update({name: live[name] for name in candidates if name in live})
+        moved |= candidates
     if copilot and moved:
         target_servers["copilot"] = type(copilot)(name for name in copilot if name not in moved)
         for name in moved:
@@ -360,25 +376,25 @@ def restore_pending_retired_claims(
     """Keep the retired claims this run did not heal, for a later heal.
 
     Only an entry APM provably wrote is kept. It is recorded under ``copilot``
-    (no lock records ``vscode``) with the fingerprint of the entry as found,
-    which is how :func:`split_mcp_claims` later tells the file it names. A name
-    the lock already claims for ``.mcp.json`` keeps that claim.
+    (no lock records ``vscode``) with the retired receipt of the entry as
+    found, which is how :func:`split_mcp_claims` later tells the file it names.
+    A name the lock already claims for ``.mcp.json`` keeps that claim; a name
+    kept in both retired files keeps only its ``.github/mcp.json`` claim.
     """
     left = {
         runtime: set(names) - set(healed.get(runtime, ()))
         for runtime, names in retired.names.items()
     }
-    proven = _retired_entry_hashes(
+    proven = _retired_entries(
         left, project_root=project_root, stored_configs=stored_configs, proof=retired.hashes
     )
     for runtime in ("copilot", "vscode"):
         for name in sorted(left.get(runtime, ())):
-            fingerprint = proven.get(runtime, {}).get(name)
-            claims = target_servers.get("copilot", set())
-            if fingerprint is None or name in claims:
+            entry = proven.get(runtime, {}).get(name)
+            if entry is None or name in target_servers.get("copilot", set()):
                 continue
             target_servers.setdefault("copilot", set()).add(name)
-            native_hashes.setdefault("copilot", {})[name] = fingerprint
+            native_hashes.setdefault("copilot", {})[name] = _retired_receipt(runtime, entry)
 
 
 def _settled_in_root_mcp_json(
