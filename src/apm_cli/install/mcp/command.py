@@ -57,14 +57,15 @@ def run_mcp_policy_preflight(
     no_policy: bool,
     logger,
     target_decision: EffectiveTargetDecision,
-    registry_url: str | None = None,
-    registry_source: str | None = None,
+    registry: tuple[str | None, str | None] = (None, None),
 ) -> None:
     """Run policy checks for a direct MCP install before any persistent write.
 
-    The registry override is active so the transport check resolves a
+    *registry* is the ``(url, source)`` pair from ``_resolve_registry_url``;
+    the registry override is active so the transport check resolves a
     registry server against the same registry the install will query.
     """
+    registry_url, registry_source = registry
     from ...models.dependency.mcp import MCPDependency
     from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
 

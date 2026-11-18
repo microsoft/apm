@@ -834,10 +834,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         no_policy=no_policy,
         logger=logger,
         target_decision=target_decision,
-        registry_url=resolved_registry_url,
-        registry_source=registry_source,
+        registry=(resolved_registry_url, registry_source),
     )
-
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,
