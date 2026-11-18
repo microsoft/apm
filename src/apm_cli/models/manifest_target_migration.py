@@ -259,9 +259,7 @@ def _rewrite_document(document: Any, plan: TargetMigrationPlan) -> None:
     fits_flow = len(", ".join(plan.targets)) <= _FLOW_LIST_MAX_WIDTH
     if isinstance(legacy_value, CommentedSeq):
         # Rewrite the authored list so per-item comments survive.
-        sequence = (
-            _detached_sequence(legacy_value) if legacy_value.anchor.value else legacy_value
-        )
+        sequence = _detached_sequence(legacy_value) if legacy_value.anchor.value else legacy_value
         if sequence.fa.flow_style() and sequence.ca.items:
             _flow_comments_to_block(sequence)
         value = _replace_sequence_items(sequence, plan.targets)
