@@ -21,7 +21,9 @@ Ref: https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.jso
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +90,78 @@ def canonical_remote_transport(
     return canonical
 
 
+# -- Policy projection (org policy ``mcp.transport.allow``) -----------------
+
+TRANSPORT_STDIO = "stdio"
+# Ordered for stable user-facing messages.
+POLICY_TRANSPORTS: tuple[str, ...] = (TRANSPORT_STDIO, TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE)
+
+
+def canonical_transport_name(value: str) -> str:
+    """Return the canonical spelling of one transport name from policy or apm.yml.
+
+    ``http`` is an alias of ``streamable-http``. Unknown names come back
+    trimmed and lower-cased, so they compare stably but match nothing.
+    """
+    token = value.strip().lower()
+    if token == TRANSPORT_STDIO:
+        return TRANSPORT_STDIO
+    return _ALIASES.get(token, token)
+
+
+def canonical_transport_names(values: Iterable[str]) -> tuple[str, ...]:
+    """Canonicalize and de-duplicate transport names, keeping first-seen order."""
+    seen: dict[str, None] = {}
+    for value in values:
+        seen.setdefault(canonical_transport_name(value), None)
+    return tuple(seen)
+
+
+@dataclass(frozen=True)
+class UnresolvedTransport:
+    """An effective transport that could not be resolved, with a user-facing reason."""
+
+    reason: str
+
+
+def server_write_transports(
+    server_info: Mapping[str, Any],
+    *,
+    selected_remote: Callable[[dict], Mapping | None],
+) -> frozenset[str]:
+    """Every canonical transport APM may write for one resolved server.
+
+    *server_info* is the (overlaid) server info handed to the client adapters;
+    *selected_remote* is the adapters' remote choice
+    (``MCPClientAdapter.selected_remote``), whose result covers every adapter
+    that renders a remote. Adapters differ in whether a package or a remote
+    wins, so a server offering both reports both. Raises ``ValueError`` for an
+    unsupported remote transport, as the adapters do.
+    """
+    if server_info.get("_raw_stdio"):
+        return frozenset({TRANSPORT_STDIO})
+    transports: set[str] = set()
+    remote = selected_remote(dict(server_info))
+    if remote is not None:
+        transports.add(
+            canonical_remote_transport(remote, server_name=str(server_info.get("name") or ""))
+        )
+    if server_info.get("packages"):
+        transports.add(TRANSPORT_STDIO)
+    if server_info.get("sse_endpoint"):
+        transports.add(TRANSPORT_SSE)
+    return frozenset(transports)
+
+
 __all__ = [
     "CANONICAL_REMOTE_TRANSPORTS",
+    "POLICY_TRANSPORTS",
     "TRANSPORT_SSE",
+    "TRANSPORT_STDIO",
     "TRANSPORT_STREAMABLE_HTTP",
+    "UnresolvedTransport",
     "canonical_remote_transport",
+    "canonical_transport_name",
+    "canonical_transport_names",
+    "server_write_transports",
 ]

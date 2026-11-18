@@ -278,6 +278,7 @@ def _install_registry_group(  # noqa: PLR0913
         retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_transport_resolution import policy_checked_registry_info
 
     configured_count = 0
     failed_installations: list[str] = []
@@ -359,8 +360,16 @@ def _install_registry_group(  # noqa: PLR0913
             # Batch fetch server info once
             if verbose:
                 logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
+            # Write exactly the registry snapshot org policy judged.
+            known = dict(registry_server_cache)
+            for name in servers_to_install:
+                checked = policy_checked_registry_info(
+                    operations.registry_client.registry_url, name
+                )
+                if checked is not None:
+                    known[name] = checked
             server_info_cache = _overlaid_server_infos(
-                operations, servers_to_install, group_dep_map, known=registry_server_cache
+                operations, servers_to_install, group_dep_map, known=known
             )
 
             # Collect env and runtime variables

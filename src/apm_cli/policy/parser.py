@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from ..mcp_transport import POLICY_TRANSPORTS, canonical_transport_names
 from ..utils.yaml_io import load_yaml_str
 from .schema import (
     ApmPolicy,
@@ -159,6 +160,7 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
             errors.append(
                 f"mcp.self_defined must be one of {sorted(_VALID_SELF_DEFINED)}, got '{sd}'"
             )
+        _warn_unknown_mcp_transports(mcp.get("transport"), warnings)
 
     # manifest.scripts
     manifest = data.get("manifest")
@@ -307,7 +309,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         allow=_parse_allow(mcp_data.get("allow")),
         deny=_parse_tuple(mcp_data.get("deny")),
         transport=McpTransportPolicy(
-            allow=_parse_allow(transport_data.get("allow")),
+            allow=_parse_transport_allow(transport_data.get("allow")),
         ),
         self_defined=mcp_data.get("self_defined", McpPolicy.self_defined),
         trust_transitive=mcp_data.get("trust_transitive", McpPolicy.trust_transitive),
@@ -494,6 +496,30 @@ def _parse_allow(val: Any) -> tuple[str, ...] | None:
     if isinstance(val, list):
         return tuple(val)
     return None
+
+
+def _parse_transport_allow(val: Any) -> tuple[str, ...] | None:
+    """Parse ``mcp.transport.allow`` into canonical transport names, once.
+
+    ``http`` folds into ``streamable-http`` so every consumer (inheritance,
+    checks, status) compares canonical names only.
+    """
+    allow = _parse_allow(val)
+    if allow is None:
+        return None
+    return canonical_transport_names(str(item) for item in allow)
+
+
+def _warn_unknown_mcp_transports(transport: Any, warnings: list[str]) -> None:
+    """Warn on ``mcp.transport.allow`` entries that can never match."""
+    if not isinstance(transport, dict) or not isinstance(transport.get("allow"), list):
+        return
+    for name in canonical_transport_names(str(item) for item in transport["allow"]):
+        if name not in POLICY_TRANSPORTS:
+            warnings.append(
+                f"mcp.transport.allow: unknown transport '{name}' never matches; "
+                f"use {', '.join(POLICY_TRANSPORTS)} (http is an alias of streamable-http)"
+            )
 
 
 def _parse_tuple(val: Any) -> tuple[str, ...]:

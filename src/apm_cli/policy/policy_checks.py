@@ -464,11 +464,35 @@ def _check_mcp_denylist(
     )
 
 
-def _check_mcp_transport(
+def _effective_mcp_transports(
     mcp_deps: list,
     policy: McpPolicy,
+) -> Mapping[str, EffectiveTransport]:
+    """Resolve each server's effective canonical transports for check 9.
+
+    Resolution queries the MCP registry for every registry server, with or
+    without a declared ``transport:`` (install writes what the registry
+    serves), so it runs only when ``mcp.transport.allow`` is configured.
+    """
+    if policy.transport.allow is None or not mcp_deps:
+        return {}
+    from ..integration.mcp_transport_resolution import resolve_effective_mcp_transports
+
+    return resolve_effective_mcp_transports(mcp_deps)
+
+
+def _check_mcp_transport(
+    effective_transports: Mapping[str, EffectiveTransport],
+    policy: McpPolicy,
 ) -> CheckResult:
-    """Check 9: MCP transport values match policy allow list."""
+    """Check 9: effective MCP transports match the policy allow list.
+
+    *effective_transports* maps each server name to the canonical
+    transports APM may write for it, or an ``UnresolvedTransport`` reason.
+    ``policy.transport.allow`` is canonical from the parser.
+    """
+    from ..mcp_transport import UnresolvedTransport
+
     allowed_transports = policy.transport.allow
     if allowed_transports is None:
         return CheckResult(
@@ -477,12 +501,23 @@ def _check_mcp_transport(
             message="No MCP transport restrictions configured",
         )
 
+    allowed_label = f"[{', '.join(allowed_transports)}]"
     violations: list[str] = []
-    for mcp in mcp_deps:
-        if mcp.transport and mcp.transport not in allowed_transports:
+    for name, transports in effective_transports.items():
+        if isinstance(transports, UnresolvedTransport):
             violations.append(
-                f"{mcp.name}: transport '{mcp.transport}' not in allowed {allowed_transports}"
+                f"{name}: effective transport unknown ({transports.reason}); "
+                f"cannot check it against allowed {allowed_label}. Check the server "
+                "name and registry URL, or make the MCP registry reachable, then "
+                "retry. A declared 'transport:' cannot stand in: install writes the "
+                "transport the registry serves"
             )
+            continue
+        violations.extend(
+            f"{name}: transport '{transport}' not in allowed {allowed_label}"
+            for transport in sorted(transports)
+            if transport not in allowed_transports
+        )
 
     if not violations:
         return CheckResult(
@@ -1366,7 +1401,7 @@ def run_dependency_policy_checks(
         remaining_checks += [
             _check_mcp_allowlist(mcp_list, policy.mcp),
             _check_mcp_denylist(mcp_list, policy.mcp),
-            _check_mcp_transport(mcp_list, policy.mcp),
+            _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
             _check_mcp_self_defined(mcp_list, policy.mcp),
         ]
     # Target / compilation + manifest tail checks.
@@ -1460,7 +1495,8 @@ def run_policy_checks(
 
     # Get dependencies from manifest (disk view)
     apm_deps = manifest.get_apm_dependencies()
-    mcp_deps = manifest.get_mcp_dependencies()
+    # Production and dev MCP servers, as the install gate judges them.
+    mcp_deps = manifest.get_all_mcp_dependencies()
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)

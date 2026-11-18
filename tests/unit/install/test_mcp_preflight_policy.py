@@ -42,6 +42,9 @@ from apm_cli.policy.schema import (
 
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"
+# Registry MCP servers resolve as stdio packages (mcp.transport.allow).
+pytestmark = pytest.mark.usefixtures("stdio_mcp_registry")
+
 MCP_POLICY_FIXTURE = FIXTURE_DIR / "apm-policy-mcp.yml"
 
 
@@ -331,9 +334,13 @@ class TestDeniedMCPWarn:
 
 
 class TestTransportAllow:
-    def test_non_allowed_transport_blocked(self):
+    def test_non_allowed_transport_blocked(self, stdio_mcp_registry):
         """MCP using a transport not in transport.allow is blocked."""
         # Fixture has transport.allow: [stdio, http]
+        stdio_mcp_registry["io.github.github/github-mcp-server"] = {
+            "name": "io.github.github/github-mcp-server",
+            "remotes": [{"type": "sse", "url": "https://sse.example/mcp"}],
+        }
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
         # Use 'sse' transport which is NOT in [stdio, http]
@@ -367,6 +374,40 @@ class TestTransportAllow:
             )
 
         assert active is True
+
+
+class TestTransportUnknownUnderWarn:
+    def test_unresolvable_registry_server_only_warns(self, monkeypatch):
+        """enforcement: warn downgrades an unknown transport like any violation."""
+        from apm_cli.integration import mcp_transport_resolution
+
+        class _Down:
+            registry_url = "https://registry.example"
+
+            def find_server_by_reference(self, name):
+                raise ConnectionError("down")
+
+        mcp_transport_resolution.clear_registry_info_memo()
+        monkeypatch.setattr(mcp_transport_resolution, "_registry_client", lambda url: _Down())
+        base = _load_mcp_policy()
+        policy = ApmPolicy(enforcement="warn", mcp=base.mcp, dependencies=base.dependencies)
+        dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="http")
+        logger = _make_logger()
+        with (
+            _patch_discover(_make_fetch_result(policy=policy)),
+            patch.object(logger, "policy_violation") as mock_violation,
+        ):
+            _result, active = run_policy_preflight(
+                project_root=Path("/tmp/fake"), mcp_deps=[dep], logger=logger
+            )
+        assert active is True
+        unknown = [
+            c
+            for c in mock_violation.call_args_list
+            if "effective transport unknown" in str(c.kwargs.get("reason", c.args))
+        ]
+        assert unknown, mock_violation.call_args_list
+        assert all(c.kwargs.get("severity") == "warn" for c in unknown)
 
 
 # -- Test: self_defined rule -------------------------------------------

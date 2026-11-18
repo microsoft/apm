@@ -802,7 +802,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false
@@ -1581,7 +1581,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false

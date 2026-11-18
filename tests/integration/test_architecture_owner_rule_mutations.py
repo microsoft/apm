@@ -1184,6 +1184,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command reads APM_POLICY_DISABLE directly instead of the single helper.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-mcp-transport-projection",
+        rule_id="install-deployment-policy-mcp-transport-projection",
+        path="src/apm_cli/policy/policy_checks.py",
+        old="_check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp)",
+        new="_check_mcp_transport({m.name: frozenset({m.transport}) for m in mcp_list}, policy.mcp)",
+        intent="Policy check 9 reads the raw declared transport instead of the effective one.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-remote-origin-owner",
         rule_id="install-deployment-policy-remote-origin-owner",
         path="src/apm_cli/policy/_remote.py",

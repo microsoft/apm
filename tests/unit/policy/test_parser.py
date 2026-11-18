@@ -571,3 +571,28 @@ class TestSecurityAuditParsing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMcpTransportAllowCanonicalization(unittest.TestCase):
+    """mcp.transport.allow is canonicalized once, at parse time."""
+
+    def test_http_alias_folds_into_streamable_http(self):
+        policy, warnings = load_policy(
+            "mcp:\n  transport:\n    allow: [HTTP, stdio, streamable-http]\n"
+        )
+        self.assertEqual(warnings, [])
+        self.assertEqual(policy.mcp.transport.allow, ("streamable-http", "stdio"))
+
+    def test_unknown_transport_warns(self):
+        policy, warnings = load_policy("mcp:\n  transport:\n    allow: [stdio, websocket]\n")
+        self.assertEqual(policy.mcp.transport.allow, ("stdio", "websocket"))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("unknown transport 'websocket'", warnings[0])
+
+    def test_inheritance_intersects_canonical_names(self):
+        from apm_cli.policy.inheritance import merge_policies
+
+        parent, _ = load_policy("mcp:\n  transport:\n    allow: [stdio, http]\n")
+        child, _ = load_policy("mcp:\n  transport:\n    allow: [streamable-http, sse]\n")
+        merged = merge_policies(parent, child)
+        self.assertEqual(merged.mcp.transport.allow, ("streamable-http",))
