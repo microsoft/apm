@@ -13,6 +13,10 @@ check function's definition order) stays visible and auditable in one place.
 
 from __future__ import annotations
 
+from scripts.architecture_linter.checks.install_agent_render_adopt import (
+    GUARD_AGENT_RENDER_ADOPT,
+    check_agent_render_then_adopt,
+)
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
     _GUARD_CLEANUP_RELEASE,
@@ -57,6 +61,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
 from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
+)
+from scripts.architecture_linter.checks.install_lsp_capability_gate import (
+    GUARD_LSP_CAPABILITY_GATE,
+    check_lsp_capability_gate,
 )
 from scripts.architecture_linter.checks.install_lsp_plugin import (
     GUARD_CONSUMER_MANIFEST_REWRITE,
@@ -231,6 +239,11 @@ RULES: tuple[Rule, ...] = (
         check_codex_agent_link_resolution,
     ),
     _rule(
+        GUARD_AGENT_RENDER_ADOPT,
+        "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
+        check_agent_render_then_adopt,
+    ),
+    _rule(
         GUARD_CONSUMER_MANIFEST_REWRITE,
         "Consumer apm.yml rewrites route through the round-trip YAML pair.",
         check_consumer_manifest_rewrite,
@@ -249,6 +262,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LSP_LIFECYCLE,
         "LSP collection and reconciliation route through install/lsp/integration.py.",
         check_lsp_lifecycle,
+    ),
+    _rule(
+        GUARD_LSP_CAPABILITY_GATE,
+        "Declared LSP without a capable target fails before any target write.",
+        check_lsp_capability_gate,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,

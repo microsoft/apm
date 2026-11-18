@@ -159,7 +159,7 @@ before anything is written.
 
 > **Bypass note:** `apm install --no-policy` skips this local gate for one
 > invocation. `APM_POLICY_DISABLE=1` also disables policy evaluation for
-> `apm audit --ci` in the same shell, but the 8 baseline lockfile checks still
+> `apm audit --ci` in the same shell, but the baseline lockfile checks still
 > run. Today that means 21 policy checks are skipped. See the
 > [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract)
 > for the full surface.
@@ -173,7 +173,7 @@ before anything is written.
 
 ### CI time (audit gate)
 
-`apm audit --ci --policy org` runs 21 policy checks plus 8 baseline lockfile
+`apm audit --ci --policy org` runs 21 policy checks plus 9 baseline lockfile
 checks and is intended as a required status check on pull requests. With
 `security.integrity.require_hashes: true`, the `dependency-content-hashes`
 check fails when a non-local locked dependency lacks `content_hash`; local

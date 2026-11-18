@@ -55,9 +55,9 @@ The `GITHUB_APM_PAT` secret is only required if your `apm.yml` references privat
 
 1. Go to your repository **Settings** > **Rules**.
 2. Select an existing branch ruleset or create a new one targeting your default branch.
-3. Enable **Require status checks to pass** and add `APM Audit` (the workflow job name) as a required check.
+3. Enable **Require status checks to pass** and add `audit` (the workflow job name) as a required check.
 
-Alternatively, in classic branch protection rules under **Settings** > **Branches** > **Branch protection rules**, enable **Require status checks to pass before merging** and search for `APM Audit`.
+Alternatively, in classic branch protection rules under **Settings** > **Branches** > **Branch protection rules**, enable **Require status checks to pass before merging** and search for `audit`.
 
 Once configured, any PR that introduces content issues detected by `apm audit` will fail the check.
 

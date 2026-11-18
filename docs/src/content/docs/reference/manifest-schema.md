@@ -170,6 +170,8 @@ Controls which output targets are generated during compilation, installation, an
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
+The exception is `target: all` on its own: `apm install` and `apm compile` select every supported target, and `compilation.target` policy judges that full set.
+
 For project-scope commands, when both fields are omitted, APM auto-detects from the
 [documented filesystem signals](../cli/targets/#detection-signals).
 Once set, the field is authoritative.
@@ -194,6 +196,9 @@ A scalar remains accepted as a one-item compatibility input. Declaring both
 fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
 supported for backward compatibility. The `vscode` alias is accepted in either
 form and normalized to `copilot`; `agents` remains a CLI-only alias.
+MCP-only and experimental `--target` values such as `intellij` and
+`copilot-app` are not manifest targets: `apm install` rejects them in
+`apm.yml` before writing any file.
 
 | Value | Effect |
 |---|---|
@@ -819,7 +824,7 @@ dependencies:
 
 ### 4.3. `dependencies.lsp` -- `list<LspDependency>`
 
-LSP (Language Server Protocol) server dependencies give supported runtimes real-time code intelligence -- diagnostics, go-to-definition, and type information. APM currently writes LSP config for Claude Code and GitHub Copilot CLI while keeping this manifest schema runtime-neutral.
+LSP (Language Server Protocol) server dependencies give supported runtimes real-time code intelligence -- diagnostics, go-to-definition, and type information. APM currently writes LSP config for Claude Code, GitHub Copilot CLI and OpenCode while keeping this manifest schema runtime-neutral.
 
 Each element MUST be one of two forms: **string** or **object**.
 
@@ -888,8 +893,12 @@ dependencies:
 Code uses the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json` at project scope or
 `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
-project scope or `~/.copilot/lsp-config.json` at user scope. See
-[Install LSP servers](../../consumer/install-lsp-servers/) for output formats
+project scope or `~/.copilot/lsp-config.json` at user scope. OpenCode uses the
+`lsp` key of `opencode.json` or `~/.config/opencode/opencode.json`; it skips
+`socket` servers and does not write `startupTimeout`, `shutdownTimeout`,
+`restartOnCrash`, `maxRestarts`, `workspaceFolder` or `settings` (see
+[OpenCode limitations](../../consumer/install-lsp-servers/#opencode-limitations)).
+See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats
 and lifecycle details.
 
 ---
@@ -947,7 +956,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `target` | `enum<string>` | `all` | Same values as Section 3.6 | Output target. Defaults to `all` when set explicitly in compilation config. |
+| `target` | `enum<string>` | unset | Same values as Section 3.6 | Ignored by `apm compile`, which uses `--target`, then the top-level `targets:` (Section 3.6), then auto-detection. Declare outputs with `targets:` instead. |
 | `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory target files (e.g. `AGENTS.md`, `CLAUDE.md`). `single-file` generates one monolithic file at `output`. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
@@ -966,7 +975,6 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 
 ```yaml
 compilation:
-  target: all
   strategy: distributed
   source_attribution: true
   exclude:
@@ -1220,7 +1228,6 @@ devDependencies:
     - owner/test-helpers
 
 compilation:
-  target: all
   strategy: distributed
   exclude:
     - "apm_modules/**"

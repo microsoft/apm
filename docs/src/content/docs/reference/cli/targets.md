@@ -68,12 +68,12 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
 ```
   TARGET       STATUS     SOURCE                                   DEPLOY DIR
   ------------ ---------- ---------------------------------------- ----------
-  copilot      inactive   needs .github/copilot-instructions.md    .github/
   claude       active     CLAUDE.md                                .claude/
-  grok-build   inactive   needs .grok/                             .grok/
+  copilot      inactive   needs .github/copilot-instructions.md    .github/
   cursor       active     .cursor/                                 .cursor/
   codex        inactive   needs .codex/                            .codex/
   gemini       inactive   needs GEMINI.md                          .gemini/
+  grok-build   inactive   needs .grok/                             .grok/
   opencode     inactive   needs .opencode/                         .opencode/
   windsurf     inactive   needs .windsurf/                         .windsurf/
   kiro         inactive   needs .kiro/                             .kiro/
@@ -93,7 +93,7 @@ match per target is enough to activate it.
 
 | Target | Signal(s) APM looks for | Deploy directory |
 |--------|-------------------------|------------------|
-| `copilot` | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
+| `copilot` | `.github/copilot-instructions.md` or `.github/mcp.json` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
 | `claude` | `.claude/` directory, or `CLAUDE.md` file | `.claude/` |
 | `grok-build` | `.grok/` directory | `.grok/` |
 | `cursor` | `.cursor/` directory, or `.cursorrules` file (legacy) | `.cursor/` |

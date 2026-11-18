@@ -60,13 +60,13 @@ Source: `src/apm_cli/bundle/local_bundle.py`.
 
 ### compile
 
-The `apm compile` command. Takes resolved primitives in `apm_modules/`
-and writes them into each declared harness location (`.github/`,
-`.claude/`, `.cursor/`, etc.) using the format that harness expects.
-Runs automatically as the final phase of `apm install`.
+The `apm compile` command. Aggregates instructions from your package and
+`apm_modules/` into root context files (`AGENTS.md`, `CLAUDE.md`,
+`GEMINI.md`) for the selected targets. Does not run as part of
+`apm install`; install prints a hint when a target needs it.
 
-NOT a build step that produces an artifact. Compile only deploys to
-local harness directories.
+NOT per-harness deployment. `apm install` writes primitives into harness
+directories (`.github/`, `.claude/`, `.cursor/`, etc.).
 
 See: [Compilation guide](/apm/producer/compile/).
 Source: `src/apm_cli/commands/compile/`.
@@ -88,7 +88,8 @@ Source: `src/apm_cli/deps/lockfile.py`,
 The personal access token APM reads to authenticate against GitHub
 when resolving private packages. Resolution order:
 `GITHUB_APM_PAT_<ORG>` (per-org), then `GITHUB_APM_PAT`, then
-`GITHUB_TOKEN`, then `GH_TOKEN`. Public packages need no token.
+`GITHUB_TOKEN`, then `GH_TOKEN`, then `gh auth token`, then the git
+credential helper. Public packages need no token.
 
 NOT a separate token type. It is a standard GitHub PAT; the
 `GITHUB_APM_PAT` name exists so APM-scoped tokens do not collide with
@@ -101,7 +102,7 @@ Source: `src/apm_cli/core/auth.py`.
 
 The agent runtime that executes primitives: GitHub Copilot (CLI + IDE),
 Claude Code, Grok Build, Cursor, Codex, Gemini, Antigravity, OpenCode,
-Windsurf, and Kiro. Each harness has
+Windsurf, Kiro, Hermes, and Grok Bot. Each harness has
 its own primitive directory layout and file format.
 
 NOT the same as a target. The target is the manifest or CLI selector for
@@ -113,7 +114,7 @@ Source: `src/apm_cli/integration/targets.py` (see `KNOWN_TARGETS`).
 
 A primitive type whose contents run at a defined lifecycle event in the
 host harness (for example `PreToolUse`). Supported on every harness
-except OpenCode -- see the matrix in
+except Grok Build, OpenCode, Hermes, and Grok Bot -- see the matrix in
 [primitives and targets](/apm/concepts/primitives-and-targets/).
 
 NOT an APM CLI lifecycle event. Hooks fire inside the agent runtime,
@@ -125,7 +126,7 @@ Source: `src/apm_cli/integration/hook_integrator.py`.
 
 The `apm install` command. Resolves dependencies declared in `apm.yml`,
 downloads them into `apm_modules/`, runs the policy gate, scans for
-hidden Unicode, writes `apm.lock.yaml`, and compiles primitives into
+hidden Unicode, writes `apm.lock.yaml`, and deploys primitives into
 each declared harness directory.
 
 All major verbs match npm semantics: `apm install` deploys, `apm update`
@@ -154,7 +155,7 @@ consumers can discover and install them by short name.
 NOT a registry. A marketplace is human-curated discovery; the registry
 is the resolution backend that APM actually downloads from.
 
-See: [Marketplaces guide](/apm/consumer/private-and-org-packages/).
+See: [Marketplaces guide](/apm/consumer/installing-from-marketplaces/).
 Source: `src/apm_cli/commands/marketplace/`.
 
 ### MCP server
@@ -254,9 +255,9 @@ Source: `src/apm_cli/models/apm_package.py`,
 
 The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
 compiles for (`copilot`, `claude`, `grok-build`, `cursor`, `codex`, `gemini`,
-`antigravity`, `opencode`, `windsurf`, `kiro`, or
+`antigravity`, `opencode`, `windsurf`, `kiro`, `hermes`, `grok-bot`, or
 `agent-skills`). `all` is a CLI `--target` value only. Drives which integrator runs and
-which directories receive output during `apm compile`.
+which directories receive output during `apm install` and `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the
 runtime that consumes the compiled output.

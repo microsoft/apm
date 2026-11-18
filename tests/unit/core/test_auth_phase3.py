@@ -14,8 +14,6 @@ Focuses on:
 - emit_stale_pat_diagnostic with logger wired
 - _diagnostics_or_none
 - notify_auth_source various paths
-- execute_with_bearer_fallback all branches
-- BearerFallbackOutcome
 - _org_to_env_suffix
 - set_logger
 """
@@ -34,11 +32,10 @@ from apm_cli.core.auth import (
     AdoAuthChainExhaustedError,
     AuthContext,
     AuthResolver,
-    BearerFallbackOutcome,
     HostInfo,
     _org_to_env_suffix,
 )
-from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.core.token_manager import GitHelperCredential, GitHubTokenManager
 from apm_cli.models.dependency.host_virtual import UnsupportedHostQualifiedVirtualPackageError
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -759,8 +756,8 @@ class TestTryWithFallbackCredentialChain:
             patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="gcm-token",
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
             ) as credential_fill,
         ):
             resolver = AuthResolver()
@@ -779,7 +776,7 @@ class TestTryWithFallbackCredentialChain:
         credential_fill.assert_called_once_with(
             "dev.azure.com",
             port=None,
-            path="contoso/platform/tools",
+            path="contoso/platform/_git/tools",
         )
         gcm_env = attempts[-1][1]
         count = int(gcm_env.get("GIT_CONFIG_COUNT", "0"))
@@ -811,8 +808,8 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="gcm-token",
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
             ) as credential_fill,
         ):
             resolver = AuthResolver()
@@ -827,8 +824,8 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="gcm-token",
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
             ) as credential_fill,
         ):
             resolver = AuthResolver()
@@ -851,7 +848,7 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
+                "resolve_git_helper_credential",
                 return_value=None,
             ),
         ):
@@ -863,8 +860,7 @@ class TestTryWithFallbackCredentialChain:
                     verbose_callback=logs.append,
                 )
 
-        assert any("returned no credential" in line for line in logs)
-        assert any("wrapping exhausted-chain error" in line for line in logs)
+        assert any("git credential fill returned no credential" in line for line in logs)
 
     def test_ado_server_exhausted_omits_az_login(self) -> None:
         def _op(_token, _env):
@@ -874,7 +870,7 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {"ADO_HOST": "ado.example.com"}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
+                "resolve_git_helper_credential",
                 return_value=None,
             ),
         ):
@@ -899,7 +895,7 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
+                "resolve_git_helper_credential",
                 return_value=None,
             ),
             patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
@@ -909,8 +905,13 @@ class TestTryWithFallbackCredentialChain:
                 resolver.try_with_fallback("dev.azure.com", _op)
 
         message = str(raised.value)
-        assert "ADO_APM_PAT and git credential fill were rejected" in message
-        assert "az CLI bearer" not in message
+        steps = [
+            message.find("ADO_APM_PAT was rejected"),
+            message.find("az CLI bearer was not available"),
+            message.find("git credential fill returned no credential"),
+        ]
+        assert all(position >= 0 for position in steps), message
+        assert steps == sorted(steps), message
         assert "az login" in message
 
     def test_ado_fill_non_auth_failure_is_not_wrapped(self) -> None:
@@ -926,8 +927,8 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="gcm-token",
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
             ),
             patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
         ):
@@ -948,8 +949,8 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="gcm-token",
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
             ),
             patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
         ):
@@ -962,8 +963,8 @@ class TestTryWithFallbackCredentialChain:
             patch.dict(os.environ, {}, clear=True),
             patch.object(
                 GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="gcm-token",
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
             ) as credential_fill,
         ):
             resolver = AuthResolver()
@@ -980,6 +981,10 @@ class TestTryWithFallbackCredentialChain:
 # ---------------------------------------------------------------------------
 # build_error_context -- non-ADO paths
 # ---------------------------------------------------------------------------
+
+
+def _helper_credential(password: str) -> GitHelperCredential:
+    return GitHelperCredential(host="dev.azure.com", password=password, username="helper-user")
 
 
 class TestBuildErrorContextNonADO:
@@ -1058,168 +1063,6 @@ class TestBuildErrorContextNonADO:
             resolver = AuthResolver()
             msg = resolver.build_error_context("github.com", "clone")
             assert "--verbose" in msg
-
-
-# ---------------------------------------------------------------------------
-# execute_with_bearer_fallback
-# ---------------------------------------------------------------------------
-
-
-class TestExecuteWithBearerFallback:
-    def _make_ado_dep_ref(self) -> MagicMock:
-        dep = MagicMock()
-        dep.is_azure_devops = lambda: True
-        dep.host = "dev.azure.com"
-        return dep
-
-    def _make_non_ado_dep_ref(self) -> MagicMock:
-        dep = MagicMock()
-        dep.is_azure_devops = lambda: False
-        dep.host = "github.com"
-        return dep
-
-    def test_non_ado_returns_primary_immediately(self) -> None:
-        resolver = AuthResolver()
-        dep = self._make_non_ado_dep_ref()
-        outcome = resolver.execute_with_bearer_fallback(
-            dep,
-            primary_op=lambda: "primary_result",
-            bearer_op=lambda b: "bearer_result",
-            is_auth_failure=lambda r: False,
-        )
-        assert outcome == BearerFallbackOutcome("primary_result", False)
-
-    def test_dep_ref_none_returns_primary_immediately(self) -> None:
-        resolver = AuthResolver()
-        outcome = resolver.execute_with_bearer_fallback(
-            None,
-            primary_op=lambda: "primary",
-            bearer_op=lambda b: "bearer",
-            is_auth_failure=lambda r: False,
-        )
-        assert outcome.outcome == "primary"
-        assert outcome.bearer_attempted is False
-
-    def test_ado_no_auth_failure_returns_primary(self) -> None:
-        resolver = AuthResolver()
-        dep = self._make_ado_dep_ref()
-        outcome = resolver.execute_with_bearer_fallback(
-            dep,
-            primary_op=lambda: "primary_ok",
-            bearer_op=lambda b: "bearer_result",
-            is_auth_failure=lambda r: False,
-        )
-        assert outcome.outcome == "primary_ok"
-        assert outcome.bearer_attempted is False
-
-    def test_ado_auth_failure_provider_unavailable_returns_primary(self) -> None:
-        resolver = AuthResolver()
-        dep = self._make_ado_dep_ref()
-        with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls:
-            mock_cls.return_value.is_available.return_value = False
-            outcome = resolver.execute_with_bearer_fallback(
-                dep,
-                primary_op=lambda: "primary_fail",
-                bearer_op=lambda b: "bearer_result",
-                is_auth_failure=lambda r: True,
-            )
-        assert outcome.outcome == "primary_fail"
-        assert outcome.bearer_attempted is False
-
-    def test_ado_auth_failure_bearer_error_returns_primary(self) -> None:
-        from apm_cli.core.azure_cli import AzureCliBearerError
-
-        resolver = AuthResolver()
-        dep = self._make_ado_dep_ref()
-        with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls:
-            mock_cls.return_value.is_available.return_value = True
-            mock_cls.return_value.get_bearer_token.side_effect = AzureCliBearerError(
-                "fail", kind="error"
-            )
-            outcome = resolver.execute_with_bearer_fallback(
-                dep,
-                primary_op=lambda: "primary_fail",
-                bearer_op=lambda b: "bearer_result",
-                is_auth_failure=lambda r: True,
-            )
-        assert outcome.outcome == "primary_fail"
-        assert outcome.bearer_attempted is False
-
-    def test_ado_bearer_succeeds_emits_diagnostic_returns_fallback(self) -> None:
-        resolver = AuthResolver()
-        dep = self._make_ado_dep_ref()
-
-        with (
-            patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls,
-            patch.object(resolver, "emit_stale_pat_diagnostic") as mock_diag,
-        ):
-            mock_cls.return_value.is_available.return_value = True
-            mock_cls.return_value.get_bearer_token.return_value = "ey.bearer.jwt"
-            outcome = resolver.execute_with_bearer_fallback(
-                dep,
-                primary_op=lambda: "primary_fail",
-                bearer_op=lambda b: "bearer_success",
-                is_auth_failure=lambda r: r == "primary_fail",
-            )
-
-        assert outcome.outcome == "bearer_success"
-        assert outcome.bearer_attempted is True
-        mock_diag.assert_called_once_with("dev.azure.com")
-
-    def test_ado_bearer_fails_returns_primary_with_attempted_true(self) -> None:
-        resolver = AuthResolver()
-        dep = self._make_ado_dep_ref()
-
-        with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls:
-            mock_cls.return_value.is_available.return_value = True
-            mock_cls.return_value.get_bearer_token.return_value = "ey.bearer.jwt"
-            outcome = resolver.execute_with_bearer_fallback(
-                dep,
-                primary_op=lambda: "primary_fail",
-                bearer_op=lambda b: "bearer_also_fail",
-                is_auth_failure=lambda r: r in ("primary_fail", "bearer_also_fail"),
-            )
-
-        assert outcome.outcome == "primary_fail"
-        assert outcome.bearer_attempted is True
-
-    def test_ado_bearer_op_raises_swallowed_returns_primary(self) -> None:
-        resolver = AuthResolver()
-        dep = self._make_ado_dep_ref()
-
-        with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls:
-            mock_cls.return_value.is_available.return_value = True
-            mock_cls.return_value.get_bearer_token.return_value = "ey.jwt"
-
-            def _bearer_op(b):
-                raise RuntimeError("bearer op exploded")
-
-            outcome = resolver.execute_with_bearer_fallback(
-                dep,
-                primary_op=lambda: "primary_fail",
-                bearer_op=_bearer_op,
-                is_auth_failure=lambda r: True,
-            )
-
-        assert outcome.outcome == "primary_fail"
-        assert outcome.bearer_attempted is True
-
-
-# ---------------------------------------------------------------------------
-# BearerFallbackOutcome
-# ---------------------------------------------------------------------------
-
-
-class TestBearerFallbackOutcome:
-    def test_is_namedtuple(self) -> None:
-        o = BearerFallbackOutcome(outcome="x", bearer_attempted=True)
-        assert o.outcome == "x"
-        assert o.bearer_attempted is True
-
-    def test_unpacking(self) -> None:
-        outcome, attempted = BearerFallbackOutcome("y", False)
-        assert outcome == "y"
-        assert attempted is False
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import pytest
 
 from apm_cli.constants import InstallMode
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.lsp.integration import (
     reconcile_lsp_after_uninstall,
@@ -82,6 +83,7 @@ class TestOwnedLspIntegration:
         dependency = _make_dep("new")
         mock_integrator.install.return_value = 1
         mock_integrator.get_server_names.return_value = {"new"}
+        mock_integrator.expressible_server_names.return_value = {"new"}
         mock_integrator.get_server_configs.return_value = {"new": dependency.to_lsp_json_entry()}
         mock_integrator.supported_target_runtimes.return_value = ["copilot"]
 
@@ -782,6 +784,7 @@ class TestSkipInstall:
         mock_integrator.collect_transitive.return_value = []
         mock_integrator.install.return_value = 1
         mock_integrator.get_server_names.return_value = {"pyright"}
+        mock_integrator.expressible_server_names.return_value = {"pyright"}
         mock_integrator.get_server_configs.return_value = {"pyright": {}}
 
         run_lsp_integration(
@@ -807,3 +810,217 @@ class TestSkipInstall:
             "claude": set(),
             "copilot": {"pyright"},
         }
+
+
+class TestOpenCodeLspIntegration:
+    def _run(self, tmp_path, **kwargs):
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("gopls", command="gopls")]
+        return run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            fail_on_write_error=True,
+            **kwargs,
+        )
+
+    def test_opencode_target_writes_config_and_lockfile(self, tmp_path) -> None:
+        count = self._run(tmp_path, runtime="opencode", explicit_target="opencode")
+
+        assert count == 1
+        data = json.loads((tmp_path / "opencode.json").read_text())
+        assert data["lsp"]["gopls"]["command"] == ["gopls"]
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock.lsp_target_servers["opencode"] == ["gopls"]
+
+    def test_name_only_server_is_not_recorded_for_opencode(self, tmp_path) -> None:
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [
+            _make_dep("pyright"),
+            LSPDependency.from_string("gopls"),
+        ]
+        run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            fail_on_write_error=True,
+            explicit_target="opencode",
+            runtime="opencode",
+        )
+
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock.lsp_target_servers["opencode"] == ["pyright"]
+        assert "gopls" not in json.loads((tmp_path / "opencode.json").read_text())["lsp"]
+
+    def test_skipped_socket_server_is_not_recorded_for_opencode(self, tmp_path) -> None:
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [
+            _make_dep("gopls", command="gopls"),
+            _make_dep("sock", transport="socket"),
+        ]
+        run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            fail_on_write_error=True,
+            explicit_target=["opencode", "copilot"],
+            target_decision=EffectiveTargetDecision(["opencode", "copilot"], "--target flag"),
+        )
+
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock.lsp_target_servers["opencode"] == ["gopls"]
+        assert lock.lsp_target_servers["copilot"] == ["gopls", "sock"]
+
+    def test_user_authored_server_is_neither_overwritten_nor_claimed(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        config = tmp_path / "opencode.json"
+        content = json.dumps({"lsp": {"gopls": {"command": ["my-gopls"]}}})
+        config.write_text(content, encoding="utf-8")
+
+        with pytest.raises(RequiredIntegrationError, match="not managed by APM"):
+            self._run(tmp_path, runtime="opencode", explicit_target="opencode")
+
+        assert config.read_text(encoding="utf-8") == content
+        assert not (tmp_path / "apm.lock.yaml").exists()
+
+    def test_unsupported_target_still_raises_with_new_message(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError) as exc_info:
+            self._run(tmp_path, runtime="cursor", explicit_target="cursor")
+
+        assert "--target copilot, --target claude or --target opencode" in str(exc_info.value)
+
+
+class TestLspCapabilityPreflight:
+    """Declared LSP with no capable target fails before any target write (#3727)."""
+
+    def _ctx(self, tmp_path, *, target="cursor", require=True, exclude=None):
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.lsp.integration import LspPreflight
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/lsp-kit")
+        package_dir = dep_ref.get_install_path(tmp_path / "apm_modules")
+        package_dir.mkdir(parents=True)
+        (package_dir / "apm.yml").write_text(
+            "name: lsp-kit\nversion: 1.0.0\ndependencies:\n  lsp:\n"
+            "    - name: kit-lsp\n      command: kit-ls\n"
+            "      extensionToLanguage:\n        .kit: kit\n",
+            encoding="utf-8",
+        )
+        root = MagicMock()
+        root.get_lsp_dependencies.return_value = []
+        root.scripts = {}
+        root.target = None
+        return SimpleNamespace(
+            lsp_preflight=LspPreflight(exclude=exclude) if require else None,
+            lockfile_only=False,
+            apm_modules_dir=tmp_path / "apm_modules",
+            apm_package=root,
+            dependency_graph=None,
+            deps_to_install=[dep_ref],
+            project_root=tmp_path,
+            scope=InstallScope.PROJECT,
+            target_decision=EffectiveTargetDecision(target, "--target flag"),
+            target_override=target,
+        )
+
+    def test_transitive_lsp_without_capable_target_fails(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with (
+            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
+        ):
+            preflight_lsp_targets(self._ctx(tmp_path))
+
+    def test_capable_target_passes(self, tmp_path) -> None:
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with patch("apm_cli.install.template.effective_allow_map", return_value=None):
+            preflight_lsp_targets(self._ctx(tmp_path, target="opencode"))
+
+    def test_excluded_capable_target_fails_like_the_service_phase(self, tmp_path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with (
+            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
+        ):
+            preflight_lsp_targets(self._ctx(tmp_path, target="opencode", exclude="opencode"))
+
+    def test_untrusted_lsp_package_does_not_trip_the_gate(self, tmp_path) -> None:
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        with patch("apm_cli.install.template.effective_allow_map", return_value={"other/pkg": {}}):
+            preflight_lsp_targets(self._ctx(tmp_path))
+
+    def test_callers_without_lsp_integration_skip_the_gate(self, tmp_path) -> None:
+        from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+        preflight_lsp_targets(self._ctx(tmp_path, require=False))
+
+    def test_service_integration_fails_before_any_mcp_write(self, tmp_path) -> None:
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.install.service_integration import run_service_integrations
+
+        context = SimpleNamespace(
+            project_root=tmp_path,
+            scope=InstallScope.PROJECT,
+            install_mode=InstallMode.ALL,
+            logger=_mock_logger(),
+            runtime=None,
+            exclude=None,
+            trust_transitive_mcp=False,
+            no_policy=True,
+            verbose=False,
+            force=False,
+            exec_allow_map=None,
+            exec_allow_resolved=True,
+        )
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("kit-lsp")]
+        package.scripts = {}
+        package.target = None
+        with (
+            patch("apm_cli.install.mcp.run_mcp_integration", return_value=(0, {})) as run_mcp,
+            pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
+        ):
+            run_service_integrations(
+                context,
+                apm_package=package,
+                mcp_deps=[],
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=None,
+                old_mcp_servers=set(),
+                old_mcp_configs={},
+                old_mcp_provenance={},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=True,
+                diagnostics=None,
+                explicit_target="cursor",
+                target_decision=EffectiveTargetDecision("cursor", "--target flag"),
+            )
+
+        run_mcp.assert_not_called()
+        assert list(tmp_path.iterdir()) == []

@@ -34,8 +34,11 @@ my-bundle/
 +-- apm.lock.yaml        # optional: bundle integrity manifest
 ```
 
-`plugin.json` requires only a `name`. APM also recognises `plugin.json`
-under `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/`. For the
+`plugin.json` requires only a `name` and must sit at the bundle root. A
+directory whose only `plugin.json` is under `.github/plugin/`,
+`.claude-plugin/`, or `.cursor-plugin/` is installed as a local-path
+dependency instead; an archive with that layout is rejected as an invalid
+bundle. For the
 full schema see [Package anatomy](../../concepts/package-anatomy/).
 
 :::note[Claude bundles only]
@@ -63,8 +66,7 @@ canvas, and integrity rules without network access.
 ```
 $ apm install ./dist/my-pkg-1.0.0.zip --target copilot
 [>] Installing local bundle from ./dist/my-pkg-1.0.0.zip
-[+] Bundle integrity verified
-[+] Deployed 7 files to .github/
+[*] Installed 7 file(s) from local bundle
 ```
 
 Steps APM runs:
@@ -127,7 +129,7 @@ For the full flag list see the [`apm install` reference](../../reference/cli/ins
 ## Targets
 
 Pass `--target` to scope the deploy. Without it APM uses the `targets:`
-declared in the project's `apm.yml` (then `apm config target`), and
+declared in the project's `apm.yml` (then `apm config set target`), and
 auto-detects only when neither is set. If the bundle was packed for targets you are not
 installing into, APM prints a warning naming the missing targets and
 proceeds with what it can deploy.

@@ -57,11 +57,10 @@ Migration steps:
 
 ## 3. Lockfile schema upgrades
 
-The current lockfile schemas are `lockfile_version: "1"` for plain Git projects and `"2"` when registry or Git semver resolution fields are present. When APM bumps this, an older binary reading a newer lockfile (or vice versa) will refuse to proceed and print upgrade instructions.
+The current lockfile schemas are `lockfile_version: "1"` for plain Git projects and `"2"` when registry or Git semver resolution fields are present. When APM bumps this, an older binary reading a newer lockfile will refuse to proceed and name the versions it supports.
 
 ```text
-[x] apm.lock.yaml uses lockfile_version "2", this binary supports "1"
-    [>] Upgrade APM: see https://...
+Unsupported lockfile version '2'; supported versions: 1
 ```
 
 Decision matrix:
@@ -138,16 +137,15 @@ fail closed; this explicit opt-in is not backward-compatible.
 
 ## 4. Compile strategy migration
 
-The compile step writes per-target output (e.g. `.github/copilot-instructions.md`, `.claude/`, `.cursor/rules/`). Some targets support both a single-file (monolithic) layout and a per-primitive (distributed) layout.
+The compile step writes root context files (e.g. `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`). `compilation.strategy` selects a single-file (monolithic) layout or a per-directory (distributed) layout.
 
 To switch:
 
-1. Run `apm prune` first to remove APM-managed output for the current strategy. This avoids leaving orphans when the layout changes.
-2. Update the target configuration in `apm.yml` (see the target's reference page).
-3. Run `apm compile` to materialize the new layout.
-4. `git status` -- review added/removed files and commit.
+1. Set `compilation.strategy` (`distributed` or `single-file`) in `apm.yml`.
+2. Run `apm compile --clean` to materialize the new layout. Switching to `single-file` does not remove nested generated files (for example `src/AGENTS.md`); review and delete them by hand.
+3. `git status` -- review added/removed files and commit.
 
-[!] Hand-edited files inside an APM-managed output directory will be lost on recompile. APM owns the output tree; author content lives in source packages.
+[!] `--clean` never deletes hand-authored files, and compile keeps a hand-authored nested `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` with a warning. Author content belongs in source packages.
 
 Reference: [`apm compile`](../../reference/cli/compile/) and [`apm prune`](../../reference/cli/prune/).
 
@@ -168,10 +166,10 @@ Existing target output is untouched. The new target's directory is created fresh
 ### Removing a target
 
 1. Remove the target from `apm.yml` (`target:` field).
-2. Run `apm prune`. APM removes the deployed files for the dropped target.
-3. Run `apm install && apm compile` to confirm the project is clean.
+2. Run `apm install`. APM removes the deployed files for the dropped target.
+3. Run `apm compile` to confirm the project is clean.
 
-[!] `apm prune` only removes files APM tracked in `apm.lock.yaml`. Files you placed by hand inside a target directory remain. Review `git status` after pruning.
+[!] This cleanup only removes files APM tracked in `apm.lock.yaml`. Files you placed by hand inside a target directory remain. Review `git status` afterwards.
 
 Discovery: `apm targets` lists every supported target on the current binary.
 
@@ -209,7 +207,7 @@ See [Registries guide — pitfalls](../../guides/registries/#pitfalls) for env-v
 
 If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring servers directly:
 
-1. Move each server into the `mcp:` block of `apm.yml`. APM resolves servers from the marketplace and wires them per target on install.
+1. Move each server into `dependencies.mcp` in `apm.yml`. APM resolves servers from the MCP registry (or as self-defined entries) and wires them per target on install.
 2. Run `apm install`. APM rewrites the target-specific MCP config.
 3. Diff the generated MCP config against your previous hand-rolled version and reconcile any custom env vars or args using the marketplace package's documented inputs.
 4. Delete the legacy hand-rolled config once the APM-managed version is verified.

@@ -173,9 +173,9 @@ dependencies:
     package_type: apm_package
     content_hash: sha256:9f...                 # Hash of the package file tree
     deployed_files:                            # What this dep wrote to disk
-      - .github/skills/review/SKILL.md
+      - .agents/skills/review/SKILL.md
     deployed_file_hashes:
-      .github/skills/review/SKILL.md: sha256:c4...
+      .agents/skills/review/SKILL.md: sha256:c4...
 
   # A single-primitive (virtual) import looks like this:
   - repo_url: https://github.com/github/awesome-copilot

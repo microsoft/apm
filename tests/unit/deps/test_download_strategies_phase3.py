@@ -26,7 +26,6 @@ import io
 import json
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -42,6 +41,7 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.archive import safe_extract_zip
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -76,12 +76,7 @@ def _make_host(
     ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
-    auth.execute_with_bearer_fallback.side_effect = (
-        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
-            outcome=primary_op(),
-            bearer_attempted=False,
-        )
-    )
+    install_simulated_ado_chain(auth)
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",
@@ -1164,15 +1159,10 @@ class TestDownloadAdoFile:
             ),
         ]
 
-        def execute(_dep, primary_op, bearer_op, is_auth_failure):
-            primary = primary_op()
-            assert is_auth_failure(primary)
-            return SimpleNamespace(
-                outcome=bearer_op("fresh-bearer"),
-                bearer_attempted=True,
-            )
-
-        host.auth_resolver.execute_with_bearer_fallback.side_effect = execute
+        provider = MagicMock()
+        provider.is_available.return_value = True
+        provider.get_bearer_token.return_value = "fresh-bearer"
+        host.auth_resolver.bearer_provider = provider
         result = DownloadDelegate(host).download_ado_file(
             self._dep(),
             "apm.yml",
@@ -1205,7 +1195,7 @@ class TestDownloadAdoFile:
     def test_404_with_html_content_type_does_not_trigger_sign_in_detection(self) -> None:
         """Regression lock: 404 response with text/html body must NOT fire the HTML sign-in guard.
 
-        ADO can return 404 pages as text/html.  _check_html_signin must only fire
+        ADO can return 404 pages as text/html.  Sign-in detection must only fire
         on 200 responses so 404s fall through to raise_for_status and then to the
         main/master ref fallback path rather than raising a misleading 'sign-in page'
         error.  This test proves the status-code guard added in the HTML detection fix.

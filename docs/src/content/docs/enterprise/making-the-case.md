@@ -60,7 +60,7 @@ Because `apm.lock.yaml` is a committed file, standard git tooling answers govern
 - **What was active at a specific release?** `git show v4.2.1:apm.lock.yaml`
 - **Is this environment current?** `apm audit`
 
-For the full forensic and compliance recipes, see the [Lock File Specification](../../reference/lockfile-spec/#9-auditing-patterns).
+For the full forensic and compliance recipes, see the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity).
 
 ---
 
@@ -85,7 +85,7 @@ For the full forensic and compliance recipes, see the [Lock File Specification](
 
 - **Lock file integrity.** `apm.lock.yaml` pins exact versions and commit SHAs for every dependency. No silent updates, no supply chain surprises.
 - **Dependency provenance.** Every package resolves to a specific git repository and commit. The full dependency tree is inspectable before installation.
-- **No code execution, no runtime.** APM is a dev-time tool only. It copies configuration files -- it does not execute code, run background processes, or modify your application at runtime.
+- **No package code execution, no runtime.** APM is a dev-time tool only. It copies configuration files; dependency packages cannot run code at install. APM runs commands only where you configure them ([lifecycle scripts](../lifecycle-scripts/) you trust, `apm run` scripts, opted-in external scanners). It does not run background processes or modify your application at runtime.
 - **Org-wide policy enforcement.** `apm-policy.yml` allow-lists dependency repos, restricts MCP transports and deploy targets, and is auto-discovered from the org's `.github` repo. See [Governance](../governance-guide/) for the bypass contract and install-gate guarantees.
 - **Full audit trail.** All configuration changes are committed to git. Compliance teams can review agent setup changes through standard code review processes.
 

@@ -23,7 +23,7 @@ Until the flag is enabled, the `copilot-app` target stays inert: it is hidden fr
 
 Your APM workflows appear in the Copilot App's correct project tab automatically -- no manual workspace tagging. Ship a `.prompt.md` with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), run `apm install --target copilot-app` inside the repo, and the App lists the workflow under that repo's Workflows tab on next launch. Add `--global` to install from a user-scope `~/.apm/apm.yml`; omit it for project-scoped, team-shared scheduled prompts.
 
-Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM hard-errors with an actionable diagnostic if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface -- whichever its frontmatter shape selects.
+Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM skips them with an actionable `[!]` warning if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface -- whichever its frontmatter shape selects.
 
 :::note[How it works]
 The desktop App stores workflows in a SQLite database at `~/.copilot/data.db`, not as files on disk -- so `copilot-app` is a separate target from the file-based `copilot` integration. `apm install --target copilot-app` inserts one row per workflow prompt; the App picks them up on next launch or refresh. If a freshly installed workflow does not appear, restart the Copilot App once.
@@ -108,7 +108,7 @@ Subsequent installs into the same repo are silent. The hint is upstream-bug guid
 Workflows installed with `apm install --global` run with `CWD=~/.copilot`, not a repository -- which is almost never what the user wants. APM still deploys global workflows (so global skills and commands keep working), but emits a one-time warn-and-proceed diagnostic whenever a `--global` install carries any workflow-shape prompt:
 
 ```
-[!] Copilot App workflows installed with --global run with CWD=~/.copilot, not a project. Attach the workflow to a project from the App's Workflows tab to fix this, or re-run `apm install` from a repo without --global.
+[!] Copilot App workflows installed with --global run with CWD=~/.copilot, not a project. Attach the workflow to a project from the App's Workflows tab to fix this, or re-run `apm install` from a repo without --global. See https://aka.ms/apm/copilot-app-global for details.
 ```
 
 The remediation is per-row: attach the workflow to any project from the Workflows tab in the App. Or re-run `apm install` from inside a repo without `--global`.
@@ -140,7 +140,7 @@ The Copilot App owns the DB and keeps it in WAL mode while running. APM coexists
 
 ## Lockfile entries
 
-Deployed rows are tracked in the project / user lockfile under the `copilot-app-db://workflows/<namespaced-id>` URI scheme. Standard sync semantics apply: lockfile drift triggers redeploy; removal from lockfile triggers row delete on next install.
+Deployed rows are tracked in the project / user lockfile under the `copilot-app-db://workflows/<namespaced-id>` URI scheme. Standard sync semantics apply: lockfile drift triggers redeploy; `apm uninstall` deletes the tracked rows (see [Lifecycle](#lifecycle)).
 
 ## Out of scope (today)
 

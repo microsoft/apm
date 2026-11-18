@@ -169,9 +169,7 @@ def test_ado_retry_stays_inside_primary_auth_attempt(
         attempts=[TransportAttempt(scheme="https", label="HTTPS token", use_token=True)],
         strict=True,
     )
-    host.auth_resolver.execute_with_bearer_fallback.side_effect = (
-        AuthResolver().execute_with_bearer_fallback
-    )
+    host.auth_resolver.try_with_fallback.side_effect = AuthResolver().try_with_fallback
     stderr = (
         f"fatal: unable to access '{url}/': Failed to connect to dev.azure.com port 443 "
         "after 8126 ms: Couldn't connect to server"
@@ -179,6 +177,7 @@ def test_ado_retry_stays_inside_primary_auth_attempt(
     error = subprocess.CalledProcessError(128, ["git"], stderr=stderr)
     action = MagicMock(side_effect=[error, error if persistent else None])
     with (
+        patch.dict("os.environ", {"ADO_APM_PAT": "test-pat"}),
         patch("apm_cli.deps.clone_engine.time.sleep"),
         patch("apm_cli.core.azure_cli.get_bearer_provider") as bearer_provider,
         pytest.raises(RuntimeError) if persistent else nullcontext(),
@@ -191,8 +190,7 @@ def test_ado_retry_stays_inside_primary_auth_attempt(
         )
     assert action.call_count == 2
     assert action.call_args_list[0] == action.call_args_list[1]
-    host.auth_resolver.execute_with_bearer_fallback.assert_called_once()
-    host.auth_resolver.build_ado_bearer_git_env.assert_not_called()
+    host.auth_resolver.try_with_fallback.assert_called_once()
     bearer_provider.assert_not_called()
 
 

@@ -448,6 +448,7 @@ class TestPreflightAuthCheck:
         auth = MagicMock()
         auth.resolve_for_dep.return_value = dep_ctx
         auth._build_git_env.return_value = {}
+        auth.try_with_fallback.side_effect = lambda _host, op, **_kw: op(dep_ctx.token, {})
 
         proc = MagicMock()
         proc.returncode = 0

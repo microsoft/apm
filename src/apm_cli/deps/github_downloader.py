@@ -649,8 +649,10 @@ class GitHubPackageDownloader:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        allow_redirects: bool = True,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
+        extra = {} if allow_redirects else {"allow_redirects": False}
         return self._strategies.resilient_get(
             url,
             headers,
@@ -659,6 +661,7 @@ class GitHubPackageDownloader:
             stream=stream,
             retry_throttles=retry_throttles,
             allow_netrc=allow_netrc,
+            **extra,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:

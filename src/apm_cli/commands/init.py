@@ -693,7 +693,7 @@ def _confirm_setup_summary(config: dict, logger) -> None:
 
     Aborts via ``sys.exit(0)`` if the user declines.
     """
-    targets = config.get("targets")
+    targets = config.get("targets")  # architecture-authority-exempt: bootstrap-writer
     targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
 
     try:
@@ -793,7 +793,7 @@ def _resolve_init_targets(
             )
         if prechecked:
             targets = sorted(prechecked)
-            sources = ", ".join(signal_hints.get(t, "") for t in targets)
+            sources = ", ".join(dict.fromkeys(signal_hints.get(t, "") for t in targets))
             logger.progress(
                 f"Auto-detected targets: {', '.join(targets)} {sources}".rstrip(),
                 symbol="info",
@@ -819,24 +819,10 @@ def _read_existing_targets(project_root: Path) -> list[str]:
     try:
         # Bounded loader so a hostile apm.yml cannot wedge target parsing with a
         # merge/alias expansion bomb (fails closed -> empty target list).
+        from apm_cli.models.manifest_targets import ManifestTargetDeclaration
         from apm_cli.utils.yaml_io import load_yaml
 
-        data = load_yaml(apm_yml_path)
-        if not isinstance(data, dict):
-            return []
-        # Canonical plural form
-        raw = data.get("targets")
-        if raw is not None:
-            if isinstance(raw, list):
-                return [str(t).strip() for t in raw if str(t).strip()]
-            return [t.strip() for t in str(raw).split(",") if t.strip()]
-        # Legacy singular form
-        raw = data.get("target")
-        if raw is None:
-            return []
-        if isinstance(raw, list):
-            return [str(t).strip() for t in raw if str(t).strip()]
-        return [t.strip() for t in str(raw).split(",") if t.strip()]
+        return ManifestTargetDeclaration.from_mapping(load_yaml(apm_yml_path)).prefill_names()
     except Exception:
         return []
 
