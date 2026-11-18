@@ -8,7 +8,10 @@ to a registry. It is a directory (or archive -- `.zip` by default, `.tar.gz` via
 `--archive-format tar.gz`) containing a
 `plugin.json`, your primitive folders, and an embedded `apm.lock.yaml` that
 pins every file by SHA-256. Build it with one command from a project that has
-`apm.yml`:
+`apm.yml`. Run `apm install` first: the embedded `apm.lock.yaml` is built
+from the project's lockfile, and without one the default format packs no
+lockfile ([#3846](https://github.com/microsoft/apm/issues/3846)) while
+`--format agent-plugin` fails:
 
 ```bash
 apm pack
@@ -37,7 +40,7 @@ build/<your-package>-<version>/
 +-- hooks.json         # first-party hook configuration, when present
 +-- .claude-plugin/
 |   +-- plugin.json    # native Claude hook discovery, when hooks are present
-+-- apm.lock.yaml      # embedded: pins every file by SHA-256
++-- apm.lock.yaml      # embedded when the project has a lockfile: pins every file by SHA-256
 ```
 
 The success line tells you exactly what to share:
@@ -161,7 +164,13 @@ side, `apm install <bundle>` rehashes every file and rejects the bundle if:
 
 The manifest is the source of truth. Tampering after pack time is detected
 before any file lands in the project. You do not configure this -- it runs on
-every `apm install <bundle>`.
+every `apm install <bundle>` that carries the manifest.
+
+If the project had no `apm.lock.yaml` when you packed in the default format,
+the bundle has no manifest: `apm install <bundle>` skips the integrity check
+with a warning, or fails when policy sets
+`security.integrity.require_hashes: true`. Run `apm install` before
+`apm pack` so the bundle carries hashes.
 
 ## Distribution paths
 

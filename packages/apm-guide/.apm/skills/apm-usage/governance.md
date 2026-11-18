@@ -373,16 +373,19 @@ undeclared local content at install / audit time.
 
 ## Inheritance rules
 
-Most fields tighten as the policy chain descends. The exception is `deny` and
-`require` lists: a child policy may use `[]` to explicitly clear an inherited
-list (removing entries the parent set). All other fields obey the rules below:
+Inheritance is tighten-only: a child policy can add restrictions but never
+remove ones its parent set. On `deny` and `require` lists a child `[]` adds
+nothing and the parent's entries still apply; on allow lists a child `[]`
+narrows to nothing (no package is allowed). One exception widens:
+`unmanaged_files.exclude` is unioned. Fields merge as follows:
 
 | Field | Merge rule |
 |-------|-----------|
 | `enforcement` | Escalates: `off` < `warn` < `block` |
 | Allow lists | Intersection (child narrows parent) |
-| Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
-| `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
+| Deny lists | Union (child adds to parent). Omitting, `null`, or `[]` leaves the parent's entries in force. |
+| `require` | Union (combines required packages). Omitting, `null`, or `[]` leaves the parent's entries in force. |
+| `fetch_failure` | Escalates: `warn` < `block` (stricter wins) |
 | `max_depth` | `min(parent, child)` |
 | `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
@@ -493,7 +496,7 @@ The `--policy <override>` flag is **audit-only today**  --  it works on
 ### 3. Inheritance and composition
 
 Policy resolves through the chain: enterprise hub -> org -> repo override.
-The merge follows "Inheritance rules" above (most fields tighten; deny/require lists support explicit `[]` override).
+The merge follows "Inheritance rules" above (tighten-only; a child cannot remove inherited entries).
 
 **Multi-level extends:** install-time enforcement and `apm audit --ci` both
 resolve the full `extends:` chain up to `MAX_CHAIN_DEPTH = 5`. Cycles are
@@ -672,13 +675,14 @@ time. MD5 / SHA-1 not accepted.
 ### 9.7. Diagnostic command
 
 `apm policy status` prints discovery outcome, source, enforcement, cache
-age, `extends` chain, and rule counts (table or `--json`). Always exits 0
-so it is safe for CI / SIEM ingestion. Supports `--policy-source` and
-`--no-cache`.
+age, `extends` chain, and rule counts (table or `--json`). It exits 0 by
+default, so it is safe for SIEM ingestion; add `--check` to exit 1 when no
+usable policy is found (any outcome other than `found`), for CI gates.
+Supports `--policy-source` and `--no-cache`.
 
 ### 9.8. `apm audit --ci` auto-discovery
 
-When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci`
+When `--policy` is omitted, `apm audit --ci`
 auto-discovers the org policy from the git remote, mirroring the install
 path. Use `--no-policy` to skip discovery for a single invocation.
 

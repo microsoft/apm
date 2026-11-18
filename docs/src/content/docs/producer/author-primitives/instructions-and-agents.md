@@ -330,8 +330,6 @@ dedicated persona.
   scope-attached and gets folded into the compiled context file. If
   you wanted Cursor or Copilot to scope it to `**/*.ts`, the rule
   will not bind.
-- **Agent named `default` or `start`.** These collide with script
-  resolution in `apm run`. Pick a descriptive name.
 - **Targeting an agent at Windsurf or Gemini.** Neither harness has an
   agents primitive. Cascade auto-invokes skills by description and
   Gemini folds context into `GEMINI.md`. If a persona must reach those

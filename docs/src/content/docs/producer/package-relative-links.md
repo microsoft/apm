@@ -89,8 +89,8 @@ inline what you need.
 
 ## Skills are a special case
 
-Skills deploy as whole bundles (`shutil.copytree` in
-`src/apm_cli/integration/skill_integrator.py:392`). The internal
+Skills deploy as whole bundles (`_copy_skill_bundle` in
+`src/apm_cli/integration/skill_integrator.py`). The internal
 layout of a skill folder is preserved as-is at the destination, so
 **links between files inside a single skill bundle just work and are
 not rewritten**.
@@ -106,10 +106,10 @@ my-pkg/.apm/skills/code-review/
 
 `SKILL.md` linking to `references/api.md` or `scripts/lint.sh` keeps
 working unchanged after deploy to `.claude/skills/code-review/`,
-`.codex/skills/code-review/`, etc.
+`.agents/skills/code-review/` (Codex), etc.
 
 A link from inside a skill bundle out to the package's other
-directories (e.g. `../../references/patterns.md`) does go through the
+directories (e.g. `../../../references/patterns.md`) does go through the
 rewriter, with the same rules as above.
 
 ## Verify after install

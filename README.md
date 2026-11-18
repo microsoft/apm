@@ -176,7 +176,7 @@ apm install --mcp io.github.github/github-mcp-server --transport http   # connec
 Teach your coding agent to use APM with the [official guide](https://github.com/microsoft/apm/tree/main/packages/apm-guide) (an expert agent plus the `apm-usage` skill):
 
 ```bash
-apm install microsoft/apm/packages/apm-guide#v0.35.1
+apm install microsoft/apm/packages/apm-guide#v0.36.1
 ```
 
 See the **[Getting Started guide](https://microsoft.github.io/apm/quickstart/)** for the full walkthrough.
