@@ -100,7 +100,7 @@ class TestRedirectLeakGuard:
 
     def test_same_path_redirect_is_existence_proof_not_followed(self):
         """An in-path 3xx still proves the archive exists; it is not followed."""
-        package = "art.example.com/artifactory/apm/group/repo"
+        package = "art.example.com/artifactory/apm/group/sub/repo"
         auth = Mock()
         auth.resolve_for_dep.return_value = Mock(token=None)
         calls: list[str] = []
@@ -119,6 +119,7 @@ class TestRedirectLeakGuard:
             result = _resolve_artifactory_boundary(package, auth, verbose=False)
 
         assert result is not None
+        assert calls, "expected at least one HEAD probe"
         assert all("signed=1" not in url for url in calls)
 
 
