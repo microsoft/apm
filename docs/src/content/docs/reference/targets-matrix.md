@@ -66,7 +66,8 @@ priority:
 
 1. `--target` / `--all` on the command line.
 2. `targets:` in `apm.yml`.
-3. Auto-detection from filesystem signals (table below).
+3. `apm install` only: the saved `apm config set target` default.
+4. Auto-detection from filesystem signals (table below).
 
 For MCP installation, the equivalent explicit legacy `--runtime` flag also
 has highest priority. MCP machine discovery runs only when `targets:` is
@@ -431,8 +432,8 @@ MCP is not a `TargetProfile` primitive; it is wired by a separate
 integrator that writes per-client config files (e.g.
 `.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`, `.kiro/settings/mcp.json`) for every
 target in the active set that has an MCP client adapter. Active set
-follows the same `--target` > `targets:` > auto-detect chain as
-`apm install`: a runtime with an adapter but outside the active set
+follows the same `--target` > `targets:` > `apm config set target` >
+auto-detect chain as `apm install`: a runtime with an adapter but outside the active set
 is skipped and APM emits an `[i] Skipped MCP config for X  (active
 targets: Y)` line so the gate decision is observable. The matrix
 above marks `mcp` supported when an adapter exists; whether the
@@ -440,6 +441,10 @@ config gets written on a given install is a function of the active
 target set, not just adapter availability. See
 [Install MCP servers](../../consumer/install-mcp-servers/) for the
 gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
+
+LSP servers follow the same active-target gate but are written only for
+`claude`, `copilot` and `opencode`; see
+[Install LSP servers](../../consumer/install-lsp-servers/).
 
 ## See also
 
