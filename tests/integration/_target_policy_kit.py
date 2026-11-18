@@ -62,8 +62,13 @@ def write_manifest(project: Path, declaration: Mapping[str, object], **extra: ob
     dump_yaml(manifest, project / "apm.yml")
 
 
-def compilation_target_check(result: CommandResult) -> dict:
-    """Return the ``compilation-target`` row from ``audit --ci -f json`` output."""
+def compilation_target_check(result: CommandResult, *, unrestricted: bool = False) -> dict:
+    """Return the ``compilation-target`` row from ``audit --ci -f json`` output.
+
+    An unrestricted target policy (``allow: [all]``) may leave the org policy
+    with no rules, so audit runs no policy checks; ``unrestricted`` accepts
+    that as a passing row when the whole report passed.
+    """
     try:
         report = json.loads(result.stdout)
     except json.JSONDecodeError as exc:  # pragma: no cover - diagnostic path
@@ -71,6 +76,8 @@ def compilation_target_check(result: CommandResult) -> dict:
     for check in report.get("checks") or []:
         if check.get("name") == "compilation-target":
             return check
+    if unrestricted and report.get("passed") is True:
+        return {"name": "compilation-target", "passed": True, "message": "", "details": []}
     raise AssertionError(f"no compilation-target check in audit report:\n{result.stdout}")
 
 
@@ -146,7 +153,9 @@ class TargetPolicyWorld:
             self.runner, args, cwd=project, env=env or self.env, step=step, expected=expected
         )
 
-    def audit_read_only(self, project: Path, *, step: str) -> tuple[CommandResult, dict]:
+    def audit_read_only(
+        self, project: Path, *, step: str, unrestricted: bool = False
+    ) -> tuple[CommandResult, dict]:
         """Run ``audit --ci -f json`` and assert it changed nothing in the project."""
         before = tree_snapshot(project)
         result = self.run(project, "audit", "--ci", "-f", "json", step=step, expected=(0, 1))
@@ -154,7 +163,7 @@ class TargetPolicyWorld:
         assert after == before, (
             f"[{step}] audit --ci changed project files: {changed_paths(before, after)}"
         )
-        return result, compilation_target_check(result)
+        return result, compilation_target_check(result, unrestricted=unrestricted)
 
 
 @contextmanager

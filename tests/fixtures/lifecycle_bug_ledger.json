@@ -361,6 +361,23 @@
       ]
     },
     {
+      "issue": 3732,
+      "fixed_in": "0.36.1",
+      "summary": "Compilation-target policy judged raw manifest spellings: audit ignored targets: lists, comma-separated, alias and all spellings drew wrong verdicts, inheritance intersected raw names, undeployable singular targets wrote files before failing, and re-init narrowed target: all.",
+      "failure_modes": ["routing", "observation", "transaction"],
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_audit_and_install_agree_on_target_policy",
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_extends_chain_intersects_canonical_target_names",
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_mcp_add_judges_alias_targets_canonically",
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_local_bundle_install_and_audit_agree",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_undeployable_singular_target_is_rejected_before_any_write",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_user_scope_undeployable_singular_target_is_rejected_before_any_write",
+        "tests/integration/test_target_declaration_adjacent_commands_lifecycle.py::test_reinit_keeps_the_singular_all_deployment_set",
+        "tests/integration/test_target_manifest_upgrade_lifecycle.py::test_upgraded_project_keeps_targets_and_only_policy_verdicts_change"
+      ]
+    },
+    {
       "issue": 3752,
       "fixed_in": "0.36.1",
       "summary": "Azure DevOps installs, validation, lock replay and update ignored the Git credential helper when no ADO_APM_PAT or Azure CLI token was available, although git clone succeeded with the same helper.",
