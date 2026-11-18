@@ -500,7 +500,7 @@ dependencies:
   apm:
     # GitHub shorthand (default host); each line shows a syntax variant
     - microsoft/apm-sample-package                # latest (lockfile pins commit SHA)
-    - microsoft/apm-sample-package#v1.0.0         # pinned to tag (immutable)
+    - microsoft/apm-sample-package#v1.0.0         # release tag; the lockfile pins the commit
     - microsoft/apm-sample-package#main           # branch ref (may change over time)
 
     # Non-GitHub hosts (FQDN preserved)
