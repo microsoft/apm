@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "srv": {
+      "type": "remote",
+      "enabled": true,
+      "url": "https://mcp.example.com/mcp"
+    }
+  }
+}

@@ -181,3 +181,34 @@ def test_marketplace_build_keeps_the_leading_dot_of_a_hidden_local_source(
         data = json.loads(catalog.read_text(encoding="utf-8"))
         sources = [p.get("source") for p in data.get("plugins", [])]
         assert sources == ["./.hidden/plug"], (catalog, sources)
+
+
+def test_policy_deny_pattern_matches_a_git_named_repository(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Names that used to fail parsing now reach policy evaluation and can be denied."""
+    world = _world(tmp_path, apm_binary_path)
+    world.publish("named", skills=("named-skill",), owner="git", repo="git")
+    project = world.project("consumer")
+    policy = world.isolated.work_root / "apm-policy.yml"
+    dump_yaml(
+        {
+            "name": "deny-git-org",
+            "version": "1.0.0",
+            "enforcement": "block",
+            "dependencies": {"deny": ["git/**"]},
+        },
+        policy,
+    )
+    with world.serve() as env:
+        world.run((*INSTALL, "git/git"), cwd=project, env=env, scenario_id="policy-install")
+        result = world.run(
+            ("audit", "--ci", "--policy", str(policy), "--no-fail-fast", "--format", "json"),
+            cwd=project,
+            env=env,
+            expect=None,
+            scenario_id="policy-audit",
+        )
+    failures = audit_failures(result)
+    assert result.returncode != 0, result.stdout[-3000:]
+    assert any("git/git" in " ".join(details) for details in failures.values()), failures

@@ -346,6 +346,139 @@
       ]
     },
     {
+      "issue": 3711,
+      "fixed_in": "0.36.1",
+      "summary": "Antigravity inherited the Gemini remote shape, so APM wrote httpUrl (which Antigravity rejects) and wrote SSE remotes it cannot use.",
+      "failure_modes": ["routing", "outcome"],
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_rewrites_apm_owned_entries_into_the_current_shape"
+      ]
+    },
+    {
+      "issue": 3715,
+      "fixed_in": "0.36.1",
+      "summary": "Repository segments were stripped as a character set instead of a literal .git suffix, so names such as git/git or jonas/tig were rejected and URL installs persisted manifest entries the next run could not parse; marketplace builds dropped the leading dot of ./.hidden sources.",
+      "failure_modes": ["reference", "idempotency"],
+      "properties": ["idempotency.byte_stable", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_git_named_repository_lifecycle.py::test_repository_named_with_git_letters_installs_reinstalls_and_uninstalls",
+        "tests/integration/test_git_named_repository_lifecycle.py::test_manifest_written_by_url_install_on_an_older_release_is_readable",
+        "tests/integration/test_git_named_repository_lifecycle.py::test_dot_only_or_bare_suffix_repository_names_stay_rejected_without_writes",
+        "tests/integration/test_git_named_repository_lifecycle.py::test_marketplace_build_keeps_the_leading_dot_of_a_hidden_local_source",
+        "tests/integration/test_git_named_repository_lifecycle.py::test_policy_deny_pattern_matches_a_git_named_repository"
+      ]
+    },
+    {
+      "issue": 3722,
+      "fixed_in": "0.36.1",
+      "summary": "Global reinstall compared transformed agents (Codex TOML, rewritten links) to their source and reported APM's own files as unmanaged and skipped.",
+      "failure_modes": ["idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_global_agent_adoption_lifecycle.py::test_global_reinstall_adopts_transformed_agents_for_every_target",
+        "tests/integration/test_global_agent_adoption_lifecycle.py::test_global_reinstall_adopts_agents_whose_links_were_rewritten",
+        "tests/integration/test_global_agent_adoption_lifecycle.py::test_upgrade_adopts_agents_rendered_by_an_earlier_release"
+      ]
+    },
+    {
+      "issue": 3726,
+      "fixed_in": "0.36.1",
+      "summary": "A registry behind a gateway that answers with a same-origin redirect failed install and lock replay, because every redirect was refused instead of following those that stay inside the configured registry.",
+      "failure_modes": ["auth", "routing"],
+      "properties": ["auth.credentials_isolated", "lockfile.frozen_preserves_bytes"],
+      "regression_tests": [
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_install_follows_same_origin_gateway_redirect",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_install_refuses_redirect_outside_configured_registry",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_lock_replay_follows_same_origin_redirect_without_lock_churn",
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_registry_lock_replays_resolved_url_without_churn",
+        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_lookalike_redirect_targets",
+        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_follows_case_only_host_difference"
+      ]
+    },
+    {
+      "issue": 3727,
+      "fixed_in": "0.36.1",
+      "summary": "LSP dependencies had no OpenCode target, and the no-LSP-target error fired after skills and .gitignore were already written.",
+      "failure_modes": ["routing", "transaction"],
+      "properties": ["routing.authorized_targets_only", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_fresh_project_writes_lsp_to_opencode_json",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_target_without_lsp_support_fails_before_any_write"
+      ]
+    },
+    {
+      "issue": 3732,
+      "fixed_in": "0.36.1",
+      "summary": "Compilation-target policy judged raw manifest spellings: audit ignored targets: lists, comma-separated, alias and all spellings drew wrong verdicts, inheritance intersected raw names, undeployable singular targets wrote files before failing, and re-init narrowed target: all.",
+      "failure_modes": ["routing", "observation", "transaction"],
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_audit_and_install_agree_on_target_policy",
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_extends_chain_intersects_canonical_target_names",
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_mcp_add_judges_alias_targets_canonically",
+        "tests/integration/test_target_policy_gate_parity_lifecycle.py::test_local_bundle_install_and_audit_agree",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_undeployable_singular_target_is_rejected_before_any_write",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_user_scope_undeployable_singular_target_is_rejected_before_any_write",
+        "tests/integration/test_target_declaration_adjacent_commands_lifecycle.py::test_reinit_keeps_the_singular_all_deployment_set",
+        "tests/integration/test_target_manifest_upgrade_lifecycle.py::test_upgraded_project_keeps_targets_and_only_policy_verdicts_change"
+      ]
+    },
+    {
+      "issue": 3735,
+      "fixed_in": "0.36.1",
+      "summary": "A dependency reached through several parents kept only the first edge's skills, targets or alias, so the result depended on manifest order and uninstall, frozen replay and audit could not see the lost selections.",
+      "failure_modes": ["routing", "idempotency", "observation"],
+      "properties": ["portability.byte_deterministic", "lockfile.frozen_preserves_bytes", "routing.authorized_targets_only", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_diamond_parents_deploy_the_union_of_their_skill_selections_in_any_manifest_order",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_depth_three_chain_keeps_both_ancestor_skill_selections",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_parent_asking_for_whole_bundle_is_not_starved_by_a_narrowing_sibling",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_root_skill_selection_merges_with_a_transitive_selection_and_audit_passes",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_parents_restricting_different_targets_populate_both_harness_roots",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstalling_one_diamond_parent_shrinks_to_the_survivor_selection_then_cleans",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_frozen_install_rejects_a_first_wins_lock_with_an_actionable_reason",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_audit_ci_rejects_a_transitive_skill_subset_that_disagrees_with_declarations",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_user_scope_diamond_shrinks_under_copilot_home",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_pack_ships_the_merged_skill_selection",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_install_rewrites_an_old_diamond_lock_to_the_union_then_uninstall_shrinks",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_frozen_install_on_an_old_first_wins_lock_fails_with_remediation"
+      ]
+    },
+    {
+      "issue": 3736,
+      "fixed_in": "0.36.1",
+      "summary": "Registry v0.1 remotes[].type was ignored, so SSE servers rendered as Streamable HTTP for every harness and apm mcp show printed UNKNOWN.",
+      "failure_modes": ["routing", "outcome"],
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_registry_remote_type_reaches_every_harness_in_its_native_shape",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_mcp_show_reports_the_registry_remote_transport"
+      ]
+    },
+    {
+      "issue": 3745,
+      "fixed_in": "0.36.1",
+      "summary": "COPILOT_HOME moved only the MCP config; skills, agents, instructions, hooks and LSP config still landed under ~/.copilot.",
+      "failure_modes": ["routing", "cleanup"],
+      "properties": ["routing.authorized_targets_only", "filesystem.open_world_observation", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_harness_user_root_lifecycle.py::test_copilot_home_receives_every_copilot_user_primitive",
+        "tests/integration/test_harness_user_root_lifecycle.py::test_relative_user_root_is_rejected_before_any_write"
+      ]
+    },
+    {
+      "issue": 3749,
+      "fixed_in": "0.36.1",
+      "summary": "Hermes MCP writes dropped cwd, documented per-server keys and the SSE transport marker.",
+      "failure_modes": ["routing", "idempotency"],
+      "properties": ["routing.authorized_targets_only", "idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_keeps_cwd_extra_keys_and_sse_transport_idempotently"
+      ]
+    },
+    {
       "issue": 3752,
       "fixed_in": "0.36.1",
       "summary": "Azure DevOps installs, validation, lock replay and update ignored the Git credential helper when no ADO_APM_PAT or Azure CLI token was available, although git clone succeeded with the same helper.",
@@ -355,7 +488,8 @@
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_cli_install_uses_credential_helper_without_pat_or_az",
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_manifest_install_frozen_update_outdated_through_credential_helper",
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_user_scope_install_through_credential_helper",
-        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_pat_keeps_precedence_over_credential_helper"
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_pat_keeps_precedence_over_credential_helper",
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_ado_lock_replays_frozen_and_updates_through_credential_helper"
       ]
     },
     {
@@ -380,6 +514,20 @@
         "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_compile_lifecycle_runs_when_ado_policy_needs_credential_helper",
         "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_uninstall_lifecycle_runs_when_ado_policy_needs_credential_helper",
         "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block"
+      ]
+    },
+    {
+      "issue": 3760,
+      "fixed_in": "0.36.1",
+      "summary": "Uninstalling an unrelated package re-deployed every skill of surviving skill bundles, ignoring their skills selection and leaving the extra skills unrecorded while audit still passed.",
+      "failure_modes": ["cleanup", "ownership", "observation"],
+      "properties": ["filesystem.open_world_observation", "ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_skill_selection_lifecycle.py::test_uninstall_unrelated_package_keeps_survivor_skill_selection",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_non_skill_primitives_and_only_selected_skills_of_a_survivor",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
     }
   ],

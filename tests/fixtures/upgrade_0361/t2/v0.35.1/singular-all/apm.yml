@@ -1,0 +1,11 @@
+name: singular-all
+version: 1.0.0
+target: all
+dependencies:
+  apm:
+  - path: ../pkg
+  mcp:
+  - name: srv
+    registry: false
+    transport: http
+    url: https://mcp.example.com/mcp
