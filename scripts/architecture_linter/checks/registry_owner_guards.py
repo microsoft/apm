@@ -413,14 +413,38 @@ def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -
 
 
 # The deprecated singular ``target:`` key (#3762): one warning emitter in the
-# declaration owner and one rewrite path, reachable only from the explicit
-# ``apm manifest migrate`` command. Install never rewrites the manifest.
+# declaration owner and one in-place rewrite module, reachable only from the
+# explicit ``apm manifest migrate`` command. The target token mapping itself
+# lives in the declaration owner (#3857); migrate and the ``apm init`` re-init
+# both call it, and every rewritten manifest is verified before it is written.
+# Install never rewrites the manifest.
 _TARGET_DEPRECATION_OWNER = "src/apm_cli/models/manifest_targets.py"
 _TARGET_DEPRECATION_FUNCTION = "_warn_deprecated_manifest_keys"
 _TARGET_DEPRECATION_PHRASE = "uses the deprecated 'target:' key"
+_TARGET_REWRITE_OWNER = _TARGET_DEPRECATION_OWNER
 _TARGET_MIGRATION_MODULE = "manifest_target_migration"
 _TARGET_MIGRATION_OWNER = "src/apm_cli/models/manifest_target_migration.py"
 _TARGET_MIGRATION_COMMAND = "src/apm_cli/commands/manifest.py"
+# Each rewrite path must call the owner. The scaffold writer verifies only
+# when asked, so both init writes must ask.
+_TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
+    _TARGET_REWRITE_OWNER: (
+        "def rewrite_target_names(",
+        "def verify_rewritten_manifest(",
+    ),
+    _TARGET_MIGRATION_OWNER: (
+        "targets = rewrite_target_names(legacy_declaration)",
+        "verify_rewritten_manifest(path, migrated_text)",
+    ),
+    "src/apm_cli/commands/init.py": (
+        "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
+        "_create_minimal_apm_yml(config, plugin=plugin, verify=True)",
+        "target_path=staged_manifest, verify=True)",
+    ),
+    "src/apm_cli/commands/_helpers.py": ("verify_rewritten_manifest(out_file, content)",),
+}
+# Authored (unvalidated) names feed only the rewrite mapping.
+_TARGET_AUTHORED_NAMES_CALL = ".authored_names("
 
 
 def _target_deprecation_findings(
@@ -444,6 +468,27 @@ def _target_deprecation_findings(
             )
             for literal in facts.literals
             if _TARGET_DEPRECATION_PHRASE in literal.value_repr
+        )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"apm.yml target rewrites must call the rewrite owner: {required_call}",
+        )
+        for required_call in _TARGET_REWRITE_CALLS.get(path, ())
+        if not any(required_call in line for line in facts.lines)
+    )
+    if path != _TARGET_REWRITE_OWNER:
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "authored target names feed only the apm.yml target rewrite mapping; "
+                f"use {_TARGET_REWRITE_OWNER}::rewrite_target_names",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _TARGET_AUTHORED_NAMES_CALL in line
         )
     if path == _TARGET_MIGRATION_OWNER:
         return findings

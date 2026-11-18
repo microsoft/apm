@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.target_detection import EffectiveTargetDecision
+from apm_cli.models.manifest_io import ManifestAnchorError
 from apm_cli.models.manifest_target_migration import (
     ManifestMigrationError,
     plan_manifest_migration,
@@ -268,16 +269,13 @@ def test_removing_empty_key_keeps_its_comment(tmp_path, original, migrated):
     assert plan_manifest_migration(manifest).migrated_text == migrated
 
 
-def test_anchored_list_is_rewritten_without_changing_its_aliases(tmp_path):
-    manifest = _write(
-        tmp_path / "apm.yml",
-        "name: demo\ntarget: &t\n  - agy\ncompilation:\n  exclude: *t\n",
-    )
+def test_anchored_manifest_is_refused_before_planning(tmp_path):
+    original = "name: demo\ntarget: &t\n  - agy\ncompilation:\n  exclude: *t\n"
+    manifest = _write(tmp_path / "apm.yml", original)
 
-    migrated = plan_manifest_migration(manifest).migrated_text
-
-    assert "targets:\n  - antigravity\n" in migrated
-    assert "compilation:\n  exclude:\n    - agy\n" in migrated
+    with pytest.raises(ManifestAnchorError, match=r"YAML anchor '&t' on line 2"):
+        plan_manifest_migration(manifest)
+    assert manifest.read_text(encoding="utf-8") == original
 
 
 def test_multiline_flow_list_keeps_item_comments(tmp_path):

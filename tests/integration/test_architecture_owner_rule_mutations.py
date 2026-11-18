@@ -3388,17 +3388,137 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             "from ..models.manifest_rewrite import (",
             id="migrate-command-bypasses-rewrite-owner",
         ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
+            "ManifestTargetDeclaration.from_mapping(data, apm_yml_path).selection",
+            id="reinit-bypasses-rewrite-mapping",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            "    apm_yml_path = project_root / APM_YML_FILENAME\n",
+            "    apm_yml_path = project_root / APM_YML_FILENAME\n"
+            "    _names = ManifestTargetDeclaration().authored_names()\n",
+            id="authored-names-outside-rewrite-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            "        verify_rewritten_manifest(out_file, content)\n",
+            "        pass\n",
+            id="scaffold-writes-unverified-rewrite",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            "_create_minimal_apm_yml(config, plugin=plugin, verify=True)",
+            "_create_minimal_apm_yml(config, plugin=plugin)",
+            id="init-skips-rewrite-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            "target_path=staged_manifest, verify=True)",
+            "target_path=staged_manifest)",
+            id="plugin-init-skips-rewrite-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_target_migration.py",
+            "    verify_rewritten_manifest(path, migrated_text)\n",
+            "",
+            id="migrate-writes-unverified-rewrite",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_target_migration.py",
+            "    targets = rewrite_target_names(legacy_declaration)\n",
+            "    targets = tuple(legacy_declaration.canonical) or None\n",
+            id="migrate-keeps-its-own-mapping",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_targets.py",
+            "def rewrite_target_names(",
+            "def _rewrite_target_names_removed(",
+            id="declaration-owner-loses-rewrite-mapping",
+        ),
     ],
 )
 def test_manifest_target_declaration_guard_rejects_raw_readers(
     path: str, old: str, new: str
 ) -> None:
-    """Every package-target reader routes through ManifestTargetDeclaration (#3732)."""
+    """Every package-target reader routes through ManifestTargetDeclaration (#3732).
+
+    Every apm.yml target rewrite routes through the one rewrite mapping and
+    verifies the rewritten manifest before writing it (#3857).
+    """
     source = _source(path)
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)
     rule_id = "registry_delegation.target_vocabulary"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/models/manifest_io.py",
+            "    reject_manifest_anchors(manifest_path, text)\n",
+            "",
+            id="read-owner-stops-rejecting-anchors",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_io.py",
+            "return check_manifest_text(path, Path(path).read_text(",
+            "return (lambda text: text)(Path(path).read_text(",
+            id="read-skips-manifest-checks",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_targets.py",
+            "data = load_manifest(manifest_path)",
+            "data = load_yaml(manifest_path)",
+            id="target-declaration-read-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_target_migration.py",
+            "text = read_manifest_text(path)",
+            'text = path.read_text(encoding="utf-8")',
+            id="migrate-read-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/audit.py",
+            "        read_manifest_text(manifest_path)\n",
+            '        manifest_path.read_text(encoding="utf-8")\n',
+            id="audit-skips-manifest-checks",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_target_migration.py",
+            "        sequence = legacy_value\n",
+            "        sequence = legacy_value.copy() if legacy_value.anchor.value else legacy_value\n",
+            id="migrate-rewrites-anchored-list",
+        ),
+        pytest.param(
+            "src/apm_cli/utils/yaml_io.py",
+            "data, Dumper=_NoAliasSafeDumper,",
+            "data, Dumper=yaml.SafeDumper,",
+            id="yaml-writer-emits-anchors",
+        ),
+        pytest.param(
+            "src/apm_cli/utils/yaml_io.py",
+            "    rt.representer.ignore_aliases = lambda _data: True\n",
+            "",
+            id="roundtrip-writer-emits-anchors",
+        ),
+    ],
+)
+def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, new: str) -> None:
+    """Every apm.yml read refuses YAML anchors and aliases (req-mf-020(b), #3858)."""
+    source = _source(path)
+    assert source.count(old) >= 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-consumer-manifest-rewrite"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(

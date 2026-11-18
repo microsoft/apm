@@ -1,4 +1,4 @@
-"""Unit tests for the apm.yml read owner (duplicate top-level keys, #3691)."""
+"""Unit tests for the apm.yml read owner (duplicate keys #3691, anchors #3858)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,11 @@ import pytest
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.manifest_io import (
     DuplicateManifestKeyError,
+    ManifestAnchorError,
+    load_manifest,
     load_manifest_roundtrip,
     reject_duplicate_manifest_keys,
+    reject_manifest_anchors,
 )
 
 _DUPLICATE = (
@@ -93,3 +96,72 @@ def test_bom_manifest_still_loads(tmp_path: Path) -> None:
 
     assert APMPackage.from_apm_yml(manifest).name == "demo"
     assert load_manifest_roundtrip(manifest)["name"] == "demo"
+
+
+@pytest.mark.parametrize(
+    ("text", "fragment"),
+    [
+        pytest.param(
+            "name: demo\nx-shared: &rule owner/one\ndependencies:\n  apm:\n    - *rule\n",
+            "uses the YAML anchor '&rule' on line 2",
+            id="anchor-then-alias",
+        ),
+        pytest.param(
+            "name: demo\ntargets: [claude]\nother: *missing\n",
+            "uses the YAML alias '*missing' on line 3",
+            id="alias-only",
+        ),
+        pytest.param(
+            "{name: demo, targets: &t [claude], x-copy: *t}\n",
+            "uses the YAML anchor '&t' on line 1",
+            id="flow",
+        ),
+        pytest.param(
+            "base: &base {a: 1}\nother:\n  <<: *base\n",
+            "uses the YAML anchor '&base' on line 1",
+            id="merge-key",
+        ),
+    ],
+)
+def test_anchor_or_alias_is_refused_with_file_and_line(tmp_path: Path, text: str, fragment: str):
+    manifest = tmp_path / "apm.yml"
+
+    with pytest.raises(ManifestAnchorError) as excinfo:
+        reject_manifest_anchors(manifest, text)
+
+    message = str(excinfo.value)
+    assert message.startswith(str(manifest)), message
+    assert fragment in message
+    assert "must not use YAML anchors (&name) or aliases (*name)" in message
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'name: demo\ndescription: "R&D *notes* & more"\nversion: 1.0.0\n',
+        "name: a&b\nscripts:\n  build: echo a && echo *\n",
+        "name: [unclosed\n",
+    ],
+    ids=["quoted", "plain-scalars", "malformed"],
+)
+def test_ampersand_and_asterisk_inside_scalars_are_not_anchors(tmp_path: Path, text: str):
+    reject_manifest_anchors(tmp_path / "apm.yml", text)
+
+
+def test_every_manifest_read_refuses_anchors_without_writing(tmp_path: Path) -> None:
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
+
+    anchored = "name: demo\nversion: 1.0.0\nx: &t [claude]\ntargets: *t\n"
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(anchored, encoding="utf-8")
+
+    for read in (
+        APMPackage.from_apm_yml,
+        load_manifest,
+        load_manifest_roundtrip,
+        read_manifest_target_declaration,
+    ):
+        with pytest.raises(ManifestAnchorError, match=r"anchor '&t' on line 3"):
+            read(manifest)
+    assert read_manifest_target_declaration(manifest, lenient=True) is None
+    assert manifest.read_text(encoding="utf-8") == anchored

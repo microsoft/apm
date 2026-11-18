@@ -37,6 +37,12 @@ _MCP_PIPELINE = "src/apm_cli/install/mcp/integration.py"
 _MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 _UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 _HOOK_INTEGRATOR = "src/apm_cli/integration/hook_integrator.py"
+_AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
+_MANIFEST_TARGETS = "src/apm_cli/models/manifest_targets.py"
+_TARGET_MIGRATION = "src/apm_cli/models/manifest_target_migration.py"
+_YAML_IO = "src/apm_cli/utils/yaml_io.py"
+# Anchors are refused on read (req-mf-020(b), #3858), so no rewrite may keep one.
+_ANCHOR_REWRITE_TOKENS = (".anchor.value", "_detached_sequence")
 
 
 def _missing_tokens(
@@ -101,38 +107,67 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
     )
 
 
+_CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {
+    _MANIFEST_IO: (
+        "def reject_duplicate_manifest_keys(",
+        "def reject_manifest_anchors(",
+        "reject_duplicate_manifest_keys(manifest_path, text)",
+        "reject_manifest_anchors(manifest_path, text)",
+        "return check_manifest_text(path, Path(path).read_text(",
+        "def load_manifest(",
+        "def load_manifest_roundtrip(",
+    ),
+    _MANIFEST_TARGETS: ("data = load_manifest(manifest_path)",),
+    # Writers never emit the anchors the read owner refuses.
+    _YAML_IO: (
+        "data, Dumper=_NoAliasSafeDumper,",
+        "rt.representer.ignore_aliases = lambda _data: True",
+    ),
+    _TARGET_MIGRATION: ("text = read_manifest_text(path)",),
+    _AUDIT_COMMAND: ("read_manifest_text(manifest_path)",),
+    _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
+    _APPROVE_COMMAND: ("data = load_manifest(manifest)",),
+    _COMMAND_HELPERS: ("return load_manifest(APM_YML_FILENAME)",),
+    _INSTALL_COMMAND: ("data = load_manifest_roundtrip(apm_yml_path) or {}",),
+    _ADOPT_MANIFEST_EDIT: ("data = load_manifest_roundtrip(path)",),
+    _MCP_WRITER: (
+        "data = load_manifest_roundtrip(apm_yml_path) or {}",
+        "dump_yaml_roundtrip(data, apm_yml_path)",
+    ),
+    _EXECUTABLES: (
+        "data = load_manifest(manifest_path)",
+        "data = load_manifest_roundtrip(manifest_path)",
+        "dump_yaml_roundtrip(data, manifest_path)",
+    ),
+    _MANIFEST_HELPERS: ("dump_yaml_roundtrip(data, apm_yml_path)",),
+    _UNINSTALL_COMMAND: (
+        "data = load_manifest_roundtrip(apm_yml_path) or {}",
+        "dump_yaml_roundtrip(data, apm_yml_path)",
+    ),
+}
+
+
 def check_consumer_manifest_rewrite(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Every apm.yml read rejects duplicate keys; every rewrite preserves authoring."""
-    return _missing_tokens(
-        provider,
-        GUARD_CONSUMER_MANIFEST_REWRITE,
-        {
-            _MANIFEST_IO: (
-                "def reject_duplicate_manifest_keys(",
-                "def load_manifest(",
-                "def load_manifest_roundtrip(",
-            ),
-            _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
-            _APPROVE_COMMAND: ("data = load_manifest(manifest)",),
-            _COMMAND_HELPERS: ("return load_manifest(APM_YML_FILENAME)",),
-            _INSTALL_COMMAND: ("data = load_manifest_roundtrip(apm_yml_path) or {}",),
-            _ADOPT_MANIFEST_EDIT: ("data = load_manifest_roundtrip(path)",),
-            _MCP_WRITER: (
-                "data = load_manifest_roundtrip(apm_yml_path) or {}",
-                "dump_yaml_roundtrip(data, apm_yml_path)",
-            ),
-            _EXECUTABLES: (
-                "data = load_manifest(manifest_path)",
-                "data = load_manifest_roundtrip(manifest_path)",
-                "dump_yaml_roundtrip(data, manifest_path)",
-            ),
-            _MANIFEST_HELPERS: ("dump_yaml_roundtrip(data, apm_yml_path)",),
-            _UNINSTALL_COMMAND: (
-                "data = load_manifest_roundtrip(apm_yml_path) or {}",
-                "dump_yaml_roundtrip(data, apm_yml_path)",
-            ),
-        },
+    """Every apm.yml read rejects duplicate keys and anchors; rewrites keep authoring."""
+    findings = list(
+        _missing_tokens(
+            provider,
+            GUARD_CONSUMER_MANIFEST_REWRITE,
+            _CONSUMER_MANIFEST_TOKENS,
+        )
     )
+    facts, failures = _facts_for(provider, _TARGET_MIGRATION, GUARD_CONSUMER_MANIFEST_REWRITE)
+    findings.extend(failures)
+    findings.extend(
+        _summary(
+            GUARD_CONSUMER_MANIFEST_REWRITE,
+            _TARGET_MIGRATION,
+            f"apm.yml anchors are refused on read; remove the anchor rewrite path {token}",
+        )
+        for token in _ANCHOR_REWRITE_TOKENS
+        if not failures and _present(facts, token)
+    )
+    return tuple(findings)
 
 
 def check_lsp_target_contract(provider: FactsProvider) -> tuple[Violation, ...]:

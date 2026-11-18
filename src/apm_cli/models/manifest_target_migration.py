@@ -1,9 +1,11 @@
 """Rewrite the deprecated top-level ``target:`` key of apm.yml to ``targets:``.
 
-Only ``apm manifest migrate`` uses this module: install and every other
-command never rewrite the manifest. The rewrite is comment-preserving and
-touches only the top-level key; dependency ``targets:`` subsets are left
-alone.
+Only ``apm manifest migrate`` uses this module: it rewrites the key in place
+(comment-preserving, top-level key only; dependency ``targets:`` subsets are
+left alone). The token mapping belongs to the declaration owner
+(``manifest_targets.rewrite_target_names``), which the ``apm init`` re-init
+uses too; the rewritten text is checked with
+``manifest_targets.verify_rewritten_manifest`` before it is written.
 
 Mapping (each selected target is spelled by its MCP runtime identity, so the
 MCP destination does not move):
@@ -24,16 +26,20 @@ LSP targets, or the migration is refused.
 from __future__ import annotations
 
 import difflib
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ..core.errors import TargetResolutionError
-from ..core.target_detection import AgentsTargetDeprecationWarning, EffectiveTargetDecision
 from ..utils.atomic_io import atomic_write_text
 from ..utils.yaml_io import load_yaml_roundtrip_str, yaml_roundtrip_to_str
-from .manifest_targets import ManifestTargetDeclaration
+from .manifest_io import read_manifest_text
+from .manifest_targets import (
+    ManifestTargetDeclaration,
+    TargetRewriteError,
+    rewrite_target_names,
+    verify_rewritten_manifest,
+)
 
 _LEGACY_KEY = "target"
 _CURRENT_KEY = "targets"
@@ -41,8 +47,8 @@ _CURRENT_KEY = "targets"
 _FLOW_LIST_MAX_WIDTH = 60
 
 
-class ManifestMigrationError(ValueError):
-    """The manifest cannot be migrated without changing what APM deploys."""
+# The manifest cannot be migrated without changing what APM deploys.
+ManifestMigrationError = TargetRewriteError
 
 
 @dataclass(frozen=True)
@@ -91,27 +97,14 @@ class ManifestMigration:
             atomic_write_text(self.path, self.migrated_text)
 
 
-def _no_equivalent(token: str) -> ManifestMigrationError:
-    return ManifestMigrationError(
-        f"Target '{token}' has no 'targets:' equivalent. Remove '{token}' from "
-        f"'target:' in apm.yml and pass '--target {token}' to 'apm install' instead."
-    )
-
-
-def _decision_profile(decision: EffectiveTargetDecision) -> tuple[frozenset[str], ...]:
-    return (
-        frozenset(decision.canonical_targets or ()),
-        frozenset(decision.runtime_targets or ()),
-        frozenset(decision.lsp_targets or ()),
-    )
-
-
 def plan_target_migration(
     value: object, *, source_path: Path | None = None, user_scope: bool = False
 ) -> TargetMigrationPlan:
     """Map a legacy ``target:`` value to an equivalent ``targets:`` list.
 
-    With *user_scope*, the user manifest also drives ``apm compile -g``, which
+    Delegates to the declaration owner's rewrite mapping
+    (:func:`~apm_cli.models.manifest_targets.rewrite_target_names`). With
+    *user_scope*, the user manifest also drives ``apm compile -g``, which
     writes every known target when the declaration does not restrict them.
 
     Raises:
@@ -119,24 +112,9 @@ def plan_target_migration(
         ManifestMigrationError: A token has no ``targets:`` equivalent.
     """
     legacy_declaration = ManifestTargetDeclaration.from_mapping({_LEGACY_KEY: value}, source_path)
-    with warnings.catch_warnings():
-        # Migrating away from the alias is the fix this warning asks for.
-        warnings.simplefilter("ignore", AgentsTargetDeprecationWarning)
-        selection = legacy_declaration.selection
-    if selection is None:
+    targets = rewrite_target_names(legacy_declaration)
+    if targets is None:
         return TargetMigrationPlan(targets=None)
-
-    # The decision owner expands ``all`` and keeps each runtime spelling.
-    legacy = EffectiveTargetDecision(selection, "apm.yml")
-    targets = tuple(legacy.runtime_targets or ())
-    for token in targets:
-        try:
-            _ = ManifestTargetDeclaration.from_mapping({_CURRENT_KEY: [token]}).selection
-        except TargetResolutionError:
-            raise _no_equivalent(token) from None
-
-    migrated_declaration = ManifestTargetDeclaration.from_mapping({_CURRENT_KEY: list(targets)})
-    migrated = EffectiveTargetDecision(migrated_declaration.selection, "apm.yml")
     if user_scope and legacy_declaration.legacy_all:
         # Singular ``all`` leaves ``apm compile -g`` unrestricted; any list narrows it.
         label = source_path.as_posix() if source_path else "~/.apm/apm.yml"
@@ -145,12 +123,6 @@ def plan_target_migration(
             "writes every known target for it, including targets 'apm install -g' does "
             "not deploy, and any 'targets:' list would narrow that. Replace 'target: all' "
             "by hand with the 'targets:' you use."
-        )
-    if _decision_profile(migrated) != _decision_profile(legacy):
-        raise ManifestMigrationError(
-            f"Cannot migrate 'target:' in {source_path.name if source_path else 'apm.yml'} "
-            f"automatically: 'targets: [{', '.join(targets)}]' would change what APM "
-            "deploys. Replace 'target:' with a 'targets:' list by hand."
         )
     return TargetMigrationPlan(targets=targets, expanded_all=legacy_declaration.legacy_all)
 
@@ -208,22 +180,6 @@ def _replace_sequence_items(sequence: Any, items: tuple[str, ...]) -> Any:
     return sequence
 
 
-def _detached_sequence(sequence: Any) -> Any:
-    """Copy *sequence* with its comments and style, but not its anchor.
-
-    An anchored ``target:`` list may be aliased elsewhere in the manifest;
-    rewriting a copy keeps those aliases unchanged.
-    """
-    from ruamel.yaml.comments import CommentedSeq
-
-    copy = CommentedSeq(list(sequence))
-    copy.ca.items.update(sequence.ca.items)
-    copy.ca.comment = sequence.ca.comment
-    if sequence.fa.flow_style():
-        copy.fa.set_flow_style()
-    return copy
-
-
 def _flow_comments_to_block(sequence: Any) -> None:
     """Switch a commented flow list to block style so its comments survive.
 
@@ -259,7 +215,7 @@ def _rewrite_document(document: Any, plan: TargetMigrationPlan) -> None:
     fits_flow = len(", ".join(plan.targets)) <= _FLOW_LIST_MAX_WIDTH
     if isinstance(legacy_value, CommentedSeq):
         # Rewrite the authored list so per-item comments survive.
-        sequence = _detached_sequence(legacy_value) if legacy_value.anchor.value else legacy_value
+        sequence = legacy_value
         if sequence.fa.flow_style() and sequence.ca.items:
             _flow_comments_to_block(sequence)
         value = _replace_sequence_items(sequence, plan.targets)
@@ -290,12 +246,13 @@ def plan_manifest_migration(path: Path, *, user_scope: bool = False) -> Manifest
     Raises:
         OSError: The manifest cannot be read.
         yaml.YAMLError: The manifest is not valid YAML.
-        ValueError: The legacy value is invalid, or both keys are present.
+        ValueError: The legacy value is invalid, both keys are present, or
+            the manifest uses a YAML anchor, alias or duplicate top-level key.
         ManifestMigrationError: The value cannot be migrated.
     """
     from ruamel.yaml.comments import CommentedMap
 
-    text = path.read_text(encoding="utf-8")
+    text = read_manifest_text(path)
     document = load_yaml_roundtrip_str(text)
     if not isinstance(document, CommentedMap):
         raise ManifestMigrationError(f"{path} must contain a YAML mapping")
@@ -318,10 +275,12 @@ def plan_manifest_migration(path: Path, *, user_scope: bool = False) -> Manifest
 
     plan = plan_target_migration(document[_LEGACY_KEY], source_path=path, user_scope=user_scope)
     _rewrite_document(document, plan)
+    migrated_text = yaml_roundtrip_to_str(document)
+    verify_rewritten_manifest(path, migrated_text)
     return ManifestMigration(
         path=path,
         original_text=text,
-        migrated_text=yaml_roundtrip_to_str(document),
+        migrated_text=migrated_text,
         plan=plan,
         ignored_compilation_target=ignored_compilation_target,
     )

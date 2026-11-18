@@ -165,7 +165,13 @@ the author and target harness remain responsible for compliance.
   home-rooted paths accepted by the installer.
 - **Target seeding on re-init:** when `apm.yml` exists, the prompt
   pre-checks targets read from its existing `targets:` list, or from the
-  legacy `target:` field.
+  legacy `target:` field rewritten to an equivalent `targets:` list (for
+  example, `agents` becomes `copilot` and `agy` becomes `antigravity`). A
+  legacy target with no `targets:`
+  equivalent (such as `intellij`) is not carried over: `--yes` and
+  non-interactive runs exit `1` before writing; pass `--target` to choose
+  targets explicitly. The rewritten manifest is parsed back before it is
+  written.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
 - **Existing plugin sources:** when plugin-native directories such as
@@ -182,6 +188,7 @@ the author and target harness remain responsible for compliance.
   - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
   project or plugin name, empty `--version`, refused discovery apply, declined discovery consent,
+  an existing legacy target with no `targets:` equivalent on a non-interactive re-init,
   or unhandled error. Discovery consent refusal leaves files unchanged.
   Invalid option combinations, including `--discover --target` and
   `--discover` with a metadata flag, exit `2`.

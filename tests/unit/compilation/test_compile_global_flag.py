@@ -639,7 +639,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
             patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
             patch(
-                "apm_cli.utils.yaml_io.load_yaml",
+                "apm_cli.models.manifest_io.read_manifest_text",
                 side_effect=PermissionError("permission denied"),
             ),
         ):
@@ -755,10 +755,10 @@ class TestGlobalCompileHonorsDeclaredTargets:
     def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
         """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.
 
-        ``load_yaml`` opens the manifest as UTF-8, so bad bytes raise
-        ``UnicodeDecodeError``; ``_bounded_load`` normalizes that ``ValueError``
-        into ``yaml.YAMLError``. This pins that normalization, because without it
-        the decode failure would escape the handler uncaught.
+        The manifest read owner decodes the file as UTF-8, so bad bytes raise
+        ``UnicodeDecodeError``; ``read_manifest_target_declaration`` normalizes
+        that ``ValueError`` into ``yaml.YAMLError``. This pins that normalization,
+        because without it the decode failure would escape the handler uncaught.
         """
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -776,3 +776,23 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert rc == 1
         compile_mock.assert_not_called()
         assert "unicodedecodeerror" in str(logger.error.call_args).lower()
+
+    def test_anchored_manifest_fails_closed_without_compiling(self, tmp_path):
+        """req-mf-020(b): a YAML anchor in ~/.apm/apm.yml stops compile -g (#3858)."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(
+            tmp_path, "name: h\nversion: 1.0.0\nx: &t [claude]\ntargets: *t\n"
+        )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "YAML anchor '&t' on line 3" in str(logger.error.call_args)
