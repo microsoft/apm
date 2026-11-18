@@ -146,7 +146,7 @@ def _assert_macos_startup_steps(workflow: dict) -> None:
 def _assert_windows_installer_step(workflow: dict) -> None:
     job = workflow_job(workflow, "build-windows")
     step = workflow_step(job, "Test install.ps1 end-to-end (Windows)")
-    assert step.get("if") == f"matrix.platform == 'windows' && {RUN_UNIT}"
+    assert step.get("if") == f"matrix.platform == 'windows' && {FULL}"
     assert effective_env(workflow, job, step).get("GITHUB_TOKEN") is None
     assert step["env"] == {"APM_E2E_TESTS": "1"}
     tokens = shell_tokens(step)
