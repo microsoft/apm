@@ -580,10 +580,10 @@ one root-to-target chain (not a fan-out of every theoretical route):
     +-- acme-org/shared-utils
 ```
 
-`<pkg>` accepts four identifier styles, tried in order: unique key
-(`acme-org_shared-utils`), full repo URL
-(`https://github.com/acme-org/shared-utils`), `owner/repo`, or bare
-basename (`shared-utils`) when unambiguous. An ambiguous bare name
+`<pkg>` accepts four identifier styles, tried in order: lockfile unique key
+(`acme-org/shared-utils`, or `gitlab.com/acme-org/shared-utils` for a
+non-GitHub host), lockfile `repo_url`, `owner/repo`, or bare
+basename (`shared-utils`) when unambiguous. An ambiguous name
 exits `1` and lists the candidates.
 
 Pass `--json` for scripting; the JSON document goes to stdout and all
