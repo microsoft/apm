@@ -4,10 +4,18 @@ import os
 from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
+import pytest
+
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.git_file_transport import GitFileTransportError
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
+
+# The GitLab REST fallback reads git config, so the cleared environment must
+# still let git be found (Windows has no trusted-directory fallback).
+pytestmark = pytest.mark.windows_compat
+
+_GIT_LOOKUP_ENV_KEYS = ("PATH", "SYSTEMROOT", "PATHEXT")
 
 
 def _download_from_bespoke_gitlab_host(env: dict[str, str]) -> tuple[str, dict[str, str]]:
@@ -17,7 +25,8 @@ def _download_from_bespoke_gitlab_host(env: dict[str, str]) -> tuple[str, dict[s
     )
     response = Mock(status_code=200, content=b"gitlab raw", headers={})
 
-    with patch.dict(os.environ, env, clear=True):
+    kept = {key: os.environ[key] for key in _GIT_LOOKUP_ENV_KEYS if key in os.environ}
+    with patch.dict(os.environ, {**kept, **env}, clear=True):
         downloader = GitHubPackageDownloader(
             auth_resolver=AuthResolver(allow_external_fallback=False)
         )
