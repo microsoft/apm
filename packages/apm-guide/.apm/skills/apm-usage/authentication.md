@@ -194,7 +194,10 @@ Auth failures are HTTP 401/403, a redirect to the ADO sign-in service, an
 HTML sign-in page instead of the file, or a Git auth error. DNS, TLS,
 timeout, and not-found errors stop the chain. ADO requests use only the
 credential chosen by the chain (an unrelated `~/.netrc` entry is ignored).
-APM never runs `git credential approve`/`reject`, and sets
+For the helper credential only, APM runs `git credential approve` after
+success and `git credential reject` after an HTTP 401 for it (once per
+repository per run; never for 403, sign-in redirects, network or TLS errors,
+`ADO_APM_PAT`, or `az` tokens; helper errors never fail the command). It sets
 `GCM_INTERACTIVE=0` when stdin is not a terminal or `CI` is set.
 
 ```bash
@@ -332,10 +335,12 @@ proxy token. The deprecated `ARTIFACTORY_APM_TOKEN` is ignored (with one
 warning) when no proxy URL is configured.
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly. The proxy has no tag listing, so semver
-ranges (`#^1.2.0`) and `apm view <pkg> versions` fail with an actionable
-error and `apm outdated` reports git deps as unknown; pin the exact upstream
-tag (`#v1.2.3`).
+never contacts GitHub directly. APM fetches exact versions only and does not
+list versions through the proxy, so semver ranges (`#^1.2.0`) and
+`apm view <pkg> versions` fail with an actionable error and `apm outdated`
+reports git deps as unknown. Pin the exact upstream tag (`#v1.2.3`) and commit
+`apm.lock.yaml`, or install from a registry that implements the APM Registry
+HTTP API.
 
 ## Registry tokens (experimental)
 

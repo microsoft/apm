@@ -31,7 +31,7 @@ consumer's target config, lockfile provenance, or audit baseline.
 This keeps package-author debug servers out of consumer tool lists.
 
 MCP servers live under `dependencies.mcp:` (or
-`devDependencies.mcp:`). Three forms are valid -- pick the one that
+`devDependencies.mcp:`). Four forms are valid -- pick the one that
 matches the source you have:
 
 ```yaml
@@ -80,7 +80,7 @@ allowlists, `package:` selection) is in
 ## Adding a server from the CLI
 
 `apm install --mcp NAME` writes the entry into `apm.yml` for you,
-then runs install. Three shapes match the three manifest forms:
+then runs install. Three shapes match the registry, stdio, and remote forms:
 
 ```bash
 # Registry
@@ -195,7 +195,7 @@ unresolved required entries fail closed.
 | GitHub Copilot CLI | `.github/mcp.json` | project | JSON `mcpServers` |
 | GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
-| Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
+| Claude Code | `.mcp.json` (project, only if `.claude/` exists) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` (project, only if `.cursor/` exists) or `~/.cursor/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank and absolute; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
@@ -396,7 +396,7 @@ Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
 and JetBrains Copilot to its OS-specific user config).
 When the user-scope manifest declares a `targets:` field (or the CLI passes
 `--target`), only the matching runtimes receive the config write. When no CLI
-target, user-scope manifest target, or saved `apm config target` restricts
+target, user-scope manifest target, or saved `apm config set target` value restricts
 targets, all detected user-scope-capable runtimes are configured.
 The workspace-only VS Code target is skipped with a warning
 when a mixed target set also contains a global-capable runtime. If none of the
@@ -519,7 +519,7 @@ a token source and applies the target's auth behavior described below.
 
 The server is identified as "GitHub" only when it satisfies **both** of
 these narrow checks
-([copilot.py:1004](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1004)):
+(`_is_github_server` in [copilot.py](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py)):
 
 1. The server name (case-insensitive) is one of:
    `github-mcp-server`, `github`, `github-mcp`,
@@ -572,7 +572,7 @@ Re-run `apm install --mcp NAME ...` against an existing declaration in `apm.yml`
 | Situation | Behaviour |
 |---|---|
 | New `NAME` | Appended to `dependencies.mcp`. |
-| Existing `NAME`, identical config | No-op. Logs `unchanged`. |
+| Existing `NAME`, identical config | Leaves `apm.yml` unchanged and re-checks runtime configs (`already declared; checking integrations`). |
 | Existing `NAME`, different config, TTY | Prompts to replace. |
 | Existing `NAME`, different config, CI | Refuses with exit 2. Re-run with `--force`. |
 

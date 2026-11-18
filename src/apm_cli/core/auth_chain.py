@@ -13,11 +13,15 @@ Invariants:
   repository path the caller derived from the dependency reference, caches the
   answer per (host, port, path), and presents it as ``Basic
   username:password`` -- the same header Git itself would send.
-* APM never stores or erases a helper credential (no approve or reject call).
+* Only :func:`report_helper_outcome` reports a helper credential back to Git
+  (the git-credential ``approve`` action after it was accepted, ``reject``
+  after a verified HTTP 401 for it), at most once per (host, port, path) and
+  action per process. Env PATs, az bearers, and gh tokens are never reported.
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import threading
 from collections.abc import Callable
@@ -26,6 +30,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from apm_cli.core.auth_outcome import (
     AuthAttemptFailed,
+    AuthOutcome,
     AuthOutcomeKind,
     classify_auth_outcome,
     sanitize_diagnostic_detail,
@@ -215,6 +220,14 @@ class AttemptAuth:
         return hash(tuple(sorted(self._headers.items())))
 
 
+HelperKey = tuple[str, int | None, str | None]
+
+
+def helper_cache_key(host_info: HostInfo, path: str | None) -> HelperKey:
+    """Return the (host, port, path) identity of one helper credential."""
+    return (host_info.host.lower(), host_info.port, path)
+
+
 class HelperCredentialCache:
     """Per-resolver singleflight cache of path-scoped helper answers."""
 
@@ -235,9 +248,99 @@ class HelperCredentialCache:
             self._values[key] = value
             return value
 
+    def discard(self, key: HelperKey, value: GitHelperCredential) -> None:
+        """Forget *value* for *key* unless a newer answer already replaced it."""
+        with self._lock:
+            if self._values.get(key) is value:
+                del self._values[key]
+
     def clear(self) -> None:
         with self._lock:
             self._values.clear()
+
+
+class HelperReportLedger:
+    """Process-wide record of helper reports; one per (key, action).
+
+    Also keeps, in memory only, the secrets accepted per (host, port), so a 401
+    on another path never erases a secret this process saw work on that host.
+    Secrets are never hashed, logged, or persisted.
+    """
+
+    def __init__(self) -> None:
+        self._claimed: set[tuple[HelperKey, str]] = set()
+        self._accepted: dict[tuple[str, int | None], list[str]] = {}
+        self._lock = threading.Lock()
+
+    def decide(self, key: HelperKey, action: str, password: str) -> bool:
+        """Atomically decide whether to report *action* for *key*; claim it if so."""
+        host_port = (key[0], key[1])
+        secret = password.encode("utf-8")
+        with self._lock:
+            accepted = self._accepted.setdefault(host_port, [])
+            seen = any(hmac.compare_digest(item.encode("utf-8"), secret) for item in accepted)
+            if action == "approve" and not seen:
+                accepted.append(password)
+            elif action == "reject" and seen:
+                return False
+            if (key, action) in self._claimed:
+                return False
+            self._claimed.add((key, action))
+            return True
+
+    def clear(self) -> None:
+        with self._lock:
+            self._claimed.clear()
+            self._accepted.clear()
+
+
+_HELPER_REPORTS = HelperReportLedger()
+
+
+def report_helper_outcome(
+    resolver: AuthResolver,
+    host_info: HostInfo,
+    path: str | None,
+    credential: GitHelperCredential,
+    outcome: AuthOutcome | None,
+) -> None:
+    """Report one helper credential's outcome back to Git's credential helpers.
+
+    ``outcome`` is ``None`` (or ``ok``) when the operation succeeded with
+    *credential*: Git is told to ``approve`` it. A verified rejection (HTTP
+    401 for this credential) always drops it from the cache and tells Git to
+    ``reject`` it, unless this process already saw the same secret accepted on
+    this host (then the 401 means "no access to this path", not a dead
+    credential). Every other outcome (403, sign-in redirect or page, not
+    found, throttle, network, TLS, a returned non-2xx response) is ambiguous
+    and is not reported. Failures never reach the operation.
+    """
+    from apm_cli.core.token_manager import GitHelperCredential
+
+    if outcome is None or outcome.kind is AuthOutcomeKind.OK:
+        action = "approve"
+    elif outcome.is_verified_rejection:
+        action = "reject"
+    else:
+        return
+    if not isinstance(credential, GitHelperCredential) or not credential.description:
+        return
+    key = helper_cache_key(host_info, path)
+    if credential.host.lower() != key[0] or credential.port != key[1]:
+        return
+    if action == "reject":
+        # Every verified rejection drops the cached answer so the next
+        # operation asks the helper again, even when the report is skipped.
+        resolver._helper_cache.discard(key, credential)
+    if not _HELPER_REPORTS.decide(key, action, credential.password):
+        return
+    try:
+        resolver._token_manager.report_git_helper_credential(
+            credential, accepted=action == "approve"
+        )
+    except Exception as exc:
+        # Reporting is advisory; it must never change the operation result.
+        logger.debug("git credential %s for %s failed: %s", action, key[0], type(exc).__name__)
 
 
 def _bearer_provider(resolver: AuthResolver, host: str):
@@ -313,7 +416,7 @@ def run_ado_chain(
         first_step = STEP_ANONYMOUS
         _record_resolve_time_bearer_failure(resolver, host_info.host, attempts)
 
-    def _attempt(step: str, attempt_ctx: AuthContext) -> tuple[bool, Any]:
+    def _attempt(step: str, attempt_ctx: AuthContext) -> tuple[bool, Any, AuthOutcome | None]:
         try:
             value = operation(attempt_ctx.token, env_for(attempt_ctx))
             if isinstance(getattr(value, "status_code", None), int):
@@ -326,7 +429,8 @@ def run_ado_chain(
                 )
                 if returned.is_auth_failure:
                     raise AuthAttemptFailed(returned.detail, response=value)
-            return True, value
+                return True, value, returned
+            return True, value, None
         except Exception as exc:
             # operation is caller-provided; the classifier decides what happens next.
             outcome = classify_auth_outcome(
@@ -338,10 +442,10 @@ def run_ado_chain(
             log(f"{display}: {entry.describe()}")
             if not outcome.is_auth_failure:
                 raise
-            return False, exc
+            return False, exc, outcome
 
     log(f"Auth-only attempt for ado host {display} ({first_step})")
-    ok, value = _attempt(first_step, ctx)
+    ok, value, _outcome = _attempt(first_step, ctx)
     if ok:
         return value
     last_exc: BaseException = value
@@ -371,7 +475,7 @@ def run_ado_chain(
                     git_env={},
                     auth_scheme="bearer",
                 )
-                ok, value = _attempt(STEP_BEARER, bearer_ctx)
+                ok, value, _outcome = _attempt(STEP_BEARER, bearer_ctx)
                 if ok:
                     resolver.emit_stale_pat_diagnostic(display)
                     return value
@@ -400,7 +504,8 @@ def run_ado_chain(
         auth_scheme="basic",
         username=credential.username,
     )
-    ok, value = _attempt(STEP_HELPER, helper_ctx)
+    ok, value, outcome = _attempt(STEP_HELPER, helper_ctx)
+    report_helper_outcome(resolver, host_info, helper_path, credential, outcome)
     if ok:
         return value
     raise _exhausted(resolver, host_info, attempts, value)

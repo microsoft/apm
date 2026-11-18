@@ -14,18 +14,21 @@ boundary explanation, see [What is APM](/apm/concepts/what-is-apm/#what-apm-is-n
 ## Where the policy lives
 
 APM auto-discovers `apm-policy.yml` from your project's git remote. For
-a repo on `github.com/your-org/your-repo`, APM looks in
-`your-org/.github/apm-policy.yml`. The file is fetched, cached, and
-re-checked on every install.
+a repo on `github.com/your-org/your-repo`, APM checks `your-org/.github-private`,
+`.github`, `.apm`, then `_apm` for `apm-policy.yml`; the first one found wins.
+Azure DevOps and GitLab use their own locations (see
+[Policy Files](../../enterprise/apm-policy/#where-it-lives)). The file is
+fetched, cached, and re-checked on every install.
 
 You do not need to install or configure anything. If the file exists
-in your org's `.github` repository, every `apm install` run from a repo
+in one of those org repositories, every `apm install` run from a repo
 in that org is governed by it.
 
 ## What the policy can do to your install
 
-The schema is defined in `src/apm_cli/policy/schema.py`. The fields
-your platform team can set, and what each one does to your install:
+The schema is defined in `src/apm_cli/policy/schema.py`. The main fields
+your platform team can set, and what each one does to your install (full
+list in the [Policy Reference](../../enterprise/policy-reference/)):
 
 - **`enforcement`** -- `warn`, `block`, or `off`. `block` aborts the
   install on any violation; `warn` lets it proceed but logs each
@@ -51,7 +54,7 @@ your platform team can set, and what each one does to your install:
 - **`mcp.trust_transitive`** -- whether MCP servers shipped by deep
   dependencies are trusted automatically.
 - **`compilation.target.allow`** -- which harness targets your repo can
-  compile to (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`,
+  compile to (for example `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`,
   `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`).
 - **`compilation.strategy.enforce`** -- `distributed` or `single-file`.
 - **`manifest.required_fields`** / **`manifest.scripts`** /
@@ -70,8 +73,8 @@ apm policy status
 ```
 
 Prints the active policy: where it was discovered, the enforcement
-level, the cache age, the `extends` chain, and a count of effective
-rules per section.
+level, the cache age, the `extends` chain, a count of effective
+rules per section, and any warnings.
 
 ```
 APM Policy Status
@@ -81,6 +84,7 @@ APM Policy Status
   Cache age        12m ago
   Extends chain    enterprise/policies
   Effective rules  3 dependency denies; 2 mcp transport restrictions
+  Warnings         none
 ```
 
 Useful flags:

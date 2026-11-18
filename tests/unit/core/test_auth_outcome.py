@@ -82,6 +82,127 @@ def test_ado_git_stderr_classification(error: str, expected: bool) -> None:
     assert outcome.is_auth_failure is expected
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "verified"),
+    [
+        ({"response": _response(401)}, True),
+        ({"error": "fatal: could not read Username: terminal prompts disabled"}, True),
+        ({"error": "fatal: Authentication failed for 'https://dev.azure.com/o/'"}, True),
+        ({"error": "The requested URL returned error: 401"}, True),
+        ({"response": _response(403)}, False),
+        ({"error": "The requested URL returned error: 403"}, False),
+        ({"error": "remote: TF400813: unauthorized"}, False),
+        (
+            {"error": "fatal: repository 'https://dev.azure.com/o/team-401/_git/r/' not found"},
+            False,
+        ),
+        (
+            {"error": "fatal: unable to access 'https://x/team-401/': returned error: 404"},
+            False,
+        ),
+        (
+            {"error": "fatal: unable to access 'https://x/_git/http401/': returned error: 500"},
+            False,
+        ),
+        (
+            {"error": "fatal: could not read Username for 'http://proxy:3128': prompts disabled"},
+            False,
+        ),
+        ({"error": "Received HTTP code 407 from proxy; HTTP 401"}, False),
+        ({"error": "HTTP/2 403\nfatal: Authentication failed for 'https://dev.azure.com/'"}, False),
+        ({"error": "HTTP/1.1 403 Forbidden; Authentication failed"}, False),
+        ({"error": "HTTP/1.1 401 Unauthorized"}, True),
+        (
+            {
+                "response": _response(
+                    302, {"Location": "https://app.vssps.visualstudio.com/_signin"}
+                )
+            },
+            False,
+        ),
+        ({"response": _response(203, {"Content-Type": "text/html"})}, False),
+    ],
+)
+def test_only_a_401_for_a_presented_credential_verifies_rejection(kwargs, verified) -> None:
+    """Only a verified rejection may erase a helper credential (#3765)."""
+    host_info = AuthResolver.classify_host("dev.azure.com")
+    presented = classify_auth_outcome(host_info=host_info, credential_presented=True, **kwargs)
+    assert presented.is_auth_failure
+    assert presented.is_verified_rejection is verified
+    anonymous = classify_auth_outcome(host_info=host_info, credential_presented=False, **kwargs)
+    assert not anonymous.is_verified_rejection
+
+
+def test_rejection_naming_another_host_is_never_verified() -> None:
+    """A 401 prompt for a different host never verifies the requested host's credential."""
+    host_info = AuthResolver.classify_host("dev.azure.com")
+    other = classify_auth_outcome(
+        host_info=host_info,
+        error="fatal: could not read Username for 'https://elsewhere.example': prompts disabled",
+        credential_presented=True,
+    )
+    same = classify_auth_outcome(
+        host_info=host_info,
+        error="fatal: could not read Username for 'https://dev.azure.com': prompts disabled",
+        credential_presented=True,
+    )
+    assert other.is_auth_failure and not other.is_verified_rejection
+    assert same.is_verified_rejection
+
+
+def test_rejection_naming_a_url_without_a_requested_host_is_never_verified() -> None:
+    outcome = classify_auth_outcome(
+        host_kind="ado",
+        error="fatal: Authentication failed for 'https://dev.azure.com/o/'",
+        credential_presented=True,
+    )
+    assert outcome.is_auth_failure and not outcome.is_verified_rejection
+
+
+def test_rejection_on_another_port_or_scheme_is_never_verified() -> None:
+    """Another port or plain HTTP is a different endpoint than the requested one."""
+    with_port = AuthResolver.classify_host("dev.azure.com", port=8443)
+    for url in (
+        "https://dev.azure.com:443/o/",
+        "https://dev.azure.com/o/",
+        "http://dev.azure.com/o/",
+    ):
+        outcome = classify_auth_outcome(
+            host_info=with_port,
+            error=f"fatal: Authentication failed for '{url}'",
+            credential_presented=True,
+        )
+        assert outcome.is_auth_failure and not outcome.is_verified_rejection, url
+    same = classify_auth_outcome(
+        host_info=with_port,
+        error="fatal: Authentication failed for 'https://dev.azure.com:8443/o/'",
+        credential_presented=True,
+    )
+    assert same.is_verified_rejection
+
+
+def test_repository_names_never_hide_a_real_rejection() -> None:
+    """A project named proxy or a repo named team-404 is a URL, not a signal."""
+    outcome = classify_auth_outcome(
+        host_info=AuthResolver.classify_host("dev.azure.com"),
+        error="fatal: Authentication failed for 'https://dev.azure.com/o/proxy/_git/team-404/'",
+        credential_presented=True,
+    )
+    assert outcome.is_verified_rejection
+
+
+def test_401_after_a_followed_signin_redirect_is_never_verified() -> None:
+    """A redirect helper without history still lands on the sign-in URL."""
+    response = SimpleNamespace(
+        status_code=401,
+        headers={},
+        history=[],
+        url="https://dev.azure.com/_signin?realm=dev.azure.com",
+    )
+    outcome = classify_auth_outcome(host_kind="ado", response=response, credential_presented=True)
+    assert outcome.is_auth_failure and not outcome.is_verified_rejection
+
+
 def test_transport_errors_never_escalate() -> None:
     assert (
         classify_auth_outcome(host_kind="ado", error=requests.exceptions.ConnectionError("x")).kind
@@ -188,6 +309,8 @@ def test_helper_credential_keeps_username_and_request_scope(monkeypatch) -> None
         "dev.azure.com",
         "org/proj/_git/repo",
     )
+    assert "secret-value" not in repr(credential)
+    assert credential.description == (("username", "bob"), ("password", "secret-value"))
     assert "secret-value" not in repr(credential)
 
 

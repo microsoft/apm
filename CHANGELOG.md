@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - When several manifests narrow the same dependency with different `skills:` and `targets:`, each skill now deploys only to the harnesses its own declaration selected, instead of every selected skill reaching every selected harness; for example `alpha` for Claude and `gamma` for Copilot no longer cross over. `apm.lock.yaml` records the exact pairing in a new optional `subset_pairings` field (only when needed, so other lockfiles are unchanged), and `apm audit`, `apm uninstall` and `--frozen` read it; OpenAPM proposes this as `req-rs-018`. Upgrade note: a lockfile written by an earlier APM for such a diamond fails `apm install --frozen` with "selection for <dep> changed" until you run `apm install` once and commit `apm.lock.yaml`. (#3769)
 - Org policy `mcp.transport.allow` now checks the transport APM actually writes: registry MCP servers are looked up in their registry and checked on what install would write (a package counts as `stdio`, a server with both is checked on both, and a declared `transport:` only narrows the check when the server offers it), and `http` matches `streamable-http`. `apm install`, `apm install --mcp`, `apm update` and `apm audit --ci` agree (audit now also checks dev MCP servers, as install does), install writes the registry data policy checked, and a blocked server is rejected before any write. Release note: when `mcp.transport.allow` is set, this can newly block installs and `apm audit --ci` for registry servers whose transport is not allowed, or that the MCP registry cannot resolve (even with a declared `transport:`); pick an allowed transport with `transport:` when the server offers several, or update the policy. (#3788)
+- Azure DevOps installs now tell your Git credential helper how its credential went, as Git does: `git credential approve` after it worked and `git credential reject` after Azure DevOps refused it with HTTP 401, so Git Credential Manager can replace an expired credential instead of offering it again. A 403, a sign-in redirect, or a network, TLS or not-found failure is never reported; `ADO_APM_PAT` and `az` tokens are never reported; each report happens at most once per repository per run; and a helper failure never fails the command (#3765, #3818)
+
+### Fixed
+
+- `require_pinned_constraint` accepts exact package release tags such as `shadcn@4.12.0` and `@upstash/context7-mcp@4.4.4` (npm workspaces and Changesets monorepos) as pinned; dist-tags, ranges and partial versions after `@` still fail. -- by @MohammedAlkindi (#3775)
+- `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)
+- With `PROXY_REGISTRY_ONLY=1`, the semver-range error and the registry proxy guide no longer claim the proxy has no listing; they explain that APM fetches exact versions only and name the two supported routes: exact pins with lockfile replay, or a registry implementing the APM Registry HTTP API. (#3777)
 
 ## [0.36.1] - 2026-11-18
 
@@ -38,11 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `require_pinned_constraint` accepts exact package release tags such as `shadcn@4.12.0` and `@upstash/context7-mcp@4.4.4` (npm workspaces and Changesets monorepos) as pinned; dist-tags, ranges and partial versions after `@` still fail. -- by @MohammedAlkindi (#3775)
-
 ### Fixed
-
-- `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)
 
 ## [0.36.0] - 2026-11-17
 

@@ -97,7 +97,11 @@ class GitHelperCredential:
 
     Keeps the request coordinates (``protocol``/``host``/``port``/``path``)
     next to the answer so the credential can be presented exactly as Git
-    would and handed back to the same helper scope later.
+    would. ``description`` is the attribute list fill printed, kept verbatim
+    because ``git credential approve``/``reject`` must be fed that same
+    description (https://git-scm.com/docs/git-credential, "TYPICAL USE OF
+    GIT CREDENTIAL", step 4). It is empty for a credential APM did not
+    obtain from fill, and such a credential is never reported back.
     """
 
     host: str
@@ -106,11 +110,30 @@ class GitHelperCredential:
     port: int | None = None
     path: str | None = None
     protocol: str = "https"
+    description: tuple[tuple[str, str], ...] = field(default=(), repr=False, compare=False)
 
     @property
     def basic_username(self) -> str:
         """Username for HTTP Basic; empty when the helper returned none."""
         return self.username or ""
+
+    @property
+    def host_field(self) -> str:
+        """The ``host`` attribute fill was asked for (port embedded)."""
+        return _format_credential_host(self.host, self.port)
+
+
+def _parse_credential_description(stdout: str) -> tuple[tuple[str, str], ...]:
+    """Return fill's ``key=value`` lines in order; empty when any line is malformed."""
+    attributes: list[tuple[str, str]] = []
+    for line in stdout.split("\n"):
+        if not line:
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not key or "\x00" in line or "\r" in line:
+            return ()
+        attributes.append((key, value))
+    return tuple(attributes)
 
 
 def _is_valid_credential_username(username: str) -> bool:
@@ -235,6 +258,8 @@ class GitHubTokenManager:
     # The 60s default prevents false negatives on slow helpers.
     DEFAULT_CREDENTIAL_TIMEOUT = 60
     MAX_CREDENTIAL_TIMEOUT = 180
+    # approve/reject is advisory; never wait on a slow helper as long as fill.
+    CREDENTIAL_REPORT_TIMEOUT = 10
 
     @classmethod
     def _get_credential_timeout(cls) -> int:
@@ -300,8 +325,8 @@ class GitHubTokenManager:
 
         Returns the helper's username and password together with the exact
         (host, port, path) the helper was asked for, so callers present the
-        credential the way Git would (``Basic username:password``). APM never
-        stores or erases a helper credential (no approve or reject call).
+        credential the way Git would (``Basic username:password``). Only the
+        auth chain reports the outcome back (:meth:`report_git_helper_credential`).
         """
         host_field = _format_credential_host(host, port)
         stdin_lines = ["protocol=https", f"host={host_field}"]
@@ -322,6 +347,7 @@ class GitHubTokenManager:
             if result.returncode != 0:
                 return None
 
+            description = _parse_credential_description(result.stdout)
             username: str | None = None
             password: str | None = None
             for line in result.stdout.splitlines():
@@ -339,9 +365,73 @@ class GitHubTokenManager:
                 path=sanitized_path or None,
                 username=username or None,
                 password=password,
+                description=description,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             return None
+
+    @staticmethod
+    def report_git_helper_credential(
+        credential: GitHelperCredential,
+        *,
+        accepted: bool,
+        env: dict[str, str] | None = None,
+    ) -> bool:
+        """Tell the user's credential helpers whether a fill credential worked.
+
+        Step 4 of the git-credential contract
+        (https://git-scm.com/docs/git-credential, "TYPICAL USE OF GIT
+        CREDENTIAL"): ``approve`` after the credential allowed the operation,
+        ``reject`` after it was rejected, each fed the description fill
+        returned. Only the auth chain decides when to call this. Runs with the
+        same non-interactive environment as fill and at most a 10s timeout,
+        writes the description on stdin only, and never raises: a helper
+        failure is logged at debug level and the operation result stands.
+        """
+        description = credential.description
+        attributes = dict(description)
+        if (
+            attributes.get("protocol") != "https"
+            or attributes.get("host", "").lower() != credential.host_field.lower()
+            or attributes.get("password") != credential.password
+            or attributes.get("username") != credential.username
+            or ("path" in attributes and attributes["path"] != credential.path)
+        ):
+            logger.debug("Skipping git credential report: description does not match the request")
+            return False
+        action = "approve" if accepted else "reject"
+        stdin = "".join(f"{key}={value}\n" for key, value in description) + "\n"
+        try:
+            result = subprocess.run(
+                [get_git_executable(), "credential", action],
+                input=stdin,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=min(
+                    GitHubTokenManager._get_credential_timeout(),
+                    GitHubTokenManager.CREDENTIAL_REPORT_TIMEOUT,
+                ),
+                env=credential_fill_env(os.environ if env is None else env),
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.debug(
+                "git credential %s for %s failed: %s",
+                action,
+                credential.host_field,
+                type(exc).__name__,
+            )
+            return False
+        if result.returncode != 0:
+            # Helper stderr may echo the description it was given; never log it.
+            logger.debug(
+                "git credential %s for %s exited %d",
+                action,
+                credential.host_field,
+                result.returncode,
+            )
+            return False
+        return True
 
     @staticmethod
     def resolve_credential_from_gh_cli(host: str | None) -> str | None:

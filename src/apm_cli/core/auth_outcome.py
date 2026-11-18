@@ -105,16 +105,28 @@ _AUTH_FAILURE_KINDS = frozenset(
 
 @dataclass(frozen=True)
 class AuthOutcome:
-    """Classified result of one attempt; ``detail`` is always redacted."""
+    """Classified result of one attempt; ``detail`` is always redacted.
+
+    ``rejection_verified`` is set only when the server refused the presented
+    credential itself: HTTP 401, or Git's wording for a 401. A 403, a sign-in
+    redirect, or a sign-in page never sets it, because those also answer a
+    valid credential that lacks access.
+    """
 
     kind: AuthOutcomeKind
     detail: str = ""
     status: int | None = None
+    rejection_verified: bool = False
 
     @property
     def is_auth_failure(self) -> bool:
         """Return whether the auth chain may escalate to the next credential."""
         return self.kind in _AUTH_FAILURE_KINDS
+
+    @property
+    def is_verified_rejection(self) -> bool:
+        """Return whether the presented credential was verifiably refused (HTTP 401)."""
+        return self.kind is AuthOutcomeKind.CREDENTIAL_REJECTED and self.rejection_verified
 
 
 class AuthAttemptFailed(RuntimeError):
@@ -204,6 +216,53 @@ _AUTH_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403)\b|\b(?:401|403)\b",
     re.IGNORECASE,
 )
+# Git and HTTP wording that only follows an HTTP 401 for a presented credential
+# (Git asks for a new credential, or reports the one it sent as failed).
+_REJECTED_PHRASES = (
+    "authentication failed",
+    "could not read username",
+    "could not read password",
+    "terminal prompts disabled",
+    "invalid username or password",
+)
+# Status-anchored only, with a separator: a bare or glued "401" (team-401,
+# http401) may be part of a repository URL.
+_STATUS_PREFIX = (
+    r"(?:\bhttp(?:/\d(?:\.\d)?| error)?\s+|returned error:\s*"
+    r"|\bstatus(?: code)?\s*[=:]\s*|\bstatus\s+)"
+)
+_REJECTED_STATUS_RE = re.compile(_STATUS_PREFIX + r"401\b", re.IGNORECASE)
+_FORBIDDEN_STATUS_RE = re.compile(_STATUS_PREFIX + r"403\b", re.IGNORECASE)
+# A proxy challenge is about the proxy credential, never the host credential.
+_PROXY_SIGNAL_RE = re.compile(r"proxy|\b407\b", re.IGNORECASE)
+_URL_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
+
+
+_DEFAULT_PORTS = {"https": 443, "http": 80}
+
+
+def _names_other_host(text: str, host: str | None, port: int | None) -> bool:
+    """Return whether *text* names a URL other than the requested HTTPS endpoint.
+
+    Without a requested host no URL can be confirmed, so any URL counts.
+    """
+    if not host:
+        return _URL_RE.search(text) is not None
+    wanted_port = port if port is not None else _DEFAULT_PORTS["https"]
+    for match in _URL_RE.finditer(text):
+        try:
+            parsed = urlsplit(match.group(0))
+            scheme = parsed.scheme.lower()
+            other_port = parsed.port if parsed.port is not None else _DEFAULT_PORTS.get(scheme)
+        except ValueError:
+            return True
+        if scheme != "https" or (parsed.hostname or "").lower() != host.lower():
+            return True
+        if other_port != wanted_port:
+            return True
+    return False
+
+
 _PUBLIC_GITHUB_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403|404)\b",
 )
@@ -298,6 +357,11 @@ def _header(headers: Mapping[str, str] | None, name: str) -> str:
     return str(value or "")
 
 
+def _text_attr(obj: Any, name: str) -> str | None:
+    value = getattr(obj, name, None)
+    return value if isinstance(value, str) else None
+
+
 def _failure(kind_presented: bool) -> AuthOutcomeKind:
     return AuthOutcomeKind.CREDENTIAL_REJECTED if kind_presented else AuthOutcomeKind.AUTH_REQUIRED
 
@@ -315,6 +379,12 @@ def _classify_response(
     if not isinstance(status, int):
         return AuthOutcome(AuthOutcomeKind.OTHER, "response without status")
     if is_ado:
+        # A response that landed on the sign-in service (followed by a
+        # redirect helper that keeps no history) is never a direct rejection.
+        if is_ado_signin_location(_text_attr(response, "url")):
+            return AuthOutcome(
+                _failure(credential_presented), "Azure DevOps redirected to sign-in", status
+            )
         for previous in getattr(response, "history", None) or ():
             if is_ado_signin_location(_header(getattr(previous, "headers", None), "Location")):
                 return AuthOutcome(
@@ -332,7 +402,12 @@ def _classify_response(
             )
         return AuthOutcome(AuthOutcomeKind.OK, "", status)
     if status in (401, 403):
-        return AuthOutcome(_failure(credential_presented), f"HTTP {status}", status)
+        return AuthOutcome(
+            _failure(credential_presented),
+            f"HTTP {status}",
+            status,
+            rejection_verified=credential_presented and status == 401,
+        )
     if 300 <= status < 400:
         location = _header(headers, "Location")
         if is_ado and is_ado_signin_location(location):
@@ -357,6 +432,8 @@ def _classify_text(
     *,
     credential_presented: bool,
     public_github_anonymous: bool,
+    host: str | None = None,
+    port: int | None = None,
 ) -> AuthOutcome:
     detail = sanitize_diagnostic_detail(text)
     lowered = text.lower()
@@ -374,10 +451,34 @@ def _classify_text(
         if _PUBLIC_GITHUB_STATUS_RE.search(lowered):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         return AuthOutcome(AuthOutcomeKind.OTHER, detail)
+    # A 403, not-found, proxy signal, or a URL on another endpoint makes a
+    # rejection ambiguous: never verified. URLs are matched separately so a
+    # repository named "proxy" or "team-404" does not hide a real rejection.
+    prose = _URL_RE.sub(" ", text)
+    ambiguous = (
+        bool({403, 404} & set(statuses))
+        or _FORBIDDEN_STATUS_RE.search(prose) is not None
+        or _NOT_FOUND_RE.search(prose) is not None
+        or "not found" in prose.lower()
+        or _PROXY_SIGNAL_RE.search(prose) is not None
+        or _names_other_host(text, host, port)
+    )
     if any(status in {401, 403} for status in statuses):
-        return AuthOutcome(_failure(credential_presented), detail)
+        return AuthOutcome(
+            _failure(credential_presented),
+            detail,
+            rejection_verified=credential_presented and 401 in statuses and not ambiguous,
+        )
     if any(phrase in lowered for phrase in _AUTH_PHRASES) or _AUTH_STATUS_RE.search(text):
-        return AuthOutcome(_failure(credential_presented), detail)
+        verified = (
+            credential_presented
+            and not ambiguous
+            and (
+                any(phrase in prose.lower() for phrase in _REJECTED_PHRASES)
+                or _REJECTED_STATUS_RE.search(prose) is not None
+            )
+        )
+        return AuthOutcome(_failure(credential_presented), detail, rejection_verified=verified)
     if 404 in statuses or _NOT_FOUND_RE.search(text):
         return AuthOutcome(AuthOutcomeKind.NOT_FOUND, detail)
     return AuthOutcome(AuthOutcomeKind.OTHER, detail)
@@ -428,6 +529,8 @@ def classify_auth_outcome(
         statuses,
         credential_presented=credential_presented,
         public_github_anonymous=public_github_anonymous,
+        host=getattr(host_info, "host", None),
+        port=getattr(host_info, "port", None),
     )
 
 

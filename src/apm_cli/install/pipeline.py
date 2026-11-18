@@ -250,7 +250,11 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
 
             def _ado_probe(_token, git_env, url=probe_url):
                 run = _run_ls_remote(url, git_env)
-                if run is not None and run.returncode != 0:
+                if run is None:
+                    # A timeout is an outcome, not a success: the chain must
+                    # not treat it as an accepted credential.
+                    raise _sp.TimeoutExpired("git ls-remote", 30)
+                if run.returncode != 0:
                     raise AuthAttemptFailed(result=run)
                 return run
 
@@ -268,6 +272,8 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                 )
             except AuthAttemptFailed as failed:
                 result = failed.result
+            except _sp.TimeoutExpired:
+                result = None
             except AdoAuthChainExhaustedError as exhausted:
                 _trace(f"Preflight: {host_display} -- auth rejected")
                 raise AuthenticationError(
