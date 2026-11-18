@@ -44,7 +44,7 @@ def test_endpoint_alias_keys_never_reach_native_config(
     else:
         declaration.update(aliases)
     scene.write_manifest([declaration], user=False)
-    harnesses = ("gemini", "antigravity", "copilot", "claude", "vscode")
+    harnesses = ("gemini", "antigravity", "copilot", "claude")
 
     result = scene.install(",".join(harnesses), user=False)
 

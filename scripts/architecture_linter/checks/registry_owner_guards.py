@@ -420,19 +420,24 @@ def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -
     return None
 
 
-# The deprecated singular ``target:`` key (#3762): one warning emitter in the
-# declaration owner and one in-place rewrite module, reachable only from the
-# explicit ``apm manifest migrate`` command. The target token mapping itself
-# lives in the declaration owner (#3857); migrate and the ``apm init`` re-init
-# both call it, and every rewritten manifest is verified before it is written.
-# Install never rewrites the manifest.
+# The deprecated singular ``target:`` key (#3762, #3868): one warning emitter
+# in the declaration owner, and one target rewrite mapping
+# (``rewrite_target_names``) that the warning's suggestion
+# (``targets_replacement``) and the ``apm init`` re-init both use; every
+# rewritten manifest is verified before it is written. Install never rewrites
+# the manifest.
 _TARGET_DEPRECATION_OWNER = "src/apm_cli/models/manifest_targets.py"
 _TARGET_DEPRECATION_FUNCTION = "_warn_deprecated_manifest_keys"
 _TARGET_DEPRECATION_PHRASE = "uses the deprecated 'target:' key"
 _TARGET_REWRITE_OWNER = _TARGET_DEPRECATION_OWNER
-_TARGET_MIGRATION_MODULE = "manifest_target_migration"
-_TARGET_MIGRATION_OWNER = "src/apm_cli/models/manifest_target_migration.py"
-_TARGET_MIGRATION_COMMAND = "src/apm_cli/commands/manifest.py"
+_TARGET_REWRITE_FUNCTIONS = frozenset(
+    {
+        "rewrite_target_names",
+        "bootstrap_target_names",
+        "verify_rewritten_manifest",
+        "targets_replacement",
+    }
+)
 # Each rewrite path must call the owner. The scaffold writer used by init and
 # every bootstrap verifies what it renders, and the user-manifest bootstrap
 # spells its targets through the owner (#3870).
@@ -444,10 +449,8 @@ _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
         "def verify_rewritten_manifest(",
         "    _refuse_ide_targets(selected)",
         "    _refuse_ide_targets([target] if isinstance(target, str) else target)",
-    ),
-    _TARGET_MIGRATION_OWNER: (
-        "targets = rewrite_target_names(legacy_declaration)",
-        "verify_rewritten_manifest(path, migrated_text)",
+        "return rewrite_target_names(self) or ()",
+        "declaration.targets_replacement(user_scope=user_scope)",
     ),
     "src/apm_cli/commands/init.py": (
         "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
@@ -536,24 +539,17 @@ def _target_deprecation_findings(
             for number, line in enumerate(facts.lines, start=1)
             if _TARGET_AUTHORED_NAMES_CALL in line
         )
-    if path == _TARGET_MIGRATION_OWNER:
-        return findings
-    for fact in facts.imports:
-        module = (fact.module or "").split(".")[-1]
-        if module != _TARGET_MIGRATION_MODULE and _TARGET_MIGRATION_MODULE not in fact.names:
-            continue
-        importers.add(path)
-        if path != _TARGET_MIGRATION_COMMAND:
-            findings.append(
-                violation(
-                    rule_id,
-                    path,
-                    "only 'apm manifest migrate' may rewrite apm.yml's 'target:' key; "
-                    "install and other commands must never rewrite the manifest",
-                    line=fact.line,
-                    column=fact.column + 1,
-                )
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                f"the target rewrite mapping is owned by {_TARGET_REWRITE_OWNER}; "
+                f"do not define another {definition.name}",
+                line=definition.line,
             )
+            for definition in facts.definitions
+            if definition.name in _TARGET_REWRITE_FUNCTIONS
+        )
     return findings
 
 
@@ -570,14 +566,6 @@ def _target_deprecation_wiring(
                 f"in {_TARGET_DEPRECATION_OWNER}",
             )
         )
-    if _TARGET_MIGRATION_COMMAND not in importers:
-        findings.append(
-            violation(
-                rule_id,
-                _TARGET_MIGRATION_COMMAND,
-                f"'apm manifest migrate' must route through {_TARGET_MIGRATION_OWNER}",
-            )
-        )
     return findings
 
 
@@ -591,7 +579,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     ``# architecture-authority-exempt: <concept>`` naming it.
 
     The deprecated ``target:`` key has one warning emitter in the declaration
-    owner and one rewrite module, imported only by ``apm manifest migrate``.
+    owner, and the warning and ``apm init`` re-init share one rewrite mapping.
     """
     rule_id = "registry_delegation.target_vocabulary"
     findings: list[Violation] = []

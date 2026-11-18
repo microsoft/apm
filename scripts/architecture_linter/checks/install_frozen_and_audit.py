@@ -420,13 +420,14 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             and call.qualname.rsplit(".", 1)[-1] == "require_removable_mcp_connections"
             for call in getattr(cleanup, "calls", ())
         )
-        != 3
+        != 4
     ):
         findings.append(
             _summary(
                 rule_id,
                 "src/apm_cli/integration/mcp_integrator.py",
-                "Codex and both Claude cleanup scopes must verify their managed baseline",
+                "Codex, both Claude cleanup scopes and the shared Copilot project .mcp.json "
+                "must verify their managed baseline",
             )
         )
     if not _present_re(

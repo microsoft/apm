@@ -26,14 +26,36 @@ See also: [`apm init` reference](../../reference/cli/init/)
 ### `[!] apm.yml uses the deprecated 'target:' key`
 
 ```
-[!] apm.yml uses the deprecated 'target:' key. Use 'targets:' (a YAML list). Run 'apm manifest migrate' to update it. 'target:' will be removed in v1.0.
+[!] apm.yml uses the deprecated 'target:' key; 'target:' will be removed in a future release in favor of 'targets:'. Replace 'target: claude,copilot' with 'targets: [claude, copilot]'.
 ```
 
-Cause: the project `apm.yml` (or `~/.apm/apm.yml`) declares the singular `target:` key. It still works, prints once per run on stderr, and does not change the exit code. Starting with v1.0, `target:` will be a parse error.
+Cause: the project `apm.yml` (or `~/.apm/apm.yml`) declares the singular `target:` key. It still works, prints once per run on stderr, and does not change the exit code.
 
-Fix: run `apm manifest migrate` (add `--global` for `~/.apm/apm.yml`) and commit the result. The migrated manifest deploys the same files. If it reports `Target 'intellij' has no 'targets:' equivalent`, remove `intellij` from `target:` and pass `--target intellij` to `apm install` instead.
+Fix: make the replacement the warning prints and commit it. It deploys the same files. If the warning says `targets:` has no exact equivalent (for example `target: intellij`), write a `targets:` list of the targets you use and pass `--target intellij` to `apm install`.
 
-See also: [`apm manifest` reference](../../reference/cli/manifest/), [Manifest schema: targets](../../reference/manifest-schema/#36-target-and-targets)
+See also: [Manifest schema: targets](../../reference/manifest-schema/#36-target-and-targets)
+
+### `` [!] apm.yml: replace `vscode` with `copilot` ``
+
+```
+[!] apm.yml: replace `vscode` with `copilot` in 'targets:'; `vscode` is deprecated and will be removed in a future release.
+```
+
+Cause: the project `apm.yml` or `~/.apm/apm.yml` uses `vscode` under `targets:` or a dependency's `targets:` (under `target:`, the `target:` warning above covers it). `--target vscode` and `--runtime vscode` print the same warning without the `apm.yml: ` prefix and field. `vscode` selects exactly what `copilot` selects; the exit code does not change.
+
+Fix: replace `vscode` with `copilot`.
+
+### `[!] Kept MCP server '<name>' in .github/mcp.json`
+
+```
+[!] Kept MCP server 'my-server' in .github/mcp.json because it was changed after APM wrote it. APM now writes Copilot servers to .mcp.json; move it there or delete it.
+```
+
+Cause: Copilot project MCP servers now live in the root `.mcp.json`. On upgrade, `apm install` moves the entries an older APM wrote to `.github/mcp.json` or `.vscode/mcp.json`; entries you authored or edited stay put.
+
+Fix: delete the entry from the named file if the copy in `.mcp.json` is what you want, or keep it on purpose.
+
+See also: [Install MCP servers: Copilot project file](../../consumer/install-mcp-servers/#how-targets-gates-which-configs-get-written)
 
 ### `<path>/apm.yml uses the YAML anchor '&<name>' on line <n>`
 
@@ -41,7 +63,7 @@ See also: [`apm manifest` reference](../../reference/cli/manifest/), [Manifest s
 [x] /home/me/project/apm.yml uses the YAML anchor '&shared' on line 4. apm.yml must not use YAML anchors (&name) or aliases (*name). Write the value out in full wherever it is used, then retry.
 ```
 
-Cause: `apm.yml` defines a YAML anchor (`&name`) or reuses one with an alias (`*name`), including `<<: *name` merge keys. OpenAPM manifests forbid both, so `apm install`, `apm compile`, `apm audit`, `apm manifest migrate` and every other command that reads the manifest refuse it before changing any file. The message names the file and the first offending line; the same error reports an alias as `YAML alias '*<name>'`.
+Cause: `apm.yml` defines a YAML anchor (`&name`) or reuses one with an alias (`*name`), including `<<: *name` merge keys. OpenAPM manifests forbid both, so `apm install`, `apm compile`, `apm audit`, `apm init` and every other command that reads the manifest refuse it before changing any file. The message names the file and the first offending line; the same error reports an alias as `YAML alias '*<name>'`.
 
 Fix: delete the `&name` marker and replace each `*name` with a copy of the value it pointed to, then re-run the command.
 

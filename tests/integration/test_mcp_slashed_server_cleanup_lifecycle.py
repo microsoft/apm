@@ -29,19 +29,18 @@ def test_removing_slashed_server_keeps_user_and_declared_short_name_entries(
     chain = Chain(
         tmp_path / "slashed",
         apm_binary_path,
-        dirs=(".claude", ".vscode", ".cursor", ".github", ".codex", ".opencode"),
+        dirs=(".claude", ".cursor", ".github", ".codex", ".opencode"),
     )
+    # Claude's entry is also Copilot's: both read the project .mcp.json.
     user_entries = {
         "claude": {"command": "user-own"},
-        "vscode": {"type": "stdio", "command": "user-own"},
         "cursor": {"command": "user-own"},
-        "copilot": {"type": "local", "command": "user-own", "tools": ["*"]},
         "opencode": {"type": "local", "command": ["user-own"]},
     }
     for target, entry in user_entries.items():
         relative, key = JSON_CONFIGS[target]
         (chain.project / relative).write_text(json.dumps({key: {"server": entry}}), "utf-8")
-    targets = "claude,vscode,cursor,copilot,opencode"
+    targets = "claude,cursor,copilot,opencode"
 
     chain.write_manifest([stdio_server("com.example/server", "slashed")])
     chain.ok("install", "--no-policy", "--target", targets)

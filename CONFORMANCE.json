@@ -1809,11 +1809,13 @@
       "keyword": "MUST",
       "section": "8.5.3",
       "status": "active",
-      "test_count": 3,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only",
-        "tests/spec_conformance/test_manifest_reqs.py::test_targets_admits_preserved_vscode_and_rejects_agents",
-        "tests/spec_conformance/test_manifest_reqs.py::test_targets_vscode_narrows_like_copilot"
+        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_vscode_narrows_like_copilot_without_warning",
+        "tests/spec_conformance/test_manifest_reqs.py::test_vscode_is_a_deprecated_alias_of_copilot[declaration0-selection0]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_vscode_is_a_deprecated_alias_of_copilot[declaration1-selection1]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_vscode_is_a_deprecated_alias_of_copilot[declaration2-copilot]"
       ]
     },
     {

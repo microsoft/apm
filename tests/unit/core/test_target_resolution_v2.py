@@ -396,10 +396,13 @@ def test_targets_with_all_still_validates_siblings(capsys):
     assert "deprecated" in (out.out + out.err)
 
 
-def test_target_singular_with_yaml_list_preserves_duplicates():
-    """Duplicates are preserved (parser does not dedup)."""
-    out = parse_targets_field({"target": ["copilot", "copilot"]})
-    assert out == ["copilot", "copilot"]
+def test_target_singular_with_yaml_list_deduplicates():
+    """Duplicates collapse, including a deprecated alias of a listed target."""
+    assert parse_targets_field({"target": ["copilot", "copilot"]}) == ["copilot"]
+    assert parse_targets_field({"targets": ["vscode", "claude", "copilot"]}) == [
+        "copilot",
+        "claude",
+    ]
 
 
 # ---------------------------------------------------------------------------

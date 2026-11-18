@@ -191,7 +191,7 @@ def test_frozen_lsp_unrecorded_target_blocks_coupled_mcp_before_writes(
         scenario, project, "--only", "mcp", "--target", "copilot,claude", label="record-mcp-only"
     )
     # An early MCP write would recreate this file before the later LSP refusal.
-    (project.root / ".github" / "mcp.json").unlink()
+    (project.root / ".mcp.json").unlink()
     lock = project.root / "apm.lock.yaml"
     locked, manifest = lock.read_bytes(), project.manifest_path.read_bytes()
     before = _native_bytes(scenario, project)
@@ -256,7 +256,7 @@ def test_frozen_service_only_missing_package_source_cannot_remove_native_servers
         "service-consumer", dependencies=(published.dependency,), targets=("copilot", "claude")
     )
     _success(scenario, project, label="package-service-baseline")
-    assert (project.root / ".github" / "mcp.json").is_file()
+    assert (project.root / ".mcp.json").is_file()
     lock = project.root / "apm.lock.yaml"
     locked, manifest = lock.read_bytes(), project.manifest_path.read_bytes()
     native = _native_bytes(scenario, project)
@@ -294,7 +294,7 @@ def test_selected_package_install_retains_unselected_service_evidence(
     _success(scenario, project, label="complete-graph-baseline")
     lock = project.root / "apm.lock.yaml"
     native = _native_bytes(scenario, project)
-    assert set(json.loads((project.root / ".github/mcp.json").read_bytes())["mcpServers"]) == {
+    assert set(json.loads((project.root / ".mcp.json").read_bytes())["mcpServers"]) == {
         "fixture-mcp"
     }
     trace = tmp_path / "selected-preflight.jsonl"

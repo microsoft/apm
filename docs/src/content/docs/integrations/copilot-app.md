@@ -23,7 +23,7 @@ Until the flag is enabled, the `copilot-app` target stays inert: it is hidden fr
 
 Your APM workflows appear in the Copilot App's correct project tab automatically -- no manual workspace tagging. Ship a `.prompt.md` with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), run `apm install --target copilot-app` inside the repo, and the App lists the workflow under that repo's Workflows tab on next launch. Add `--global` to install from a user-scope `~/.apm/apm.yml`; omit it for project-scoped, team-shared scheduled prompts.
 
-Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM skips them with an actionable `[!]` warning if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface -- whichever its frontmatter shape selects.
+Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `claude`, ...) and APM skips them with an actionable `[!]` warning if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface -- whichever its frontmatter shape selects.
 
 :::note[How it works]
 The desktop App stores workflows in a SQLite database at `~/.copilot/data.db`, not as files on disk -- so `copilot-app` is a separate target from the file-based `copilot` integration. `apm install --target copilot-app` inserts one row per workflow prompt; the App picks them up on next launch or refresh. If a freshly installed workflow does not appear, restart the Copilot App once.

@@ -31,10 +31,9 @@ materialises them at install time into the harness-specific config
 file (see the per-harness map in
 [Install MCP servers](../../../consumer/install-mcp-servers/#what-apm-install-writes-to-disk)).
 
-You declare once. At project scope, APM writes `.github/mcp.json` for Copilot
-CLI, `.vscode/mcp.json` for VS Code, `.cursor/mcp.json`, `.mcp.json` for
-Claude, `.codex/config.toml`, and the rest -- whichever harnesses the consumer
-has.
+You declare once. At project scope, APM writes `.mcp.json` for Copilot (CLI
+and VS Code) and Claude, `.cursor/mcp.json`, `.codex/config.toml`, and the
+rest -- whichever harnesses the consumer has.
 
 ## The `mcp:` schema
 

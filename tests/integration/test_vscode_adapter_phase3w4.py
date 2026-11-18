@@ -262,7 +262,7 @@ class TestConfigureMcpServer:
                 logger=logger,
             )
 
-    def test_optional_env_vars_omitted_from_vscode_config_on_install(self, tmp_path, monkeypatch):
+    def test_optional_env_vars_omitted_from_copilot_config_on_install(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CONTEXT7_API_KEY", raising=False)
         server_info = _context7_optional_env_server_info()
         logger = MagicMock()
@@ -284,20 +284,23 @@ class TestConfigureMcpServer:
         ):
             configured = run_mcp_install(
                 ["context7"],
-                runtime="vscode",
-                explicit_target="vscode",
+                runtime="copilot",
+                explicit_target="copilot",
                 project_root=tmp_path,
                 logger=logger,
             )
 
-        config = json.loads((tmp_path / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
-        server = config["servers"]["context7"]
+        # Project MCP servers land in the workspace-root .mcp.json, never in
+        # the retired .vscode/mcp.json (#3866).
+        config = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+        server = config["mcpServers"]["context7"]
 
         assert configured == 1
         assert "CONTEXT7_API_KEY" not in server.get("env", {})
-        assert config.get("inputs", []) == []
+        assert "inputs" not in config
+        assert not (tmp_path / ".vscode" / "mcp.json").exists()
 
-    def test_optional_env_vars_preserved_on_reinstall(self, tmp_path, monkeypatch):
+    def test_user_vscode_mcp_json_untouched_by_copilot_install(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CONTEXT7_API_KEY", raising=False)
         vscode_dir = tmp_path / ".vscode"
         vscode_dir.mkdir()
@@ -343,22 +346,20 @@ class TestConfigureMcpServer:
         ):
             configured = run_mcp_install(
                 ["context7"],
-                runtime="vscode",
-                explicit_target="vscode",
+                runtime="copilot",
+                explicit_target="copilot",
                 project_root=tmp_path,
                 logger=logger,
             )
 
-        config = json.loads(mcp_json.read_text(encoding="utf-8"))
-        server = config["servers"]["context7"]
-
-        # The existing entry already equals what VS Code would write (optional
-        # env kept), so it is left alone and unclaimed: no rewrite, no
-        # conflict (#3681).
-        assert configured == 0
+        # A user-authored entry in the retired .vscode/mcp.json is never
+        # touched; the install writes Copilot's .mcp.json instead (#3866).
+        assert configured == 1
         assert mcp_json.read_bytes() == before
-        assert server["env"] == {"CONTEXT7_API_KEY": "${env:CONTEXT7_API_KEY}"}
-        assert config.get("inputs", []) == []
+        server = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"][
+            "context7"
+        ]
+        assert "CONTEXT7_API_KEY" not in server.get("env", {})
 
     def test_adds_input_variables_without_duplicates(self, tmp_path):
         vscode_dir = tmp_path / ".vscode"

@@ -50,9 +50,9 @@ def test_recorded_server_leaves_config_after_opt_in_dir_is_pruned(
     tmp_path: Path, apm_binary_path: Path, target: str, removal: str
 ) -> None:
     opt_in = f".{target}"
-    chain = Chain(tmp_path / f"{target}-{removal}", apm_binary_path, dirs=(opt_in, ".vscode"))
+    chain = Chain(tmp_path / f"{target}-{removal}", apm_binary_path, dirs=(opt_in, ".cursor"))
     _seed(chain, target)
-    chain.write_manifest([], apm=["./pkgs/p"], targets=[target, "vscode"])
+    chain.write_manifest([], apm=["./pkgs/p"], targets=[target, "cursor"])
 
     chain.ok("install", "--no-policy", "--trust-transitive-mcp")
     assert set(chain.servers(target)) == {"mine", "p"}
@@ -61,11 +61,11 @@ def test_recorded_server_leaves_config_after_opt_in_dir_is_pruned(
     if removal == "uninstall":
         chain.ok("uninstall", "./pkgs/p")
     else:
-        chain.write_manifest([], targets=[target, "vscode"])
+        chain.write_manifest([], targets=[target, "cursor"])
         chain.ok("install", "--no-policy", "--trust-transitive-mcp")
 
     assert not (chain.project / opt_in).exists(), "fixture must exercise the pruned directory"
     assert chain.servers(target) == {"mine": _USER[target]}
-    assert chain.servers("vscode") == {}
+    assert chain.servers("cursor") == {}
     assert not chain.lock().get("mcp_servers")
     chain.ok("audit", "--ci", "--no-policy")

@@ -662,7 +662,7 @@ class TestInstallMCPDependencies:
         mock_ops.validate_servers_exist.return_value = (["ghcr.io/org/server"], [])
         mock_ops.check_servers_needing_installation.return_value = []
 
-        count = MCPIntegrator.install(["ghcr.io/org/server"], runtime="vscode")
+        count = MCPIntegrator.install(["ghcr.io/org/server"], runtime="copilot")
 
         assert count == 0
 
@@ -683,7 +683,7 @@ class TestInstallMCPDependencies:
         mock_ops.collect_environment_variables.return_value = {}
         mock_ops.collect_runtime_variables.return_value = {}
 
-        count = MCPIntegrator.install(["ghcr.io/org/already", "ghcr.io/org/new"], runtime="vscode")
+        count = MCPIntegrator.install(["ghcr.io/org/already", "ghcr.io/org/new"], runtime="copilot")
 
         assert count == 1
         mock_install_runtime.assert_called_once()
@@ -707,7 +707,7 @@ class TestInstallMCPDependencies:
 
         with patch("apm_cli.integration.mcp_integrator._get_console", return_value=mock_console):
             count = MCPIntegrator.install(
-                ["ghcr.io/org/already", "ghcr.io/org/new"], runtime="vscode"
+                ["ghcr.io/org/already", "ghcr.io/org/new"], runtime="copilot"
             )
 
         assert count == 1
@@ -854,7 +854,7 @@ class TestInstallSelfDefinedSkipLogic:
             url="https://atlassian.example.com",
             registry=False,
         )
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="copilot")
 
         assert count == 0
         mock_install_runtime.assert_not_called()
@@ -877,7 +877,7 @@ class TestInstallSelfDefinedSkipLogic:
             url="https://atlassian.example.com",
             registry=False,
         )
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="copilot")
 
         assert count == 1
         assert mock_install_runtime.call_count == 1
@@ -914,7 +914,7 @@ class TestInstallSelfDefinedSkipLogic:
             "apm_cli.integration.mcp_integrator._get_console",
             return_value=mock_console,
         ):
-            count = MCPIntegrator.install(deps, runtime="vscode")
+            count = MCPIntegrator.install(deps, runtime="copilot")
 
         assert count == 1
         assert mock_install_runtime.call_count == 1
@@ -1108,7 +1108,7 @@ class TestDiffAwareSelfDefinedInstall:
 
         count = MCPIntegrator.install(
             [dep],
-            runtime="vscode",
+            runtime="copilot",
             stored_mcp_configs=stored_configs,
         )
 
@@ -1142,7 +1142,7 @@ class TestDiffAwareSelfDefinedInstall:
 
         count = MCPIntegrator.install(
             [dep],
-            runtime="vscode",
+            runtime="copilot",
             stored_mcp_configs=stored_configs,
         )
 
@@ -1180,7 +1180,7 @@ class TestDiffAwareSelfDefinedInstall:
         ):
             count = MCPIntegrator.install(
                 [dep],
-                runtime="vscode",
+                runtime="copilot",
                 stored_mcp_configs=stored_configs,
             )
 
@@ -1215,7 +1215,7 @@ class TestDiffAwareSelfDefinedInstall:
             registry=False,
         )
 
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="copilot")
 
         assert count == 0
         mock_install_runtime.assert_not_called()

@@ -280,6 +280,12 @@ def run_mcp_integration(  # noqa: PLR0913
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import MCPNativeConflictError
+    from apm_cli.install.mcp.retired_destinations import (
+        apply_retired_mcp_heal,
+        heal_retired_project_mcp_destinations,
+        lock_predates_root_mcp_json,
+        report_retired_mcp_heal,
+    )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.policy.install_preflight import run_policy_preflight
 
@@ -337,6 +343,22 @@ def run_mcp_integration(  # noqa: PLR0913
         logger.error(str(exc), symbol="error")
         logger.render_summary()
         raise SystemExit(2) from exc
+
+    if (
+        should_install
+        and not user_scope
+        and old_mcp_target_servers
+        and previous_lock is not None
+        and lock_predates_root_mcp_json(previous_lock.apm_version)
+    ):
+        heal = heal_retired_project_mcp_destinations(
+            old_mcp_target_servers,
+            stored_configs=old_mcp_configs,
+            native_hashes=old_native_hashes,
+            project_root=project_root,
+        )
+        apply_retired_mcp_heal(heal, old_mcp_target_servers, native_hashes)
+        report_retired_mcp_heal(heal, logger)
 
     if should_install and mcp_deps:
         from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
@@ -416,11 +438,21 @@ def run_mcp_integration(  # noqa: PLR0913
             )
             raise conflict
 
+        from apm_cli.install.mcp.ownership import names_owned_by_active_peers
+
         for removed_target in sorted(
             builtins.set(old_mcp_target_servers) - builtins.set(managed_target_servers)
         ):
+            retired_names = builtins.set(old_mcp_target_servers[removed_target])
+            # An entry in a file the removed runtime shares (.mcp.json) stays
+            # while an active runtime still owns it.
+            retired_names -= names_owned_by_active_peers(
+                removed_target, retired_names, managed_target_servers, user_scope=user_scope
+            )
+            if not retired_names:
+                continue
             MCPIntegrator.remove_stale(
-                builtins.set(old_mcp_target_servers[removed_target]),
+                retired_names,
                 runtime=removed_target,
                 project_root=project_root,
                 user_scope=user_scope,

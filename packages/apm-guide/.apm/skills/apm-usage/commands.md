@@ -30,7 +30,6 @@ APM does not migrate an existing `~/.apm`.
 | `apm init [NAME]` | Initialize a new APM project; names must be non-empty and must not contain path separators or equal `..`. A derived filesystem-root name falls back to `my-project`. | `-y` skip prompts, `--name`/`--description`/`--version`/`--author` set manifest metadata with `-y` and seed the prompt defaults without it (`--name` is for in-place init and is ignored with a warning when `NAME` is given; empty `--version` exits 1), `--target` comma-separated targets (CLI aliases such as `agents` and `vscode` are persisted as canonical `copilot`, so the generated manifest is immediately installable; `intellij` is an IDE, not a target, and exits 1 before writing), `--plugin` (deprecated, use `apm plugin init` instead) scaffolds `plugin.json` + `apm.yml` using the same no-flag Claude-compatible default as `apm plugin init`, `--marketplace` (deprecated, use `apm marketplace init` instead) seed apm.yml with a `marketplace:` block. On re-init over an existing `apm.yml`, its targets carry over as an equivalent `targets:` list (for example `agents` -> `copilot`, `agy` -> `antigravity`); a legacy target with no `targets:` equivalent (`intellij`) exits 1 under `-y` or non-interactive stdin before writing (pass `--target`), and the rewritten manifest is parsed back before it is written. After init, Next Steps contextually suggests `agentrc init` (if agentrc is in PATH) or prints a tip link when no agent instruction files exist. |
 | `apm init --discover` | Preview existing agent content without writing or executing it. Apply adds missing local package references to `apm.yml`, leaving source files unchanged; reruns do not duplicate declarations. Unsupported content is reported, not converted. Run `apm install` separately. | `--apply`/`--write` request a manifest merge; `--yes` supplies noninteractive consent (unlike plain `init --yes`, this never overwrites the manifest). `--format text\|json\|yaml`; `-g`/`--global` for user scope with absolute/home-directory references. Select `--target` on install, not discovery. |
 | `apm plugin init [NAME]` | Scaffold a plugin project (`plugin.json` + `apm.yml`). No-flag default scaffolds the legacy Claude-compatible layout (same as `apm init --plugin`). Pass `--format agent-plugin` to explicitly scaffold a portable Agent Plugins v1 project instead; `--claude-plugin` (or `--format plugin\|claude\|claude-plugin`) is the explicit form of the default. `--format` and `--claude-plugin` are mutually exclusive. | `-y` skip prompts, `--target` comma-separated targets, `--format [agent-plugin\|plugin\|claude\|claude-plugin]`, `--claude-plugin`, `-v`/`--verbose` |
-| `apm manifest migrate` | Rewrite the deprecated top-level `target:` key to `targets:` in place: comment-preserving, top-level key only, same deployed files and MCP destinations (`vscode` stays `vscode`, `agents` -> `copilot`, `agy` -> `antigravity`, `all` -> the explicit install list; refused with `--global` because `compile -g` would narrow). No-op exits 0. Refuses `intellij`/`copilot-app` (exit 1; remove the token from `target:` and pass `--target <name>` to `apm install`). `apm install` never rewrites the manifest. A manifest with YAML anchors or aliases is refused. Under `CI=true` (even with `--dry-run`) prints the diff and exits 1 without writing. | `--dry-run` preview diff, `-y`/`--yes` apply without prompt (required non-interactively; unlike `marketplace migrate`, `-y` only skips the prompt), `-g`/`--global` migrate `~/.apm/apm.yml` |
 
 ## Dependency management
 
@@ -194,8 +193,8 @@ credentials by `(host, port, org)` plus repository path for private GitHub
 helper fallback; see the
 [install behavior reference](https://microsoft.github.io/apm/reference/cli/install/#behavior).
 
-For JavaScript hook bundles, `apm install --target copilot` and its
-`--target vscode` alias omit the generated `package.json` sidecar from
+For JavaScript hook bundles, `apm install --target copilot` (and the
+deprecated `--target vscode` alias of `copilot`) omit the generated `package.json` sidecar from
 project `.github/hooks/` and user `~/.copilot/hooks/` because Copilot
 recursively treats JSON there as hook configuration. Use `.mjs` for ES
 module hooks and keep runtime configuration in a non-JSON format on these
@@ -329,16 +328,15 @@ When replacing a declaration with `--mcp NAME`, `--force` permits changing
 
 For registry MCP runtime variables, `apm install` prompts once for a required
 non-secret default and accepts an override; secret defaults remain hidden.
-Non-secret values resolve every matching `{variable}` launcher reference,
-while VS Code uses secret-input references so secret bytes stay out of
-`mcp.json`. A missing required value declines that target configuration.
+Non-secret values resolve every matching `{variable}` launcher reference.
+A missing required value declines that target configuration.
 
 ### Target resolution chain
 
 `apm install` resolves harness targets in strict priority order:
 
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
-2. `apm.yml` `targets:` list (the singular `target:` key is deprecated: it still works but warns once per run on stderr; run `apm manifest migrate` to rewrite it).
+2. `apm.yml` `targets:` list (the singular `target:` key is deprecated: it still works but warns once per run on stderr, naming the exact `targets:` replacement; `vscode` is a deprecated alias of `copilot` and warns too).
 3. `apm config set target <value>` default.
 4. Auto-detect file-primitive targets from project signals (`.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.claude/` or `CLAUDE.md` -> claude, `.grok/` -> grok-build, `.cursor/` or legacy `.cursorrules` -> cursor, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro).
 
@@ -410,11 +408,19 @@ OpenCode's built-in language servers. Declared LSP servers with no
 LSP-capable target (for example `--target cursor`) fail before any target
 write.
 
-For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
+For MCP, `--target copilot` writes the workspace-root `.mcp.json`
+(`mcpServers`, read by Copilot CLI and VS Code's Copilot) at project scope and
 `$COPILOT_HOME/mcp-config.json` with `--global` (or
 `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset or blank; relative
-values are rejected). `--target vscode`
-writes only `.vscode/mcp.json`.
+values are rejected). `--target vscode` is a deprecated alias that writes the
+same `.mcp.json`; APM no longer writes `.vscode/mcp.json` or `.github/mcp.json`.
+`.mcp.json` is shared with Claude Code: both targets write one identical entry
+per server, never overwrite user-authored servers, and each record ownership in
+`apm.lock.yaml`. The first install of a project locked by APM 0.36 or earlier
+(also `--frozen`) moves the entries APM wrote to `.github/mcp.json` or
+`.vscode/mcp.json` into `.mcp.json`; user-authored or edited entries stay and
+APM warns (`Kept MCP server '<name>' ...`). A file is deleted only if APM created it
+and nothing but empty scaffolding remains.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 
@@ -766,7 +772,7 @@ To build the marketplace, run `apm pack` (it reads `apm.yml` and writes `.claude
 | `apm mcp search QUERY` | Search MCP registry | `--limit N` |
 | `apm mcp show SERVER` | Show server details | -- |
 
-Self-defined stdio MCP entries declared in `apm.yml` (`env:` / `args:`) have their placeholders resolved at install time on Codex, Gemini, and Antigravity, which have no runtime interpolation. Copilot CLI preserves env references as `${VAR}`; VS Code and JetBrains preserve them as `${env:VAR}`. Cursor normalizes references in `env`, `args`, and `headers` to `${env:VAR}` for runtime resolution; this normalization does not cover `command` or `url`. All three env syntaxes are accepted: `${VAR}`, `${env:VAR}`, and the legacy `<VAR>`. Missing variables fall back to an interactive prompt on install-time targets (suppressed in non-TTY contexts). See [Manifest schema -- MCP placeholder syntaxes](https://microsoft.github.io/apm/reference/manifest-schema/) for the per-target matrix.
+Self-defined stdio MCP entries declared in `apm.yml` (`env:` / `args:`) have their placeholders resolved at install time on Codex, Gemini, and Antigravity, which have no runtime interpolation. Copilot preserves env references as `${VAR}`; JetBrains preserves them as `${env:VAR}`. Cursor normalizes references in `env`, `args`, and `headers` to `${env:VAR}` for runtime resolution; this normalization does not cover `command` or `url`. All three env syntaxes are accepted: `${VAR}`, `${env:VAR}`, and the legacy `<VAR>`. Missing variables fall back to an interactive prompt on install-time targets (suppressed in non-TTY contexts). See [Manifest schema -- MCP placeholder syntaxes](https://microsoft.github.io/apm/reference/manifest-schema/) for the per-target matrix.
 
 Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL is validated at startup and must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. The registry must implement the [MCP Registry v0.1 spec](https://github.com/modelcontextprotocol/registry) (apm calls `/v0.1/servers/...`); legacy `/v0/`-only registries will return 404. Direct install pre-flight fails closed when any registry is unreachable and accepts a bare server name only when it has one unique registry match. A no-match error names the searched registry and how to choose another; APM never falls back to another registry. See [Choosing an MCP registry](https://microsoft.github.io/apm/consumer/choosing-an-mcp-registry/).
 
@@ -776,7 +782,7 @@ package arguments stay after it. Options-only `runtimeArguments` (no
 leading `run`) gain `run -i --rm` ahead of them. Docker must be available when the
 harness starts the server; no manual launcher override is required.
 
-For VS Code and Copilot-family adapters, non-container install preserves
+For Copilot-family adapters, non-container install preserves
 typed v0.1 registry arguments and legacy `value_hint` arguments while
 keeping exactly one semantic package identity. Registry defaults resolve,
 secret variables use target-native references, unresolved optional groups

@@ -63,7 +63,7 @@ mcp:
 
 compilation:
   target:
-    allow: [vscode, claude]             # permitted targets
+    allow: [copilot, claude]            # permitted targets
     enforce: null                       # force specific target (must be present in target list)
   strategy:
     enforce: null                       # distributed | single-file

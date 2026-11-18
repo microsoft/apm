@@ -170,9 +170,9 @@ targets: [claude]
 ```
 
 The deprecated `target:` key accepts scalar, CSV, and list spellings, including
-aliases such as `vscode` (normalized to `copilot`); `apm manifest migrate`
-rewrites it to `targets:`. `targets:` accepts a scalar or list
-of canonical names. Unknown names, both keys together, and an empty
+aliases such as `vscode` (normalized to `copilot`); its warning names the
+`targets:` replacement. `targets:` accepts a scalar or list
+of canonical names (`vscode` is a deprecated alias of `copilot`). Unknown names, both keys together, and an empty
 or null `targets:` value fail validation. A null singular `target:` is
 treated as omission for legacy compatibility; an empty string or list fails
 validation. Both keys conflict even when either value is null. Consumers

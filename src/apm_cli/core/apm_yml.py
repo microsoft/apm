@@ -20,7 +20,11 @@ from apm_cli.core.errors import (
     render_conflicting_schema_error,
     render_unknown_target_error,
 )
-from apm_cli.core.target_catalog import get_target_capability, manifest_target_names
+from apm_cli.core.target_catalog import (
+    canonical_target_token,
+    get_target_capability,
+    manifest_target_names,
+)
 
 # Canonical target names accepted by APM.
 CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
@@ -111,7 +115,13 @@ def _validate_canonical(tokens: list[str]) -> None:
 
 
 def _validate_and_fold_legacy_all(tokens: list[str]) -> list[str]:
-    """Validate tokens and fold legacy 'all' to the omitted-field behavior."""
+    """Validate tokens and fold legacy 'all' to the omitted-field behavior.
+
+    Deprecated aliases (``vscode``) are canonicalised to the target they
+    select and deduplicated; the consumer manifest's warning is emitted by
+    the declaration owner (``models/manifest_targets.py``).
+    """
+    tokens = list(dict.fromkeys(canonical_target_token(token) for token in tokens))
     tokens, folded = _fold_legacy_all(tokens)
     _validate_canonical(tokens)
     if folded:

@@ -12,9 +12,12 @@ from apm_cli.models.manifest_targets import (
     reset_manifest_deprecation_warnings,
 )
 
+_TARGET_DEPRECATION = (
+    "uses the deprecated 'target:' key; 'target:' will be removed in a future "
+    "release in favor of 'targets:'."
+)
 _TARGET_WARNING = (
-    "[!] apm.yml uses the deprecated 'target:' key. Use 'targets:' (a YAML list). "
-    "Run 'apm manifest migrate' to update it. 'target:' will be removed in v1.0."
+    f"[!] apm.yml {_TARGET_DEPRECATION} Replace 'target: claude' with 'targets: [claude]'."
 )
 
 
@@ -70,13 +73,80 @@ def test_unknown_key_handler_does_not_control_the_deprecation_warning(tmp_path, 
     assert _flat(capsys.readouterr().err) == _TARGET_WARNING
 
 
-def test_user_manifest_warning_points_at_global_migrate(tmp_path, capsys):
+def test_user_manifest_warning_names_its_path_and_replacement(tmp_path, capsys):
     user_manifest = tmp_path / "home" / ".apm" / "apm.yml"
     _parse(user_manifest, "target: claude\n")
 
     err = "".join(capsys.readouterr().err.split())
-    assert err.startswith(f"[!]{user_manifest.as_posix()}usesthedeprecated'target:'key.")
-    assert "Run'apmmanifestmigrate--global'toupdateit." in err
+    assert err.startswith(f"[!]{user_manifest.as_posix()}usesthedeprecated'target:'key;")
+    assert err.endswith("Replace'target:claude'with'targets:[claude]'.")
+    assert "v1.0" not in err
+
+
+@pytest.mark.parametrize(
+    ("body", "hint"),
+    [
+        (
+            "target: [claude, cursor]\n",
+            "Replace 'target: [claude, cursor]' with 'targets: [claude, cursor]'.",
+        ),
+        (
+            "target: claude,agents\n",
+            "Replace 'target: claude,agents' with 'targets: [claude, copilot]'.",
+        ),
+        ("target:\n", "Delete the empty 'target:' key."),
+        (
+            "target: intellij\n",
+            "'targets:' has no exact equivalent of 'target: intellij' here; list the "
+            "targets you use, e.g. 'targets: [claude, copilot]'.",
+        ),
+        (
+            "target: claude,vscode\n",
+            "Replace 'target: claude,vscode' with 'targets: [claude, copilot]'. "
+            "(`vscode` is a deprecated alias: replace `vscode` with `copilot`.)",
+        ),
+    ],
+    ids=["flow-list", "alias", "empty", "no-equivalent", "vscode-alias"],
+)
+def test_project_warning_names_the_behaviour_preserving_replacement(tmp_path, capsys, body, hint):
+    _parse(tmp_path / "apm.yml", body)
+
+    assert _flat(capsys.readouterr().err) == f"[!] apm.yml {_TARGET_DEPRECATION} {hint}"
+
+
+def test_singular_all_expands_in_the_project_but_not_the_user_manifest(tmp_path, capsys):
+    from apm_cli.core.target_catalog import expand_all
+
+    _parse(tmp_path / "apm.yml", "target: all\n")
+    expanded = ", ".join(expand_all("install"))
+    assert _flat(capsys.readouterr().err).endswith(
+        f"Replace 'target: all' with 'targets: [{expanded}]'. "
+        "('targets: [all]' means auto-detect, not every target.)"
+    )
+
+    _parse(tmp_path / "home" / ".apm" / "apm.yml", "target: all\n")
+    assert _flat(capsys.readouterr().err).endswith(
+        "'targets:' has no exact equivalent of 'target: all' here; list the targets "
+        "you use, e.g. 'targets: [claude, copilot]'."
+    )
+
+
+def test_deprecated_vscode_alias_warns_for_consumer_manifest_once(tmp_path, capsys):
+    """vscode is read as copilot; only the consumer manifest warns (#3866)."""
+    package = _parse(tmp_path / "apm.yml", "targets: [vscode]\n")
+    _parse(tmp_path / "apm.yml", "targets: [vscode]\n")
+
+    assert package.target_declaration.selection == ["copilot"]
+    assert _flat(capsys.readouterr().err) == (
+        "[!] apm.yml: replace `vscode` with `copilot` in 'targets:'; `vscode` is "
+        "deprecated and will be removed in a future release."
+    )
+
+    dependency = _parse(
+        tmp_path / "apm_modules" / "acme" / "pkg" / "apm.yml", "targets: [vscode]\n"
+    )
+    assert dependency.target_declaration.selection == ["copilot"]
+    assert capsys.readouterr().err == ""
 
 
 def test_ignored_compilation_target_warns_once(tmp_path, capsys):
@@ -84,8 +154,8 @@ def test_ignored_compilation_target_warns_once(tmp_path, capsys):
     _parse(tmp_path / "apm.yml", "compilation:\n  target: cursor\n")
 
     assert _flat(capsys.readouterr().err) == (
-        "[!] apm.yml sets 'compilation.target', which APM ignores (targets come from "
-        "'targets:' or auto-detection). Delete it by hand; v1.0 will reject it."
+        "[!] apm.yml sets 'compilation.target', which APM ignores; targets come from "
+        "'targets:' or auto-detection. Delete it; a future release will reject it."
     )
 
 
@@ -124,7 +194,7 @@ def test_user_and_project_manifests_each_warn_once(tmp_path, capsys):
 
     err = "".join(capsys.readouterr().err.split())
     assert err.count("usesthedeprecated'target:'key") == 2
-    assert err.count("Run'apmmanifestmigrate--global'") == 1
+    assert err.count(f"{(tmp_path / 'home' / '.apm' / 'apm.yml').as_posix()}uses") == 1
 
 
 def test_prospective_parse_can_opt_out_explicitly(tmp_path, capsys):

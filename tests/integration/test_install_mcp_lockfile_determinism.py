@@ -70,7 +70,7 @@ _TARGET_SERVERS = {
     "copilot": [_SERVER_NAME],
 }
 _CONFIG_PATHS = (
-    PurePosixPath(".github/mcp.json"),
+    PurePosixPath(".mcp.json"),
     PurePosixPath(".vscode/mcp.json"),
     PurePosixPath(".codex/config.toml"),
     PurePosixPath(".agents/skills/local-lifecycle/SKILL.md"),
@@ -320,29 +320,29 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
 
 
 @pytest.mark.lifecycle_smoke
-def test_copilot_target_migrates_legacy_vscode_ownership_without_rewriting_vscode(
+def test_vscode_alias_target_matches_copilot_without_touching_vscode_config(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """Copilot writes its discoverable repo config without dual-writing VS Code."""
+    """The deprecated vscode alias installs exactly what copilot does (#3866).
+
+    Both write the workspace-root .mcp.json and record copilot ownership; the
+    user's .vscode/mcp.json is never written.
+    """
     scenario = _new_scenario(
         tmp_path / "copilot-project-config",
         apm_binary_path,
         targets=("vscode",),
     )
     project_root = scenario.project.root
-
-    _run_ok(scenario, _INSTALL_VSCODE, "copilot-vscode-install")
     vscode_config = project_root / ".vscode" / "mcp.json"
     vscode_bytes = vscode_config.read_bytes()
 
-    scenario.packages.set_targets(scenario.project, ("copilot",))
-    _run_ok(scenario, _INSTALL_COPILOT, "copilot-project-install")
-
-    copilot_config = project_root / ".github" / "mcp.json"
+    _run_ok(scenario, _INSTALL_VSCODE, "copilot-vscode-install")
+    copilot_config = project_root / ".mcp.json"
     assert vscode_config.read_bytes() == vscode_bytes
+    assert not (project_root / ".github" / "mcp.json").exists()
     assert json.loads(copilot_config.read_text(encoding="utf-8"))["mcpServers"][_SERVER_NAME]
-
     lock = _lock(project_root)
     assert lock.mcp_target_servers == {"copilot": [_SERVER_NAME]}
     assert {
@@ -350,10 +350,18 @@ def test_copilot_target_migrates_legacy_vscode_ownership_without_rewriting_vscod
         for record in lock.deployment_ledger.records.values()
         if record.locator.target == "mcp"
     } == {"copilot"}
+    alias_state = _snapshot(project_root)
 
-    first = _snapshot(project_root)
+    scenario.packages.set_targets(scenario.project, ("copilot",))
+    _run_ok(scenario, _INSTALL_COPILOT, "copilot-project-install")
+    canonical_state = _snapshot(project_root)
+    assert canonical_state.mcp_state_bytes == alias_state.mcp_state_bytes
+    assert canonical_state.deployment_records == alias_state.deployment_records
+    assert canonical_state.file(".mcp.json") == alias_state.file(".mcp.json")
+    assert vscode_config.read_bytes() == vscode_bytes
+
     _run_ok(scenario, _INSTALL_COPILOT, "copilot-project-rerun")
-    _assert_exact_state(first, _snapshot(project_root))
+    _assert_exact_state(canonical_state, _snapshot(project_root))
 
 
 @pytest.mark.lifecycle_smoke
@@ -434,7 +442,7 @@ def test_redirected_root_registry_install_converges_without_rewrite(
         first = LifecycleStateSnapshot.capture(
             output_root,
             config_paths=(
-                PurePosixPath(".vscode/mcp.json"),
+                PurePosixPath(".mcp.json"),
                 PurePosixPath(".codex/config.toml"),
             ),
         )
@@ -446,7 +454,7 @@ def test_redirected_root_registry_install_converges_without_rewrite(
         second = LifecycleStateSnapshot.capture(
             output_root,
             config_paths=(
-                PurePosixPath(".vscode/mcp.json"),
+                PurePosixPath(".mcp.json"),
                 PurePosixPath(".codex/config.toml"),
             ),
         )

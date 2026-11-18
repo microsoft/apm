@@ -593,12 +593,16 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             )
             ok = self.update_config({config_key: server_config}, managed_fields=managed_fields)
             if not ok:
-                _rich_error(f"Failed to write MCP config for '{config_key}' to Claude Code")
+                _rich_error(
+                    f"Failed to write MCP config for '{config_key}' to {self._client_label}"
+                )
                 return False
             self.written_mcp_hashes[server_url] = fingerprint
             self._record_env_diagnostics(config_key, server_config, previously_baked)
 
-            _rich_success(f"Successfully configured MCP server '{config_key}' for Claude Code")
+            _rich_success(
+                f"Successfully configured MCP server '{config_key}' for {self._client_label}"
+            )
             return True
 
         except Exception:

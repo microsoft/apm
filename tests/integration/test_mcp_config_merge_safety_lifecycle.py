@@ -1,7 +1,7 @@
 """Installed-CLI contract: MCP config merges keep user config files intact.
 
-A user's Copilot ``.github/mcp.json`` with a trailing comma or VS Code
-``.vscode/mcp.json`` with a JSONC comment is never rewritten: install keeps
+A user's Copilot ``.mcp.json`` with a trailing comma or Cursor
+``.cursor/mcp.json`` with a JSONC comment is never rewritten: install keeps
 the bytes, reports the server as failed with guidance, and converges once
 the user fixes the file. Claude's ``.mcp.json`` follows the same rule, and
 project MCP configs that are symbolic links are refused like user-scope ones.
@@ -24,9 +24,7 @@ pytestmark = [
 ]
 
 _COPILOT = '{\n  "mcpServers": {\n    "user-srv": {"type": "stdio", "command": "mine"},\n  }\n}\n'
-_VSCODE = (
-    '{\n  // team servers\n  "servers": {"user-srv": {"type": "stdio", "command": "mine"}}\n}\n'
-)
+_CURSOR = '{\n  // team servers\n  "mcpServers": {"user-srv": {"command": "mine"}}\n}\n'
 
 
 def test_unparsable_user_mcp_configs_are_kept_until_fixed(
@@ -35,15 +33,15 @@ def test_unparsable_user_mcp_configs_are_kept_until_fixed(
     world = build_world(
         tmp_path,
         apm_binary_path,
-        targets=("copilot", "vscode"),
+        targets=("copilot", "cursor"),
         mcp_package="alpha",
         installed=False,
     )
-    copilot = world.project / ".github/mcp.json"
-    vscode = world.project / ".vscode/mcp.json"
+    copilot = world.project / ".mcp.json"
+    cursor = world.project / ".cursor/mcp.json"
     copilot.write_text(_COPILOT, encoding="ascii")
-    vscode.parent.mkdir()
-    vscode.write_text(_VSCODE, encoding="ascii")
+    cursor.parent.mkdir(exist_ok=True)
+    cursor.write_text(_CURSOR, encoding="ascii")
 
     result = world.install()
 
@@ -51,15 +49,15 @@ def test_unparsable_user_mcp_configs_are_kept_until_fixed(
     output = " ".join((result.stdout + result.stderr).split())
     assert "fix the file" in output, output
     assert copilot.read_text(encoding="ascii") == _COPILOT
-    assert vscode.read_text(encoding="ascii") == _VSCODE
+    assert cursor.read_text(encoding="ascii") == _CURSOR
 
     copilot.write_text(_COPILOT.replace("},\n  }", "}\n  }"), encoding="ascii")
-    vscode.write_text(_VSCODE.replace("  // team servers\n", ""), encoding="ascii")
+    cursor.write_text(_CURSOR.replace("  // team servers\n", ""), encoding="ascii")
     fixed = world.install()
 
     assert fixed.returncode == 0, evidence(fixed)
-    for path, key in ((copilot, "mcpServers"), (vscode, "servers")):
-        servers = json.loads(path.read_text(encoding="utf-8"))[key]
+    for path in (copilot, cursor):
+        servers = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
         assert {"user-srv", "alpha-srv"} <= servers.keys(), (path, servers)
 
 

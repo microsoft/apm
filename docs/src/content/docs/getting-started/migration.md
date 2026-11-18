@@ -148,7 +148,7 @@ skill collection layout reference.
 ## Deprecated targets
 
 :::note[Deprecated]
-`--target agents` is deprecated and maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` for GitHub Copilot deployment, or `--target agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
+`--target agents` is deprecated and maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` for GitHub Copilot deployment, or `--target agent-skills` for cross-client `.agents/skills/` deployment. `vscode` (in `apm.yml` or on the CLI) is a deprecated alias of `copilot` and selects exactly what `copilot` selects. Both aliases will be removed in a future release.
 :::
 
 ## Skill routing convergence

@@ -110,6 +110,7 @@ Notes:
   decide whether a marker is "real".
 - A `CLAUDE.md` written as documentation will still activate the
   `claude` target. Pin `targets:` in `apm.yml` to override.
+- A root `.mcp.json` is not a signal: Claude Code and Copilot both read it.
 - If no signals are found and `apm.yml` declares no `targets:`,
   `apm targets` prints the full table with every row inactive and an
   info hint to create a harness config or declare `targets:`

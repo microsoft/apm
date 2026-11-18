@@ -27,8 +27,7 @@ A harness that is only documented or unverified is not counted as passing.
 | Harness (client checked) | APM writes to | Native syntax and fields | `${VAR:-default}` | Unset, no default | Approval before servers run | Evidence |
 |---|---|---|---|---|---|---|
 | Claude Code (2.1.310) | `.mcp.json` (project), `~/.claude.json` (user) | `${VAR}` in `command`, `args`, `env`, `url`, `headers` | Supported | Left as literal text; `claude mcp list` warns | Project servers need workspace trust and approval; user servers do not | client |
-| GitHub Copilot CLI (1.0.44) | `.github/mcp.json` (project), `~/.copilot/mcp-config.json` (user) | `${NAME}` in `command`, `args`, `env`, header values (portable format) | Supported (portable format) | Not documented | Project servers load only after folder trust | docs; client for file locations |
-| VS Code | `.vscode/mcp.json` (project) | `${env:NAME}`, `${input:id}` in `env`, `envFile`, `cwd`, `headers` | Only in the portable format | Not documented | Workspace servers follow Workspace Trust | docs |
+| GitHub Copilot CLI (1.0.44) | `.mcp.json` (project, shared with Claude Code), `~/.copilot/mcp-config.json` (user) | `${NAME}` in `command`, `args`, `env`, header values (portable format) | Supported (portable format) | Not documented | Project servers load only after folder trust | docs; client for file locations |
 | Cursor | `.cursor/mcp.json` (project), `~/.cursor/mcp.json` (user) | `${env:NAME}` in `command`, `args`, `env`, `url`, `headers` | Not documented | Not documented | Tool calls ask for approval by default | docs |
 | Codex CLI | `.codex/config.toml` (project), `~/.codex/config.toml` (user) | No interpolation. `env_vars` forwards variables; `bearer_token_env_var` and `env_http_headers` name variables for HTTP | Not applicable | Not applicable | Project config only in trusted projects | docs |
 | Gemini CLI | `.gemini/settings.json` (project), `~/.gemini/settings.json` (user) | `$VAR` or `${VAR}` in `env` | Not documented | Empty string | stdio servers connect only in trusted folders | docs |
@@ -49,8 +48,8 @@ an unset one (`${DEMO_MISSING}`) and a static value (`debug`):
 |---|---|---|---|---|
 | Claude Code, project | `${DEMO_TOKEN}` in every field | Kept | Kept | No |
 | Claude Code, user | `env`, `headers`: resolved at install time (unchanged); `command`, `args`, `url` copied | Kept | Kept | Yes (file is `0o600`, outside the repo) |
-| Copilot CLI, project and user | `${DEMO_TOKEN}` | `env`: replaced by `${KEY}`; other fields kept | `env`: replaced by `${KEY}` | No |
-| VS Code, project | `env`, `headers`: `${env:DEMO_TOKEN}`; `args`: bare `${DEMO_TOKEN}` | Kept | Kept | No |
+| Copilot, project | `${DEMO_TOKEN}` in every field (the same `.mcp.json` entry as Claude Code) | Kept | Kept | No |
+| Copilot CLI, user | `${DEMO_TOKEN}` | `env`: replaced by `${KEY}`; other fields kept | `env`: replaced by `${KEY}` | No |
 | Cursor, project and user | `${env:DEMO_TOKEN}` in `env`, `args`, `headers`; `command` and `url` copied | Kept | Kept | No |
 | Codex CLI, project | `env` written as `KEY: ${KEY}`: `env_vars = ["KEY"]`; other `env` references and `args`: resolved; `Authorization`: `bearer_token_env_var` | Kept | Kept | Only for references not written as `KEY: ${KEY}` |
 | Codex CLI, user | `env`: resolved; `Authorization`: `bearer_token_env_var` | Kept | Kept | Yes |
@@ -77,15 +76,11 @@ These existed before #3252 and are recorded here rather than changed by it:
   spellings such as `${env:VAR}` that the harness may not read.
 - **Cursor and OpenCode** copy references in `url` (and Cursor in `command`)
   unchanged.
-- **Copilot CLI, Kiro and JetBrains Copilot** replace static `env` values and
+- **Copilot CLI user scope, Kiro and JetBrains Copilot** replace static `env` values and
   defaulted `env` references with a reference named after the key.
-- **VS Code** leaves bare `${VAR}` in `args`, which the VS Code format does not
-  expand.
-- **Cursor, VS Code, OpenCode, Codex, Gemini CLI, Antigravity, Hermes Agent and
+- **Cursor, OpenCode, Codex, Gemini CLI, Antigravity, Hermes Agent and
   Windsurf** copy `${VAR:-default}` unchanged, although their documented syntax
   has no defaults.
-- **Copilot CLI 1.0.44** reads project servers from `.mcp.json` only, not the
-  `.github/mcp.json` that APM writes. Current GitHub documentation lists both.
 - **Every harness**: an MCP `url` must start with a literal `http://` or
   `https://`, so the scheme itself cannot be a reference.
 

@@ -30,7 +30,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm
 _REGISTRY_NAME = "io.github.apm-fixture/remote-fixture"
 _SHORT_NAME = "remote-fixture"
 _URL = "https://mcp.example.invalid/endpoint"
-_CHANGED = ("vscode", "copilot", "claude", "gemini", "antigravity", "codex", "hermes")
+_CHANGED = ("copilot", "claude", "gemini", "antigravity", "codex", "hermes")
 _UNSUPPORTED_SSE = {"antigravity", "codex"}
 
 
@@ -41,11 +41,6 @@ def scene(tmp_path: Path, apm_binary_path: Path) -> Iterator[HarnessScene]:
         yield result
     finally:
         result.close()
-
-
-def _harnesses(user: bool, candidates: tuple[str, ...] = _CHANGED) -> tuple[str, ...]:
-    # VS Code has no user-scope MCP file; APM skips it under --global.
-    return tuple(name for name in candidates if not (user and name == "vscode"))
 
 
 def _assert_remote_entry(
@@ -64,7 +59,7 @@ def _assert_remote_entry(
         return
     assert key in servers, f"{harness} missing {key!r}: {servers}"
     entry = servers[key]
-    if harness in ("copilot", "claude", "vscode"):
+    if harness in ("copilot", "claude"):
         expected_type = "sse" if transport == "sse" else "http"
         assert entry.get("type") == expected_type, f"{harness}: {entry}"
         assert entry.get("url") == url, f"{harness}: {entry}"
@@ -108,14 +103,15 @@ def test_registry_remote_type_reaches_every_harness_in_its_native_shape(
     """A registry v0.1 ``type`` remote is rendered per harness and stays idempotent."""
     registry = scene.start_registry(registry_document(_REGISTRY_NAME, _URL, transport=transport))
     scene.write_manifest([{"name": _REGISTRY_NAME, "registry": registry}], user=user)
-    harnesses = _harnesses(user)
+    harnesses = _CHANGED
 
     result = scene.install(",".join(harnesses), user=user)
 
     assert result.returncode == 0, describe(result)
     for harness in harnesses:
-        key = _REGISTRY_NAME if harness == "vscode" else _SHORT_NAME
-        _assert_remote_entry(scene, harness, key=key, transport=transport, url=_URL, user=user)
+        _assert_remote_entry(
+            scene, harness, key=_SHORT_NAME, transport=transport, url=_URL, user=user
+        )
     if transport == "sse":
         _assert_unsupported_sse_not_claimed(
             scene,
@@ -183,7 +179,7 @@ def test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped(
         {"name": "sd-stdio", "registry": False, "transport": "stdio", "command": "node"}
     )
     scene.write_manifest(declarations, user=user)
-    harnesses = _harnesses(user)
+    harnesses = _CHANGED
 
     result = scene.install(",".join(harnesses), user=user)
 

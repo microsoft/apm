@@ -25,7 +25,6 @@ _COMMANDS = (
     ("compile",),
     ("audit",),
     ("audit", "--ci"),
-    ("manifest", "migrate", "--yes"),
 )
 
 _CLEAN = (

@@ -1,7 +1,7 @@
 """Project MCP configs are only merged into regular files inside the project.
 
-When ``.mcp.json``, ``.github/mcp.json``, ``.vscode/mcp.json`` or
-``.kiro/settings/mcp.json`` (or its parent directory) is a symlink,
+When ``.mcp.json`` (Claude Code and Copilot) or ``.kiro/settings/mcp.json``
+(or its parent directory) is a symlink,
 ``apm install`` skips that runtime's MCP write with a warning, reports the
 runtime as failed, and leaves the link target unchanged.
 """
@@ -27,8 +27,7 @@ pytestmark = [
     ("target", "config_rel", "seed"),
     [
         ("claude", ".mcp.json", '{"mcpServers": {}}\n'),
-        ("copilot", ".github/mcp.json", '{"mcpServers": {}}\n'),
-        ("vscode", ".vscode/mcp.json", '{"servers": {}}\n'),
+        ("copilot", ".mcp.json", '{"mcpServers": {}}\n'),
         ("kiro", ".kiro/settings/mcp.json", '{"mcpServers": {}}\n'),
     ],
 )
@@ -56,8 +55,7 @@ def test_install_skips_linked_project_mcp_config(
     ("target", "config_rel"),
     [
         ("claude", ".mcp.json"),
-        ("copilot", ".github/mcp.json"),
-        ("vscode", ".vscode/mcp.json"),
+        ("copilot", ".mcp.json"),
         ("kiro", ".kiro/settings/mcp.json"),
     ],
 )

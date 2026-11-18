@@ -32,6 +32,7 @@ from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_ERROR,
@@ -1035,42 +1036,64 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
 
 
 @pytest.mark.req("req-tg-008")
-def test_targets_admits_preserved_vscode_and_rejects_agents(tmp_path: Path) -> None:
-    """0.1.61: a rewrite keeps `vscode` and `targets:` admits it; `agents` stays rejected."""
+@pytest.mark.parametrize(
+    ("declaration", "selection"),
+    [
+        ({"targets": ["vscode"]}, ["copilot"]),
+        ({"targets": ["vscode", "copilot", "claude"]}, ["copilot", "claude"]),
+        ({"target": "vscode"}, "copilot"),
+    ],
+)
+def test_vscode_is_a_deprecated_alias_of_copilot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    declaration: dict,
+    selection: object,
+) -> None:
+    """0.1.61: `vscode` selects exactly `copilot`; the project's manifest warns once."""
     from apm_cli.core.errors import TargetResolutionError
-    from apm_cli.models.manifest_target_migration import plan_manifest_migration
-    from apm_cli.models.manifest_targets import ManifestTargetDeclaration
-    from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.models.manifest_targets import reset_manifest_deprecation_warnings
 
-    manifest = tmp_path / "apm.yml"
-    manifest.write_text("name: legacy\nversion: 1.0.0\ntarget: vscode\n", encoding="utf-8")
-    plan_manifest_migration(manifest).write()
-    assert "targets: [vscode]" in manifest.read_text(encoding="utf-8").splitlines()
-    migrated = APMPackage.from_mapping(
-        load_yaml(manifest), package_path=tmp_path, manifest_path=manifest, create_config=False
+    reset_manifest_deprecation_warnings()
+    monkeypatch.chdir(tmp_path)
+    package = APMPackage.from_mapping(
+        {"name": "app", "version": "1.0.0", **declaration},
+        package_path=tmp_path,
+        manifest_path=tmp_path / "apm.yml",
+        create_config=False,
     )
-    assert migrated.target_declaration.selection == ["vscode"]
 
-    diagnostics = DiagnosticCollector()
-    resolve_effective_package_targets(
-        [KNOWN_TARGETS["copilot"]], None, migrated, diagnostics, "owner/legacy"
-    )
-    # Proves only that `targets: [vscode]` is accepted without a diagnostic; narrowing to the
-    # copilot profile is asserted by test_targets_vscode_narrows_like_copilot.
-    assert diagnostics.error_count == 0
+    assert package.target_declaration.selection == selection
+    assert "copilot" in package.target_declaration.canonical
+    assert "vscode" not in package.target_declaration.canonical
+    assert "replace `vscode` with `copilot`" in " ".join(capsys.readouterr().err.split())
 
     with pytest.raises(TargetResolutionError, match="agents"):
         _ = ManifestTargetDeclaration.from_mapping({"targets": ["agents"]}).selection
 
-    assert_spec_contains("the preserved legacy identifier", "`vscode` defined there")
+    assert_spec_contains(
+        "The legacy alias `vscode` is deprecated",
+        "a conforming consumer MUST treat it exactly as `copilot`",
+    )
 
 
 @pytest.mark.req("req-tg-008")
-def test_targets_vscode_narrows_like_copilot(tmp_path: Path) -> None:
+def test_dependency_vscode_narrows_like_copilot_without_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A dependency declaring `targets: [vscode]` deploys to the copilot profile."""
+    from apm_cli.models.manifest_targets import reset_manifest_deprecation_warnings
+
+    reset_manifest_deprecation_warnings()
+    project = tmp_path / "project"
+    dependency = project / "apm_modules" / "owner" / "vscode-pkg"
+    dependency.mkdir(parents=True)
+    monkeypatch.chdir(project)
     package = APMPackage.from_mapping(
         {"name": "vscode-pkg", "version": "1.0.0", "targets": ["vscode"]},
-        package_path=tmp_path,
+        package_path=dependency,
+        manifest_path=dependency / "apm.yml",
         create_config=False,
     )
 
@@ -1083,6 +1106,7 @@ def test_targets_vscode_narrows_like_copilot(tmp_path: Path) -> None:
     )
 
     assert tuple(target.name for target in effective.targets) == ("copilot",)
+    assert "vscode" not in capsys.readouterr().err
 
 
 @pytest.mark.req("req-tg-008")
@@ -1220,7 +1244,9 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
         "name: user-scope\nversion: 0.1.0\n",
         encoding="ascii",
     )
-    monkeypatch.setattr("apm_cli.config.get_install_target", lambda *, create_config=True: "vscode")
+    monkeypatch.setattr(
+        "apm_cli.config.get_install_target", lambda *, create_config=True: "copilot"
+    )
     configured = resolve_manifest_target_decision(
         project,
         manifest_path=configured_path,
@@ -1231,7 +1257,7 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
     assert (discovery.value, discovery.source) == (None, "auto-detect")
     assert (explicit.value, explicit.source) == ("codex", "--target flag")
     assert (manifest.value, manifest.source) == (["claude"], "apm.yml")
-    assert (configured.value, configured.source) == ("vscode", "apm config target")
+    assert (configured.value, configured.source) == ("copilot", "apm config target")
     assert partition_user_scope_runtimes(["vscode", "claude"]) == (["claude"], ["vscode"])
     assert_spec_contains(
         "User-scoped MCP target selection",

@@ -9,9 +9,10 @@ Promise under test (0.36.1 T2 brief, decisions C and D1, fact F12):
   MCP phase no longer claims the field is "treated as omitted" in the same
   run (F10); neither does ``apm compile -g``. A plural ``targets: [all]``
   still folds, with the warning.
-* The MCP destination depends on the runtime spelling, identically for
-  ``target:`` and ``targets:``: ``vscode`` writes ``.vscode/mcp.json`` and
-  ``copilot`` writes ``.github/mcp.json`` (F12, regression lock).
+* ``vscode`` is a deprecated alias of ``copilot`` (#3866), identically for
+  ``target:`` and ``targets:``: both write the workspace-root ``.mcp.json``,
+  record ``copilot`` in the lockfile, and never write ``.vscode/mcp.json`` or
+  ``.github/mcp.json``.
 * ``apm install -g`` reads ``~/.apm/apm.yml`` through the same declaration
   owner, so every spelling of the same set deploys the same files (L7).
 """
@@ -94,11 +95,14 @@ def test_singular_all_expands_without_claiming_it_was_omitted(
             ".claude/skills/pkg-a-skill/SKILL.md",
             ".agents/skills/pkg-a-skill/SKILL.md",
             ".kiro/skills/pkg-a-skill/SKILL.md",
-            ".vscode/mcp.json",
             ".cursor/mcp.json",
             ".mcp.json",
         ):
             assert (project / deployed).is_file(), f"target: all no longer deploys {deployed}"
+        for retired in (".vscode/mcp.json", ".github/mcp.json"):
+            assert not (project / retired).exists(), f"target: all wrote {retired}"
+        lock = load_yaml(project / "apm.lock.yaml") or {}
+        assert "copilot" in (lock.get("mcp_target_servers") or {}), lock
         manifest = (project / "apm.yml").read_bytes()
         result = tw.run(project, "install", step="2-reinstall")
         assert TREATED_AS_OMITTED not in " ".join(output(result).split())
@@ -121,27 +125,35 @@ def test_plural_all_still_folds_to_auto_detect_with_warning(
 
 
 @pytest.mark.parametrize(
-    ("declaration", "destination", "absent"),
+    "declaration",
     [
-        ({"target": "vscode"}, ".vscode/mcp.json", ".github/mcp.json"),
-        ({"targets": ["vscode"]}, ".vscode/mcp.json", ".github/mcp.json"),
-        ({"target": "copilot"}, ".github/mcp.json", ".vscode/mcp.json"),
-        ({"targets": ["copilot"]}, ".github/mcp.json", ".vscode/mcp.json"),
+        {"target": "vscode"},
+        {"targets": ["vscode"]},
+        {"target": "copilot"},
+        {"targets": ["copilot"]},
     ],
     ids=["singular-vscode", "plural-vscode", "singular-copilot", "plural-copilot"],
 )
-def test_mcp_destination_follows_runtime_spelling(
-    declaration: dict, destination: str, absent: str, tmp_path: Path, apm_binary_path: Path
+def test_vscode_alias_mcp_destination_matches_copilot(
+    declaration: dict, tmp_path: Path, apm_binary_path: Path
 ) -> None:
     policy = block_policy({"allow": ["claude", "copilot"]})
     with target_policy_world(tmp_path, apm_binary_path, policy) as tw:
         project = tw.consumer("consumer", declaration, dependencies=[], mcp=[SELF_DEFINED_MCP])
-        tw.run(project, "install", step="1-install")
-        assert (project / destination).is_file(), f"{declaration} did not write {destination}"
-        assert not (project / absent).exists(), f"{declaration} also wrote {absent}"
+        result = tw.run(project, "install", step="1-install")
+        assert (project / ".mcp.json").is_file(), f"{declaration} did not write .mcp.json"
+        for absent in (".vscode/mcp.json", ".github/mcp.json"):
+            assert not (project / absent).exists(), f"{declaration} also wrote {absent}"
         lock = load_yaml(project / "apm.lock.yaml") or {}
-        runtime = "vscode" if destination.startswith(".vscode") else "copilot"
-        assert list((lock.get("mcp_target_servers") or {}).keys()) == [runtime], lock
+        assert list((lock.get("mcp_target_servers") or {}).keys()) == ["copilot"], lock
+        text = " ".join(output(result).split())
+        if declaration == {"targets": ["vscode"]}:
+            assert (
+                "apm.yml: replace `vscode` with `copilot` in 'targets:'; `vscode` is "
+                "deprecated and will be removed in a future release."
+            ) in text, text
+        elif "vscode" not in str(declaration):
+            assert "`vscode` is deprecated" not in text, text
 
 
 @pytest.mark.parametrize(

@@ -185,7 +185,7 @@ def test_install_blocks_a_noncompliant_plural_declaration_before_writing(harness
         assert written == [], written
 
 
-def test_vscode_alias_complies_and_keeps_its_mcp_destination(harness, apm_binary_path):
+def test_vscode_alias_complies_and_uses_the_copilot_mcp_destination(harness, apm_binary_path):
     isolated, env = harness
     runner = _runner(apm_binary_path)
     project = _project(
@@ -198,6 +198,8 @@ def test_vscode_alias_complies_and_keeps_its_mcp_destination(harness, apm_binary
 
     _install(runner, project, env, "L3-install", expected=0)
 
-    assert (project / ".vscode" / "mcp.json").is_file()
+    # ``vscode`` is a deprecated alias of ``copilot``: same .mcp.json destination.
+    assert (project / ".mcp.json").is_file()
+    assert not (project / ".vscode" / "mcp.json").exists()
     assert not (project / ".github" / "mcp.json").exists()
     assert _compilation_target(runner, project, env, "L3-after", expected=0)["passed"] is True

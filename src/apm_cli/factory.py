@@ -6,6 +6,7 @@ from .adapters.client.antigravity import AntigravityClientAdapter
 from .adapters.client.claude import ClaudeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
+from .adapters.client.copilot_project import CopilotProjectClientAdapter
 from .adapters.client.cursor import CursorClientAdapter
 from .adapters.client.gemini import GeminiClientAdapter
 from .adapters.client.hermes import HermesClientAdapter
@@ -64,6 +65,9 @@ class ClientFactory:
         key = client_type.lower()
         if key not in _MCP_CLIENT_REGISTRY:
             raise ValueError(f"Unsupported client type: {client_type}")
+        if key == "copilot" and not user_scope:
+            # Project MCP destination owner: workspace-root .mcp.json (#3866).
+            return CopilotProjectClientAdapter(project_root=project_root)
 
         return _MCP_CLIENT_REGISTRY[key](
             project_root=project_root,

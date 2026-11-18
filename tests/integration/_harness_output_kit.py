@@ -38,8 +38,9 @@ SIGNAL_DIRS = (
 
 # (relative path from root, servers key, format); root is "project" or "home".
 _PROJECT_CONFIGS: dict[str, tuple[str, str, str, str]] = {
-    "vscode": ("project", ".vscode/mcp.json", "servers", "json"),
-    "copilot": ("project", ".github/mcp.json", "mcpServers", "json"),
+    # ``vscode`` is a deprecated alias of ``copilot``; both share Claude's file.
+    "vscode": ("project", ".mcp.json", "mcpServers", "json"),
+    "copilot": ("project", ".mcp.json", "mcpServers", "json"),
     "claude": ("project", ".mcp.json", "mcpServers", "json"),
     "cursor": ("project", ".cursor/mcp.json", "mcpServers", "json"),
     "gemini": ("project", ".gemini/settings.json", "mcpServers", "json"),

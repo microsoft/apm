@@ -273,6 +273,7 @@ def _install_registry_group(  # noqa: PLR0913
     # Lazy import: only available after MCPIntegrator finishes loading.
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
+        claim_shared_destination,
         compare_native_mcp_connection,
         native_comparison_clients,
         retain_native_receipt,
@@ -418,6 +419,14 @@ def _install_registry_group(  # noqa: PLR0913
                     installed_servers: set[str] = set()
                     written_hashes: dict[str, str] = {}
                     managed_fields: set[str] = set()
+                    claim_shared_destination(
+                        managed_target_servers,
+                        native_hashes,
+                        rt,
+                        dep,
+                        user_scope=user_scope,
+                        written_connections=written_connections,
+                    )
                     replace_existing = is_update and (
                         managed_target_servers is None
                         or dep in managed_target_servers.get(rt, set())
@@ -828,86 +837,6 @@ def _record_managed_server(
         written_connections.add((runtime, server_name))
 
 
-# Runtimes that always keyed self-defined servers by their full declared name,
-# so a short-name entry there can never be a truncated write by older APM.
-_DECLARED_KEY_RUNTIMES = frozenset({"vscode"})
-
-
-def _reconcile_legacy_truncated_key(
-    dep_name: str,
-    runtimes: list[str],
-    *,
-    previously_owned: dict[str, set[str]],
-    previous_native_hashes: dict[str, dict[str, str]],
-    stored_config: dict | None,
-    claimed_keys: builtins.set,
-    project_root,
-    user_scope: bool,
-    logger,
-    fail_on_write_error: bool = False,
-) -> None:
-    """Replace or flag the pre-fix truncated config key of a self-defined server.
-
-    Older releases wrote ``com.example/srv`` under its final segment (``srv``).
-    Now that the declared name is the key, the short entry is removed only when
-    the ownership ledger proves APM wrote *dep_name* to that runtime (and, on
-    runtimes with native baselines, that its content is unchanged); otherwise
-    it is left in place and named (never its contents) so the user can decide.
-    """
-    from apm_cli.adapters.client.base import MCPClientAdapter
-    from apm_cli.core.conflict_detector import MCPConflictDetector
-    from apm_cli.core.scope import InstallScope
-    from apm_cli.factory import ClientFactory
-    from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-    legacy_key = MCPClientAdapter.determine_config_key(dep_name, None)
-    if legacy_key == dep_name or legacy_key in claimed_keys:
-        return
-    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    for rt in runtimes:
-        if rt in _DECLARED_KEY_RUNTIMES:
-            continue
-        try:
-            client = ClientFactory.create_client(
-                rt, project_root=project_root, user_scope=user_scope
-            )
-            existing = MCPConflictDetector(client).get_existing_server_configs()
-        except Exception as exc:
-            logger.verbose_detail(f"Skipped legacy MCP entry check for {rt}: {exc}")
-            continue
-        if legacy_key not in existing:
-            continue
-        config_path = client.get_config_path()
-        if dep_name in previously_owned.get(rt, builtins.set()):
-            legacy_hash = previous_native_hashes.get(rt, {}).get(dep_name)
-            try:
-                MCPIntegrator.remove_stale(
-                    {legacy_key},
-                    runtime=rt,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    logger=logger,
-                    scope=scope,
-                    fail_on_write_error=fail_on_write_error,
-                    stored_configs={legacy_key: stored_config} if stored_config else {},
-                    native_hashes={rt: {legacy_key: legacy_hash}} if legacy_hash else None,
-                )
-            except RequiredIntegrationError:
-                logger.warning(
-                    f"Left existing MCP server '{legacy_key}' in {config_path}: it changed "
-                    f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
-                    f"an outdated copy of '{dep_name}'."
-                )
-                continue
-            logger.progress(f"Renamed MCP server '{legacy_key}' to '{dep_name}' in {config_path}")
-        else:
-            logger.warning(
-                f"Left existing MCP server '{legacy_key}' in {config_path}: APM has no "
-                f"record of writing it for '{dep_name}'. Remove it manually if it is "
-                f"an outdated copy of '{dep_name}'."
-            )
-
-
 def _raise_strict_config_failures(
     failed_installations: list[str],
     *,
@@ -997,7 +926,6 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
         for runtime_name in [
             "copilot",
             "codex",
-            "vscode",
             "cursor",
             "opencode",
             "gemini",
@@ -1032,8 +960,11 @@ def _runtime_is_present(
     """Return ``True`` when *runtime_name*'s opt-in presence signal fires."""
     from apm_cli.integration.mcp_integrator import _is_vscode_available
 
-    if runtime_name == "vscode":
-        return _is_vscode_available(project_root=project_root_path)
+    if runtime_name == "copilot" and not user_scope:
+        # VS Code's Copilot harness reads the workspace-root .mcp.json that the
+        # copilot target writes (#3866), so VS Code presence selects copilot.
+        if _is_vscode_available(project_root=project_root_path):
+            return True
     if runtime_name == "kiro" and user_scope:
         return True
     if runtime_name in dir_signal:
@@ -1058,8 +989,12 @@ def _discover_installed_runtimes_fallback(
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
-    if _is_vscode_available(project_root=project_root_path):
-        installed_runtimes.append("vscode")
+    if (
+        not user_scope
+        and "copilot" not in installed_runtimes
+        and _is_vscode_available(project_root=project_root_path)
+    ):
+        installed_runtimes.insert(0, "copilot")
     for name, signal in (
         ("cursor", ".cursor"),
         ("opencode", KNOWN_TARGETS["opencode"].effective_root(user_scope)),
@@ -1319,9 +1254,10 @@ def _resolve_target_runtimes(
                     logger.warning("No MCP-compatible runtimes installed")
                     logger.progress("Install a runtime with: apm runtime setup copilot")
 
-            # Fall back to VS Code only if no runtimes are installed at all
+            # Fall back to Copilot (workspace-root .mcp.json) only if no
+            # runtimes are installed at all.
             if not target_runtimes and not installed_runtimes:
-                target_runtimes = ["vscode"]
+                target_runtimes = ["copilot"]
                 selection_source = _TargetSelectionSource.FALLBACK
             else:
                 selection_source = _TargetSelectionSource.DISCOVERY
@@ -1497,8 +1433,10 @@ def _install_self_defined_deps(
     from apm_cli.adapters.client.base import MCPClientAdapter
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
+        claim_shared_destination,
         compare_native_mcp_connection,
         native_comparison_clients,
+        reconcile_legacy_truncated_key,
         retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -1602,6 +1540,14 @@ def _install_self_defined_deps(
             installed_servers: set[str] = set()
             managed_fields: set[str] = set()
             written_hashes: dict[str, str] = {}
+            claim_shared_destination(
+                managed_target_servers,
+                native_hashes,
+                rt,
+                dep.name,
+                user_scope=user_scope,
+                written_connections=written_connections,
+            )
             replace_existing = is_update and (
                 managed_target_servers is None or dep.name in managed_target_servers.get(rt, set())
             )
@@ -1689,7 +1635,7 @@ def _install_self_defined_deps(
             else:
                 failed_runtimes.append(rt)
 
-        _reconcile_legacy_truncated_key(
+        reconcile_legacy_truncated_key(
             dep.name,
             successful_runtimes,
             previously_owned=previously_owned,
@@ -1919,7 +1865,15 @@ def run_mcp_install(  # noqa: PLR0913
     )
 
     if managed_target_servers is not None:
+        from apm_cli.install.mcp.ownership import inherit_shared_destination_claims
+
         active_targets = set(target_runtimes)
+        inherit_shared_destination_claims(
+            managed_target_servers,
+            native_hashes,
+            active_runtimes=active_targets,
+            user_scope=user_scope,
+        )
         current_names = {
             dep.name if hasattr(dep, "name") else dep
             for dep in mcp_deps

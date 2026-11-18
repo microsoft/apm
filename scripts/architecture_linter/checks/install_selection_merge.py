@@ -84,7 +84,11 @@ def check_selection_merge(provider: FactsProvider) -> tuple[Violation, ...]:
     """Require every resolver edge to reach the single selection-merge owner."""
     failures: list[Violation] = []
     required = {
-        _OWNER: ("pairing=merge_edge_pairings(",),
+        _OWNER: (
+            "pairing=merge_edge_pairings(",
+            "if canonical_target_name(name) in valid_set:",
+            "return tuple(canonical_target_subset(names)) or None",
+        ),
         _RESOLVER: (
             "self._apply_edge_selections(tree)",
             "selection = merge_edge_selections(edges)",
@@ -94,6 +98,8 @@ def check_selection_merge(provider: FactsProvider) -> tuple[Violation, ...]:
         "src/apm_cli/deps/lockfile.py": (
             "SkillTargetSelection.from_lock_fields(",
             "subset_pairings=_replay_pairing(",
+            'target_subset=canonical_target_subset(data.get("target_subset")),',
+            "target_subset=canonical_target_subset(dep_ref.target_subset)",
         ),
         "src/apm_cli/policy/ci_checks.py": (
             "declared = declared_node_selections(",
@@ -152,7 +158,8 @@ def check_selection_merge(provider: FactsProvider) -> tuple[Violation, ...]:
             rule_id=GUARD_SELECTION_MERGE,
             prefix="src/apm_cli/",
             pattern=re.compile(
-                r"^def (merge_edge_selections|merge_edge_pairings|union_selection_names)\("
+                r"^def (merge_edge_selections|merge_edge_pairings|union_selection_names|"
+                r"canonical_target_subset|canonical_target_name)\("
             ),
             owner=_OWNER,
             message="Dependency selection merging has one owner",

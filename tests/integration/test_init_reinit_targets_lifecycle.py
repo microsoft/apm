@@ -2,7 +2,7 @@
 
 Re-running ``apm init --yes`` over a manifest that still uses the singular
 ``target:`` key carries the declared targets into the new manifest through the
-same mapping as ``apm manifest migrate``: ``agents`` becomes ``copilot``,
+same mapping as the ``target:`` deprecation warning: ``agents`` becomes ``copilot``,
 ``agy`` becomes ``antigravity``, and a token with no ``targets:`` equivalent
 is refused before apm.yml is rewritten.
 """

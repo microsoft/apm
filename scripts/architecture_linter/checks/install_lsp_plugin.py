@@ -39,7 +39,8 @@ _UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 _HOOK_INTEGRATOR = "src/apm_cli/integration/hook_integrator.py"
 _AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
 _MANIFEST_TARGETS = "src/apm_cli/models/manifest_targets.py"
-_TARGET_MIGRATION = "src/apm_cli/models/manifest_target_migration.py"
+# The remaining apm.yml target rewrite paths (apm init re-init, #3857/#3868).
+_TARGET_REWRITE_PATHS = ("src/apm_cli/commands/init.py", "src/apm_cli/commands/_helpers.py")
 _YAML_IO = "src/apm_cli/utils/yaml_io.py"
 # Anchors are refused on read (req-mf-020(b), #3858), so no rewrite may keep one.
 _ANCHOR_REWRITE_TOKENS = (".anchor.value", "_detached_sequence")
@@ -123,7 +124,6 @@ _CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {
         "data, Dumper=_NoAliasSafeDumper,",
         "rt.representer.ignore_aliases = lambda _data: True",
     ),
-    _TARGET_MIGRATION: ("text = read_manifest_text(path)",),
     _AUDIT_COMMAND: ("read_manifest_text(manifest_path)",),
     _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
     _APPROVE_COMMAND: ("data = load_manifest(manifest)",),
@@ -159,17 +159,18 @@ def check_consumer_manifest_rewrite(provider: FactsProvider) -> tuple[Violation,
             _CONSUMER_MANIFEST_TOKENS,
         )
     )
-    facts, failures = _facts_for(provider, _TARGET_MIGRATION, GUARD_CONSUMER_MANIFEST_REWRITE)
-    findings.extend(failures)
-    findings.extend(
-        _summary(
-            GUARD_CONSUMER_MANIFEST_REWRITE,
-            _TARGET_MIGRATION,
-            f"apm.yml anchors are refused on read; remove the anchor rewrite path {token}",
+    for path in _TARGET_REWRITE_PATHS:
+        facts, failures = _facts_for(provider, path, GUARD_CONSUMER_MANIFEST_REWRITE)
+        findings.extend(failures)
+        findings.extend(
+            _summary(
+                GUARD_CONSUMER_MANIFEST_REWRITE,
+                path,
+                f"apm.yml anchors are refused on read; remove the anchor rewrite path {token}",
+            )
+            for token in _ANCHOR_REWRITE_TOKENS
+            if not failures and _present(facts, token)
         )
-        for token in _ANCHOR_REWRITE_TOKENS
-        if not failures and _present(facts, token)
-    )
     return tuple(findings)
 
 

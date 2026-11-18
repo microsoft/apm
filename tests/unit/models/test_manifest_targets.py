@@ -69,10 +69,13 @@ def test_spellings_project_to_the_same_policy_targets(singular, plural):
     )
 
 
-def test_vscode_spelling_keeps_its_mcp_runtime():
-    decision = EffectiveTargetDecision(_declaration(targets=["vscode"]).selection, "apm.yml")
+def test_deprecated_vscode_spelling_selects_the_copilot_mcp_runtime():
+    """vscode is a deprecated alias with no MCP destination of its own (#3866)."""
+    declaration = _declaration(targets=["vscode"])
+    assert declaration.selection == ["copilot"]
+    decision = EffectiveTargetDecision(declaration.selection, "apm.yml")
     assert decision.canonical_targets == ("copilot",)
-    assert decision.runtime_targets == ("vscode",)
+    assert decision.runtime_targets == ("copilot",)
 
 
 @pytest.mark.parametrize(
@@ -136,8 +139,8 @@ def test_parsed_package_exposes_its_declaration(tmp_path: Path):
 
     assert package.target_declaration is not None
     assert package_target_declaration(package) is package.target_declaration
-    assert package_target_selection(package) == ["claude", "vscode"]
-    assert read_manifest_target_declaration(manifest).restriction() == ["claude", "vscode"]
+    assert package_target_selection(package) == ["claude", "copilot"]
+    assert read_manifest_target_declaration(manifest).restriction() == ["claude", "copilot"]
 
 
 def test_path_reader_is_lenient_only_on_request(tmp_path: Path):
@@ -210,6 +213,12 @@ def test_stand_in_packages_route_through_the_owner():
         pytest.param({"target": "agy"}, ("antigravity",), id="agy-to-antigravity"),
         pytest.param({"targets": ["claude", "cursor"]}, ("claude", "cursor"), id="plural-kept"),
         pytest.param({"targets": ["all"]}, ("all",), id="plural-all-kept"),
+        pytest.param({"target": "vscode"}, ("copilot",), id="singular-vscode-to-copilot"),
+        pytest.param(
+            {"targets": ["vscode", "copilot", "claude"]},
+            ("copilot", "claude"),
+            id="plural-vscode-to-copilot",
+        ),
     ],
 )
 def test_rewrite_target_names_keeps_what_deploys(fields, expected):
@@ -259,6 +268,18 @@ def test_verify_refuses_a_rewrite_apm_would_reject(tmp_path):
         verify_rewritten_manifest(manifest, "x: &t [claude]\ntargets: *t\n")
     verify_rewritten_manifest(manifest, "name: demo\ntargets:\n- copilot\n")
     assert not manifest.exists()
+
+
+def test_targets_replacement_wraps_the_rewrite_mapping():
+    """The target: warning suggests exactly what re-init writes (#3868)."""
+    from apm_cli.core.target_catalog import expand_all
+
+    assert _declaration(target="all").targets_replacement() == expand_all("install")
+    assert "vscode" not in expand_all("install")
+    assert _declaration(target="all").targets_replacement(user_scope=True) is None
+    assert _declaration(target="claude,intellij").targets_replacement() is None
+    assert _declaration(target=None).targets_replacement() == ()
+    assert _declaration(targets=["claude"]).targets_replacement() is None
 
 
 @pytest.mark.parametrize(

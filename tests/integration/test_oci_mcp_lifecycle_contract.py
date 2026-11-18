@@ -56,7 +56,7 @@ _CASES = (
     _TargetCase(
         runtime="copilot",
         manifest_target="copilot",
-        config_path=PurePosixPath(".github/mcp.json"),
+        config_path=PurePosixPath(".mcp.json"),
         config_section="mcpServers",
         env_operand=f"{_ENV_NAME}=${{{_ENV_NAME}}}",
     ),
@@ -73,14 +73,6 @@ _CASES = (
         config_path=PurePosixPath(".gemini/settings.json"),
         config_section="mcpServers",
         env_operand=f"{_ENV_NAME}={_ENV_VALUE}",
-    ),
-    _TargetCase(
-        runtime="vscode",
-        manifest_target="copilot",
-        config_path=PurePosixPath(".vscode/mcp.json"),
-        config_section="servers",
-        env_operand=_ENV_NAME,
-        server_key=_SERVER_NAME,
     ),
 )
 
@@ -120,7 +112,7 @@ def _vscode_value_server_document() -> dict[str, object]:
     """Return a v0.1 container package with typed and variable-backed arguments."""
     return {
         "name": _VALUE_SERVER_NAME,
-        "description": "Lifecycle fixture for VS Code typed container arguments",
+        "description": "Lifecycle fixture for typed container arguments",
         "version": "2.0.0",
         "packages": [
             {
@@ -362,8 +354,7 @@ def test_mcp_runtime_variable_default_override_lifecycle(
         )
         .root
     )
-    config_path = PurePosixPath(".vscode/mcp.json")
-    (project / config_path.parent).mkdir(parents=True, exist_ok=True)
+    config_path = PurePosixPath(".mcp.json")
     registry_factory = LocalMcpRegistryFactory(isolated.root / "registries")
     runner = ApmLifecycleRunner(
         (str(apm_binary_path),),
@@ -380,13 +371,13 @@ def test_mcp_runtime_variable_default_override_lifecycle(
     reinstall = (
         "install",
         "--runtime",
-        "vscode",
+        "copilot",
         "--target",
         "copilot",
         "--trust-transitive-mcp",
         "--no-policy",
     )
-    update = ("update", "--yes", "--target", "vscode")
+    update = ("update", "--yes", "--target", "copilot")
     expected_args = [
         "run",
         "-i",
@@ -417,7 +408,7 @@ def test_mcp_runtime_variable_default_override_lifecycle(
             "install",
             str(source.root),
             "--runtime",
-            "vscode",
+            "copilot",
             "--target",
             "copilot",
             "--trust-transitive-mcp",
@@ -433,14 +424,13 @@ def test_mcp_runtime_variable_default_override_lifecycle(
         first = LifecycleStateSnapshot.capture(project, config_paths=(config_path,))
         document = json.loads((project / config_path).read_text(encoding="utf-8"))
         assert document == {
-            "servers": {
-                _VALUE_SERVER_NAME: {
+            "mcpServers": {
+                _VALUE_SERVER_NAME.rsplit("/", 1)[-1]: {
                     "type": "stdio",
                     "command": "docker",
                     "args": expected_args,
                 }
             },
-            "inputs": [],
         }
 
         runner.run_sequence(

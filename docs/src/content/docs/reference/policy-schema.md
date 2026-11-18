@@ -389,7 +389,7 @@ mcp:
 compilation:
   target:
     allow:
-      - vscode
+      - copilot
       - claude
   strategy:
     enforce: distributed

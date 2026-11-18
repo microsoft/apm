@@ -73,6 +73,9 @@ For MCP installation, the equivalent explicit legacy `--runtime` flag also
 has highest priority. MCP machine discovery runs only when `targets:` is
 omitted (or legacy `all` is treated as omission). Declared targets therefore produce portable MCP ownership in `apm.lock.yaml`;
 omitted targets intentionally make that ownership machine-dependent.
+During that discovery, VS Code presence (`code` on `PATH` or a `.vscode/`
+directory) selects `copilot` at project scope, and APM falls back to `copilot`
+when no MCP runtime is installed.
 
 `apm install` fails closed when no target can be detected. `apm compile`
 retains its documented unsignalled fallback because install writes
@@ -430,7 +433,7 @@ To restore the pre-convergence per-target layout (skills land under each target'
 
 MCP is not a `TargetProfile` primitive; it is wired by a separate
 integrator that writes per-client config files (e.g.
-`.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`, `.kiro/settings/mcp.json`) for every
+`.mcp.json` for Copilot and Claude, `.cursor/mcp.json`, `.claude.json`, `.kiro/settings/mcp.json`) for every
 target in the active set that has an MCP client adapter. Active set
 follows the same `--target` > `targets:` > `apm config set target` >
 auto-detect chain as `apm install`: a runtime with an adapter but outside the active set
