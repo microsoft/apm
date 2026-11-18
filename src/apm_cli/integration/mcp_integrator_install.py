@@ -276,6 +276,7 @@ def _install_registry_group(  # noqa: PLR0913
         claim_shared_destination,
         compare_native_mcp_connection,
         native_comparison_clients,
+        peer_wrote_shared_entry,
         retain_native_receipt,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -484,6 +485,10 @@ def _install_registry_group(  # noqa: PLR0913
                                     requested_info=server_info_cache.get(dep),
                                     replace=dep in stale_receipts,
                                 )
+                            if peer_wrote_shared_entry(
+                                rt, dep, written_connections, user_scope=user_scope
+                            ):
+                                successful_runtimes.append(rt)
                             logger.verbose_detail(f"{dep} already matches {rt}; no write")
                             continue
                         replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
@@ -1436,6 +1441,7 @@ def _install_self_defined_deps(
         claim_shared_destination,
         compare_native_mcp_connection,
         native_comparison_clients,
+        peer_wrote_shared_entry,
         reconcile_legacy_truncated_key,
         retain_native_receipt,
     )
@@ -1604,6 +1610,10 @@ def _install_self_defined_deps(
                         retain_native_receipt(
                             native_hashes, rt, client, dep.name, requested_info=synthetic_info
                         )
+                    if peer_wrote_shared_entry(
+                        rt, dep.name, written_connections, user_scope=user_scope
+                    ):
+                        successful_runtimes.append(rt)
                     logger.verbose_detail(f"{dep.name} already matches {rt}; no write")
                     continue
                 replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
@@ -1847,6 +1857,10 @@ def run_mcp_install(  # noqa: PLR0913
         from apm_cli.adapters.client.claude import ClaudeClientAdapter
 
         ClaudeClientAdapter.reset_install_run_state()
+    if "copilot" in target_runtimes and not user_scope:
+        from apm_cli.adapters.client.copilot_project import CopilotProjectClientAdapter
+
+        CopilotProjectClientAdapter.reset_install_run_state()
     if managed_target_servers is not None:
         from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 

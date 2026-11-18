@@ -696,7 +696,9 @@ def _target_error(message: str, source_path: Path | None) -> str:
 _deprecated_flag_aliases_warned: set[str] = set()
 
 
-def warn_deprecated_target_alias_flag(value: str | list[str] | None) -> None:
+def warn_deprecated_target_alias_flag(
+    value: str | list[str] | None, *, flag: str = "--target"
+) -> None:
     """Warn once per process when a CLI target flag uses a deprecated alias."""
     tokens = value.split(",") if isinstance(value, str) else list(value or ())
     alias = first_deprecated_target_alias(tokens)
@@ -705,7 +707,7 @@ def warn_deprecated_target_alias_flag(value: str | list[str] | None) -> None:
     _deprecated_flag_aliases_warned.add(alias)
     from apm_cli.utils.console import _rich_warning
 
-    _rich_warning(deprecated_target_alias_message(alias, where=None), symbol="warning", err=True)
+    _rich_warning(deprecated_target_alias_message(alias, where=flag), symbol="warning", err=True)
 
 
 def canonical_runtime_option(
@@ -714,7 +716,7 @@ def canonical_runtime_option(
     """Click callback: read a deprecated alias passed as ``--runtime`` as its target."""
     if value is None:
         return value
-    warn_deprecated_target_alias_flag(value)
+    warn_deprecated_target_alias_flag(value, flag="--runtime")
     return canonical_target_token(value.strip().lower())
 
 

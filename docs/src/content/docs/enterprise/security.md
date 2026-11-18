@@ -626,7 +626,7 @@ For an org standardizing on APM:
   `--allow-insecure-host` in standard CI; review both explicit gates for any
   air-gapped exception. `registry_source.allow_non_registry` is a separate
   source-routing control, not an insecure-transport setting.
-- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor preserves explicitly authored static values, while env-var references use Cursor's native runtime interpolation. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
+- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor, and Claude Code and Copilot in the shared project `.mcp.json`, preserve explicitly authored static values, while env-var references stay native runtime references. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
 
 A restrictive dependency policy is still valuable, but it is identity-based,
 not transport-aware:

@@ -575,6 +575,20 @@ def claim_shared_destination(
         return
 
 
+def peer_wrote_shared_entry(
+    runtime: str,
+    name: str,
+    written_connections: set[tuple[str, str]] | None,
+    *,
+    user_scope: bool,
+) -> bool:
+    """Whether a shared-file peer wrote *name* in this run (so *runtime* is configured too)."""
+    return any(
+        (peer, name) in (written_connections or ())
+        for peer in shared_destination_peers(runtime, user_scope=user_scope)
+    )
+
+
 def inherit_shared_destination_claims(
     managed_target_servers: dict[str, set[str]],
     native_hashes: dict[str, dict[str, str]] | None,

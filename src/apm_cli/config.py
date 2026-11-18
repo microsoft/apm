@@ -38,7 +38,7 @@ def ensure_config_exists():
         try:
             fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"default_client": "vscode"}, f)
+                json.dump({"default_client": "copilot"}, f)
         except FileExistsError:
             pass
         with contextlib.suppress(NotImplementedError, OSError):
@@ -121,7 +121,10 @@ def get_default_client():
     Returns:
         str: Default MCP client type.
     """
-    return get_config().get("default_client", "vscode")
+    from apm_cli.core.target_catalog import canonical_target_token
+
+    # ``vscode`` is a deprecated alias of ``copilot`` (#3866).
+    return canonical_target_token(get_config().get("default_client", "copilot"))
 
 
 def set_default_client(client_type):

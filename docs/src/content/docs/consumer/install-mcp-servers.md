@@ -356,7 +356,7 @@ was written by APM 0.36 or earlier, APM moves the entries it wrote to
 `.mcp.json`. It moves an entry only when its recorded fingerprint, or what that
 release rendered for the same self-defined declaration, proves APM wrote it
 unchanged. Entries you authored or edited stay where they are, and APM prints
-a [warning naming them](../../troubleshooting/common-errors/#-kept-mcp-servers-names-in-githubmcpjson).
+a [warning naming them](../../troubleshooting/common-errors/#-kept-mcp-server-name-in-githubmcpjson).
 APM deletes one of those files only if it created it: every server in it was
 APM's and nothing but empty scaffolding (such as `"inputs": []`) remains.
 

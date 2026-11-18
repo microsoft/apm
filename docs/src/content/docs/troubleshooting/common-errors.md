@@ -41,19 +41,19 @@ See also: [Manifest schema: targets](../../reference/manifest-schema/#36-target-
 [!] apm.yml: replace `vscode` with `copilot` in 'targets:'; `vscode` is deprecated and will be removed in a future release.
 ```
 
-Cause: the project `apm.yml` or `~/.apm/apm.yml` uses `vscode` under `targets:` or a dependency's `targets:` (under `target:`, the `target:` warning above covers it). `--target vscode` and `--runtime vscode` print the same warning without the `apm.yml: ` prefix and field. `vscode` selects exactly what `copilot` selects; the exit code does not change.
+Cause: the project `apm.yml` or `~/.apm/apm.yml` uses `vscode` under `targets:` or a dependency's `targets:` (under `target:`, the `target:` warning above covers it). `--target vscode` and `--runtime vscode` print the same warning prefixed with the flag (`--target: replace ...`). `vscode` selects exactly what `copilot` selects; the exit code does not change.
 
 Fix: replace `vscode` with `copilot`.
 
 ### `[!] Kept MCP server '<name>' in .github/mcp.json`
 
 ```
-[!] Kept MCP server 'my-server' in .github/mcp.json because it was changed after APM wrote it. APM now writes Copilot servers to .mcp.json; move it there or delete it.
+[!] Kept MCP server 'my-server' in .github/mcp.json because it was changed after APM wrote it. Copilot now uses the 'my-server' in .mcp.json, which APM writes from apm.yml; put your changes in apm.yml and delete this entry.
 ```
 
-Cause: Copilot project MCP servers now live in the root `.mcp.json`. On upgrade, `apm install` moves the entries an older APM wrote to `.github/mcp.json` or `.vscode/mcp.json`; entries you authored or edited stay put.
+Cause: Copilot project MCP servers now live in the root `.mcp.json`, which takes precedence over `.github/mcp.json`. On upgrade, `apm install` moves the entries an older APM wrote to `.github/mcp.json` or `.vscode/mcp.json`; entries you edited stay put, but Copilot now uses the `.mcp.json` copy.
 
-Fix: delete the entry from the named file if the copy in `.mcp.json` is what you want, or keep it on purpose.
+Fix: move your changes into the server's declaration in `apm.yml`, run `apm install`, and delete the entry from the named file.
 
 See also: [Install MCP servers: Copilot project file](../../consumer/install-mcp-servers/#how-targets-gates-which-configs-get-written)
 

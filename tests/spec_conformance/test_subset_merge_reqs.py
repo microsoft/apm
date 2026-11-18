@@ -188,3 +188,21 @@ def test_frozen_rejects_changed_or_invalid_selections_before_deploy() -> None:
 
     flat.subset_pairings = pairing.to_lock_records()
     assert frozen_selection_changes([ref], product_lock) == []
+
+
+@pytest.mark.req("req-rs-018")
+def test_frozen_replay_reads_a_recorded_vscode_target_as_copilot() -> None:
+    """0.1.61: a lock that recorded the deprecated `vscode` alias is not a selection change."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.service import frozen_selection_changes
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    ref = DependencyReference(
+        repo_url="owner/bundle", host="github.com", target_subset=["claude", "copilot"]
+    )
+    legacy = LockedDependency.from_dict(
+        {"repo_url": "owner/bundle", "target_subset": ["claude", "vscode"]}
+    )
+    assert legacy.target_subset == ["claude", "copilot"]
+    lock = LockFile(dependencies={legacy.get_unique_key(): legacy})
+    assert frozen_selection_changes([ref], lock) == []

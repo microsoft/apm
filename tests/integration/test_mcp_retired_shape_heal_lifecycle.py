@@ -114,14 +114,17 @@ def _assert_healed(scene: HarnessScene, *, user: bool, claims: bool = True) -> N
 def _assert_retired_destinations_healed(scene: HarnessScene, label: str, warnings: list) -> None:
     """APM's entries leave .github/mcp.json and .vscode/mcp.json once proven (#3866).
 
-    v0.36.0 recorded a fingerprint for every entry, so both files empty out and
-    are deleted. v0.35.1 recorded none: self-defined entries are proven by that
-    release's render, but the registry entry cannot be, so it is kept and named.
+    v0.36.0 recorded a fingerprint for every entry, so both files empty out;
+    .vscode/mcp.json is deleted, while .github/mcp.json stays (empty) because it
+    is a copilot detection signal. v0.35.1 recorded none: self-defined entries
+    are proven by that release's render, but the registry entry cannot be, so
+    it is kept and named.
     """
     retired = {".github/mcp.json": "mcpServers", ".vscode/mcp.json": "servers"}
     if label == "v0.36.0":
-        for relative in retired:
-            assert not (scene.project / relative).exists(), relative
+        assert not (scene.project / ".vscode/mcp.json").exists()
+        github = json.loads((scene.project / ".github/mcp.json").read_text(encoding="utf-8"))
+        assert github == {"mcpServers": {}}, github
         return
     kept = {".github/mcp.json": "heal-registry", ".vscode/mcp.json": _REGISTRY_NAME}
     for relative, key in retired.items():

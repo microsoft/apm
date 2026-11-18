@@ -11,13 +11,13 @@ removes the entries APM wrote to those files:
   write fingerprint matches, or it equals the render that release wrote for
   the same self-defined declaration. Anything else (a user-authored or
   user-edited entry) stays where it is and is reported once.
-* Other keys and the file itself are kept. A file is deleted only when APM
-  created it: every server it held was removed by this heal and nothing but
-  empty scaffolding (VS Code's ``inputs: []``) remains in it.
+* Other keys and the file itself are kept. ``.vscode/mcp.json`` is deleted
+  only when APM created it: every server it held was removed by this heal and
+  nothing but empty scaffolding (VS Code's ``inputs: []``) remains in it.
+  ``.github/mcp.json`` is never deleted (it is a target-detection signal).
 
-The healed names leave that runtime's recorded ownership so the ``.mcp.json``
-write claims them afresh (``vscode`` ownership otherwise maps to ``copilot``
-through :func:`~apm_cli.install.mcp.ownership.migrate_legacy_project_target_servers`).
+The heal runs after the install wrote ``.mcp.json``, so an entry leaves its
+retired file only once its replacement exists (:func:`healable_names`).
 """
 
 from __future__ import annotations
@@ -34,12 +34,18 @@ _log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RetiredMcpDestination:
-    """One project MCP file APM no longer writes."""
+    """One project MCP file APM no longer writes.
+
+    ``deletable``: whether the heal may delete the file once APM's entries are
+    gone. ``.github/mcp.json`` is kept, because it is a ``copilot``
+    target-detection signal for projects that declare no targets.
+    """
 
     runtime: str
     relative_path: str
     servers_key: str
     adapter: Callable[[Path], Any]
+    deletable: bool
 
 
 def _legacy_copilot_adapter(project_root: Path) -> Any:
@@ -60,12 +66,14 @@ RETIRED_PROJECT_MCP_DESTINATIONS: tuple[RetiredMcpDestination, ...] = (
         ".github/mcp.json",  # architecture-authority-exempt: retired MCP destination
         "mcpServers",
         _legacy_copilot_adapter,
+        deletable=False,
     ),
     RetiredMcpDestination(
         "vscode",
         ".vscode/mcp.json",  # architecture-authority-exempt: retired MCP destination
         "servers",
         _legacy_vscode_adapter,
+        deletable=True,
     ),
 )
 
@@ -137,12 +145,14 @@ def heal_retired_project_mcp_destinations(
     """Remove APM-written entries from retired project MCP files (never user entries)."""
     from apm_cli.adapters.client.base import MCPClientAdapter
     from apm_cli.utils.atomic_io import atomic_write_text
+    from apm_cli.utils.path_security import has_symlink_component
 
     heal = RetiredMcpHeal(removed={}, kept={}, deleted_files=[])
     for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
         names = set(owned.get(destination.runtime, ()))
         path = project_root / destination.relative_path
-        if not names or path.is_symlink() or not path.is_file():
+        # A linked file or parent directory may point outside the project.
+        if not names or has_symlink_component(project_root, path) or not path.is_file():
             continue
         try:
             raw = path.read_text(encoding="utf-8")
@@ -190,7 +200,7 @@ def heal_retired_project_mcp_destinations(
         scaffolding_only = all(
             value in ([], {}) for key, value in data.items() if key != destination.servers_key
         )
-        if not servers and removed_here == total and scaffolding_only:
+        if destination.deletable and not servers and removed_here == total and scaffolding_only:
             path.unlink()
             heal.deleted_files.append(destination.relative_path)
             continue
@@ -201,23 +211,91 @@ def heal_retired_project_mcp_destinations(
     return heal
 
 
-def apply_retired_mcp_heal(
-    heal: RetiredMcpHeal,
+def take_retired_ownership(
     target_servers: dict[str, set[str]],
-    native_hashes: dict[str, dict[str, str]],
-) -> None:
-    """Drop healed names from the runtime that owned them in the retired file."""
-    for runtime, names in heal.removed.items():
-        if runtime in target_servers:
-            remaining = set(target_servers[runtime]) - names
-            if remaining:
-                target_servers[runtime] = remaining
-            else:
-                del target_servers[runtime]
-        hashes = native_hashes.get(runtime)
-        if hashes:
-            for name in names:
-                hashes.pop(name, None)
+    *,
+    native_hashes: Mapping[str, Mapping[str, str]],
+    project_root: Path,
+    live_hashes: dict[str, dict[str, str]] | None = None,
+    stored_configs: Mapping[str, Any] | None = None,
+) -> dict[str, set[str]]:
+    """Split the ownership that names entries in retired destinations off *target_servers*.
+
+    ``copilot`` stays (its claims now mean ``.mcp.json``; the copy is the
+    heal's view of ``.github/mcp.json``). ``vscode`` is removed outright: its
+    only destination is retired, so no cleanup may reach ``.vscode/mcp.json``
+    except the proof-checked heal. A name whose recorded ``copilot``
+    fingerprint already matches its ``.mcp.json`` entry was moved by an
+    earlier install and is settled, so the heal never revisits it. An
+    unsettled name's ``copilot`` fingerprint describes its ``.github/mcp.json``
+    entry, so it is dropped from *live_hashes* (the heal keeps its snapshot as
+    proof) and the ``.mcp.json`` comparison does not read that entry as edited.
+    """
+    settled = _settled_in_root_mcp_json(
+        native_hashes.get("copilot", {}), project_root, stored_configs or {}
+    )
+    retired = {
+        destination.runtime: set(target_servers.get(destination.runtime, ())) - settled
+        for destination in RETIRED_PROJECT_MCP_DESTINATIONS
+        if target_servers.get(destination.runtime)
+    }
+    target_servers.pop("vscode", None)
+    for name in retired.get("copilot", ()):
+        (live_hashes or {}).get("copilot", {}).pop(name, None)
+    return {runtime: names for runtime, names in retired.items() if names}
+
+
+def _settled_in_root_mcp_json(
+    hashes: Mapping[str, str], project_root: Path, stored_configs: Mapping[str, Any]
+) -> set[str]:
+    """Names whose recorded ``copilot`` fingerprint matches their ``.mcp.json`` entry.
+
+    Lock names are registry names; the entry sits under the adapter's native key.
+    """
+    if not hashes:
+        return set()
+    from apm_cli.adapters.client.copilot_project import CopilotProjectClientAdapter
+    from apm_cli.install.mcp.ownership import _native_config_key, mcp_native_hash
+    from apm_cli.utils.path_security import has_symlink_component
+
+    client = CopilotProjectClientAdapter(project_root=project_root)
+    path = Path(client.get_config_path())
+    if has_symlink_component(project_root, path) or not path.is_file():
+        return set()
+    servers = client.get_current_config().get(client.mcp_servers_key) or {}
+    settled = set()
+    for name, recorded in hashes.items():
+        key = _native_config_key(client, name, stored_config=stored_configs.get(name))
+        entry = servers.get(name, servers.get(key))
+        if (
+            isinstance(entry, dict)
+            and mcp_native_hash(client.managed_server_config(entry)) == recorded
+        ):
+            settled.add(name)
+    return settled
+
+
+def healable_names(
+    retired: dict[str, set[str]],
+    *,
+    declared: set[str],
+    copilot_claims: set[str] | None,
+) -> dict[str, set[str]]:
+    """Names whose retired entries may go once this install has settled.
+
+    An entry moves only after Copilot owns its replacement in ``.mcp.json``;
+    an entry no longer declared, or left behind because ``copilot`` is no
+    longer selected, is simply stale. A declared name Copilot failed to write
+    keeps its old entry until a later install succeeds.
+    """
+    return {
+        runtime: {
+            name
+            for name in names
+            if copilot_claims is None or name not in declared or name in copilot_claims
+        }
+        for runtime, names in retired.items()
+    }
 
 
 def report_retired_mcp_heal(heal: RetiredMcpHeal, logger: Any) -> None:
@@ -225,16 +303,18 @@ def report_retired_mcp_heal(heal: RetiredMcpHeal, logger: Any) -> None:
     labels = {d.runtime: d.relative_path for d in RETIRED_PROJECT_MCP_DESTINATIONS}
     for runtime, names in sorted(heal.removed.items()):
         for name in sorted(names):
-            logger.progress(
-                f"Removed APM-managed MCP server '{name}' from {labels[runtime]}; "
-                "Copilot project MCP servers now live in .mcp.json"
-            )
+            logger.progress(f"Removed APM-managed MCP server '{name}' from {labels[runtime]}")
     for path in heal.deleted_files:
         logger.progress(f"Removed empty {path} (APM created it and no longer writes it)")
     for runtime, names in sorted(heal.kept.items()):
         for name in sorted(names):
             logger.warning(
                 f"Kept MCP server '{name}' in {labels[runtime]} because it was changed "
-                "after APM wrote it. APM now writes Copilot servers to .mcp.json; move it "
-                "there or delete it."
+                f"after APM wrote it. Copilot now uses the '{name}' in .mcp.json, which "
+                "APM writes from apm.yml; put your changes in apm.yml and delete this entry."
             )
+    if heal.removed:
+        logger.progress(
+            "If those files were committed with resolved credentials, rotate them: "
+            "removing the entries does not erase them from Git history."
+        )

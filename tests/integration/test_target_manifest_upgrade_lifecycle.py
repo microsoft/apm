@@ -85,6 +85,8 @@ def _project_files(project: Path) -> dict[str, str]:
 
 
 _RETIRED_MCP_FILES = frozenset({".github/mcp.json", ".vscode/mcp.json"})
+# .github/mcp.json is a copilot detection signal, so the heal empties it but keeps it.
+_DELETABLE_RETIRED_MCP_FILES = frozenset({".vscode/mcp.json"})
 
 
 def _after_mcp_move(rows: set[tuple], files: set[str]) -> tuple[set[tuple], set[str]]:
@@ -93,7 +95,7 @@ def _after_mcp_move(rows: set[tuple], files: set[str]) -> tuple[set[tuple], set[
         (kind, target, value, "copilot" if runtime == "vscode" else runtime)
         for kind, target, value, runtime in rows
     }
-    moved_files = set(files) - _RETIRED_MCP_FILES
+    moved_files = set(files) - _DELETABLE_RETIRED_MCP_FILES
     if files & _RETIRED_MCP_FILES:
         moved_files.add(".mcp.json")
     return moved_rows, moved_files

@@ -172,14 +172,6 @@ def _target_replacement_hint(declaration: ManifestTargetDeclaration, *, user_sco
     return hint
 
 
-def _decision_profile(decision: EffectiveTargetDecision) -> tuple[frozenset[str], ...]:
-    return (
-        frozenset(decision.canonical_targets or ()),
-        frozenset(decision.runtime_targets or ()),
-        frozenset(decision.lsp_targets or ()),
-    )
-
-
 def canonical_target_names(names: Iterable[str]) -> tuple[str, ...]:
     """Resolve declared target names to canonical ones, keeping legacy ``all``.
 
@@ -423,7 +415,6 @@ def rewrite_target_names(declaration: ManifestTargetDeclaration) -> tuple[str, .
     """
 
     from ..core.errors import TargetResolutionError
-    from ..core.target_detection import EffectiveTargetDecision
 
     if declaration.spelling != "target":
         # Deprecated aliases (``vscode``) are written as the target they select.

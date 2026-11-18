@@ -16,9 +16,10 @@ from apm_cli.install.mcp.ownership import (
     names_owned_by_active_peers,
 )
 from apm_cli.install.mcp.retired_destinations import (
-    apply_retired_mcp_heal,
     heal_retired_project_mcp_destinations,
+    healable_names,
     lock_predates_root_mcp_json,
+    take_retired_ownership,
 )
 from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 
@@ -140,11 +141,71 @@ def test_heal_removes_only_proven_apm_entries_and_keeps_the_file(tmp_path: Path)
     remaining = json.loads((tmp_path / ".github/mcp.json").read_text(encoding="utf-8"))
     assert set(remaining["mcpServers"]) == {"edited", "user"}
 
-    owned = {"copilot": ["echo", "edited"]}
-    hashes = {"copilot": {"echo": "sha256:x"}}
-    apply_retired_mcp_heal(heal, owned, hashes)
-    assert owned == {"copilot": {"edited"}}
-    assert hashes == {"copilot": {}}
+
+def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
+    """.github/mcp.json is a copilot detection signal, so the heal never deletes it."""
+    _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT}})
+
+    heal = heal_retired_project_mcp_destinations(
+        {"copilot": {"echo"}},
+        stored_configs={"echo": _ECHO},
+        native_hashes={},
+        project_root=tmp_path,
+    )
+
+    assert heal.removed == {"copilot": {"echo"}}
+    assert heal.deleted_files == []
+    assert json.loads((tmp_path / ".github/mcp.json").read_text(encoding="utf-8")) == {
+        "mcpServers": {}
+    }
+
+
+def test_vscode_ownership_never_reaches_unproven_cleanup(tmp_path: Path) -> None:
+    """The retired vscode runtime is split off before install; only the heal sees it."""
+    owned = {"copilot": {"a"}, "vscode": {"b"}, "claude": {"c"}}
+
+    retired = take_retired_ownership(owned, native_hashes={}, project_root=tmp_path)
+
+    assert retired == {"copilot": {"a"}, "vscode": {"b"}}
+    assert owned == {"copilot": {"a"}, "claude": {"c"}}
+
+
+def test_names_already_moved_to_root_mcp_json_are_settled(tmp_path: Path) -> None:
+    """A recorded copilot fingerprint matching .mcp.json means an earlier install moved it."""
+    entry = {"type": "stdio", "command": "echo", "args": []}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"moved": entry, "edited": {"command": "x"}}})
+    hashes = {"copilot": {"moved": mcp_native_hash(entry), "edited": mcp_native_hash(entry)}}
+
+    retired = take_retired_ownership(
+        {"copilot": {"moved", "edited", "pending"}}, native_hashes=hashes, project_root=tmp_path
+    )
+
+    assert retired == {"copilot": {"edited", "pending"}}
+
+
+def test_registry_name_settles_under_its_native_key(tmp_path: Path) -> None:
+    """The lock records a registry name; .mcp.json keys the entry by its short name."""
+    entry = {"type": "http", "url": "https://mcp.example.invalid/registry-lifecycle"}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"registry-lifecycle": entry}})
+    name = "com.example/registry-lifecycle"
+
+    retired = take_retired_ownership(
+        {"copilot": {name}},
+        native_hashes={"copilot": {name: mcp_native_hash(entry)}},
+        project_root=tmp_path,
+        stored_configs={name: {"name": name, "registry": "https://registry.example"}},
+    )
+
+    assert retired == {}
+
+
+def test_retired_entries_move_only_after_their_replacement_is_owned() -> None:
+    retired = {"copilot": {"written", "failed", "dropped"}, "vscode": {"written"}}
+
+    healable = healable_names(retired, declared={"written", "failed"}, copilot_claims={"written"})
+
+    assert healable == {"copilot": {"written", "dropped"}, "vscode": {"written"}}
+    assert healable_names(retired, declared={"written"}, copilot_claims=None) == retired
 
 
 def test_heal_accepts_a_matching_fingerprint_and_deletes_an_apm_only_file(tmp_path: Path) -> None:
@@ -207,3 +268,14 @@ def test_singular_all_replacement_is_the_explicit_install_set() -> None:
     assert declaration.targets_replacement() == expand_all("install")
     assert "copilot" in expand_all("install")
     assert "vscode" not in expand_all("install")
+
+
+def test_root_mcp_json_is_not_a_target_detection_signal(tmp_path: Path) -> None:
+    """Claude Code reads .mcp.json too, so it names no single harness; .github/mcp.json does."""
+    from apm_cli.core.target_detection import detect_signals
+
+    _write(tmp_path / ".mcp.json", {"mcpServers": {}})
+    assert detect_signals(tmp_path) == []
+
+    _write(tmp_path / ".github/mcp.json", {"mcpServers": {}})
+    assert [signal.target for signal in detect_signals(tmp_path)] == ["copilot"]

@@ -343,3 +343,106 @@ def test_manifest_migrate_command_no_longer_exists(tmp_path: Path, apm_binary_pa
 
     assert result.returncode != 0
     assert "No such command" in result.stdout + result.stderr
+
+
+def _seed_036_copilot_only(project: _Project, *, targets: list[str] | None) -> None:
+    """A copilot-only 0.36 project: APM's entry and a user entry in .github/mcp.json."""
+    fields = {"targets": targets} if targets is not None else {}
+    project.manifest(**fields, dependencies={"mcp": [_ECHO]})
+    legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
+    project.write_json(".github/mcp.json", {"mcpServers": {"echo": legacy}})
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.36.1",
+            "dependencies": [],
+            "mcp_servers": ["echo"],
+            "mcp_configs": {"echo": _ECHO},
+            "mcp_target_servers": {"copilot": ["echo"]},
+        },
+        project.root / "apm.lock.yaml",
+    )
+
+
+def test_heal_runs_once_and_keeps_an_autodetected_project_installable(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The heal settles in one install; .github/mcp.json stays as the copilot signal."""
+    project = _Project(tmp_path, apm_binary_path)
+    _seed_036_copilot_only(project, targets=None)
+
+    first = _flat(project.install())
+    assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in first
+    assert project.read_json(".github/mcp.json") == {"mcpServers": {}}
+
+    for _ in range(2):
+        again = _flat(project.install())
+        assert "Removed APM-managed" not in again and "Kept MCP server" not in again, again
+        assert "echo" in project.read_json(".mcp.json")["mcpServers"]
+
+    # A user who later writes the old shape by hand keeps it.
+    legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
+    project.write_json(".github/mcp.json", {"mcpServers": {"echo": legacy}})
+    assert "Removed APM-managed" not in _flat(project.install())
+    assert project.read_json(".github/mcp.json") == {"mcpServers": {"echo": legacy}}
+
+
+def test_edited_vscode_entry_is_kept_when_copilot_is_not_selected(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A retired vscode claim never reaches unproven cleanup, even without copilot."""
+    project = _Project(tmp_path, apm_binary_path)
+    (project.root / ".claude").mkdir()
+    project.manifest(targets=["claude"], dependencies={"mcp": [_ECHO]})
+    edited = {"type": "stdio", "command": "echo", "args": ["--mine"]}
+    project.write_json(".vscode/mcp.json", {"servers": {"echo": edited}, "inputs": []})
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.36.1",
+            "dependencies": [],
+            "mcp_servers": ["echo"],
+            "mcp_configs": {"echo": _ECHO},
+            "mcp_target_servers": {"vscode": ["echo"]},
+        },
+        project.root / "apm.lock.yaml",
+    )
+
+    output = _flat(project.install())
+
+    assert "Kept MCP server 'echo' in .vscode/mcp.json" in output
+    assert project.read_json(".vscode/mcp.json")["servers"] == {"echo": edited}
+    project.manifest(targets=["claude"])
+    project.install()
+    assert project.read_json(".vscode/mcp.json")["servers"] == {"echo": edited}
+
+
+def test_saved_vscode_default_target_deploys_like_copilot(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    project = _Project(tmp_path, apm_binary_path)
+    project.manifest(dependencies={"mcp": [_ECHO]})
+
+    configured = project.apm("config", "set", "target", "vscode")
+    assert configured.returncode == 0, configured.stdout + configured.stderr
+    # The alias is saved as the target it selects.
+    assert "Default install target set to: copilot" in _flat(configured.stdout)
+    project.install()
+
+    assert "echo" in project.read_json(".mcp.json")["mcpServers"]
+    assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+    assert not (project.root / ".vscode").exists()
+
+
+def test_user_scope_copilot_keeps_its_global_config(tmp_path: Path, apm_binary_path: Path) -> None:
+    project = _Project(tmp_path, apm_binary_path)
+
+    result = project.apm(
+        "install", "-g", "--target", "copilot", "--mcp", "echo", "--", "echo", "hi"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    home = Path(project.env["HOME"])
+    config = json.loads((home / ".copilot" / "mcp-config.json").read_text(encoding="utf-8"))
+    assert "echo" in config["mcpServers"]
+    assert not (project.root / ".mcp.json").exists()
