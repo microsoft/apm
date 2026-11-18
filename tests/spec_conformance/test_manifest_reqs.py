@@ -1000,7 +1000,7 @@ def test_targets_admits_preserved_vscode_and_rejects_agents(tmp_path: Path) -> N
         [KNOWN_TARGETS["copilot"]], None, migrated, diagnostics, "owner/legacy"
     )
     # Proves only that `targets: [vscode]` is accepted without a diagnostic; narrowing to the
-    # copilot profile is asserted by test_targets_vscode_narrows_like_copilot (strict xfail, #3861).
+    # copilot profile is asserted by test_targets_vscode_narrows_like_copilot.
     assert diagnostics.error_count == 0
 
     with pytest.raises(TargetResolutionError, match="agents"):
@@ -1010,11 +1010,6 @@ def test_targets_admits_preserved_vscode_and_rejects_agents(tmp_path: Path) -> N
 
 
 @pytest.mark.req("req-tg-008")
-@pytest.mark.xfail(
-    strict=True,
-    reason="https://github.com/microsoft/apm/issues/3861: plural targets: [vscode] "
-    "is not intersected as copilot",
-)
 def test_targets_vscode_narrows_like_copilot(tmp_path: Path) -> None:
     """A dependency declaring `targets: [vscode]` deploys to the copilot profile."""
     package = APMPackage.from_mapping(
