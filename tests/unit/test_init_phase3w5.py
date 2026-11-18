@@ -364,7 +364,7 @@ class TestConfirmSetupSummary:
             _confirm_setup_summary(config, logger)
         assert exc_info.value.code == 0
 
-    def test_targets_line_shows_in_summary(self):
+    def test_targets_line_shows_in_summary(self, capsys):
         from apm_cli.commands.init import _confirm_setup_summary
 
         config = {
@@ -383,6 +383,8 @@ class TestConfirmSetupSummary:
             patch("click.confirm", return_value=True),
         ):
             _confirm_setup_summary(config, logger)
+
+        assert "targets: copilot, claude" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -485,8 +487,7 @@ class TestInitCommand:
 
     def test_plugin_with_invalid_name_exits(self, tmp_path):
         with self.runner.isolated_filesystem(temp_dir=tmp_path):
-            os.rename if hasattr(os, "rename") else None
-            # Create a dir with invalid plugin name (contains uppercase)
-            self._run("--plugin", "--yes", "Invalid_Plugin_Name")
-        # Should exit with error due to invalid plugin name
-        # (implementation may vary based on validation logic)
+            # Invalid plugin name: uppercase letters and underscores
+            result = self._run("--plugin", "--yes", "Invalid_Plugin_Name")
+        assert result.exit_code != 0
+        assert "Invalid plugin name" in result.output

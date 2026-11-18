@@ -370,8 +370,8 @@ class TestCleanAll:
     def test_removes_lock_files(self, cache, tmp_path):
         lock_file = cache._db_root / "foo.lock"
         lock_file.touch()
-        # Should not raise; suppress is used
         cache.clean_all()
+        assert not lock_file.exists()
 
 
 # ---------------------------------------------------------------------------

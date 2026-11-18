@@ -283,29 +283,25 @@ class TestOrphanDetectionScenarios:
         ]
 
         for entry in apm_yml_entries:
-            try:
-                dep = DependencyReference.parse(entry)
-                canonical = dep.get_canonical_dependency_string()
+            dep = DependencyReference.parse(entry)
+            canonical = dep.get_canonical_dependency_string()
 
-                # Use proper URL parsing to extract hostname safely
-                host = _get_host_from_entry(entry)
+            # Use proper URL parsing to extract hostname safely
+            host = _get_host_from_entry(entry)
 
-                if host == "dev.azure.com":
-                    # ADO entries: canonical should match without the host
-                    # Remove host prefix: dev.azure.com/org/proj/repo -> org/proj/repo
-                    expected = "/".join(entry.split("/")[1:])
-                    expected = expected.replace("/_git/", "/")
-                    assert canonical == expected
-                elif host == "github.com":
-                    # GitHub entries: canonical should match without the host
-                    expected = "/".join(entry.split("/")[1:])
-                    assert canonical == expected
-                else:
-                    # Entries without host prefix should match exactly
-                    assert canonical == entry
-            except ValueError:
-                # Skip entries that can't be parsed due to ADO format issues
-                pass
+            if host == "dev.azure.com":
+                # ADO entries: canonical should match without the host
+                # Remove host prefix: dev.azure.com/org/proj/repo -> org/proj/repo
+                expected = "/".join(entry.split("/")[1:])
+                expected = expected.replace("/_git/", "/")
+                assert canonical == expected
+            elif host == "github.com":
+                # GitHub entries: canonical should match without the host
+                expected = "/".join(entry.split("/")[1:])
+                assert canonical == expected
+            else:
+                # Entries without host prefix should match exactly
+                assert canonical == entry
 
     def test_unique_key_matches_canonical_string(self):
         """get_unique_key and get_canonical_dependency_string should be consistent."""
