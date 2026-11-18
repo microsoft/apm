@@ -181,7 +181,7 @@ A Claude Code plugin directory under `--output`. Contains:
 
 ### Agent Plugin bundle (`--format agent-plugin`)
 
-An explicit opt-in. `apm pack --format agent-plugin` emits a strict, portable [Agent Plugins v1](https://agent-plugins.org) bundle instead of the Claude-compatible layout above. `--format plugin` does **not** select this bundle -- it is a compatibility alias for the Claude plugin bundle below.
+An explicit opt-in. `apm pack --format agent-plugin` emits a strict, portable [Agent Plugins v1](https://agent-plugins.org) bundle instead of the Claude-compatible layout above. `--format plugin` does **not** select this bundle -- it is a compatibility alias for the Claude plugin bundle above.
 
 - `plugin.json` -- identifies the pinned Agent Plugins v1 schema (`$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"`), synthesised from `apm.yml` the same way as the Claude plugin manifest.
 - `skills/` -- standard skill bundles. This is the **only** primitive directory the Agent Plugin bundle carries.
@@ -250,7 +250,7 @@ fail before writing with uncertifiable remote metadata. `--check-clean` also fai
 
 ### Plugin manifests
 
-Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
+Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target-and-targets) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
 
 | Ecosystem | Output path |
 |---|---|

@@ -42,6 +42,10 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
     check_prospective_dry_run_plan,
 )
+from scripts.architecture_linter.checks.install_effective_selection import (
+    GUARD_EFFECTIVE_SELECTION,
+    check_effective_selection,
+)
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
     _GUARD_FROZEN,
@@ -57,6 +61,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
 from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
+)
+from scripts.architecture_linter.checks.install_lsp_capability_gate import (
+    GUARD_LSP_CAPABILITY_GATE,
+    check_lsp_capability_gate,
 )
 from scripts.architecture_linter.checks.install_lsp_plugin import (
     GUARD_CONSUMER_MANIFEST_REWRITE,
@@ -88,6 +96,10 @@ from scripts.architecture_linter.checks.install_request_and_source import (
     check_primitive_classification,
     check_request_defaults,
     check_source_plan,
+)
+from scripts.architecture_linter.checks.install_selection_merge import (
+    GUARD_SELECTION_MERGE,
+    check_selection_merge,
 )
 from scripts.architecture_linter.checks.install_single_file import (
     GUARD as _GUARD_SINGLE_FILE,
@@ -191,9 +203,19 @@ RULES: tuple[Rule, ...] = (
         check_source_plan,
     ),
     _rule(
+        GUARD_EFFECTIVE_SELECTION,
+        "Every package deployment takes its skill and target selection from one owner.",
+        check_effective_selection,
+    ),
+    _rule(
         GUARD_SKILL_PREFLIGHT,
         "The complete selected skill plan is checked before native deployment.",
         check_skill_preflight,
+    ),
+    _rule(
+        GUARD_SELECTION_MERGE,
+        "Every resolver edge reaches the single dependency selection-merge owner.",
+        check_selection_merge,
     ),
     _rule(
         _GUARD_PRIMITIVE_CLASSIFICATION,
@@ -249,6 +271,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LSP_LIFECYCLE,
         "LSP collection and reconciliation route through install/lsp/integration.py.",
         check_lsp_lifecycle,
+    ),
+    _rule(
+        GUARD_LSP_CAPABILITY_GATE,
+        "Declared LSP without a capable target fails before any target write.",
+        check_lsp_capability_gate,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,

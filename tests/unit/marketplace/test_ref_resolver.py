@@ -1013,7 +1013,7 @@ class TestRefResolverTokenInjection:
             with pytest.raises(GitLsRemoteError):
                 resolver.list_remote_refs("contoso/platform/repo")
 
-        auth_resolver.execute_with_bearer_fallback.assert_not_called()
+        auth_resolver.try_with_fallback.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

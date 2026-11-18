@@ -51,8 +51,8 @@ stable but explicit-only. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
-It emits the
+separate root-context compile for `codex`, `gemini`, `opencode`, `hermes`, and
+`grok-build`. It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -66,7 +66,8 @@ priority:
 
 1. `--target` / `--all` on the command line.
 2. `targets:` in `apm.yml`.
-3. Auto-detection from filesystem signals (table below).
+3. `apm install` only: the saved `apm config set target` default.
+4. Auto-detection from filesystem signals (table below).
 
 For MCP installation, the equivalent explicit legacy `--runtime` flag also
 has highest priority. MCP machine discovery runs only when `targets:` is
@@ -82,7 +83,7 @@ runtime-specific configuration while compile only generates project output. Use
 
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
-| copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
+| copilot  | `.github/copilot-instructions.md` or `.github/mcp.json` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
 | claude   | `.claude/` directory, or `CLAUDE.md` file     |
 | grok-build | `.grok/` directory                          |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
@@ -219,7 +220,7 @@ Gemini CLI.
 Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
 - **Detection.** None -- explicit-only for auto-detection. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity` or list it in `apm.yml` `targets:`; it is not part of `--target all`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
-- **Deploy directory.** `.agents/` (project scope); `~/.gemini/` (user scope).
+- **Deploy directory.** `.agents/` (project scope); `~/.gemini/antigravity-cli/` (user scope, skills only; instructions and hooks are project-scope only; user MCP goes to `~/.gemini/config/mcp_config.json`).
 - **Supported primitives.** instructions, skills, hooks, mcp.
 - **File conventions.**
   - instructions: `.agents/rules/<name>.md` (formatted natively with `trigger: glob` and `globs` frontmatter mapped from the package `applyTo` patterns)
@@ -431,8 +432,8 @@ MCP is not a `TargetProfile` primitive; it is wired by a separate
 integrator that writes per-client config files (e.g.
 `.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`, `.kiro/settings/mcp.json`) for every
 target in the active set that has an MCP client adapter. Active set
-follows the same `--target` > `targets:` > auto-detect chain as
-`apm install`: a runtime with an adapter but outside the active set
+follows the same `--target` > `targets:` > `apm config set target` >
+auto-detect chain as `apm install`: a runtime with an adapter but outside the active set
 is skipped and APM emits an `[i] Skipped MCP config for X  (active
 targets: Y)` line so the gate decision is observable. The matrix
 above marks `mcp` supported when an adapter exists; whether the
@@ -440,6 +441,10 @@ config gets written on a given install is a function of the active
 target set, not just adapter availability. See
 [Install MCP servers](../../consumer/install-mcp-servers/) for the
 gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
+
+LSP servers follow the same active-target gate but are written only for
+`claude`, `copilot` and `opencode`; see
+[Install LSP servers](../../consumer/install-lsp-servers/).
 
 ## See also
 

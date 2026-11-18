@@ -66,6 +66,7 @@ from .types import VirtualPackageType
 
 if TYPE_CHECKING:
     from .replacement import ReplacementBinding
+    from .subsets import EdgeSelection, SkillTargetSelection
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
@@ -138,6 +139,15 @@ class DependencyReference(ProviderCoordinateMixin):
     marketplace_version_spec: str | None = None
     marketplace_manifest: dict[str, object] | None = None
     replacement: "ReplacementBinding | None" = field(default=None, repr=False, compare=False)
+    # Every edge that declared this node, set by the resolver's selection merge
+    # (#3735). Diagnostics only: never part of identity and never persisted.
+    selection_contributors: "tuple[EdgeSelection, ...]" = field(
+        default=(), repr=False, compare=False
+    )
+    # Exact per-target skill selection when skill_subset x target_subset would
+    # over-select (req-rs-018); None means the flat product is exact. Set by
+    # the resolver's merge or decoded from the lockfile; never identity.
+    subset_pairings: "SkillTargetSelection | None" = field(default=None, repr=False, compare=False)
 
     @property
     def source_reference(self) -> "DependencyReference":

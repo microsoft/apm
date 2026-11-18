@@ -209,6 +209,13 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `skills` | OPTIONAL | Select deployed skills, not a repo slice; use `path` for a subdirectory. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
+When several manifests declare the same dependency, each `skills:` list reaches
+only the `targets:` of its own declaration (omitted = all). Example: one parent
+asks for `alpha` on `claude`, another for `gamma` on `copilot`; `alpha` deploys
+only for Claude and `gamma` only for Copilot, in any declaration order.
+`apm.lock.yaml` records this as `subset_pairings`, and `--frozen` fails if the
+pairing changed.
+
 Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
 source identity or local `../sibling` source anchors. After upgrading an older
 aliased install, run `apm install` and review the updated lockfile; use the
@@ -582,6 +589,17 @@ lockfile cannot widen a dependency's reach. The formal schema contract
 lives in `docs/src/content/docs/reference/manifest-schema.md` section
 4.1.2.
 
+
+## Shared dependencies (diamonds)
+
+When your `apm.yml` and one or more parent packages declare the same
+dependency, APM installs it once with the sorted union of every declaration's
+`skills:` and of every declaration's `targets:`. A declaration that omits the
+field selects everything. Declaration order does not matter. `apm uninstall`
+of one parent narrows the union to the remaining declarations, and
+`apm audit --ci` checks the lockfile against that union. If the declarations
+use different `alias:` values, the shallowest declaration wins with a warning.
+
 ## MCP dependency formats
 
 See also: [MCP Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
@@ -679,7 +697,9 @@ dependencies:
 Remote transport: `http`/`streamable-http` are Streamable HTTP; registry servers
 take it from `remotes[].type` (missing = Streamable HTTP). Native keys per
 harness: Copilot CLI, Claude, VS Code `type: http|sse` + `url`; Gemini `httpUrl`
-(Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`. SSE on
+(Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`; Hermes
+`url`, plus `transport: sse` for SSE (Hermes also keeps stdio `cwd` and extra
+keys such as `timeout` or `auth`). SSE on
 Antigravity or Codex is skipped with one warning, not recorded, exit 0 (also
 under `--frozen`). The next
 install, update or `install --frozen` rewrites APM-written entries left in an
@@ -763,8 +783,8 @@ relative values are rejected.
 ## LSP dependency formats
 
 LSP (Language Server Protocol) servers give supported runtimes real-time
-code intelligence. APM currently writes LSP config for Claude Code and
-GitHub Copilot CLI while keeping the dependency schema runtime-neutral.
+code intelligence. APM currently writes LSP config for Claude Code, GitHub
+Copilot CLI and OpenCode while keeping the dependency schema runtime-neutral.
 
 ```yaml
 dependencies:
@@ -802,8 +822,11 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 project installs use the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs use
 `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. GitHub Copilot CLI uses
-`.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI uses
-`fileExtensions` on disk;
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. OpenCode uses the `lsp`
+key of `opencode.json` or `~/.config/opencode/opencode.json`
+(`command` array, `extensions`, `env`, `initialization`; socket and name-only
+servers are skipped), and creating that key also enables OpenCode's built-in
+language servers. Copilot CLI uses `fileExtensions` on disk;
 manifests continue to use `extensionToLanguage`. A dependency package's source
 `.lsp.json` may use either a flat server map or a
 `{ "lspServers": { ... } }` envelope; it is distinct from the Claude project
@@ -833,7 +856,7 @@ New named refs may need a Git lookup to establish equivalence.
 
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
-| Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
+| Tag | `owner/repo#v1.0.0` | Production -- release tag; the lockfile pins the commit |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
 | Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |

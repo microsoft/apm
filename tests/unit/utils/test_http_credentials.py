@@ -359,3 +359,18 @@ def test_request_body_cannot_use_anonymous_cross_origin_follow() -> None:
         )
 
     assert session.calls == []
+
+
+@pytest.mark.parametrize("suffix", ["?next=1", "/child"], ids=["query", "descendant-path"])
+def test_unfollowed_redirect_request_never_follows_a_same_path_redirect(suffix: str) -> None:
+    from apm_cli.utils.http_credentials import unfollowed_redirect_request
+
+    with _server() as origin:
+        start = f"http://127.0.0.1:{origin.server_address[1]}/start"
+        origin.location = f"{start}{suffix}"
+        response = unfollowed_redirect_request(
+            "GET", start, headers={"Authorization": "token t"}, timeout=10
+        )
+
+    assert response.status_code == 302
+    assert len(origin.seen) == 1

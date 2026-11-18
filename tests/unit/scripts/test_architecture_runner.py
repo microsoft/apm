@@ -634,6 +634,7 @@ install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-drift-claim-classification
+install-deployment-effective-selection
 install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
@@ -646,7 +647,9 @@ install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
 install-deployment-skill-layout
 install-deployment-skill-preflight
+install-deployment-selection-merge
 install-deployment-locked-skill-subset-reconstruction
+install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract
 install-deployment-manifest-inheritance-includes
@@ -756,9 +759,12 @@ registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-auth-outcome-owner
+transport-platform-authenticated-egress
 transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
+transport-platform-credential-report-owner
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight

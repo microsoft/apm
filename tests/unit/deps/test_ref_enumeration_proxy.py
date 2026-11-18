@@ -10,8 +10,8 @@ the approved scope:
    short-circuit.
 2. ``GitSemverResolver.resolve`` -- used by ``apm install`` / ``apm lock``
    for semver ranges. Raises ``RegistryOnlySemverError`` instead of
-   listing upstream tags, because a range needs a version listing the
-   proxy does not expose.
+   listing upstream tags, because a range needs a version listing that
+   APM does not fetch through the proxy.
 3. ``GitReferenceResolver.resolve_commit_sha_for_ref`` -- the GitHub
    commits API used for ref-to-SHA lookup (tier L1 of
    ``TieredRefResolver`` and single-file downloads). Returns ``None``
@@ -130,9 +130,17 @@ class TestGitSemverResolverRegistryOnly:
         ref_resolver.list_remote_refs.assert_not_called()
         assert "registry-only mode" in excinfo.value.summary
         assert "PROXY_REGISTRY_ONLY" in excinfo.value.hint
-        # The hint must name both escape hatches.
-        assert "exact version" in excinfo.value.hint
-        assert "unset PROXY_REGISTRY_ONLY" in excinfo.value.hint
+        # The hint must name both supported routes (#3756): exact pins with
+        # lockfile replay, or a server implementing the APM Registry HTTP API.
+        hint = excinfo.value.hint
+        assert "exact version" in hint and "apm.lock.yaml" in hint
+        assert "APM Registry HTTP API" in hint
+        assert "/v1/packages/{owner}/{repo}/versions" in hint
+        # The upstream escape hatch stays named (installed-CLI contract in
+        # tests/integration/test_registry_only_enumeration_contract.py).
+        assert "unset PROXY_REGISTRY_ONLY" in hint
+        # It must not repeat the refuted claim that proxies have no listing.
+        assert "exposes no" not in hint
 
     def test_error_is_catchable_as_no_matching_tag(self):
         """Existing callers catching NoMatchingTagError keep working."""

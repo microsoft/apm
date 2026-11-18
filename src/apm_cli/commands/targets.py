@@ -102,7 +102,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
             from apm_cli.core.target_catalog import TARGET_CAPABILITIES
             from apm_cli.integration.targets import KNOWN_TARGETS
 
-            shown = {row["target"] for row in rows}
+            shown = {row["target"] for row in rows}  # architecture-authority-exempt: display-row
             for name, capability in TARGET_CAPABILITIES.items():
                 profile = KNOWN_TARGETS.get(name)
                 if (
@@ -135,6 +135,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
             source_col = row["source"] or ""
         else:
             source_col = f"needs {row['needs']}" if row["needs"] else ""
+        # architecture-authority-exempt: display-row
         click.echo(
             f"  {row['target']:<12} {row['status']:<10} {source_col:<40} {row['deploy_dir']}"
         )

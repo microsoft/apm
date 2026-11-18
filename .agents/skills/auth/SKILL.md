@@ -33,8 +33,10 @@ Azure DevOps Services (`dev.azure.com`, `*.visualstudio.com`) use this chain:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer via `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798` if `az` is installed and `az account show` succeeds
-3. Operation-time path-scoped `git credential fill` after HTTP 401/403 or a recognized Git authentication failure (`is_ado_auth_failure_signal`)
-4. Otherwise: `AdoAuthChainExhaustedError` from `try_with_fallback`, or `build_error_context` on resolve-time failures
+3. Operation-time path-scoped `git credential fill` (`org/project/_git/repo`, sent as Basic `username:password`, cached per repository) after an auth failure classified by `classify_auth_outcome` (`src/apm_cli/core/auth_outcome.py`): HTTP 401/403, a redirect to the ADO sign-in service, an HTML sign-in page, or a Git auth error
+4. Otherwise: `AdoAuthChainExhaustedError` (with its `AuthAttemptLog`) from `try_with_fallback`, or `build_error_context` on resolve-time failures
+
+`AuthResolver.try_with_fallback` is the only chain entry; the chain lives in `src/apm_cli/core/auth_chain.py`. Call sites raise `AuthAttemptFailed` with the raw response or process result and never classify auth failures themselves (guard `transport-platform-auth-outcome-owner`). ADO HTTP requests pass `auth=AttemptAuth(git_env)` or `allow_netrc=False` so only the chain-selected credential is sent. Only `auth_chain.report_helper_outcome` reports a helper credential back to Git: `approve` after success, `reject` only after `AuthOutcome.is_verified_rejection` (status-anchored HTTP 401, never with a 403/not-found signal) and never for a secret the resolver's helper cache already saw approved on that host (no secret is hashed or copied for this), once per (host, port, path) and action per process, never for PAT, bearer, or gh tokens (guard `transport-platform-credential-report-owner`). Fill, approve, and reject run with `GCM_INTERACTIVE=0` when stdin is not a TTY or `CI` is set.
 
 Azure DevOps Server hosts (`ADO_HOST` / `APM_ADO_HOSTS`) skip az bearer: PAT, then fill.
 
@@ -54,7 +56,7 @@ Azure DevOps Server hosts (`ADO_HOST` / `APM_ADO_HOSTS`) skip az bearer: PAT, th
 [i] dev.azure.com -- token from ADO_APM_PAT
 ```
 
-**Diagnostic cases** (`build_error_context` + `AdoAuthChainExhaustedError` in `src/apm_cli/core/auth.py`):
+**Diagnostic cases** (`build_error_context` in `src/apm_cli/core/auth.py`, `AdoAuthChainExhaustedError` in `src/apm_cli/core/auth_chain.py`):
 
 Initial PAT/bearer diagnostics do not describe the later helper retry.
 
@@ -62,5 +64,6 @@ Initial PAT/bearer diagnostics do not describe the later helper retry.
 2. No PAT, `az` not signed in: same two-options copy with `az login` first.
 3. No PAT, wrong tenant: `Your az cli session (tenant: ...) returned a bearer token, but Azure DevOps rejected it (HTTP 401).` -> `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT`.
 4. PAT set, request failed: `ADO_APM_PAT is set, but the Azure DevOps request failed.` -> rotate the PAT, `az login` on Services, or store a GCM credential.
-5. Helper empty or rejected: `AdoAuthChainExhaustedError` names only attempted steps -> refresh PAT, `az login` on Services, or store a repository credential in GCM. DNS, TLS, and timeout failures re-raise without unlocking fill or becoming auth exhaustion.
+5. Helper empty or rejected: `AdoAuthChainExhaustedError` lists every chain step in order with its outcome (`Azure DevOps authentication failed. Tried in order: ...`) -> refresh PAT, `az login` on Services, or store a repository credential in GCM. DNS, TLS, timeout, and not-found failures re-raise without unlocking fill or becoming auth exhaustion.
 6. Server, no PAT: `Azure DevOps Server requires ADO_APM_PAT or a Git credential helper.` -> set `ADO_APM_PAT` or store a GCM credential (`az` does not apply).
+7. `az` installed but token acquisition failed: `Azure CLI is installed but could not get a token for Azure DevOps: <az reason>` (reason such as `AADSTS50076` from the provider's `last_error`; tenant lookup cached). Case 3 renders only when a bearer was actually issued.

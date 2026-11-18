@@ -21,6 +21,7 @@ from apm_cli.deps.transport_selection import (
     TransportSelector,
 )
 from apm_cli.models.apm_package import DependencyReference
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 
 def make_host(
@@ -54,6 +55,7 @@ def make_host(
     auth_resolver.build_error_context.return_value = (
         "Check PAT permissions." if effective_token else "Set a token."
     )
+    install_simulated_ado_chain(auth_resolver)
     host.auth_resolver = auth_resolver
     host._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
     host._protocol_pref = ProtocolPreference.NONE

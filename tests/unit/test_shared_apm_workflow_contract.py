@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 import yaml
+
+from tests.workflow_contracts import run_bash as _run_bash
 
 ROOT = Path(__file__).resolve().parents[2]
 SHARED_APM = ROOT / ".github" / "workflows" / "shared" / "apm.md"
@@ -128,31 +128,6 @@ def _token_source_step() -> dict:
 def _package_token_step() -> dict:
     apm_job = _frontmatter()["jobs"]["apm"]
     return next(step for step in apm_job["steps"] if step.get("name") == "Select APM package token")
-
-
-def _run_bash(script: str, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    """Execute an extracted workflow step with its declared test environment."""
-    # Windows' ambient bash.exe can be the WSL launcher, not Git Bash.
-    search_path = None
-    if sys.platform == "win32":
-        program_files = os.environ.get("PROGRAMFILES")
-        if not program_files:
-            raise FileNotFoundError(
-                "Workflow contract tests require PROGRAMFILES to locate Git for Windows Bash"
-            )
-        search_path = str(Path(program_files) / "Git" / "bin")
-    executable = shutil.which("bash", path=search_path)
-    if executable is None:
-        recovery = "install Git for Windows" if sys.platform == "win32" else "install bash on PATH"
-        raise FileNotFoundError(f"Workflow contract tests require native Bash; {recovery}")
-    return subprocess.run(
-        (executable, "-c", script),
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, **env},
-        timeout=30,
-    )
 
 
 @pytest.mark.windows_compat

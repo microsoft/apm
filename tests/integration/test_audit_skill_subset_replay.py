@@ -128,7 +128,7 @@ def test_fresh_subset_audit_uses_locked_commit_without_checkout_writes(
     elif scenario == "tampered-deployment":
         assert {finding["kind"] for finding in payload["drift"]["drift"]} == {"modified"}
     elif scenario == "subset-mismatch":
-        assert "manifest skills ['beta'] != lockfile skill_subset ['alpha']" in subset["details"][0]
+        assert "declared skills ['beta'] != lockfile skill_subset ['alpha']" in subset["details"][0]
     elif scenario == "invalid-selection":
         assert (
             "recorded skill subset path(s) not found in package tree: nonexistent"

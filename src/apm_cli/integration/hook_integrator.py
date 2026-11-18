@@ -1942,6 +1942,7 @@ class HookIntegrator(BaseIntegrator):
         """Securely wipe and rebuild merged hooks from installed survivors."""
         from apm_cli.agent_plugins.errors import preflight_reintegration_survivors
         from apm_cli.constants import APM_MODULES_DIR
+        from apm_cli.install.package_resolution import effective_dependency_selection
         from apm_cli.install.target_filter import resolve_effective_package_targets
         from apm_cli.integration.hook_reintegration import (
             build_hook_reintegration_source_plan,
@@ -1978,7 +1979,7 @@ class HookIntegrator(BaseIntegrator):
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(
                 targets,
-                dep_ref.target_subset,
+                effective_dependency_selection(dep_ref).target_subset,
                 pkg_info,
                 None,
                 dep_ref.get_identity(),

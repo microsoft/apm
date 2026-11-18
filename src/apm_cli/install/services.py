@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from ..core.scope import InstallScope
     from ..install.context import InstallContext
     from ..integration.base_integrator import BaseIntegrator
+    from ..models.dependency.subsets import SkillTargetSelection
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -209,7 +210,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     package_name: str = "",
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
-    skill_subset: tuple | None = None,
+    skill_subset: tuple | None,
+    skill_pairing: SkillTargetSelection | None = None,  # per-target skills (req-rs-018)
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
     policy: Any = None,
@@ -630,6 +632,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         force=force,
         targets=projection_targets,
         skill_subset=skill_subset,
+        skill_pairing=skill_pairing,
         scope=scope,
         policy=policy,
         skip_bin=_skip_bin,
@@ -739,6 +742,7 @@ def integrate_local_content(  # noqa: PLR0913
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
+    from .package_resolution import effective_dependency_selection
 
     if source_root is None:
         source_root = project_root
@@ -764,6 +768,8 @@ def integrate_local_content(  # noqa: PLR0913
         package_name="_local",
         logger=logger,
         scope=scope,
+        skill_subset=effective_dependency_selection(None, ctx).skill_subset,
+        skill_pairing=None,  # first-party content has no per-edge pairing (req-rs-018)
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,

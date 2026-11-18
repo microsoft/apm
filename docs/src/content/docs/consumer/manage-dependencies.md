@@ -406,8 +406,8 @@ For registry-sourced deps or when `policy.dependencies.require_pinned_constraint
 
 Pip-style `==1.2.3` is not part of the node-semver grammar APM follows and is rejected as an unbounded ref under `require_pinned_constraint`. Use `=1.2.3` or the bare form instead.
 
-Branches move; tags and SHAs do not. For reproducibility, prefer tags or
-SHAs. The lockfile pins the resolved commit either way, so two clones
+Branches move; release tags rarely do and SHAs never do. For
+reproducibility, prefer tags or SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
 
@@ -580,10 +580,10 @@ one root-to-target chain (not a fan-out of every theoretical route):
     +-- acme-org/shared-utils
 ```
 
-`<pkg>` accepts four identifier styles, tried in order: unique key
-(`acme-org_shared-utils`), full repo URL
-(`https://github.com/acme-org/shared-utils`), `owner/repo`, or bare
-basename (`shared-utils`) when unambiguous. An ambiguous bare name
+`<pkg>` accepts four identifier styles, tried in order: lockfile unique key
+(`acme-org/shared-utils`, or `gitlab.com/acme-org/shared-utils` for a
+non-GitHub host), lockfile `repo_url`, `owner/repo`, or bare
+basename (`shared-utils`) when unambiguous. An ambiguous name
 exits `1` and lists the candidates.
 
 Pass `--json` for scripting; the JSON document goes to stdout and all

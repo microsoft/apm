@@ -74,11 +74,62 @@ def test_package_qualified_literal_tag_for_own_name_is_pinned(spec):
         "acme/mono/packages/pkg-a#release-pkg-a-v1.1.0",
         # layouts the resolver does not select from
         "acme/mono/packages/pkg-a#pkg-a_v1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
     ],
 )
 def test_other_names_and_near_misses_stay_bare_branch(spec):
     assert classify_unbounded_reason(_dep(spec)) is UnboundedReason.BARE_BRANCH
+
+
+# ---------------------------------------------------------------------------
+# Exact package release tags (name@X.Y.Z), #3731
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        # Ruling change (#3731): pkg-a@1.1.0 used to be a bare branch.
+        # An exact name@X.Y.Z tag declares one release, like v1.2.3, and
+        # the name is not bound to the dependency's own name.
+        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a@v1.1.0",
+        "shadcn/ui#shadcn@4.12.0",
+        "upstash/context7/skills/context7-mcp#@upstash/context7-mcp@4.4.4",
+        "acme/mono/packages/pkg-a#@scope/pkg-a@1.1.0-rc.1",
+        "acme/mono#pkg-a@1.1.0+build.5",
+    ],
+)
+def test_exact_package_release_tag_is_pinned(spec):
+    assert classify_unbounded_reason(_dep(spec)) is None
+
+
+def _object_dep(ref: str) -> DependencyReference:
+    return DependencyReference.parse_from_dict({"git": "acme/mono", "ref": ref})
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "release@next",
+        "feature/x@1.2.3",
+        "a/b/c@1.2.3",
+        "@scope/a/b@1.2.3",
+        "name@^1.2.0",
+        "name@1.x",
+        "name@1.2",
+        "name@1.2.3.4",
+        "name@@1.2.3",
+        "@1.2.3",
+    ],
+)
+def test_non_exact_package_release_tags_stay_bare_branch(ref):
+    # Object form: the shorthand parser already rejects most of these refs.
+    assert classify_unbounded_reason(_object_dep(ref)) is UnboundedReason.BARE_BRANCH
+
+
+@pytest.mark.parametrize("ref", ["shadcn@4.12.0", "@upstash/context7-mcp@4.4.4"])
+def test_exact_package_release_tag_in_object_form_is_pinned(ref):
+    assert classify_unbounded_reason(_object_dep(ref)) is None
 
 
 def test_tag_name_comes_from_the_resolver_owner(monkeypatch):

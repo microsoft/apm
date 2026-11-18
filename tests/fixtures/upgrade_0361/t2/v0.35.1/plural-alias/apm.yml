@@ -1,0 +1,12 @@
+name: plural-alias
+version: 1.0.0
+targets:
+- vscode
+dependencies:
+  apm:
+  - path: ../pkg
+  mcp:
+  - name: srv
+    registry: false
+    transport: http
+    url: https://mcp.example.com/mcp

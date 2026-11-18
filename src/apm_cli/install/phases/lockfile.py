@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -398,15 +398,23 @@ class LockfileBuilder:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
-                merged = effective_deploy_skill_subset(
-                    skill_subset_from_cli=self.ctx.skill_subset_from_cli,
-                    cli_subset=self.ctx.skill_subset,
-                    persisted_subset=locked_dep.skill_subset,
-                )
+                # Record what was deployed: the same owner the deploy used (#3760).
+                merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
+                try:
+                    pairing = locked_dep.selection()
+                except ValueError:
+                    pairing = None
                 # merged is never None here: the guard above returns for
                 # --skill '*' (empty ctx.skill_subset), so a real named
                 # subset always survives the union.
                 locked_dep.skill_subset = list(merged) if merged else []
+                if pairing is not None and not pairing.is_product:
+                    # The CLI overlay is one more edge over the entry's targets
+                    # (req-rs-018), as effective_dependency_selection deploys it.
+                    pairing = pairing.with_edge(self.ctx.skill_subset, locked_dep.target_subset)
+                    locked_dep.subset_pairings = pairing.to_lock_records()
+                else:
+                    locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():

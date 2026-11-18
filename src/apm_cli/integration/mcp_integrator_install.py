@@ -20,7 +20,6 @@ from apm_cli.core.apm_yml import (
     ConflictingTargetsError,
     EmptyTargetsListError,
     UnknownTargetError,
-    parse_targets_field,
 )
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.target_catalog import accepted_target_values
@@ -416,6 +415,7 @@ def _install_registry_group(  # noqa: PLR0913
                     )
                     if rt in protected_clients:
                         client = protected_clients[rt]
+                        stale_receipts: set[str] = set()
                         state = compare_native_mcp_connection(
                             client,
                             dep,
@@ -429,6 +429,7 @@ def _install_registry_group(  # noqa: PLR0913
                             declaration_changed=is_update,
                             env_overrides=shared_env_vars,
                             runtime_vars=shared_runtime_vars,
+                            stale_receipts=stale_receipts,
                         )
                         if state in {
                             NativeMcpConnectionState.MATCHING_FOREIGN,
@@ -463,6 +464,7 @@ def _install_registry_group(  # noqa: PLR0913
                                     client,
                                     dep,
                                     requested_info=server_info_cache.get(dep),
+                                    replace=dep in stale_receipts,
                                 )
                             logger.verbose_detail(f"{dep} already matches {rt}; no write")
                             continue
@@ -1079,7 +1081,7 @@ def _declared_manifest_target_runtimes(
 ) -> tuple[list[str] | None, bool]:
     """Return canonical manifest targets and whether the declaration is valid.
 
-    Delegates to :func:`apm_cli.core.apm_yml.parse_targets_field`, the same
+    Delegates to the manifest target declaration owner, the same
     parser the v2 file-deployment target resolver and
     :meth:`MCPIntegrator._gate_project_scoped_runtimes` both use, so a
     manifest-declared target list is interpreted identically everywhere
@@ -1096,7 +1098,9 @@ def _declared_manifest_target_runtimes(
         return None, True
 
     try:
-        parsed = parse_targets_field(apm_config)
+        from apm_cli.models.manifest_targets import manifest_target_restriction
+
+        parsed = manifest_target_restriction(apm_config)
     except (ConflictingTargetsError, EmptyTargetsListError, UnknownTargetError):
         return None, False
     if not parsed:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 from unittest.mock import MagicMock, Mock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -65,34 +66,61 @@ def _make_head_recorder(status_code: int = 404):
 
 
 class TestRedirectLeakGuard:
-    """``allow_redirects=False`` must hold for every probe.
+    """A proxy redirect is never followed by a boundary probe.
 
-    Flipping it to ``True`` would let the proxy redirect the resolver to a
-    different host while the Bearer token rides along -- a cross-host token
-    leak.  This is the single highest-severity invariant in the module.
+    Following it would let the proxy send the resolver -- and its Bearer
+    token -- to another host. Each probe must be one hop sent with automatic
+    redirects disabled, and a 3xx still counts as existence proof.
     """
 
-    def test_every_probe_disables_redirects(self):
-        """Probe every candidate of an ambiguous Mode 1 dep; assert each call
-        was made with ``allow_redirects=False``."""
+    def test_probe_never_follows_a_redirect(self):
+        package = "art.example.com/artifactory/apm/group/sub/repo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token="proxy-token")
+        calls: list[dict] = []
+
+        def _request(method, url=None, **kwargs):
+            calls.append({"method": method, "url": url, **kwargs})
+            resp = MagicMock()
+            resp.status_code = 302
+            resp.headers = {"Location": "https://elsewhere.example.net/archive.zip"}
+            return resp
+
+        with patch(
+            "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+            side_effect=_request,
+        ):
+            result = _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        assert result is not None
+        assert calls, "expected at least one HEAD probe"
+        assert all(call["method"] == "HEAD" for call in calls)
+        assert all(call["allow_redirects"] is False for call in calls)
+        assert all(urlparse(call["url"]).hostname == "art.example.com" for call in calls)
+
+    def test_same_path_redirect_is_existence_proof_not_followed(self):
+        """An in-path 3xx still proves the archive exists; it is not followed."""
         package = "art.example.com/artifactory/apm/group/sub/repo"
         auth = Mock()
         auth.resolve_for_dep.return_value = Mock(token=None)
+        calls: list[str] = []
 
-        recorded, fake_head = _make_head_recorder(status_code=404)
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=fake_head):
-            with pytest.raises(ValueError):
-                _resolve_artifactory_boundary(package, auth, verbose=False)
+        def _request(method, url=None, **_kwargs):
+            calls.append(url)
+            resp = MagicMock()
+            resp.status_code = 302
+            resp.headers = {"Location": f"{url}?signed=1"}
+            return resp
 
-        # Sanity: the resolver actually probed something (otherwise the
-        # assertion below would pass vacuously and the mutation-break gate
-        # would be useless).
-        assert recorded, "expected at least one HEAD probe"
-        for call in recorded:
-            assert call["allow_redirects"] is False, (
-                "allow_redirects must be False on every probe to prevent "
-                "cross-host Bearer-token leakage via proxy-issued redirects"
-            )
+        with patch(
+            "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+            side_effect=_request,
+        ):
+            result = _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        assert result is not None
+        assert calls, "expected at least one HEAD probe"
+        assert all("signed=1" not in url for url in calls)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +160,7 @@ class TestModeTwoTokenAudience:
 
             recorded, fake_head = _make_head_recorder(status_code=404)
             with patch(
-                "apm_cli.install.artifactory_resolver.requests.head",
+                "apm_cli.install.artifactory_resolver._head_probe",
                 side_effect=fake_head,
             ):
                 with pytest.raises(ValueError):
@@ -169,7 +197,7 @@ class TestErrorDiscrimination:
             resp.status_code = status_for_url(url)
             return resp
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_head):
             with pytest.raises(ValueError) as excinfo:
                 _resolve_artifactory_boundary(package, auth, verbose=False)
         return str(excinfo.value)
@@ -237,7 +265,7 @@ class TestInconclusiveFailsClosed:
         def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
             raise requests.ConnectionError("name resolution failed")
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_head):
             with pytest.raises(ValueError) as excinfo:
                 _resolve_artifactory_boundary(package, auth, verbose=False)
 
@@ -270,7 +298,7 @@ class TestInconclusiveFailsClosed:
             resp.status_code = 404
             return resp
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_head):
             with pytest.raises(ValueError) as excinfo:
                 _resolve_artifactory_boundary(package, auth, verbose=False)
 

@@ -86,13 +86,30 @@ def preflight_skill_selection(
         else skill_subset_filter_tokens(skill_subset)
     )
     available = frozenset(selection.children)
+    dependency = package_info.dependency_ref
+    package_key = (
+        dependency.get_unique_key() if dependency is not None else package_info.install_path.name
+    )
+    # #3204 holds per declaring edge: a merged union must not hide one
+    # parent's selection that matches nothing (#3735).
+    for edge in getattr(dependency, "selection_contributors", ()) or ():
+        edge_filter = skill_subset_filter_tokens(edge.skill_subset)
+        if SkillIntegrator._skill_filter_misses_available(edge_filter, available):
+            SkillIntegrator._error_no_skill_filter_match(
+                available,
+                tuple(edge.skill_subset or ()),
+                package_key,
+                diagnostics=diagnostics,
+                logger=logger,
+                declared_by=edge.declared_by() if edge.parent_chain else None,
+            )
+            return False
     if not SkillIntegrator._skill_filter_misses_available(name_filter, available):
         return True
-    dependency = package_info.dependency_ref
     SkillIntegrator._error_no_skill_filter_match(
         available,
         tuple(skill_subset or ()),
-        dependency.get_unique_key() if dependency is not None else package_info.install_path.name,
+        package_key,
         diagnostics=diagnostics,
         logger=logger,
     )

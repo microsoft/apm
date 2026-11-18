@@ -11,10 +11,11 @@ from __future__ import annotations
 import builtins
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from apm_cli.install import registry_wiring
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
+from apm_cli.models.dependency.subsets import SkillTargetSelection, union_selection_names
 from apm_cli.utils.github_host import build_ssh_url
 
 GIT_PARENT_USER_SCOPE_ERROR = (
@@ -261,12 +262,61 @@ def effective_deploy_skill_subset(
     """
     if skill_subset_from_cli and not cli_subset:
         return None  # --skill '*' -> full bundle
-    merged: builtins.set[str] = builtins.set()
-    if persisted_subset:
-        merged.update(persisted_subset)
-    if cli_subset:
-        merged.update(cli_subset)
-    return builtins.tuple(sorted(merged)) or None
+    return union_selection_names(persisted_subset, cli_subset)
+
+
+class EffectiveDependencySelection(NamedTuple):
+    """Skill and target selection one package deployment must honor.
+
+    ``skill_pairing`` narrows ``skill_subset`` per target when the flat
+    ``skill_subset x target_subset`` product would over-select (req-rs-018);
+    ``None`` means every selected target receives every selected skill.
+    """
+
+    skill_subset: builtins.tuple[str, ...] | None
+    target_subset: builtins.list[str] | None
+    skill_pairing: SkillTargetSelection | None = None
+
+
+def effective_dependency_selection(
+    dep_ref: Any | None,
+    ctx: Any | None = None,
+) -> EffectiveDependencySelection:
+    """Return the effective deploy selection for one dependency (#3760).
+
+    This is the single owner every ``prepare_package_deployment`` and
+    ``integrate_package_primitives`` caller routes through: install
+    preflight and deploy, audit replay and uninstall survivor
+    re-integration. ``None`` in either field means "no restriction".
+
+    *dep_ref* ``None`` is first-party project content, which has no
+    selection. *ctx* carries the install invocation's CLI ``--skill``
+    overlay; lifecycle paths without an install context (uninstall,
+    audit replay) pass ``None`` and deploy exactly the persisted selection.
+    """
+    if dep_ref is None:
+        return EffectiveDependencySelection(None, None)
+    skill_subset = effective_deploy_skill_subset(
+        skill_subset_from_cli=bool(getattr(ctx, "skill_subset_from_cli", False)),
+        cli_subset=getattr(ctx, "skill_subset", None),
+        persisted_subset=getattr(dep_ref, "skill_subset", None),
+    )
+    target_subset = getattr(dep_ref, "target_subset", None)
+    pairing = getattr(dep_ref, "subset_pairings", None)
+    if not isinstance(pairing, SkillTargetSelection):
+        pairing = None  # raw lock records are decoded via LockedDependency.selection()
+    cli_subset = getattr(ctx, "skill_subset", None)
+    if pairing is not None and getattr(ctx, "skill_subset_from_cli", False) and not cli_subset:
+        pairing = None  # --skill '*': every skill on every selected target
+    elif pairing is not None and cli_subset:
+        # The CLI overlay acts as one more edge over the dependency's targets.
+        pairing = pairing.with_edge(cli_subset, target_subset)
+        pairing = None if pairing.is_product else pairing
+    return EffectiveDependencySelection(
+        skill_subset,
+        builtins.list(target_subset) if target_subset else None,
+        pairing,
+    )
 
 
 def cli_skill_subset(

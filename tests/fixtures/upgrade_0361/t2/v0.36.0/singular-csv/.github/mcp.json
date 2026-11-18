@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "srv": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "tools": [
+        "*"
+      ],
+      "id": ""
+    }
+  }
+}

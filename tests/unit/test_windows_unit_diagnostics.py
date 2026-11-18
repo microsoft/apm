@@ -30,7 +30,9 @@ def _assert_windows_diagnostics(workflow: dict) -> None:
     windows = workflow_step(job, "Run unit tests (Windows diagnostics)")
     assert linux["if"] == f"matrix.platform != 'windows' && {RUN_UNIT}"
     assert shell_commands(linux) == [TEST_COMMAND + PARALLEL_ARGS]
-    assert windows["if"] == f"matrix.platform == 'windows' && {RUN_UNIT}"
+    assert (
+        windows["if"] == "matrix.platform == 'windows' && needs.release-plan.outputs.full == 'true'"
+    )
     assert windows["timeout-minutes"] == 60
     assert shell_commands(windows) == [[*TEST_COMMAND, *PARALLEL_ARGS, *DIAGNOSTIC_ARGS]]
     assert windows["env"] == {**linux["env"], "PYTHONUNBUFFERED": "1"}

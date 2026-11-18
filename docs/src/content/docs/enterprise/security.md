@@ -23,7 +23,7 @@ This changes the security model fundamentally. APM treats package deployment as 
 
 APM is a build-time dependency manager for AI agent configuration. It performs four operations:
 
-1. **Resolves git repositories** — clones or sparse-checks-out packages from GitHub or Azure DevOps.
+1. **Resolves git repositories** — clones or sparse-checks-out packages from GitHub, GitLab, Azure DevOps, or other git hosts.
 2. **Deploys static files** — copies markdown, JSON, and YAML files into project directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`).
 3. **Generates compiled output** — produces `AGENTS.md`, `CLAUDE.md`, and similar files from templates and prompts.
 4. **Records a lock file** — writes `apm.lock.yaml` with exact commit SHAs for every resolved dependency.
@@ -65,7 +65,7 @@ Git, Node-based Copilot, and Rust-based Codex retain their own trust configurati
 
 ## Dependency provenance
 
-APM resolves dependencies directly from git repositories. There is no intermediary registry, proxy, or mirror.
+By default, APM resolves dependencies directly from git repositories, with no intermediary registry, proxy, or mirror unless you configure one (see [Registry security model](#registry-security-model) and [Registry Proxy & Air-gapped](../registry-proxy/)).
 
 ### Exact commit pinning
 
@@ -107,7 +107,7 @@ By default, APM resolves dependencies as git repository URLs, eliminating the ce
 The experimental `registries` feature adds REST-based package sources. When enabled:
 
 - **Byte-level reproducibility.** `resolved_hash` in `apm.lock.yaml` is a SHA-256 digest of the downloaded archive. Re-installs verify bytes against the lockfile hash before writing to disk. A mismatch **fails closed** — the install aborts before any archive contents are extracted.
-- **Token containment.** Tokens for registry auth MUST NOT appear in repo-tracked YAML files. APM hard-fails if a `token:` key is found in `apm.yml` or `apm-policy.yml`. Tokens belong in `APM_REGISTRY_TOKEN_<NAME>` env vars or `~/.apm/config.json`.
+- **Token containment.** Tokens for registry auth MUST NOT appear in repo-tracked YAML files. APM hard-fails if a `token:` key is found in an `apm.yml` registry entry. Tokens belong in `APM_REGISTRY_TOKEN_<NAME>` env vars or `~/.apm/config.json`.
 - **Policy enforcement.** The `registry_source` block in `apm-policy.yml` lets platform teams mandate specific registries and block non-registry sources. Checks apply transitively.
 
 **Known limitations:**
@@ -320,7 +320,7 @@ On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not vi
 
 **Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
 
-See the [Lock File Specification](../../reference/lockfile-spec/#44-content-integrity) for field details.
+See the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity) for field details.
 
 ## Inventory export (SBOM)
 
@@ -432,7 +432,7 @@ APM separates production and development dependencies:
 - **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output in every bundle format (the default Claude plugin format, the explicit Agent Plugin format, and the legacy `--format apm`).
 - **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
 
-This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
+This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#per-entry-fields) for field details.
 
 ## Slash command deployment
 
@@ -570,6 +570,15 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
 
+### Credential helper reports (Azure DevOps)
+
+When the Azure DevOps chain uses a credential from `git credential fill`, APM reports the result back to your credential helper, as Git does: `git credential approve` after the request succeeded, `git credential reject` after Azure DevOps refused that credential with HTTP 401. Limits:
+
+- Only the credential the helper returned for that repository's host and path is reported, using the exact description the helper returned. `ADO_APM_PAT`, Azure CLI bearer tokens, `gh` tokens, and GitHub, GitLab, or generic hosts are never reported.
+- A 403, a sign-in redirect or page, a proxy challenge, a not-found, throttle, network, or TLS failure, or an error naming another host is never reported, so an ambiguous answer never erases a credential.
+- Each report happens at most once per host, port, and path per run. A secret that already worked on a host in this run is never rejected for another path on that host.
+- Reports are non-interactive, time out after at most 10 seconds, and never fail the command.
+
 ### Azure DevOps Services AAD bearer tokens
 
 When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps Services
@@ -592,7 +601,7 @@ See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-
 |---|---|---|
 | Registry compromise | Attacker poisons central registry | No registry by default (git-direct). With experimental `registries`: `resolved_hash` detects tampered archives; token containment enforced; package signing not yet supported. |
 | Version substitution | Malicious version replaces legitimate one | Lock file pins exact commit SHA; content hash detects post-download tampering |
-| Post-install scripts | Arbitrary code runs after install | No code execution |
+| Post-install scripts | Arbitrary code runs after install | Dependency packages cannot run install scripts; only [lifecycle scripts](../lifecycle-scripts/) from policy, user, or explicitly trusted project sources run |
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |

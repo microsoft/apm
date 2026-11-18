@@ -8,8 +8,9 @@ Ports two owner guards recorded in
   ``mcp_transport.canonical_remote_transport``; ingestion records it.
 * ``hooks-integrations-mcp-remote-shape-table`` -- every runtime registered in
   ``ClientFactory`` binds its own row of ``adapters/client/_remote_shapes.py``
-  in its class body, every row cites evidence, and the unverified rows are
-  listed explicitly.
+  in its class body, every row cites evidence, the unverified rows are
+  listed explicitly, and an adapter whose row retires earlier shapes keeps
+  native comparison on so those APM writes heal.
 """
 
 from __future__ import annotations
@@ -171,6 +172,30 @@ def _shape_rows(tree: ast.Module) -> tuple[dict[str, dict[str, ast.expr]], set[s
     return rows, unverified
 
 
+def _opts_out_of_native_comparison(tree: ast.Module, class_name: str) -> bool:
+    """Whether *class_name* sets ``compares_native_connections`` to False in its body."""
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != class_name:
+            continue
+        for statement in node.body:
+            if isinstance(statement, ast.AnnAssign):
+                targets = [statement.target]
+            elif isinstance(statement, ast.Assign):
+                targets = statement.targets
+            else:
+                continue
+            if [getattr(t, "id", None) for t in targets] == ["compares_native_connections"] and (
+                isinstance(statement.value, ast.Constant) and statement.value.value is False
+            ):
+                return True
+    return False
+
+
+def _has_retired_shapes(row: dict[str, ast.expr]) -> bool:
+    retired = row.get("retired")
+    return retired is not None and not (isinstance(retired, ast.Tuple) and not retired.elts)
+
+
 def _check_remote_shape_table(provider: FactsProvider) -> Iterable[Violation]:
     """Each registered MCP runtime binds its own evidence-backed remote shape row."""
     rule_id = "mutation_writes.mcp_remote_shape_table"
@@ -201,6 +226,18 @@ def _check_remote_shape_table(provider: FactsProvider) -> Iterable[Violation]:
                     "in its own class body",
                 )
             )
+        elif row is not None and _has_retired_shapes(row):
+            if _opts_out_of_native_comparison(tree, class_name):
+                # The retired-shape heal runs only through native comparison
+                # (install.mcp.ownership.native_comparison_clients).
+                findings.append(
+                    violation(
+                        rule_id,
+                        module,
+                        f"{class_name} declares retired remote shapes but sets "
+                        "compares_native_connections = False, so earlier APM writes never heal",
+                    )
+                )
     stale = set(rows) - set(registry)
     if stale:
         findings.append(

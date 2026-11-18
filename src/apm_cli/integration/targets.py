@@ -114,10 +114,26 @@ USER_ROOT_ENV_VARS: dict[str, str] = {
 """Targets whose user-scope root an environment variable selects, by variable name."""
 
 
+def _default_user_dir(target: str) -> str:
+    """Return *target*'s home-relative default user root.
+
+    Targets without a user-root variable (OpenCode's ``.config/opencode``) use
+    their profile's documented ``user_root_dir``.
+    """
+    variable = USER_ROOT_VARIABLES.get(target)
+    if variable is not None:
+        return variable.default_dir
+    root_dir = KNOWN_TARGETS[target].user_root_dir
+    if root_dir is None:
+        raise KeyError(f"target '{target}' has no static user root")
+    return root_dir
+
+
 def configured_user_root(target: str) -> Path | None:
     """Return the absolute root *target*'s user-root variable selects, or ``None``.
 
-    An unset or blank variable returns ``None`` (the harness default applies).
+    An unset or blank variable, or a target without a variable, returns
+    ``None`` (the harness default applies).
     ``~`` is expanded; the path is not resolved, so callers can reject a
     symlinked location before normalizing. A relative value raises
     :class:`PathTraversalError` instead of resolving against the working
@@ -125,7 +141,9 @@ def configured_user_root(target: str) -> Path | None:
     """
     import os
 
-    variable = USER_ROOT_VARIABLES[target]
+    variable = USER_ROOT_VARIABLES.get(target)
+    if variable is None:
+        return None
     raw = os.environ.get(variable.env_var, "")
     if not raw.strip():
         return None
@@ -144,7 +162,7 @@ def resolve_user_root(target: str) -> Path:
     configured = configured_user_root(target)
     if configured is not None:
         return configured
-    return Path.home() / USER_ROOT_VARIABLES[target].default_dir
+    return Path.home() / _default_user_dir(target)
 
 
 def user_root_is_default(target: str) -> bool:
@@ -152,7 +170,7 @@ def user_root_is_default(target: str) -> bool:
     configured = configured_user_root(target)
     if configured is None:
         return True
-    default = Path.home() / USER_ROOT_VARIABLES[target].default_dir
+    default = Path.home() / _default_user_dir(target)
     return configured.resolve(strict=False) == default.resolve(strict=False)
 
 
@@ -172,7 +190,7 @@ def user_root_display(target: str) -> str:
     """Return a human-readable user root: ``~/<default>`` or the configured path."""
     configured = configured_user_root(target)
     if configured is None:
-        return f"~/{USER_ROOT_VARIABLES[target].default_dir}"
+        return f"~/{_default_user_dir(target)}"
     return configured.as_posix()
 
 

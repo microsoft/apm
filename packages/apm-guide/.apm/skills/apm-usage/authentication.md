@@ -183,9 +183,22 @@ supported. Resolution order:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
-3. After an operation's HTTP 401/403 or recognized Git authentication failure:
-   path-scoped `git credential fill` (Git Credential Manager)
-4. If the helper is empty or rejected: an error naming the attempted steps
+3. After an auth failure: path-scoped `git credential fill` (Git Credential
+   Manager), asked for `org/project/_git/repo` and sent as HTTP Basic
+   `username:password`
+4. If the helper is empty or rejected: an error listing every step in order
+
+Every ADO operation uses this chain (validation, clone, ref resolution,
+`--update` pre-flight, file downloads, org policy discovery, marketplace).
+Auth failures are HTTP 401/403, a redirect to the ADO sign-in service, an
+HTML sign-in page instead of the file, or a Git auth error. DNS, TLS,
+timeout, and not-found errors stop the chain. ADO requests use only the
+credential chosen by the chain (an unrelated `~/.netrc` entry is ignored).
+For the helper credential only, APM runs `git credential approve` after
+success and `git credential reject` after an HTTP 401 for it (once per
+repository per run; never for 403, sign-in redirects, network or TLS errors,
+`ADO_APM_PAT`, or `az` tokens; helper errors never fail the command). It sets
+`GCM_INTERACTIVE=0` when stdin is not a terminal or `CI` is set.
 
 ```bash
 # Recommended: bearer mode (no env var needed)
@@ -260,7 +273,8 @@ DNS, TLS, and timeout errors do not trigger it.
 | `ADO_APM_PAT is set, but the Azure DevOps request failed` | Stale or wrong-org PAT, no az | Rotate the PAT, run `az login --tenant <tenant>`, or store a Git Credential Manager credential |
 | `ADO_APM_PAT was rejected; az cli bearer was also rejected` | PAT and az both failed | `unset ADO_APM_PAT`, run `az login --tenant <correct-tenant>`, or store a Git Credential Manager credential |
 | `Azure DevOps Server requires ADO_APM_PAT or a Git credential helper` | On-prem Server, no PAT or fill | Set `ADO_APM_PAT` or store a repository credential in Git Credential Manager (`az` does not apply) |
-| `Authentication failed for <host>: <attempted steps> ... rejected` | Helper empty or rejected after an auth failure | Refresh `ADO_APM_PAT`, run `az login` on Services, or store a repository credential in Git Credential Manager |
+| `Azure DevOps authentication failed. Tried in order: ...` | Every chain step failed (each step's outcome is listed) | Refresh `ADO_APM_PAT`, run `az login` on Services, or store a repository credential in Git Credential Manager |
+| `Azure CLI is installed but could not get a token for Azure DevOps: <reason>` | `az` failed to issue a token (for example `AADSTS50076`, MFA required) | Run `az login` (with `--tenant` if the reason names a tenant), or set `ADO_APM_PAT` |
 | On-prem host classified as GHES / GitHub credentials selected | `GITHUB_HOST` set without an ADO host configuration | Add `ADO_HOST=your-ado-server.example.com` (or list it in `APM_ADO_HOSTS`); ADO takes precedence |
 
 ## GitHub Enterprise Server (GHES)
@@ -321,10 +335,12 @@ proxy token. The deprecated `ARTIFACTORY_APM_TOKEN` is ignored (with one
 warning) when no proxy URL is configured.
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly. The proxy has no tag listing, so semver
-ranges (`#^1.2.0`) and `apm view <pkg> versions` fail with an actionable
-error and `apm outdated` reports git deps as unknown; pin the exact upstream
-tag (`#v1.2.3`).
+never contacts GitHub directly. APM fetches exact versions only and does not
+list versions through the proxy, so semver ranges (`#^1.2.0`) and
+`apm view <pkg> versions` fail with an actionable error and `apm outdated`
+reports git deps as unknown. Pin the exact upstream tag (`#v1.2.3`) and commit
+`apm.lock.yaml`, or install from a registry that implements the APM Registry
+HTTP API.
 
 ## Registry tokens (experimental)
 

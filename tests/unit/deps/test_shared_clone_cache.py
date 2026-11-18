@@ -1197,7 +1197,9 @@ class TestAdoBareBearerRetry:
         from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
 
         d = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
-        d.auth_resolver = AuthResolver()
+        helper_store = MagicMock()
+        helper_store.resolve_git_helper_credential.return_value = None
+        d.auth_resolver = AuthResolver(token_manager=helper_store)
         d.auth_resolver.emit_stale_pat_diagnostic = MagicMock()
         d.token_manager = MagicMock()
         d._transport_selector = MagicMock()
@@ -1206,6 +1208,8 @@ class TestAdoBareBearerRetry:
         d._fallback_port_warned = set()
         d._strategies = MagicMock()
         d.git_env = {}
+        d.ado_token = "pat-token"
+        d.has_ado_token = True
 
         # Token attempt with basic auth scheme on ADO is the trigger
         # condition for the bearer retry branch.
@@ -1231,6 +1235,7 @@ class TestAdoBareBearerRetry:
             auth_scheme="basic",
         )
         d._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
+        d.auth_resolver.resolve = MagicMock(return_value=ctx)
         d._sanitize_git_error = MagicMock(side_effect=lambda s: s)
 
         attempt = TransportAttempt(scheme="https", label="https-token", use_token=True)
@@ -1250,15 +1255,16 @@ class TestAdoBareBearerRetry:
         assert dep.is_azure_devops(), "fixture sanity: dep must be ADO"
 
         bare = tmp_path / "bare"
-        urls_seen: list[str] = []
+        schemes_seen: list[str] = []
 
         def fake_run(args, **kwargs):
             if "clone" in args and "--bare" in args:
-                # URL appears in args; locate it by content rather than position
-                # (varies for tier-1 shallow vs tier-2 full clone).
-                url = next((a for a in args if a.startswith("https://")), "")
-                urls_seen.append(url)
-                if "pat-url" in url:
+                # The chain carries each credential as an Authorization
+                # header in the child environment, not in the URL.
+                env_text = " ".join(str(v) for v in (kwargs.get("env") or {}).values())
+                scheme = "bearer" if "Bearer fake-bearer-token" in env_text else "pat"
+                schemes_seen.append(scheme)
+                if scheme == "pat":
                     raise sp.CalledProcessError(
                         128, args, stderr=b"fatal: Authentication failed for 'https://...'"
                     )
@@ -1285,17 +1291,10 @@ class TestAdoBareBearerRetry:
                 is_commit_sha=False,
             )
 
-        # Both URLs must have been attempted: PAT first, bearer second.
-        assert any("pat-url" in u for u in urls_seen), (
-            f"expected PAT clone attempt, got urls={urls_seen}"
-        )
-        assert any("bearer-url" in u for u in urls_seen), (
-            f"expected bearer retry clone attempt, got urls={urls_seen}"
-        )
-        # Bearer attempt must come AFTER the PAT failure.
-        pat_idx = next(i for i, u in enumerate(urls_seen) if "pat-url" in u)
-        bearer_idx = next(i for i, u in enumerate(urls_seen) if "bearer-url" in u)
-        assert bearer_idx > pat_idx, f"bearer retry must follow PAT failure, urls={urls_seen}"
+        # PAT first, then the bearer retry after the PAT failure.
+        assert "pat" in schemes_seen, f"expected PAT clone attempt, got {schemes_seen}"
+        assert "bearer" in schemes_seen, f"expected bearer retry, got {schemes_seen}"
+        assert schemes_seen.index("bearer") > schemes_seen.index("pat"), schemes_seen
         # Stale-PAT diagnostic must be emitted on bearer success.
         assert d.auth_resolver.emit_stale_pat_diagnostic.called
 

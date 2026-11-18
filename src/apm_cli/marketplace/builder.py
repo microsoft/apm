@@ -1261,8 +1261,7 @@ class MarketplaceBuilder:
                     headers: dict[str, str] = {}
                     if rest:
                         headers["Accept"] = "application/vnd.github.raw"
-                    if token:
-                        headers["Authorization"] = f"token {token}"
+                    headers.update(AuthResolver.github_rest_headers(token))
                     with CredentialScopedSession() as session:
                         resp = origin_bounded_request(
                             session,

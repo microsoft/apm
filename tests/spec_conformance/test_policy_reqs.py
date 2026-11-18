@@ -913,7 +913,7 @@ def test_explicit_policy_ref_that_cannot_load_fails_closed(tmp_path, monkeypatch
 
     with (
         patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=requests.exceptions.ConnectionError(),
         ),
         patch("apm_cli.policy.discovery._fetch_github_contents") as remote,

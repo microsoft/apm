@@ -15,6 +15,7 @@ from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
 from ..models.dependency.materialization import nested_materialization_pairs
 from ..models.dependency.replacement import build_replacement_index
+from ..models.dependency.subsets import EdgeSelection, merge_edge_selections
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
@@ -59,6 +60,51 @@ def _select_dependency_winners(
             node.get_id(),
         )
     return ordered, winner_ids
+
+
+def _alias_divergence_warning(dep_ref: DependencyReference, selection) -> str:
+    """Describe divergent aliases for one dependency and the alias that applies."""
+    declared = "; ".join(
+        f"{edge.declared_by()}: {edge.alias or '(none)'}" for edge in selection.contributors
+    )
+    return (
+        f"Dependency '{dep_ref.get_identity()}' is declared with different aliases "
+        f"({declared}). Using '{selection.alias or '(none)'}' from the shallowest "
+        "declaration; declare the same alias everywhere to silence this warning."
+    )
+
+
+def _with_node_selection(dep_ref: DependencyReference, selection) -> DependencyReference:
+    """Return *dep_ref* carrying the merged selection; keep it when nothing changes."""
+    skills = None if selection.skill_subset is None else list(selection.skill_subset)
+    targets = None if selection.target_subset is None else list(selection.target_subset)
+    if (
+        len(selection.contributors) == 1
+        and sorted(dep_ref.skill_subset or ()) == (skills or [])
+        and sorted(dep_ref.target_subset or ()) == (targets or [])
+        and dep_ref.allow_insecure == selection.allow_insecure
+    ):
+        return dep_ref
+    merged = replace(
+        dep_ref,
+        skill_subset=skills,
+        target_subset=targets,
+        allow_insecure=selection.allow_insecure,
+        selection_contributors=selection.contributors,
+        subset_pairings=selection.subset_pairings,
+    )
+    binding = dep_ref.replacement
+    if binding is not None:
+        # The lockfile records a replaced node through its original request,
+        # so the original carries the node's merged selection too.
+        binding.original = replace(binding.original, skill_subset=skills, target_subset=targets)
+    # Download callbacks annotate the node reference with non-field state
+    # (for example ``resolved_reference``); keep it on the merged reference.
+    declared = {item.name for item in fields(dep_ref)}
+    for name, value in vars(dep_ref).items():
+        if name not in declared:
+            setattr(merged, name, value)
+    return merged
 
 
 # Type alias for the download callback.
@@ -205,6 +251,10 @@ class APMDependencyResolver:
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
         self._marketplace_provenance: dict[str, dict[str, str]] = {}
+        # Every declaring edge per node identity (``get_unique_key``), recorded
+        # before any dedup so the selection merge sees all of them (#3735).
+        self._edge_selections: dict[str, list[EdgeSelection]] = {}
+        self._edge_parents: dict[str, list[DependencyNode]] = {}
 
     @property
     def marketplace_provenance(self) -> dict[str, dict[str, str]]:
@@ -717,6 +767,8 @@ class APMDependencyResolver:
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
+        self._edge_selections = {}
+        self._edge_parents = {}
         self.replacement_index = build_replacement_index(root_package.replace_rules or [])
         consumer_root = root_package.source_path or root_apm_yml.parent
         modules_dir = self._apm_modules_dir or root_apm_yml.parent / "apm_modules"
@@ -761,6 +813,7 @@ class APMDependencyResolver:
                 parent=None,
                 is_dev=False,
             )
+            self._record_edge_selection(dep_ref, None)
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_resolution_key())
 
@@ -786,6 +839,8 @@ class APMDependencyResolver:
                 parent=None,
                 is_dev=True,
             )
+            # Record before the prod-wins skip: a dev edge still selects skills.
+            self._record_edge_selection(dep_ref, None)
             key = dep_ref.get_resolution_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
@@ -1036,6 +1091,8 @@ class APMDependencyResolver:
                             parent=node.dependency_ref.get_unique_key(),
                             is_dev=is_dev,
                         )
+                        # Record before the queued_keys dedup drops this edge.
+                        self._record_edge_selection(sub_dep, node)
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if (
@@ -1048,7 +1105,69 @@ class APMDependencyResolver:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
                             queued_keys.add(queue_key)
 
+        self._apply_edge_selections(tree)
         return tree
+
+    def _record_edge_selection(
+        self, dep_ref: DependencyReference, parent_node: DependencyNode | None
+    ) -> None:
+        """Record one declaring edge's selection for the selection merge."""
+        chain: list[str] = []
+        ancestor = parent_node
+        while ancestor is not None:
+            chain.append(ancestor.get_display_name())
+            ancestor = ancestor.parent
+        key = dep_ref.get_unique_key()
+        self._edge_selections.setdefault(key, []).append(
+            EdgeSelection.from_dependency(dep_ref, reversed(chain))
+        )
+        if parent_node is not None:
+            self._edge_parents.setdefault(key, []).append(parent_node)
+
+    @staticmethod
+    def _select_nearest_parent(
+        node: DependencyNode, declaring_parents: Iterable[DependencyNode]
+    ) -> None:
+        """Make the recorded parent the nearest declaring parent, ties by lowest key.
+
+        Equal-depth parents otherwise win by manifest order, which would make
+        ``resolved_by`` (and so the lockfile bytes) depend on declaration order.
+        """
+        if node.parent is None:
+            return
+        nearest = [parent for parent in declaring_parents if parent.depth == node.depth - 1]
+        if not nearest:
+            return
+        chosen = min(
+            nearest,
+            key=lambda parent: (parent.dependency_ref.get_unique_key(), parent.get_id()),
+        )
+        if chosen is node.parent:
+            return
+        node.parent = chosen
+        if all(child is not node for child in chosen.children):
+            chosen.children.append(node)
+
+    def _apply_edge_selections(self, tree: DependencyTree) -> None:
+        """Give every node the merged selection of all edges that declared it.
+
+        Identity, ref, transport hints and the materialized alias stay as the
+        first (shallowest, then declared) edge set them; only the per-edge
+        selection fields change.
+        """
+        warned: set[str] = set()
+        for node in tree.nodes.values():
+            dep_ref = node.dependency_ref
+            key = dep_ref.get_unique_key()
+            edges = self._edge_selections.get(key)
+            if not edges:
+                continue
+            selection = merge_edge_selections(edges)
+            node.dependency_ref = _with_node_selection(dep_ref, selection)
+            self._select_nearest_parent(node, self._edge_parents.get(key, ()))
+            if selection.divergent_aliases and key not in warned:
+                warned.add(key)
+                tree.resolution_warnings.append(_alias_divergence_warning(dep_ref, selection))
 
     def detect_circular_dependencies(self, tree: DependencyTree) -> list[CircularRef]:
         """

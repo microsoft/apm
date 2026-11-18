@@ -221,15 +221,18 @@ REMOTE_SHAPES: Mapping[str, RemoteShape] = MappingProxyType(
                 # APM <= 0.36 wrote registry SSE remotes as Streamable HTTP.
                 retired=(ShapeSpec(url_keys={_S: "url", _E: "url"}),),
             ),
-            # Today's output, kept unchanged in this row: Hermes needs
-            # ``transport: sse`` for SSE remotes, so the SSE cell is known
-            # incomplete (#3749 switches this row to a ``transport`` key).
+            # Hermes connects over Streamable HTTP unless ``transport: sse``
+            # is set (``None`` omits the key for Streamable HTTP).
             RemoteShape(
                 runtime="hermes",
                 label="Hermes",
                 url_keys={_S: "url", _E: "url"},
+                type_key="transport",
+                type_values={_S: None, _E: "sse"},
                 evidence_url="https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference",
-                verified=False,
+                # APM <= 0.36 wrote no ``transport`` key, so SSE remotes
+                # connected as Streamable HTTP (#3749).
+                retired=(ShapeSpec(url_keys={_S: "url", _E: "url"}),),
             ),
             # OpenCode converts the entry to ``type: remote`` (opencode.py).
             RemoteShape(
@@ -272,7 +275,7 @@ REMOTE_SHAPES: Mapping[str, RemoteShape] = MappingProxyType(
 
 # Rows whose remote keys were not re-verified against current vendor docs.
 UNVERIFIED_REMOTE_SHAPES: frozenset[str] = frozenset(
-    {"cursor", "hermes", "intellij", "kiro", "opencode", "windsurf"}
+    {"cursor", "intellij", "kiro", "opencode", "windsurf"}
 )
 
 

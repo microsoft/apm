@@ -24,12 +24,14 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
     from apm_cli.deps.lockfile import LockFile
@@ -85,14 +87,17 @@ class InstallService:
         *,
         mcp_servers: set[str],
         mcp_targets: list[str],
-        lsp_servers: set[str],
-        lsp_targets: list[str],
+        lsp_target_servers: dict[str, set[str]],
         current_mcp: CurrentMcpConfigView | None,
         user_scope: bool,
         project_root: Path | None = None,
         mcp_declared_transports: dict[str, str | None] | None = None,
     ) -> frozenset[tuple[str, str]]:
         """Refuse unrecorded service claims before either service mutates native state.
+
+        MCP claims every server on every target. LSP claims are per target
+        (*lsp_target_servers* maps each selected runtime to the servers it can
+        express), so a server a target skips is never required to be owned there.
 
         Returns the MCP ``(server, runtime)`` pairs that may be unclaimed only
         because the runtime refuses the server's remote transport (never
@@ -124,27 +129,27 @@ class InstallService:
                     "from the available source declarations"
                 )
         deferred: set[tuple[str, str]] = set()
-        for service, names, targets, recorded in (
-            ("MCP", mcp_servers, mcp_targets, mcp_ownership),
-            ("LSP", lsp_servers, lsp_targets, lockfile.lsp_target_servers),
-        ):
-            for target in targets:
-                for name in sorted(names - set(recorded.get(target, ()))):
-                    if (
-                        service == "MCP"
-                        and name in lockfile.mcp_servers
-                        and may_refuse_remote(target, (mcp_declared_transports or {}).get(name))
-                        and not native_mcp_entry_present(
-                            target,
-                            name,
-                            stored_config=lockfile.mcp_configs.get(name),
-                            project_root=project_root,
-                            user_scope=user_scope,
-                        )
-                    ):
-                        deferred.add((name, target))
-                        continue
-                    reasons.append(frozen_unrecorded_reason(service, name, target))
+        claims = [("MCP", target, mcp_servers, mcp_ownership) for target in mcp_targets] + [
+            ("LSP", target, names, lockfile.lsp_target_servers)
+            for target, names in lsp_target_servers.items()
+        ]
+        for service, target, names, recorded in claims:
+            for name in sorted(names - set(recorded.get(target, ()))):
+                if (
+                    service == "MCP"
+                    and name in lockfile.mcp_servers
+                    and may_refuse_remote(target, (mcp_declared_transports or {}).get(name))
+                    and not native_mcp_entry_present(
+                        target,
+                        name,
+                        stored_config=lockfile.mcp_configs.get(name),
+                        project_root=project_root,
+                        user_scope=user_scope,
+                    )
+                ):
+                    deferred.add((name, target))
+                    continue
+                reasons.append(frozen_unrecorded_reason(service, name, target))
         if reasons:
             raise frozen_services_error(reasons)
         return frozenset(deferred)
@@ -245,6 +250,7 @@ class InstallService:
             lockfile_only=request.lockfile_only,
             trust_bin=request.trust_bin,
             transaction=request.transaction,
+            lsp_preflight=request.lsp_preflight,
         )
 
     # -- Lifecycle script helpers ------------------------------------------
@@ -283,6 +289,26 @@ class InstallService:
             scope=scope_name,
             working_directory=str(pkg_path) if pkg_path is not None else None,
         )
+
+    @staticmethod
+    def enforce_frozen_selections(deps_to_install: Iterable[Any], lockfile: LockFile) -> None:
+        """Refuse a frozen install whose resolved selections differ (req-rs-018).
+
+        Runs before any deployment, so neither the recorded nor the resolved
+        selection is deployed.
+        """
+        from apm_cli.install.errors import FrozenInstallError
+
+        changes = frozen_selection_changes(deps_to_install, lockfile)
+        if changes:
+            raise FrozenInstallError(
+                "--frozen: dependency selections differ from apm.lock.yaml.",
+                reasons=[f"  - {reason}" for reason in changes],
+                tip=(
+                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
+                    "or --global if specified, then commit apm.lock.yaml."
+                ),
+            )
 
     @staticmethod
     def reject_frozen_mutation(frozen: bool, operation: str) -> None:
@@ -659,13 +685,26 @@ class InstallService:
         # than borrowing drift.py's private wrapper around the same call.
         committed_paths = set(DeploymentLedgerCodec.legacy_deployed_file_claims(committed))
 
+        changed_selections: dict[str, str] = {}
         unclaimed: set[str] = set()
         for payload in withheld:
             candidate = LockFile.from_yaml(payload)
             if committed.is_semantically_equivalent(candidate):
                 continue
+            changed_selections.update(_changed_selections(committed, candidate))
             claimed = set(DeploymentLedgerCodec.legacy_deployed_file_claims(candidate))
             unclaimed |= claimed - committed_paths
+        if changed_selections:
+            # An older lockfile recorded one parent's selection where the
+            # graph now merges every declaring edge (#3735).
+            raise FrozenInstallError(
+                "--frozen: dependency selections differ from apm.lock.yaml.",
+                reasons=[f"  - {reason}" for _key, reason in sorted(changed_selections.items())],
+                tip=(
+                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
+                    "or --global if specified, then commit apm.lock.yaml."
+                ),
+            )
         if unclaimed:
             raise FrozenInstallError(
                 "--frozen: apm.lock.yaml does not record everything this install deploys.",
@@ -699,6 +738,68 @@ _FROZEN_REPAIR_TIP = (
     "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
     "or --global if specified, then commit the deployed files and apm.lock.yaml."
 )
+
+
+def frozen_selection_changes(deps_to_install: Iterable[Any], committed: LockFile) -> list[str]:
+    """Name each locked dependency whose resolved selection differs (req-rs-018).
+
+    Runs before any deployment so ``--frozen`` never deploys either selection.
+    A recorded ``subset_pairings`` value that is malformed or disagrees with
+    the flat fields is reported as invalid lock state.
+    """
+    from apm_cli.models.dependency.subsets import dependency_pairing
+
+    marketplace_index = committed.marketplace_index()
+    reasons: dict[str, str] = {}
+    for dep_ref in deps_to_install:
+        key = dep_ref.get_unique_key()
+        locked = committed.get_dependency(key, marketplace_index=marketplace_index)
+        if locked is None:
+            continue
+        try:
+            recorded = locked.selection()
+        except ValueError as exc:
+            reasons[key] = f"selection for {key} is invalid in apm.lock.yaml ({exc})"
+            continue
+        if recorded != dependency_pairing(dep_ref):
+            reasons[key] = (
+                f"selection for {key} changed: the skills and targets its declaring "
+                "manifests request differ from apm.lock.yaml; run 'apm install' and "
+                "commit apm.lock.yaml"
+            )
+    return [reasons[key] for key in sorted(reasons)]
+
+
+def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, str]:
+    """Name each locked dependency whose resolved skill or target selection changed."""
+    changed: dict[str, str] = {}
+    for dependency in candidate.get_package_dependencies():
+        key = dependency.get_unique_key()
+        locked = committed.get_dependency(key)
+        if locked is None:
+            continue
+        for field_name, label in (("skill_subset", "skills"), ("target_subset", "targets")):
+            before = sorted(getattr(locked, field_name) or ())
+            after = sorted(getattr(dependency, field_name) or ())
+            if before != after:
+                changed[key] = (
+                    f"selection for {key} changed: locked {label} {before or 'all'}, "
+                    f"resolved {label} {after or 'all'}; run 'apm install' and commit "
+                    "apm.lock.yaml"
+                )
+                break
+        else:
+            # Same unions, but the per-target pairing can still differ (req-rs-018).
+            try:
+                same = locked.selection() == dependency.selection()
+            except ValueError:
+                same = False
+            if not same:
+                changed[key] = (
+                    f"selection for {key} changed: the skills paired with each target "
+                    "differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml"
+                )
+    return changed
 
 
 def _outermost(paths: set[str]) -> list[str]:

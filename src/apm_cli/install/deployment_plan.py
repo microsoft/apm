@@ -46,7 +46,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     package_name: str = "",
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
-    skill_subset: tuple | None = None,
+    skill_subset: tuple | None,
     ctx: InstallContext | None = None,
     policy: Any = None,
     is_first_party: bool = False,

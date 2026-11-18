@@ -1,0 +1,6 @@
+---
+paths:
+  - "**"
+---
+
+Keep it short.

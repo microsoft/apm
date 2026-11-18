@@ -265,9 +265,7 @@ class RegistryClient:
 
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
         headers = {"Accept": accept}
-        auth_header = self._auth.auth_header()
-        if auth_header:
-            headers["Authorization"] = auth_header
+        headers.update(self._auth.headers())
         return headers
 
     def _url(self, path: str) -> str:

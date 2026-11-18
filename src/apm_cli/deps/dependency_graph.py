@@ -84,6 +84,7 @@ class DependencyTree:
     _repo_lookup_index: set[str] = field(default_factory=set)
     max_depth: int = 0
     resolution_errors: list[str] = field(default_factory=list)
+    resolution_warnings: list[str] = field(default_factory=list)
 
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""

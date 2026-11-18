@@ -20,7 +20,6 @@ Artifactory Archive Entry Download proxy first. Cache lives at
 ``~/.apm/cache/marketplace/`` with a 1-hour TTL.
 """
 
-import base64
 import contextlib
 import hashlib
 import json
@@ -36,7 +35,12 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
-from ..utils.http_credentials import CredentialScopedSession, origin_bounded_request, origin_root
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
+)
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
@@ -332,10 +336,6 @@ def _fetch_url_direct(
         raise MarketplaceFetchError(url, str(exc)) from exc
 
     try:
-        final_url = getattr(resp, "url", url)
-        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
         if resp.status_code == 304:
             return None
         if resp.status_code == 404:
@@ -475,8 +475,9 @@ def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -
 
 def _github_headers(token: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github.v3.raw", "User-Agent": "apm-cli"}
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth import AuthResolver
+
+    headers.update(AuthResolver.github_rest_headers(token))
     return headers
 
 
@@ -742,42 +743,6 @@ class _AdoItemNotFound(Exception):
     """
 
 
-def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
-    """Build the Azure DevOps ``Authorization`` header for a resolved token.
-
-    ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
-    pair but not the auth scheme. Bearer contexts carry the full
-    ``Authorization: Bearer <jwt>`` header in a ``GIT_CONFIG_VALUE_<i>`` slot
-    (see ``AuthResolver._build_git_env``); detect that and emit the Bearer
-    scheme. The slot index is not fixed -- since #2368 the header is appended
-    after any retained non-auth entries -- so the whole indexed set is scanned.
-
-    Only indices below ``GIT_CONFIG_COUNT`` are read, because that is all git
-    itself reads. A slot above the count is either a leftover from an env this
-    process did not build or an injected one, and honouring it would send an
-    ADO PAT under the Bearer scheme, which the server rejects.
-
-    Otherwise treat the token as an ADO PAT and use HTTP Basic with
-    ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
-    password). Returns an empty dict for an anonymous request.
-
-    The returned dict carries the credential -- callers MUST NOT log it.
-    """
-    if not token:
-        return {}
-    env = git_env or {}
-    try:
-        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
-    except (TypeError, ValueError):
-        count = 0
-    for index in range(count):
-        value = str(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
-        if value.strip().lower().startswith("authorization: bearer "):
-            return {"Authorization": f"Bearer {token}"}
-    encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
-    return {"Authorization": f"Basic {encoded}"}
-
-
 def _fetch_ado_rest(
     source: MarketplaceSource,
     file_path: str,
@@ -810,30 +775,48 @@ def _fetch_ado_rest(
         port,
     )
 
+    from ..core.auth_chain import authorization_headers
+    from ..core.auth_outcome import raise_for_auth_outcome
+
     def _do_fetch(token, git_env):
-        headers = {"User-Agent": "apm-cli"}
-        headers.update(_ado_auth_header(token, git_env))
-        resp = _http_get(url, headers=headers, timeout=30, stream=True)
+        # Only the chain-selected credential is sent; ambient netrc never
+        # replaces it. A sign-in redirect is the auth signal: it is refused,
+        # not followed, and the classifier escalates on the refused 3xx.
+        refused: RedirectRefusedError | None = None
         try:
+            resp = _http_get(
+                url,
+                headers={"User-Agent": "apm-cli", **authorization_headers(git_env)},
+                ambient_credentials=False,
+                follow_cross_origin_without_credentials=False,
+                timeout=30,
+                stream=True,
+            )
+        except RedirectRefusedError as exc:
+            if exc.response is None:
+                raise
+            refused, resp = exc, exc.response
+        try:
+            if refused is not None:
+                # Sign-in redirects classify as auth failures; any other
+                # refused hop is a plain transport failure.
+                raise_for_auth_outcome(
+                    resp,
+                    host_kind="ado",
+                    credential_presented=bool(token),
+                )
+                raise refused
             if resp.status_code == 404:
-                # No message: this sentinel flows through ``try_with_fallback`` ->
-                # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
-                # trips an auth-failure keyword, so a 404 never wastes a bearer
-                # retry.
+                # Not an auth outcome: the classifier never escalates on it.
                 raise _AdoItemNotFound
-            # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
-            # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
-            # failure so try_with_fallback can attempt the AAD bearer before we
-            # give up and clone. The word "unauthorized" is load-bearing: it makes
-            # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
-            # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
-            if resp.status_code == 200:
-                content_type = resp.headers.get("Content-Type", "").lower()
-                if "text/html" in content_type:
-                    raise MarketplaceFetchError(
-                        source.name,
-                        "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
-                    )
+            # 401/403, a sign-in redirect, and a 200/203 HTML sign-in page all
+            # classify as auth failures so the chain escalates to the next
+            # credential before we give up and clone.
+            raise_for_auth_outcome(
+                resp,
+                host_kind="ado",
+                credential_presented=bool(token),
+            )
             resp.raise_for_status()
             return _read_capped_json(resp, source.name)
         finally:
@@ -843,7 +826,7 @@ def _fetch_ado_rest(
 
     fallback_kwargs = {
         "org": org,
-        "path": f"{org}/{project}/{repo}",
+        "path": f"{org}/{project}/_git/{repo}",
         "unauth_first": False,
     }
     if port is not None:

@@ -131,9 +131,7 @@ def test_uninstall_of_an_unrelated_package_keeps_the_legacy_skill_layout(
         recorded = set(locked(project, bundle)["deployed_files"])
         world.run(("uninstall", c), cwd=project, env=env, scenario_id="ul-rm")
     assert skill_dirs(project / _SHARED_SKILLS) == []
-    assert "alpha" in skill_dirs(legacy_root)
-    if skill_dirs(legacy_root) != ["alpha"]:
-        pytest.xfail("#3760: uninstall re-deploys every skill of a surviving bundle (#3784)")
+    assert skill_dirs(legacy_root) == ["alpha"]
     assert set(locked(project, bundle)["deployed_files"]) == recorded
 
 

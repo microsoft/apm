@@ -109,6 +109,78 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/install/drift.py",
+            "skill_subset=selection.skill_subset,",
+            "skill_subset=package_info.dependency_ref.skill_subset,",
+            id="replay-local-skill-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "dep_target_subset=selection.target_subset,\n            ctx=ctx,\n"
+            "            allow_executables=effective_allow_map(ctx),\n"
+            "            trust_bin=ctx.trust_bin,",
+            "dep_target_subset=dependency.target_subset,\n            ctx=ctx,\n"
+            "            allow_executables=effective_allow_map(ctx),\n"
+            "            trust_bin=ctx.trust_bin,",
+            id="preflight-local-target-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "skill_subset=effective_dependency_selection(None, ctx).skill_subset,",
+            "skill_subset=None,",
+            id="local-content-unallowlisted-none",
+        ),
+        pytest.param(
+            "src/apm_cli/install/deployment_plan.py",
+            "    skill_subset: tuple | None,\n",
+            "    skill_subset: tuple | None = None,\n",
+            id="optional-skill-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "            effective_dependency_selection(dep_ref).target_subset,\n",
+            "            dep_ref.target_subset,\n",
+            id="uninstall-local-target-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "                effective_dependency_selection(dep_ref).target_subset,\n",
+            "                dep_ref.target_subset,\n",
+            id="hook-reconcile-local-target-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "effective_dependency_selection(locked_dep, self.ctx).skill_subset",
+            "effective_deploy_skill_subset(False, self.ctx.skill_subset, None)",
+            id="lockfile-records-outside-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "    from apm_cli.install.services import IntegratorBundle, integrate_package_primitives\n",
+            "    from apm_cli.install.services import IntegratorBundle\n"
+            "    from apm_cli.install.services import integrate_package_primitives as _deploy\n"
+            "    integrate_package_primitives = None\n"
+            "    _deploy(skill_subset=package_info.dependency_ref.skill_subset)\n",
+            id="aliased-deploy-call",
+        ),
+    ],
+)
+def test_deploy_selection_cannot_bypass_owner(path: str, original: str, replacement: str) -> None:
+    """Deploy calls take skill and target selection from one owner (#3760)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-effective-selection"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
@@ -402,6 +474,51 @@ def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
     assert {violation.path for violation in report.violations} == {path}
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "            skill_pairing=selection.skill_pairing,\n",
+            "",
+            id="deploy-drops-pairing",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "        skill_pairing=skill_pairing,\n",
+            "",
+            id="skill-integrator-drops-pairing",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "            subset_pairings=_replay_pairing(\n",
+            "            _ignored=_replay_pairing(\n",
+            id="lock-replay-drops-pairing",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/integrate.py",
+            "InstallService.enforce_frozen_selections(",
+            "InstallService.describe_frozen_selections(",
+            id="frozen-skips-selection-check",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "def _pairing_summary(",
+            "def merge_edge_pairings(edges):\n    return edges\n\n\ndef _pairing_summary(",
+            id="second-pairing-owner",
+        ),
+    ],
+)
+def test_skill_pairing_cannot_bypass_selection_owner(path: str, old: str, new: str) -> None:
+    """req-rs-018: every deploy, replay and frozen path keeps the exact pairing (#3763)."""
+    rule_id = "install-deployment-selection-merge"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 @pytest.mark.parametrize(
@@ -794,8 +911,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-mcp-target-selection",
         rule_id="mutation_writes.mcp_target_selection",
         path="src/apm_cli/integration/mcp_integrator_install.py",
-        old="parse_targets_field(apm_config)",
-        new="parse_target_fields(apm_config)",
+        old="manifest_target_restriction(apm_config)",
+        new="manifest_target_restrictions(apm_config)",
         intent="MCP install adapter stops parsing targets through the manifest owner.",
     ),
     MutationCase(
@@ -911,6 +1028,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Audit reports an unclaimed differing file as a managed local edit.",
     ),
     MutationCase(
+        guard_id="install-deployment-effective-selection",
+        rule_id="install-deployment-effective-selection",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="                    skill_subset=selection.skill_subset,\n",
+        new="",
+        intent="Uninstall re-integrates survivors without their effective skill selection.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
@@ -959,6 +1084,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-lsp-capability-gate",
+        rule_id="install-deployment-lsp-capability-gate",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="    preflight_lsp_targets(ctx)\n",
+        new="",
+        intent="The integrate phase deploys packages without the LSP capability gate.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",
@@ -970,9 +1103,20 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-lsp-target-contract",
         rule_id="install-deployment-lsp-target-contract",
         path="src/apm_cli/integration/lsp_integrator.py",
-        old="return BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
-        new="return spec.path(project_root, user_scope=False)",
-        intent="Claude LSP plugin writes bypass the canonical deployment-path gate.",
+        old=(
+            "return BaseIntegrator.resolve_deploy_path(\n"
+            "            relative_path,\n"
+            "            root,\n"
+            "            allowed_prefixes=(relative_path,),\n"
+            "        )"
+        ),
+        new=(
+            "return spec.path(\n"
+            "            project_root,\n"
+            "            user_scope=user_scope,\n"
+            "        )"
+        ),
+        intent="LSP target config writes bypass the canonical deployment-path gate.",
     ),
     MutationCase(
         guard_id="install-deployment-manifest-snapshot",
@@ -1089,6 +1233,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def prepare_replacement(",
         new="def prepare_replacement_disabled(",
         intent="Resolution staging owner drops a mandatory replacement-activation method.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-selection-merge",
+        rule_id="install-deployment-selection-merge",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="                        self._record_edge_selection(sub_dep, node)\n",
+        new="                        self._note_edge(sub_dep, node)\n",
+        intent="A transitive edge reaches queue dedup without being recorded for the merge.",
     ),
     MutationCase(
         guard_id="install-deployment-single-file-materialization",
@@ -1401,6 +1553,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         replace_all=True,
     ),
     MutationCase(
+        guard_id="registry-delegation-manifest-target-declaration",
+        rule_id="registry_delegation.target_vocabulary",
+        path="src/apm_cli/install/target_filter.py",
+        old='    package = getattr(package_source, "package", package_source)\n',
+        new=(
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = vars(package).get("targets")\n'
+        ),
+        intent="Package-target authorization re-reads the raw manifest targets field.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-output-diagnostics",
         rule_id="registry_delegation.output_diagnostics",
         path="src/apm_cli/commands/marketplace/__init__.py",
@@ -1474,9 +1637,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-ado-validation-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/install/validation.py",
-        old="        fallback = auth_resolver.execute_with_bearer_fallback(",
-        new="        fallback = _bypass_ado_bearer_fallback(",
-        intent="Install validation bypasses canonical ADO PAT-to-bearer fallback.",
+        old="            run_result = auth_resolver.try_with_fallback(",
+        new="            run_result = _bypass_ado_auth_chain(",
+        intent="Install validation bypasses the canonical ADO credential chain.",
     ),
     MutationCase(
         guard_id="transport-platform-ado-validation-caller-config",
@@ -1496,9 +1659,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-ado-validation-clone-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/deps/clone_engine.py",
-        old="                    fallback = host.auth_resolver.execute_with_bearer_fallback(",
-        new="                    fallback = _execute_ado_bearer_fallback_locally(",
-        intent="Clone execution bypasses AuthResolver's PAT-to-bearer owner.",
+        old='                    host.auth_resolver.try_with_fallback(\n                        dep_host or "dev.azure.com",',
+        new='                    _run_ado_chain_locally(\n                        dep_host or "dev.azure.com",',
+        intent="Clone execution bypasses AuthResolver's ADO credential chain.",
     ),
     MutationCase(
         guard_id="transport-platform-ado-validation-helper-suppression",
@@ -1525,6 +1688,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Direct Artifactory entry requests regain ambient netrc credentials.",
     ),
     MutationCase(
+        guard_id="transport-platform-auth-outcome-owner",
+        rule_id="transport-platform-auth-outcome-owner",
+        path="src/apm_cli/policy/discovery.py",
+        old="        if response.status_code != 200:\n            raise AuthAttemptFailed(response=response)\n        return response\n\n    try:\n        resp = auth_resolver.try_with_fallback(",
+        new="        if response.status_code in (401, 403):\n            raise AuthAttemptFailed(response=response)\n        return response\n\n    try:\n        resp = auth_resolver.try_with_fallback(",
+        intent="ADO policy fetch regrows a local 401/403 auth classification.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-authenticated-egress",
+        rule_id="transport-platform-authenticated-egress",
+        path="src/apm_cli/marketplace/builder.py",
+        old="resp = origin_bounded_request(",
+        new="resp = urllib.request.urlopen(",
+        intent="Credentialed marketplace metadata fetches return to urllib, outside the owners.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-authenticated-egress-credential-headers",
+        rule_id="transport-platform-authenticated-egress",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="return cfg.headers_for(scheme, host)",
+        new='return {"Authorization": f"Bearer {cfg.token}"}',
+        intent="Artifactory downloads assemble a credential header outside its owners.",
+    ),
+    MutationCase(
         guard_id="transport-platform-cache-cleanup-outcome",
         rule_id="transport-platform-cache-cleanup-outcome",
         path="src/apm_cli/cache/git_cache.py",
@@ -1547,6 +1734,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="return cfg.headers_for(scheme, host)",
         new="return cfg.get_headers()",
         intent="Artifactory downloads attach the registry token to any requested origin.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-credential-report-owner",
+        rule_id="transport-platform-credential-report-owner",
+        path="src/apm_cli/core/auth_chain.py",
+        old="    elif outcome.is_verified_rejection:",
+        new="    elif outcome.is_auth_failure:",
+        intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
     ),
     MutationCase(
         guard_id="transport-platform-git-cache-identity",
@@ -2645,6 +2840,23 @@ def test_frozen_native_service_boundary_guards(path: str, old: str, new: str) ->
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_remote_shape_guard_rejects_retired_rows_without_native_comparison() -> None:
+    """A row with retired shapes cannot heal on an adapter that skips native comparison."""
+    path = "src/apm_cli/adapters/client/hermes.py"
+    old = "    supports_user_scope: bool = True\n"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, old + "    compares_native_connections: bool = False\n", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "mutation_writes.mcp_remote_shape_table"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and "compares_native_connections" in violation.message
+        for violation in report.violations
+    )
+
+
 def test_ref_freshness_guard_rejects_unconditional_cache_publication() -> None:
     """A checkout must not promote a lock pin into a fresh named observation."""
     path = "src/apm_cli/deps/github_downloader.py"
@@ -3073,3 +3285,143 @@ def test_policy_target_projection_guard_rejects_raw_selections(
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "    manifest_decision = EffectiveTargetDecision(",
+            '    raw_target = (raw_yml or {}).get("target")\n'
+            "    manifest_decision = EffectiveTargetDecision(",
+            id="audit-raw-get",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/policy_target_check.py",
+            "    target_decision = ctx.target_decision\n",
+            "    target_decision = ctx.target_decision\n"
+            '    config_target = getattr(ctx.apm_package, "target", None)\n',
+            id="install-gate-getattr",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/compile/cli.py",
+            "        if isinstance(config_target, list) and len(config_target) == 1:\n",
+            "        config_target = parse_targets_field({})\n"
+            "        if isinstance(config_target, list) and len(config_target) == 1:\n",
+            id="compile-reparse",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/parser.py",
+            "# architecture-authority-exempt: policy-schema",
+            "# architecture-authority-exempt: anything-goes",
+            id="unknown-exemption-concept",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            '        apm_yml_data["targets"] = list(config["targets"])\n',
+            '        apm_yml_data["targets"] = list(config["targets"])\n'
+            "        leaked = package.targets\n",
+            id="exempt-block-does-not-cover-nested-read",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/local_bundle.py",
+            '    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata\n',
+            '    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata\n'
+            '    leaked = lockfile.get("targets")\n',
+            id="trailing-marker-does-not-cover-next-line",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            "    if package.targets:\n"
+            "        # architecture-authority-exempt: bootstrap-writer\n"
+            "        pass\n",
+            id="body-marker-does-not-cover-header",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = package_source["targets"]\n',
+            id="raw-subscript",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    declared = "targets" in vars(package)\n',
+            id="raw-key-test",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = dict(vars(package)).pop("targets", None)\n',
+            id="raw-pop",
+        ),
+    ],
+)
+def test_manifest_target_declaration_guard_rejects_raw_readers(
+    path: str, old: str, new: str
+) -> None:
+    """Every package-target reader routes through ManifestTargetDeclaration (#3732)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.target_vocabulary"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helper credential report side doors (#3765)
+# ---------------------------------------------------------------------------
+
+_CRED_REPORT_RULE = "transport-platform-credential-report-owner"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/core/auth.py",
+            "            if cred:\n",
+            "            if cred:\n                subprocess.run(['git', 'credential', 'approve'])\n",
+            id="raw-argv-outside-runner",
+        ),
+        pytest.param(
+            "src/apm_cli/core/auth.py",
+            "            if cred:\n",
+            "            if cred:\n"
+            "                self._token_manager.report_git_helper_credential(cred, accepted=True)\n",
+            id="runner-called-outside-chain",
+        ),
+        pytest.param(
+            "src/apm_cli/core/auth_outcome.py",
+            "rejection_verified=credential_presented and status == 401,",
+            "rejection_verified=credential_presented,",
+            id="403-counts-as-verified",
+        ),
+        pytest.param(
+            "src/apm_cli/core/auth_chain.py",
+            "    if not _HELPER_REPORTS.decide(key, action, credential.password):\n        return\n",
+            "",
+            id="no-once-per-key",
+        ),
+    ],
+)
+def test_credential_report_guard_rejects_side_doors(path: str, old: str, new: str) -> None:
+    """approve/reject stays in the chain owner, once per key, reject only on a 401."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (_CRED_REPORT_RULE,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(v.rule_id == _CRED_REPORT_RULE for v in report.violations)

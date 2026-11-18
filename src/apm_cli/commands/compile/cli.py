@@ -337,28 +337,15 @@ def _resolve_effective_target(
         (str | list | None) for user-facing label rendering.
     """
     from ...core.target_detection import detect_target
-    from ...models.apm_package import APMPackage
+    from ...models.apm_package import APMPackage, package_target_selection
 
     _root = source_root or Path(".")
     config_target = None
     apm_yml_path = _root / APM_YML_FILENAME
     if apm_yml_path.exists():
-        apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
-        config_target = apm_pkg.target
-        if config_target is None:
-            try:
-                from ...core.apm_yml import parse_targets_field
-                from ...utils.yaml_io import load_yaml
-
-                _raw = load_yaml(apm_yml_path)
-                if isinstance(_raw, dict):
-                    _yaml_targets = parse_targets_field(_raw)
-                    if _yaml_targets:
-                        config_target = (
-                            _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
-                        )
-            except Exception:
-                pass
+        config_target = package_target_selection(APMPackage.from_apm_yml(apm_yml_path))
+        if isinstance(config_target, list) and len(config_target) == 1:
+            config_target = config_target[0]
 
     compile_target = _resolve_compile_target(target)
     compile_config_target = _resolve_compile_target(config_target)
@@ -390,13 +377,20 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
     Declared names are normalized before lookup because ``apm.yml`` accepts the
     ``vscode`` alias, which is not a ``KNOWN_TARGETS`` key; matching raw tokens
     would drop it and silently compile nothing.
+
+    The manifest is read strictly through the declaration owner: a broken user
+    manifest fails closed instead of widening to every harness, and singular
+    ``target: all`` expands to every target like ``apm install -g`` does.
     """
-    from ...core.apm_yml import read_declared_target_names
     from ...core.target_catalog import normalize_target_name
     from ...integration.targets import KNOWN_TARGETS
+    from ...models.manifest_targets import read_manifest_target_declaration
 
-    declared = read_declared_target_names(source_root)
-    if declared is None or not declared:
+    declaration = read_manifest_target_declaration(source_root / APM_YML_FILENAME)
+    if declaration is None or declaration.spelling is None:
+        return list(KNOWN_TARGETS.values()), None
+    declared = declaration.restriction(strict=True)
+    if not declared:
         return list(KNOWN_TARGETS.values()), None
     canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
     profiles = (KNOWN_TARGETS.get(name) for name in canonical)

@@ -1474,9 +1474,9 @@ class MCPIntegrator:
             ConflictingTargetsError,
             EmptyTargetsListError,
             UnknownTargetError,
-            parse_targets_field,
         )
         from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+        from apm_cli.models.manifest_targets import manifest_target_restriction
 
         if target_decision is not None and target_decision.canonical_targets is not None:
             active = set(target_decision.canonical_targets)
@@ -1500,7 +1500,7 @@ class MCPIntegrator:
         yaml_targets: list[str] | None = None
         if apm_config:
             try:
-                parsed = parse_targets_field(apm_config)
+                parsed = manifest_target_restriction(apm_config)
                 yaml_targets = parsed if parsed else None
             except (
                 ConflictingTargetsError,
@@ -1513,7 +1513,7 @@ class MCPIntegrator:
                 )
                 _rich_error(str(exc), symbol="")
                 _log.debug(
-                    "parse_targets_field failed; failing closed (no MCP writes)",
+                    "manifest target declaration invalid; failing closed (no MCP writes)",
                     exc_info=True,
                 )
                 return []

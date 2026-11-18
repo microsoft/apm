@@ -35,7 +35,7 @@ marketplace:
     monkeypatch.setattr(
         AuthResolver,
         "resolve",
-        lambda _self, host, org=None: AuthContext(
+        lambda _self, host, org=None, **_kwargs: AuthContext(
             token=bearer,
             source="AAD_BEARER_AZ_CLI",
             token_type="unknown",

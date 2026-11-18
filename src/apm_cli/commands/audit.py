@@ -732,6 +732,8 @@ def _audit_ci_gate(
                     f"[x] {cause} (policy.fetch_failure_default=block)",
                     err=True,
                 )
+                if fetch_result.discovery_hint:
+                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
                 sys.exit(1)
             else:
                 click.echo(
@@ -739,6 +741,8 @@ def _audit_ci_gate(
                     "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
                     err=True,
                 )
+                if cfg.verbose and fetch_result.discovery_hint:
+                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
                 fetch_result = None
 
     if fetch_result is not None and fetch_result.found:

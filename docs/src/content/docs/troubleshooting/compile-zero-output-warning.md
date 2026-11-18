@@ -64,8 +64,7 @@ This is the most common cause. Each target supports a subset of primitive types.
 
 Authoritative matrix: [targets matrix](../../reference/targets-matrix/).
 
-[i] Ship only `prompts` to `claude`? Zero output -- Claude has no `prompts` slot.
-[i] Ship only `instructions` to `codex`? Zero output -- Codex has no `instructions` slot.
+[i] Ship only `prompts` or `skills`? Nothing to compile -- `apm compile` builds `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` from instructions; `apm install` deploys prompts and skills.
 
 ### 5. Confirm policy is not dropping content
 
@@ -86,14 +85,14 @@ apm targets        # what will be written to?
 apm deps list      # is the skill counted?
 ```
 
-If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps list` shows the skill but compile still emits nothing, every active target lacks `skills` support (rare -- most targets do support skills via `.agents/SKILL.md`).
+If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps list` shows the skill but compile still emits nothing, that is expected: `apm compile` does not write skills; `apm install` deploys them to each target's skills directory.
 
 ### "I targeted `cursor` but my command files don't appear"
 
 Cursor commands route through the shared `claude_command` transformer, which only preserves the common frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`). If your command file has *only* Cursor-specific keys (`author`, `mcp`, `parameters`, ...), nothing the transformer recognises is left to write. Add at least a `description:` field, then re-run:
 
 ```bash
-apm compile --target cursor
+apm install --target cursor
 ```
 
 Dropped keys are surfaced via diagnostics at install time -- check `apm install` output for warnings.
@@ -103,7 +102,7 @@ Dropped keys are surfaced via diagnostics at install time -- check `apm install`
 Expected when targets and primitive types don't intersect uniformly. Example: a project with `target: [claude, gemini]` shipping `instructions` + `commands` writes:
 
 - `claude`: instructions (as rules) + commands -- both land.
-- `gemini`: commands only -- instructions are silently skipped because Gemini has no `rules/` slot.
+- `gemini`: commands only -- Gemini has no per-file `rules/` slot; its instructions reach `GEMINI.md` through `apm compile`.
 
 Cross-check against the [targets matrix](../../reference/targets-matrix/) before filing a bug.
 
@@ -115,6 +114,6 @@ Re-run with `--verbose` for source attribution and per-target stats:
 apm compile --verbose
 ```
 
-If `*_files_written` and `*_files_generated` are all zero across the stats block, every target was a no-op. Use the ladder above to find which step silently filtered everything out.
+If the output reports no generated files for any target, every target was a no-op. Use the ladder above to find which step silently filtered everything out.
 
 Reference: [`apm compile`](../../reference/cli/compile/), [`apm targets`](../../reference/cli/targets/), [`apm view`](../../reference/cli/view/), [targets matrix](../../reference/targets-matrix/), [manifest schema](../../reference/manifest-schema/), [policy schema](../../reference/policy-schema/).
