@@ -647,6 +647,7 @@ install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
 install-deployment-skill-layout
 install-deployment-skill-preflight
+install-deployment-selection-merge
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle

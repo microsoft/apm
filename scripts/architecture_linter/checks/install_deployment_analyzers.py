@@ -97,6 +97,10 @@ from scripts.architecture_linter.checks.install_request_and_source import (
     check_request_defaults,
     check_source_plan,
 )
+from scripts.architecture_linter.checks.install_selection_merge import (
+    GUARD_SELECTION_MERGE,
+    check_selection_merge,
+)
 from scripts.architecture_linter.checks.install_single_file import (
     GUARD as _GUARD_SINGLE_FILE,
 )
@@ -207,6 +211,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_SKILL_PREFLIGHT,
         "The complete selected skill plan is checked before native deployment.",
         check_skill_preflight,
+    ),
+    _rule(
+        GUARD_SELECTION_MERGE,
+        "Every resolver edge reaches the single dependency selection-merge owner.",
+        check_selection_merge,
     ),
     _rule(
         _GUARD_PRIMITIVE_CLASSIFICATION,

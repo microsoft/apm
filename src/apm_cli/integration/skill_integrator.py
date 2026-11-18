@@ -808,16 +808,29 @@ class SkillIntegrator(BaseIntegrator):
         parent_name: str,
         diagnostics=None,
         logger=None,
+        declared_by: str | None = None,
     ) -> None:
-        """Fail an unsatisfied persisted required selection through the output cascade."""
+        """Fail an unsatisfied persisted required selection through the output cascade.
+
+        *declared_by* names the dependency chain whose manifest declared the
+        selection when it is not the project's own apm.yml.
+        """
         available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
         requested_display = ", ".join(sorted(set(requested_names)))
-        details = (
-            "Skill selection matched no available skills. "
-            f"Requested: {requested_display}. Available: {available_display}. "
-            "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
-            "then run 'apm install'."
-        )
+        if declared_by:
+            details = (
+                f"Skill selection declared by '{declared_by}' matched no available skills. "
+                f"Requested: {requested_display}. Available: {available_display}. "
+                f"Update '{declared_by.split(' > ')[-1]}' to a version whose 'skills:' "
+                "names available skills, then run 'apm install'."
+            )
+        else:
+            details = (
+                "Skill selection matched no available skills. "
+                f"Requested: {requested_display}. Available: {available_display}. "
+                "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
+                "then run 'apm install'."
+            )
         if diagnostics is not None:
             diagnostics.error(details, package=parent_name)
         elif logger:

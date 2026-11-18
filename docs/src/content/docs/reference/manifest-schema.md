@@ -556,6 +556,12 @@ Listing a harness the install did not select does not add it; omitting
 list `targets: []` is rejected at parse time -- omit the key to mean
 "all".
 
+When several manifests declare the same dependency (your `apm.yml` and one or
+more parent packages), APM installs it once with the union of their `skills:`
+and of their `targets:`. A declaration that omits the field selects everything.
+Order of declaration does not matter. If the declarations use different
+`alias:` values, the shallowest declaration wins and APM prints a warning.
+
 ```yaml
 - git: my-team/review-hooks
   targets: [copilot, claude]

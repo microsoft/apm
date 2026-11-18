@@ -136,6 +136,15 @@
       "guards": ["install-deployment-skill-preflight"]
     },
     {
+      "id": "dependency-selection-merge",
+      "decision": "Selection (skills:, targets:) one dependency node carries when several edges declare it: per-field sorted union where an unrestricted edge absorbs; alias stays the shallowest declaration with a divergence warning",
+      "owner": "models/dependency/subsets.py (merge_edge_selections, NodeSelection, union_selection_names); deps/apm_resolver.py records every edge (_record_edge_selection) before dedup and applies the merge; deps/reachability.py (declared_node_selections) recomputes it for uninstall shrink and audit skill-subset-consistency",
+      "selectors": [
+        "src/apm_cli/models/dependency/subsets.py"
+      ],
+      "guards": ["install-deployment-selection-merge"]
+    },
+    {
       "id": "primitive-kind-classification",
       "decision": "Primitive artifact kind classification precedence",
       "owner": "install/primitive_classification.py (classify_plugin_manifest, classify_agent_source_file)",

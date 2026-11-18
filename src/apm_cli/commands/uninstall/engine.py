@@ -984,6 +984,54 @@ def _cleanup_transitive_orphans(
     return removed, actual_orphans
 
 
+def _shrink_surviving_selections(
+    lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger
+) -> builtins.set[str]:
+    """Narrow survivors' locked selections to what surviving edges still declare.
+
+    A node's ``skill_subset``/``target_subset`` is the merge over every edge
+    that declares it (#3735). Once a parent is uninstalled its contribution
+    must leave the union. The merge is recomputed from the surviving
+    manifests through the canonical owner; an incomplete walk keeps the
+    locked union, because missing evidence is not proof a selection is unused.
+
+    Returns the lock keys whose selection changed; their deployed files must
+    be removed and re-integrated with the new selection.
+    """
+    if not lockfile or apm_yml_path is None or not apm_modules_dir.exists():
+        return builtins.set()
+    from ...deps.reachability import declared_node_selections
+
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    declared = declared_node_selections(
+        lockfile, apm_yml_path.parent, apm_modules_dir, direct_refs, dev_refs=dev_refs
+    )
+    if not declared.complete:
+        logger.verbose_detail(
+            "    Kept recorded skill and target selections: "
+            f"{len(declared.unverifiable)} package manifest(s) could not be verified"
+        )
+        return builtins.set()
+    changed = builtins.set()
+    for key, selection in declared.selections.items():
+        locked = lockfile.get_dependency(key)
+        if locked is None:
+            continue
+        skills = list(selection.skill_subset or ())
+        targets = list(selection.target_subset or ())
+        if (
+            sorted(locked.skill_subset or ()) == skills
+            and sorted(locked.target_subset or ()) == targets
+        ):
+            continue
+        locked.skill_subset = skills
+        locked.target_subset = targets
+        changed.add(key)
+        label = "local dependency" if _is_private_local_identity(key) else key
+        logger.verbose_detail(f"    Updated selection of {label} to its surviving declarations")
+    return changed
+
+
 def _project_transitive_orphans(
     lockfile,
     packages_to_remove,

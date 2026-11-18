@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 
 from apm_cli.install import registry_wiring
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
+from apm_cli.models.dependency.subsets import union_selection_names
 from apm_cli.utils.github_host import build_ssh_url
 
 GIT_PARENT_USER_SCOPE_ERROR = (
@@ -261,12 +262,7 @@ def effective_deploy_skill_subset(
     """
     if skill_subset_from_cli and not cli_subset:
         return None  # --skill '*' -> full bundle
-    merged: builtins.set[str] = builtins.set()
-    if persisted_subset:
-        merged.update(persisted_subset)
-    if cli_subset:
-        merged.update(cli_subset)
-    return builtins.tuple(sorted(merged)) or None
+    return union_selection_names(persisted_subset, cli_subset)
 
 
 class EffectiveDependencySelection(NamedTuple):

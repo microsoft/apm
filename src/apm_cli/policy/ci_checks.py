@@ -375,8 +375,16 @@ def _check_skill_subset_consistency(
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
 ) -> CheckResult:
-    """Verify skill subsets match the lockfile and real package tree."""
+    """Verify locked selections match what the declared graph merges to.
+
+    Every locked dependency's ``skill_subset``/``target_subset`` must equal
+    the merge (canonical owner: ``merge_edge_selections``) of every edge the
+    project's ``apm.yml`` and the materialized packages' manifests declare
+    for it (#3735). A selection that cannot be recomputed is reported as
+    unverified, never passed.
+    """
     from ..constants import APM_MODULES_DIR
+    from ..deps.reachability import declared_node_selections
 
     if prepared_replay_error is not None:
         return CheckResult(
@@ -390,32 +398,55 @@ def _check_skill_subset_consistency(
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR
     )
+    declared = declared_node_selections(
+        lock,
+        project_root,
+        modules_root,
+        manifest.get_apm_dependencies(),
+        dev_refs=manifest.get_dev_apm_dependencies(),
+    )
     mismatches: list[str] = []
-    marketplace_index = lock.marketplace_index()
-    for dep_ref in manifest.get_all_apm_dependencies():
-        key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
-        if locked_dep is None:
-            continue
-        if not dep_ref.skill_subset and not locked_dep.skill_subset:
-            continue
-        manifest_subset = sorted(dep_ref.skill_subset) if dep_ref.skill_subset else []
-        lock_subset = sorted(locked_dep.skill_subset) if locked_dep.skill_subset else []
-        if manifest_subset != lock_subset:
-            mismatches.append(
-                f"{key}: manifest skills {manifest_subset} != lockfile skill_subset {lock_subset}"
-            )
-            continue
+    for locked_dep in lock.get_package_dependencies():
+        key = locked_dep.get_unique_key()
+        lock_skills = sorted(locked_dep.skill_subset or ())
+        lock_targets = sorted(locked_dep.target_subset or ())
         missing = _missing_recorded_skill_subset_paths(
             modules_root,
-            dep_ref,
+            locked_dep.to_dependency_ref(),
             locked_dep.package_type,
-            lock_subset,
+            lock_skills,
         )
         if missing:
             mismatches.append(
                 f"{key}: recorded skill subset path(s) not found in package tree: "
                 f"{', '.join(missing)}"
+            )
+            continue
+        selection = declared.selections.get(key)
+        expected_skills = list(selection.skill_subset or ()) if selection else []
+        expected_targets = list(selection.target_subset or ()) if selection else []
+        # An unrestricted declaration absorbs any declaration the walk could
+        # not read, so only then is an incomplete walk still conclusive.
+        absorbed = (
+            selection is not None
+            and selection.skill_subset is None
+            and selection.target_subset is None
+        )
+        if selection is None or (not declared.complete and not absorbed):
+            mismatches.append(
+                f"{key}: selection unverified -- the manifests that declare it could "
+                "not all be read"
+            )
+            continue
+        if lock_skills != expected_skills:
+            mismatches.append(
+                f"{key}: declared skills {expected_skills} != lockfile skill_subset {lock_skills}"
+            )
+            continue
+        if lock_targets != expected_targets:
+            mismatches.append(
+                f"{key}: declared targets {expected_targets} != lockfile target_subset "
+                f"{lock_targets}"
             )
 
     if not mismatches:

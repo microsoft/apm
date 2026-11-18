@@ -582,6 +582,17 @@ lockfile cannot widen a dependency's reach. The formal schema contract
 lives in `docs/src/content/docs/reference/manifest-schema.md` section
 4.1.2.
 
+
+## Shared dependencies (diamonds)
+
+When your `apm.yml` and one or more parent packages declare the same
+dependency, APM installs it once with the sorted union of every declaration's
+`skills:` and of every declaration's `targets:`. A declaration that omits the
+field selects everything. Declaration order does not matter. `apm uninstall`
+of one parent narrows the union to the remaining declarations, and
+`apm audit --ci` checks the lockfile against that union. If the declarations
+use different `alias:` values, the shallowest declaration wins with a warning.
+
 ## MCP dependency formats
 
 See also: [MCP Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md) for the CLI-first `apm install --mcp` workflow.

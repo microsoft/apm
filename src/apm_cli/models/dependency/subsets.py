@@ -1,11 +1,148 @@
-"""Per-dependency subset field parsers."""
+"""Per-dependency subset field parsers and the selection-merge owner.
+
+One dependency node can be declared by several edges (the project's
+``apm.yml`` and any number of parent packages). Each edge may narrow the node
+with ``skills:`` and ``targets:``. :func:`merge_edge_selections` is the single
+owner of the selection the node carries: a per-field union in which an
+unrestricted edge (``None``) absorbs every narrowing, returned as a sorted
+tuple so the result never depends on traversal order (#3735).
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Any, Literal
 
 from apm_cli.utils.path_security import validate_path_segments
+
+# Typed hook for #3203: exclude-mode selections will join this vocabulary.
+# Merging any mode other than "include" must fail clearly rather than invent
+# a precedence between include and exclude lists.
+SelectionMode = Literal["include"]
+
+ROOT_MANIFEST_LABEL = "apm.yml"
+
+
+class SelectionMergeError(ValueError):
+    """Raised when edge selections cannot be merged without inventing precedence."""
+
+
+@dataclass(frozen=True)
+class EdgeSelection:
+    """The selection one declaring edge places on a dependency node.
+
+    Diagnostics-only provenance: it is never persisted. ``parent_chain`` names
+    the declaring packages from the shallowest down to the direct parent; an
+    empty chain is the project's own ``apm.yml``. ``None`` subsets mean
+    "unrestricted".
+    """
+
+    parent_chain: tuple[str, ...]
+    skill_subset: tuple[str, ...] | None
+    target_subset: tuple[str, ...] | None
+    alias: str | None = None
+    allow_insecure: bool = False
+    mode: SelectionMode = "include"
+
+    @classmethod
+    def from_dependency(cls, dep_ref: Any, parent_chain: Iterable[str] = ()) -> EdgeSelection:
+        """Capture the per-edge intent declared on *dep_ref*."""
+        return cls(
+            parent_chain=tuple(parent_chain),
+            skill_subset=_normalized(getattr(dep_ref, "skill_subset", None)),
+            target_subset=_normalized(getattr(dep_ref, "target_subset", None)),
+            alias=getattr(dep_ref, "alias", None),
+            allow_insecure=bool(getattr(dep_ref, "allow_insecure", False)),
+        )
+
+    def declared_by(self) -> str:
+        """Return a printable name for the manifest that declared this edge."""
+        return " > ".join(self.parent_chain) if self.parent_chain else ROOT_MANIFEST_LABEL
+
+
+@dataclass(frozen=True)
+class NodeSelection:
+    """The merged selection one dependency node carries.
+
+    ``contributors`` keeps every edge record, in discovery order, for
+    diagnostics; it is never persisted.
+    """
+
+    skill_subset: tuple[str, ...] | None
+    target_subset: tuple[str, ...] | None
+    contributors: tuple[EdgeSelection, ...]
+
+    @property
+    def alias(self) -> str | None:
+        """Deterministic alias winner: the first (shallowest, then declared) edge."""
+        return self.contributors[0].alias if self.contributors else None
+
+    @property
+    def divergent_aliases(self) -> tuple[str, ...]:
+        """Declared aliases the winning alias does not honor, in discovery order."""
+        winner = self.alias
+        ignored: list[str] = []
+        for edge in self.contributors:
+            if edge.alias is not None and edge.alias != winner and edge.alias not in ignored:
+                ignored.append(edge.alias)
+        return tuple(ignored)
+
+    @property
+    def allow_insecure(self) -> bool:
+        """An HTTP opt-in holds only when every declaring edge states it."""
+        return bool(self.contributors) and all(e.allow_insecure for e in self.contributors)
+
+
+def union_selection_names(*subsets: Iterable[str] | None) -> tuple[str, ...] | None:
+    """Return the sorted union of the named entries, or ``None`` when empty.
+
+    The additive core shared by edge merging and the CLI ``--skill`` overlay.
+    ``None`` and empty inputs contribute no names; callers that treat ``None``
+    as "unrestricted" use :func:`merge_edge_selections`.
+    """
+    names: set[str] = set()
+    for subset in subsets:
+        if subset:
+            names.update(str(name) for name in subset)
+    return tuple(sorted(names)) or None
+
+
+def merge_edge_selections(edges: Iterable[EdgeSelection]) -> NodeSelection:
+    """Merge every declaring edge's selection into the node's selection.
+
+    Per field: union of the declared names, where any unrestricted edge
+    (``None``) absorbs the field to ``None``. The result is a sorted tuple, so
+    the merge is commutative, associative and idempotent.
+    """
+    contributors = tuple(edges)
+    if not contributors:
+        raise SelectionMergeError("A dependency node needs at least one declaring edge")
+    unsupported = sorted({edge.mode for edge in contributors} - {"include"})
+    if unsupported:
+        raise SelectionMergeError(
+            f"Cannot merge {', '.join(unsupported)} selections with other declarations"
+        )
+    return NodeSelection(
+        skill_subset=_merge_field(edge.skill_subset for edge in contributors),
+        target_subset=_merge_field(edge.target_subset for edge in contributors),
+        contributors=contributors,
+    )
+
+
+def _merge_field(values: Iterable[tuple[str, ...] | None]) -> tuple[str, ...] | None:
+    collected = list(values)
+    if any(value is None for value in collected):
+        return None
+    # An explicitly empty selection stays empty; it never widens to "all".
+    return tuple(sorted({str(name) for value in collected for name in value}))
+
+
+def _normalized(subset: Iterable[object] | None) -> tuple[str, ...] | None:
+    if not subset:
+        return None
+    return tuple(sorted({str(name) for name in subset}))
 
 
 def skill_subset_filter_tokens(skill_subset: Iterable[object] | None) -> set[str] | None:

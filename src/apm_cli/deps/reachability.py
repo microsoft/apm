@@ -51,6 +51,7 @@ from apm_cli.deps.path_anchoring import (
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.materialization import installed_package_path
 from apm_cli.models.dependency.replacement import build_replacement_index, parse_replace_block
+from apm_cli.models.dependency.subsets import EdgeSelection, NodeSelection, merge_edge_selections
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -95,6 +96,10 @@ class ReachabilityResult:
         dev_only: Keys in ``reachable`` reached only through
             ``dev_refs`` -- the install resolver's ``is_dev`` rule, where a
             production path wins. Rescues persist it with ``resolved_by``.
+        edge_selections: Every declaring edge walked for each node, recorded
+            before the visited dedup (as the install resolver records them),
+            keyed by lockfile key when one matches. Feed it to
+            :func:`apm_cli.models.dependency.subsets.merge_edge_selections`.
     """
 
     reachable: frozenset[str]
@@ -102,6 +107,45 @@ class ReachabilityResult:
     unverifiable: tuple[tuple[str, str], ...]
     reachable_via: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     dev_only: frozenset[str] = frozenset()
+    edge_selections: dict[str, tuple[EdgeSelection, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DeclaredSelections:
+    """Merged per-node selections declared by the manifests a walk read.
+
+    ``complete`` False means some manifest could not be read; callers must
+    treat every selection as unverified rather than trust a partial merge.
+    """
+
+    selections: dict[str, NodeSelection]
+    complete: bool
+    unverifiable: tuple[tuple[str, str], ...]
+
+
+_WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...]]
+
+
+def _locked_marketplace_form(
+    ref: DependencyReference,
+    lockfile: LockFile,
+    marketplace_index: dict,
+) -> DependencyReference:
+    """Return the locked coordinates a marketplace declaration resolved to.
+
+    The walk is offline, so it cannot ask the marketplace again; the lockfile's
+    discovery association names the package install materialized. The edge's
+    own selection and alias are kept.
+    """
+    locked = lockfile.get_dependency(ref.get_unique_key(), marketplace_index=marketplace_index)
+    if locked is None:
+        return ref
+    return replace(
+        locked.to_dependency_ref(),
+        skill_subset=ref.skill_subset,
+        target_subset=ref.target_subset,
+        alias=ref.alias,
+    )
 
 
 def _join_local(anchor: Path, local_path: str) -> Path:
@@ -227,15 +271,17 @@ def compute_forward_reachable_keys(
     # repair (see ReachabilityResult.reachable_via).
     # Production paths drain before any dev path starts, so ``visited``
     # gives a key the production flag whenever any production path exists.
-    queue: deque[tuple[DependencyReference, Path | None, str | None, bool]] = deque(
-        (ref, project_root, None, False) for ref in direct_refs
-    )
-    dev_queue: deque[tuple[DependencyReference, Path | None, str | None, bool]] = deque(
-        (ref, project_root, None, True) for ref in dev_refs
-    )
+    queue: deque[_WalkItem] = deque((ref, project_root, None, False, ()) for ref in direct_refs)
+    dev_queue: deque[_WalkItem] = deque((ref, project_root, None, True, ()) for ref in dev_refs)
+    edge_selections: dict[str, list[EdgeSelection]] = {}
+    expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
+
+    marketplace_index = lockfile.marketplace_index()
 
     while queue or dev_queue:
-        ref, anchor, parent_repo_url, is_dev = (queue or dev_queue).popleft()
+        ref, anchor, parent_repo_url, is_dev, chain = (queue or dev_queue).popleft()
+        if ref.is_marketplace:
+            ref = _locked_marketplace_form(ref, lockfile, marketplace_index)
         try:
             ref = replacement_index.bind(
                 ref,
@@ -263,14 +309,17 @@ def compute_forward_reachable_keys(
                     ),
                 )
             visit_key = ref.get_unique_key() if ref.replacement is not None else str(real_dir)
-            if visit_key in visited:
-                continue
-            visited.add(visit_key)
             matched_key = (
                 ref.get_unique_key()
                 if ref.replacement is not None and ref.get_unique_key() in lockfile.dependencies
                 else local_dir_index.get(real_dir)
             )
+            edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
+                EdgeSelection.from_dependency(ref, chain)
+            )
+            if visit_key in visited:
+                continue
+            visited.add(visit_key)
             if matched_key is not None:
                 reachable.add(matched_key)
                 if is_dev:
@@ -282,8 +331,16 @@ def compute_forward_reachable_keys(
                     )
             manifest_dir = real_dir
         else:
+            locked = lockfile.dependencies.get(ref.get_unique_key())
+            # Several edges may alias one node; it is materialized where the
+            # locked alias put it, not where this edge's alias would.
+            path_ref = (
+                replace(ref, alias=locked.alias)
+                if locked is not None and locked.alias != ref.alias
+                else ref
+            )
             try:
-                install_path = installed_package_path(ref, apm_modules_dir)
+                install_path = installed_package_path(path_ref, apm_modules_dir)
             except ValueError as exc:
                 # Unresolved marketplace ref or an install path that
                 # escapes apm_modules_dir (PathTraversalError, a ValueError
@@ -291,6 +348,9 @@ def compute_forward_reachable_keys(
                 unverifiable.append((ref.get_canonical_dependency_string(), str(exc)))
                 continue
             visit_key = ref.get_unique_key()
+            edge_selections.setdefault(visit_key, []).append(
+                EdgeSelection.from_dependency(ref, chain)
+            )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -315,8 +375,20 @@ def compute_forward_reachable_keys(
             # trusting a partial walk.
             unverifiable.append((visit_key, str(exc)))
             continue
+        if not ref.is_local and not package.source:
+            # Install marks a fetched package with its origin, which is what
+            # makes its same-repository ``path:`` children expand as remote.
+            package = replace(package, source=ref.repo_url)
 
-        for child_ref in package.get_apm_dependencies():
+        child_chain = (*chain, ref.get_display_name())
+        for declared in package.get_apm_dependencies():
+            # Expand ``git: parent`` and same-repository ``path:`` declarations
+            # exactly as the install resolver does, so each edge lands on the
+            # node identity install recorded. A declaration install rejects
+            # never becomes a node.
+            child_ref = expander.expand_transitive_declaration(ref, package, declared)
+            if child_ref is None:
+                continue
             # manifest_dir anchors a LOCAL child's own relative local_path;
             # remote children ignore the anchor (they resolve via
             # get_install_path instead), so propagating it unconditionally
@@ -329,6 +401,7 @@ def compute_forward_reachable_keys(
                     manifest_dir,
                     lockfile_parent_identity(ref, lockfile.replacements),
                     is_dev,
+                    child_chain,
                 )
             )
 
@@ -338,6 +411,40 @@ def compute_forward_reachable_keys(
         unverifiable=tuple(unverifiable),
         reachable_via=reachable_via,
         dev_only=frozenset(dev_only),
+        edge_selections={key: tuple(edges) for key, edges in edge_selections.items()},
+    )
+
+
+def declared_node_selections(
+    lockfile: LockFile,
+    project_root: Path,
+    apm_modules_dir: Path,
+    direct_refs: Sequence[DependencyReference],
+    *,
+    dev_refs: Sequence[DependencyReference] = (),
+) -> DeclaredSelections:
+    """Merge the selection every walked manifest declares for each locked node.
+
+    Walks the same declared graph as install (the project's direct refs, then
+    each materialized package's ``apm.yml``) and merges each node's edges
+    through the canonical selection-merge owner. ``apm uninstall`` uses it to
+    shrink survivors' selections; ``apm audit`` uses it as the expected value
+    for every locked dependency.
+    """
+    walk = compute_forward_reachable_keys(
+        lockfile,
+        project_root,
+        apm_modules_dir,
+        list(direct_refs),
+        frozenset(dep.get_unique_key() for dep in lockfile.get_package_dependencies()),
+        dev_refs=dev_refs,
+    )
+    return DeclaredSelections(
+        selections={
+            key: merge_edge_selections(edges) for key, edges in walk.edge_selections.items()
+        },
+        complete=walk.complete,
+        unverifiable=walk.unverifiable,
     )
 
 

@@ -176,5 +176,5 @@ def test_prepared_tree_does_not_override_manifest_lock_subset_mismatch(
     check = next(check for check in result.checks if check.name == "skill-subset-consistency")
     assert check.passed is False
     assert check.details == [
-        "owner/repo/plugins/tools: manifest skills ['alpha'] != lockfile skill_subset ['beta']"
+        "owner/repo/plugins/tools: declared skills ['alpha'] != lockfile skill_subset ['beta']"
     ]
