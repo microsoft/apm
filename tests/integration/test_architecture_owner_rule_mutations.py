@@ -3432,6 +3432,12 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             id="user-manifest-bootstrap-writes-raw-runtimes",
         ),
         pytest.param(
+            "src/apm_cli/commands/install.py",
+            "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes, target, runtime)",
+            'initial_manifest_config = {"name": "me", "targets": supported_runtimes}',
+            id="install-command-bypasses-bootstrap-owner",
+        ),
+        pytest.param(
             "src/apm_cli/commands/_helpers.py",
             "    verify_rewritten_manifest(out_file, content)\n",
             "    if False:\n        verify_rewritten_manifest(out_file, content)\n",
@@ -3564,6 +3570,12 @@ def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, ne
             'f"one: {detail.strip()}"',
             "f\"one: {detail.strip().removeprefix('[x] ')}\"",
             id="caller-strips-status-symbol",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            'f"one: {detail.strip()}"',
+            "f\"one: {detail.strip().replace('[x] ', '')}\"",
+            id="caller-replaces-status-symbol",
         ),
     ],
 )

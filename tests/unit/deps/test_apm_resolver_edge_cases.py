@@ -1255,6 +1255,6 @@ def test_downloaded_package_error_names_package_paths_and_ends_once(tmp_path):
         )
     assert str(error.value) == (
         "Downloaded dependency 'owner/repo' is invalid: apm.yml uses the YAML anchor '&v' "
-        "on line 2. Write it out, then retry. The downloaded candidate was not activated; "
+        "on line 2. Write it out. The downloaded candidate was not activated; "
         "fix the cause and retry the install."
     )

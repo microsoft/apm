@@ -30,23 +30,27 @@ def _env(tmp_path: Path) -> tuple[IsolatedApmEnvironment, dict[str, str], Path]:
     return isolated, env, work
 
 
-def _mcp_install(target: str) -> tuple[str, ...]:
-    return ("install", "-g", "--no-policy", "--mcp", "local-echo", "--target", target, "--", "echo")
+def _mcp_install(target: str, flag: str = "--target") -> tuple[str, ...]:
+    return ("install", "-g", "--no-policy", "--mcp", "local-echo", flag, target, "--", "echo")
 
 
-@pytest.mark.parametrize("target", ["intellij", "claude,intellij"])
+@pytest.mark.parametrize(
+    ("flag", "target"),
+    [("--target", "intellij"), ("--target", "claude,intellij"), ("--runtime", "intellij")],
+)
 def test_bootstrap_refuses_a_target_with_no_targets_spelling(
-    tmp_path: Path, apm_binary_path: Path, target: str
+    tmp_path: Path, apm_binary_path: Path, flag: str, target: str
 ) -> None:
     isolated, env, work = _env(tmp_path)
     manifest = isolated.config_root / "apm.yml"
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
 
-    result = runner.run(_mcp_install(target), cwd=work, env=env)
+    result = runner.run(_mcp_install(target, flag), cwd=work, env=env)
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode != 0, output
-    assert "Target 'intellij' has no 'targets:' equivalent" in output, output
+    assert f"for {flag} {target}: target 'intellij' has no 'targets:' equivalent" in output
     assert "Nothing was written" in output, output
+    assert f"{flag} {target} will apply to that install only" in output, output
     assert "Traceback" not in output, output
     assert not manifest.exists()
     assert not (Path(env["XDG_CONFIG_HOME"]) / "github-copilot" / "intellij" / "mcp.json").exists()
@@ -60,6 +64,24 @@ def test_bootstrap_records_a_readable_target(tmp_path: Path, apm_binary_path: Pa
     first = runner.run(_mcp_install("claude"), cwd=work, env=env)
     assert first.returncode == 0, first.stdout + first.stderr
     assert load_yaml(manifest)["targets"] == ["claude"]
+
+    again = runner.run(("install", "-g", "--no-policy"), cwd=work, env=env)
+    assert again.returncode == 0, again.stdout + again.stderr
+
+
+def test_refusal_recovery_installs_without_recording_the_target(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Following the refusal's advice installs the IntelliJ server and stays readable."""
+    isolated, env, work = _env(tmp_path)
+    manifest = isolated.config_root / "apm.yml"
+    manifest.write_text("name: me\nversion: 0.1.0\n", encoding="ascii")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    first = runner.run(_mcp_install("intellij"), cwd=work, env=env)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "targets" not in load_yaml(manifest)
+    assert (Path(env["XDG_CONFIG_HOME"]) / "github-copilot" / "intellij" / "mcp.json").is_file()
 
     again = runner.run(("install", "-g", "--no-policy"), cwd=work, env=env)
     assert again.returncode == 0, again.stdout + again.stderr

@@ -102,18 +102,36 @@ def test_manifest_anchor_is_refused_before_any_write(
     assert again.returncode == 0, again.stdout + again.stderr
 
 
-def test_dependency_manifest_anchor_is_refused_before_any_write(
-    tmp_path: Path, apm_binary_path: Path
+_DEPENDENCY_MANIFESTS = {
+    "anchor": (
+        "name: alpha\nx-version: &v 1.0.0\nversion: *v\n",
+        "apm.yml uses the YAML anchor '&v' on line 2. apm.yml must not use YAML anchors "
+        "(&name) or aliases (*name). Write the value out in full wherever it is used.",
+    ),
+    "duplicate-key": (
+        "name: alpha\nversion: 1.0.0\nversion: 1.0.1\n",
+        "apm.yml declares the top-level key 'version' twice (lines 2 and 3), so one of "
+        "them would be ignored. Merge both 'version:' blocks into one.",
+    ),
+    "unknown-target": (
+        "name: alpha\nversion: 1.0.0\ntargets: [bogus]\n",
+        "apm.yml: Unknown target 'bogus'. Valid targets:",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_DEPENDENCY_MANIFESTS))
+def test_dependency_manifest_error_names_the_dependency_before_any_write(
+    tmp_path: Path, apm_binary_path: Path, case: str
 ) -> None:
-    """A dependency's own apm.yml is read by the same owner, so its anchors fail too."""
+    """A dependency's invalid apm.yml names that dependency, with one retry (#3858, #3871)."""
+    body, reason = _DEPENDENCY_MANIFESTS[case]
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     env = dict(isolated.subprocess_env())
     env.pop("CI", None)
     project = isolated.work_root / "consumer"
     _package(project / "pkgs" / "alpha", "alpha")
-    (project / "pkgs" / "alpha" / "apm.yml").write_text(
-        "name: alpha\nx-version: &v 1.0.0\nversion: *v\n", encoding="ascii"
-    )
+    (project / "pkgs" / "alpha" / "apm.yml").write_text(body, encoding="ascii")
     (project / "apm.yml").write_text(_CLEAN, encoding="ascii")
     before = _snapshot(project)
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
@@ -121,15 +139,13 @@ def test_dependency_manifest_anchor_is_refused_before_any_write(
     result = runner.run(("install", "--no-policy"), cwd=project, env=env)
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode != 0, output
-    # #3871: names the dependency and its in-package path, one period, no staging path.
-    assert (
-        "Downloaded dependency './pkgs/alpha' is invalid: apm.yml uses the YAML anchor "
-        "'&v' on line 2. apm.yml must not use YAML anchors (&name) or aliases (*name). "
-        "Write the value out in full wherever it is used, then retry. The downloaded "
-        "candidate was not activated; fix the cause and retry the install."
-    ) in output, output
+    assert f"Downloaded dependency './pkgs/alpha' is invalid: {reason}" in output, output
+    assert "The downloaded candidate was not activated; fix the cause and retry the install." in (
+        output
+    )
+    assert output.count("retry") == 1, output
     assert ".apm-resolution-staging" not in output and "retry.." not in output, output
-    assert "Traceback" not in output, output
+    assert "Usage: apm install" not in output and "Traceback" not in output, output
     assert not (project / ".github" / "instructions" / "alpha.instructions.md").exists()
     assert {key: value for key, value in _snapshot(project).items() if key in before} == before
 

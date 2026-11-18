@@ -70,7 +70,7 @@ def user_manifest_bootstrap_config(
     if manifest_path.exists():
         return None
     config = _get_bootstrap_config(resolve_bootstrap_project_name(Path.home().name))
-    requested = target if target is not None else runtime
+    flag, requested = ("--target", target) if target is not None else ("--runtime", runtime)
     if requested is None:
         return config
     try:
@@ -81,11 +81,10 @@ def user_manifest_bootstrap_config(
         rendered = requested if isinstance(requested, str) else ",".join(requested)
         label = manifest_path.as_posix()
         raise click.UsageError(
-            f"Cannot create {label} for --target {rendered}: Target '{exc.token}' has no "
-            "'targets:' equivalent, so a later 'apm install -g' could not read the new "
-            f"manifest. Nothing was written. Create {label} first (it needs only 'name:' "
-            "and 'version:'), then rerun this command; an existing manifest keeps its "
-            f"targets and --target {rendered} applies to this install only."
+            f"Cannot create {label} for {flag} {rendered}: target '{exc.token}' has no "
+            "'targets:' equivalent, so later 'apm install -g' runs could not read the new "
+            f"manifest. Nothing was written. Create {label} with just 'name:' and "
+            f"'version:', then rerun; {flag} {rendered} will apply to that install only."
         ) from None
     return config
 

@@ -153,7 +153,7 @@ _TARGET_ERROR_MESSAGE_FILES: tuple[str, ...] = (
     "src/apm_cli/core/apm_yml.py",
 )
 _STATUS_PREFIX_LITERAL = re.compile(r"""(?:^|[\s(=,])[rbuf]{0,2}["']\[[x!i+*>]\] """)
-_STATUS_PREFIX_STRIP = re.compile(r"""removeprefix\(\s*["']\[[x!i+*>]\] ["']""")
+_STATUS_PREFIX_STRIP = re.compile(r"""(?:removeprefix|replace|lstrip)\(\s*["']\[[x!i+*>]\] ["']""")
 _USER_FACING_LOG_LEVELS: frozenset[str] = frozenset(
     {"info", "warning", "warn", "error", "exception", "critical"}
 )
@@ -451,6 +451,10 @@ _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/install/mcp/command.py": (
         'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
+    ),
+    "src/apm_cli/commands/install.py": (
+        "from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap",
+        "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes,",
     ),
     "src/apm_cli/commands/_helpers.py": ("    verify_rewritten_manifest(out_file, content)",),
 }

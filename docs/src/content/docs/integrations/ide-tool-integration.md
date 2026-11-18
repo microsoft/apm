@@ -40,7 +40,7 @@ apm targets                    # list detected and supported targets
 apm install --target claude    # force a specific target
 ```
 
-If no marker is present, APM emits the `[x] No harness detected` error - see [Common errors](../../troubleshooting/common-errors/).
+If no marker is present, APM emits the `No harness detected` error - see [Common errors](../../troubleshooting/common-errors/).
 
 To pin targets in the manifest:
 
@@ -202,7 +202,7 @@ Pinpoint behaviour, slot layout, and known limits per target:
 
 | Symptom                                       | Where to look                                                              |
 |-----------------------------------------------|----------------------------------------------------------------------------|
-| `[x] No harness detected`                     | [Common errors](../../troubleshooting/common-errors/)                          |
+| `No harness detected`                         | [Common errors](../../troubleshooting/common-errors/)                          |
 | Compile produced no output                    | [Compile zero-output](../../troubleshooting/compile-zero-output-warning/)      |
 | Wrong target picked, multiple harnesses       | [`apm targets`](../../reference/cli/targets/)                                  |
 | MCP server not appearing in tool              | [MCP servers guide](../../consumer/install-mcp-servers/)                       |
