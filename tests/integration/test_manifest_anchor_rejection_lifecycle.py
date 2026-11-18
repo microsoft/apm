@@ -9,6 +9,7 @@ changes.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -124,3 +125,28 @@ def test_dependency_manifest_anchor_is_refused_before_any_write(
     assert "must not use YAML anchors" in output and "Traceback" not in output, output
     assert not (project / ".github" / "instructions" / "alpha.instructions.md").exists()
     assert {key: value for key, value in _snapshot(project).items() if key in before} == before
+
+
+def test_ci_audit_reports_anchor_on_a_cold_checkout(tmp_path: Path, apm_binary_path: Path) -> None:
+    """Without apm_modules/, `apm audit --ci -f json` still renders its report."""
+    import json
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = dict(isolated.subprocess_env())
+    env.pop("CI", None)
+    project = isolated.work_root / "consumer"
+    _package(project / "pkgs" / "alpha", "alpha")
+    manifest = project / "apm.yml"
+    manifest.write_text(_CLEAN, encoding="ascii")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    first = runner.run(("install", "--no-policy"), cwd=project, env=env)
+    assert first.returncode == 0, first.stdout + first.stderr
+    shutil.rmtree(project / "apm_modules")
+    manifest.write_text(_LAYOUTS["alias"][0], encoding="ascii")
+
+    result = runner.run(("audit", "--ci", "-f", "json"), cwd=project, env=env)
+    assert result.returncode != 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    failed = {check["name"]: check["message"] for check in report["checks"] if not check["passed"]}
+    assert "YAML anchor '&rule' on line 4" in failed.get("manifest-parse", ""), failed
+    assert "Traceback" not in result.stdout + result.stderr
