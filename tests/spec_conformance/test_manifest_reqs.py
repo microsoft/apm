@@ -88,7 +88,8 @@ def test_manifest_version_is_semver_2_0_0():
 def test_manifest_target_enum_is_pinned():
     """req-mf-005 says producer MUST reject unknown target values."""
     assert_spec_contains(
-        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all"
+        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, "
+        "hermes, grok-bot, all"
     )
     assert_spec_contains("x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*")
 
@@ -975,6 +976,60 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
         "follow-up compilation operation",
         "MUST NOT emit this diagnostic for a dry run",
     )
+
+
+@pytest.mark.req("req-tg-008")
+def test_targets_admits_preserved_vscode_and_rejects_agents(tmp_path: Path) -> None:
+    """0.1.61: a rewrite keeps `vscode` and `targets:` admits it; `agents` stays rejected."""
+    from apm_cli.core.errors import TargetResolutionError
+    from apm_cli.models.manifest_target_migration import plan_manifest_migration
+    from apm_cli.models.manifest_targets import ManifestTargetDeclaration
+    from apm_cli.utils.yaml_io import load_yaml
+
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text("name: legacy\nversion: 1.0.0\ntarget: vscode\n", encoding="utf-8")
+    plan_manifest_migration(manifest).write()
+    assert "targets: [vscode]" in manifest.read_text(encoding="utf-8").splitlines()
+    migrated = APMPackage.from_mapping(
+        load_yaml(manifest), package_path=tmp_path, manifest_path=manifest, create_config=False
+    )
+    assert migrated.target_declaration.selection == ["vscode"]
+
+    diagnostics = DiagnosticCollector()
+    resolve_effective_package_targets(
+        [KNOWN_TARGETS["copilot"]], None, migrated, diagnostics, "owner/legacy"
+    )
+    assert diagnostics.error_count == 0
+
+    with pytest.raises(TargetResolutionError, match="agents"):
+        _ = ManifestTargetDeclaration.from_mapping({"targets": ["agents"]}).selection
+
+    assert_spec_contains("the preserved legacy identifier", "`vscode` defined there")
+
+
+@pytest.mark.req("req-tg-008")
+@pytest.mark.xfail(
+    strict=True,
+    reason="https://github.com/microsoft/apm/issues/3861: plural targets: [vscode] "
+    "is not intersected as copilot",
+)
+def test_targets_vscode_narrows_like_copilot(tmp_path: Path) -> None:
+    """A dependency declaring `targets: [vscode]` deploys to the copilot profile."""
+    package = APMPackage.from_mapping(
+        {"name": "vscode-pkg", "version": "1.0.0", "targets": ["vscode"]},
+        package_path=tmp_path,
+        create_config=False,
+    )
+
+    effective = resolve_effective_package_targets(
+        [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
+        None,
+        package,
+        DiagnosticCollector(),
+        "owner/vscode-pkg",
+    )
+
+    assert tuple(target.name for target in effective.targets) == ("copilot",)
 
 
 @pytest.mark.req("req-tg-008")
