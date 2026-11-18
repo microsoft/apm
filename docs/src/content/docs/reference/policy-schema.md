@@ -67,7 +67,7 @@ possible.
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
-| `security`         | object              | see section      | no       | Rules over APM's security checks (install-time content audit + external scanners; requires `external-scanners` flag). |
+| `security`         | object              | see section      | no       | Rules over APM's security checks: install-time audit and external scanners (require the `external-scanners` flag), lockfile hashes and drift. |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, LSP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
@@ -104,8 +104,8 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
 | `allow`              | list of patterns or null | `null`        | `null` = no opinion. `[]` = nothing allowed. `[...]` = only these.                          |
-| `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Always wins over `allow`. |
-| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
+| `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Always wins over `allow`. |
+| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
 | `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, exact package release tag such as `name@1.2.3` or `@scope/name@1.2.3`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
@@ -208,8 +208,10 @@ proving a supply-chain attack. Every finding is enriched in place:
 
 ## security
 
-Rules over APM's security checks. Requires the `external-scanners`
-experimental flag to take effect; ignored otherwise.
+Rules over APM's security checks. The `audit.on_install`, `audit.external`
+and `audit.scanners` keys take effect only when the `external-scanners`
+experimental flag is enabled; they are ignored otherwise.
+`audit.fail_on_drift` and `integrity.require_hashes` always apply.
 
 | Field                | Type            | Default | Notes                                                                            |
 |----------------------|-----------------|---------|----------------------------------------------------------------------------------|
@@ -246,7 +248,7 @@ The floor is enforced during `apm install` (where org policy is loaded). A bare
 allowlist validation for arg safety.
 
 `audit.on_install` is a floor: it can only raise the effective mode chosen by
-`apm install --audit` / `apm config audit-on-install`, never relax it. `apm
+`apm install --audit` / `apm config set audit-on-install`, never relax it. `apm
 install --force` downgrades a `block` to `warn` for that invocation; `apm
 install --no-policy` skips the policy floor entirely.
 
@@ -283,17 +285,17 @@ closed. APM never applies the weaker subset that happened to resolve.
 
 ### Merge rules
 
-Most fields tighten as the policy chain descends. The exceptions are
-`deny`/`require` lists, where a child may use `[]` to explicitly clear an
-inherited list (see the tri-state table below).
+Every field tightens as the policy chain descends: a child can add
+restrictions but never remove a parent's. A child `[]` on a `deny` or
+`require` list adds nothing and does not clear the inherited entries.
 
 | Field family                | Merge rule                                                                       |
 |-----------------------------|----------------------------------------------------------------------------------|
 | `enforcement`               | Stricter wins (`block` > `warn` > `off`).                                        |
-| `fetch_failure`             | Child overrides if set.                                                          |
+| `fetch_failure`             | Stricter wins (`block` > `warn`).                                                |
 | `cache.ttl`                 | `min(parent, child)`.                                                            |
 | `*.allow` lists             | Set intersection. `null` is transparent (no opinion).                            |
-| `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
+| `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field, `null` and `[]` all leave the parent list unchanged; a child cannot drop a parent entry. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
 | `manifest.require_explicit_includes` | Logical OR; once enabled, descendants cannot relax it.                 |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
@@ -302,7 +304,7 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
-| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list  --  unlike `deny`/`require`, a child cannot clear an inherited `exclude`. |
+| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list; a child cannot clear an inherited `exclude`. |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
@@ -325,12 +327,12 @@ For every `allow:` field, the three states are distinct:
 | `[]`     | "explicitly nothing"                         | Intersects to nothing downstream. |
 | `[...]`  | "only these patterns"                        | Intersected with child list.    |
 
-`deny` and `require` lists support the same three-state semantics as `allow`:
+`deny` and `require` lists distinguish the same three values, but merge by union, so no value removes a parent entry:
 
 | Value    | Meaning                    | Inheritance behavior                                     |
 |----------|----------------------------|----------------------------------------------------------|
 | omitted / `null` | "no opinion"     | Transparent during merge  --  parent value passes through. |
-| `[]`     | "explicitly empty"         | Overrides parent; no entries accumulate.                |
+| `[]`     | "nothing to add"           | Adds nothing; parent entries still apply.               |
 | `[...]`  | "these entries"            | Unioned with parent list (parent order preserved).      |
 
 ### Identity casing

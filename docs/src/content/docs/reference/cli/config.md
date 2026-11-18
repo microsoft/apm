@@ -65,7 +65,7 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
+| `auto-integrate` | boolean | `true` | Has no effect. APM stores and reports the value, but no command reads it: `apm compile` and `apm install` behave the same whether it is `true` or `false` ([#3839](https://github.com/microsoft/apm/issues/3839)). |
 | `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
 | `self-update.install-dir` | path | unset | Optional launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
@@ -151,13 +151,6 @@ Show everything:
 
 ```bash
 apm config
-```
-
-Read and write `auto-integrate`:
-
-```bash
-apm config get auto-integrate
-apm config set auto-integrate false
 ```
 
 Persist a default install target:
@@ -277,7 +270,6 @@ Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `self_upd
 
 - [`apm install`](../install/) -- consumes `target`, `temp-dir`, and `allow-protocol-fallback` / `prefer-ssh` / `github-auth-first`.
 - [`apm self-update`](../self-update/) -- consumes `self-update.channel` and `self-update.install-dir`.
-- [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
 - [Environment variables](../../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK` and `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys; `APM_GITHUB_AUTH_FIRST` is the env-var equivalent of the credential-order `github-auth-first` key.
 - [Registries](../../../guides/registries/) -- full private registry setup guide.

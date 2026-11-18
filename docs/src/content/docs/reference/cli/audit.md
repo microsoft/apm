@@ -89,7 +89,7 @@ files are not covered by this content comparison.
 
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
-`PACKAGE`, when supplied, scans one installed dependency by its lockfile key (the repo URL), so only files recorded for that package are included. Omit it to scan deployed files across the whole project. See [Baseline CI checks](../../baseline-checks/#content-integrity) for the exact lockfile, target-directory, symlink, and `.apm/` scope boundaries.
+`PACKAGE`, when supplied, scans one installed dependency, so only files recorded for that package are included. Pass the dependency key exactly as APM records it in `apm.lock.yaml`: `owner/repo` for GitHub, `host/owner/repo` for other hosts. URLs, `#ref` suffixes and other install forms are not normalized. A key with no match prints a warning and exits `0` ([#3840](https://github.com/microsoft/apm/issues/3840)). Omit it to scan deployed files across the whole project. See [Baseline CI checks](../../baseline-checks/#content-integrity) for the exact lockfile, target-directory, symlink, and `.apm/` scope boundaries.
 
 ## Options
 
@@ -166,7 +166,7 @@ apm audit
 ### Scan a specific installed package
 
 ```bash
-apm audit https://github.com/owner/repo
+apm audit owner/repo
 ```
 
 ### Scan an arbitrary file outside APM
@@ -362,6 +362,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 - `--no-drift` cannot be combined with `--strip` or `--file`.
 - `--ci` cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`.
 - `--ci` does not support `--format markdown`.
+- `--format json`, `sarif` or `markdown` (including a format inferred from `--output`) cannot be combined with `--strip` or `--dry-run`.
 - `--external` cannot be combined with `--strip`, `--dry-run`, or `--ci`; `--external-sarif` requires `--external sarif`; `--external-llm` / `--no-external-llm` and `--external-args` require `--external`.
 
 ## Exit codes

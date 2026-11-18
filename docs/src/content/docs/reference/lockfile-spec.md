@@ -41,8 +41,8 @@ The lockfile gives APM four things:
    with deployed files.
 3. **Cleanup.** The list of deployed files lets `apm prune` remove orphans
    when a dependency is dropped from `apm.yml`.
-4. **Inspection.** `apm view --lock` and `apm audit` read the lockfile to
-   answer "what is actually installed".
+4. **Inspection.** `apm deps why`, `apm view --file` and `apm audit` read the
+   lockfile to answer "what is actually installed".
 
 ## Location
 
@@ -307,7 +307,7 @@ with one locked coordinate, not a durable catalog trust identity.
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 | `constraint` | string | git-source semver only | The original semver selector from Git `ref:` or marketplace object-form `version` in `apm.yml` (`^1.2.0`, `~1.4`, `1.2.3`). Together with `resolved_tag` and selected `version`, distinguishes a resolved selection from package inventory metadata. Replay pins the selected tag and commit rather than re-resolving the selector. |
 | `resolved_tag` | string | git-source semver or SHA-pin updates | The concrete annotated git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint` or justified the latest full-SHA revision-pin update. |
-| `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution. Surfaces "how stale is this pin?" in `apm why`. |
+| `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution: how old the pin is. |
 | `declared_license` | string | no | The license the package *manifest declares* (`license:` in `apm.yml`, or `license` in a `plugin.json`), recorded verbatim at resolve time and syntax-validated offline against the bundled SPDX id set. An author **claim**, not a conclusion from `LICENSE` text -- APM never interprets a license file. Omitted when undeclared (absence means unknown; no sentinel is stored). Surfaced by `apm lock export`. |
 | `carried_licenses` | list | no | Licence files APM copied, byte-for-byte, into the materialized package: the nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` from the package path up to the repository root, plus a copy next to each skill directory that has none. Each item has `path` (copy, relative to the package root), `source` (original file, relative to the repository root at `resolved_commit`) and `hash` (`sha256:<hex>`, line-ending normalized like deployed-file hashes). The copies are excluded from `content_hash` and verified against `hash` instead, so lockfiles written before this field keep verifying. Omitted when nothing was carried. |
 | `extensions` | map | no | Vendor keys matching `x-[a-z][a-z0-9-]*` from the dependency's own `apm.yml`, in declaration order. Values are recorded as declared and are not interpreted. Omitted when the dependency declares none. See [req-ext-003](../../specs/openapm-v01/#req-ext-003). |
@@ -418,7 +418,7 @@ with a top-level `pack:` block:
 
 ```yaml
 pack:
-  format: apm           # or "plugin"
+  format: apm           # or "claude-plugin", "agent-plugin"
   target: copilot       # or comma-joined list, or "all"
   packed_at: "2026-05-10T20:14:00+00:00"
   mapped_from:          # only when cross-target path remapping happened
@@ -444,7 +444,7 @@ shipped.
 | `apm compile` | yes (resolution + integrity) | no |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
-| `apm view --lock` | yes | no |
+| `apm deps why`, `apm view --file` | yes | no |
 | `apm unpack` | bundle's pack-enriched lockfile | merges into project lockfile |
 
 `apm install` only rewrites the file when its semantic content changes
@@ -570,6 +570,6 @@ local_deployed_file_hashes:
 - [`apm install`](../cli/install/) - resolves and writes the lockfile
 - [`apm audit`](../cli/audit/) - validates the workspace against the lockfile
 - [`apm prune`](../cli/prune/) - removes orphan packages and files
-- [`apm view`](../cli/view/) - inspect resolved state (`--lock`)
+- [`apm view`](../cli/view/) - show which package deployed a file (`--file`)
 - [Baseline checks](../baseline-checks/) - the drift checks the lockfile feeds
 - [Manifest schema](../manifest-schema/) - the `apm.yml` it pins

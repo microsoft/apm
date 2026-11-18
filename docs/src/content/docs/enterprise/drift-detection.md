@@ -16,7 +16,7 @@ Four concrete categories. Each has a different signal and a different fix.
 
 | Category | What it is | Detected by |
 |---|---|---|
-| Lockfile drift | `apm.yml` and `apm.lock.yaml` disagree, or deployed files do not match the lockfile | `apm audit --ci` (8 baseline checks) |
+| Lockfile drift | `apm.yml` and `apm.lock.yaml` disagree, or deployed files do not match the lockfile | `apm audit --ci` (baseline lockfile checks) |
 | Cache drift | A cached checkout's `HEAD` no longer matches `resolved_commit` in the lockfile | Built into every `apm install` cache hit |
 | Ref drift (stale floats) | A locked branch tip or tag has moved upstream since the last install | `apm outdated` |
 | Security-finding drift | A primitive in `apm_modules/` now contains hidden Unicode that was clean before | `apm audit` |
@@ -40,7 +40,7 @@ lockfile-exists -> ref-consistency -> deployment-ledger-owners
 -> content-integrity -> includes-consent
 ```
 
-After the baseline passes, it replays the install in a scratch directory
+Whether or not the baseline passes, it then replays the install in a scratch directory
 and diffs against the working tree to surface `unintegrated`, `modified`,
 `orphaned`, `unrecorded`, and `unmanaged-conflict` files. An unmanaged
 conflict is a differing file that no lockfile entry claims (including a
@@ -65,7 +65,8 @@ without a warm cache yields an informational skip. In `apm audit --ci`, a
 cold cache instead triggers the lock-pinned scratch self-hydration owned by
 `install/audit_replay.py`; if it cannot be materialized, audit fails closed.
 With `--policy
-<source>` it also evaluates the discovered policy against the lockfile.
+<source>` (or an auto-discovered org policy) it also evaluates that policy
+against the project; in fail-fast mode this runs only when the baseline passes.
 Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
 ### `apm audit` (default)
@@ -98,8 +99,9 @@ and published Latest. `apm update` still respects the declared constraint;
 
 ### `apm view <package>`
 
-Prints the lockfile entry for a single package (`resolved_ref`,
-`resolved_commit`, deployed files). Use it to confirm what a repo
+Prints local metadata for a single installed package, including its
+locked ref and commit (`apm view --file <path>` names a deployed file's
+owner). Use it to confirm what a repo
 actually has after a drift report names a dependency. Note that
 `apm list` lists scripts, not packages.
 
