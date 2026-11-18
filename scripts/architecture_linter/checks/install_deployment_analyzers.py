@@ -42,6 +42,10 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
     check_prospective_dry_run_plan,
 )
+from scripts.architecture_linter.checks.install_effective_selection import (
+    GUARD_EFFECTIVE_SELECTION,
+    check_effective_selection,
+)
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
     _GUARD_FROZEN,
@@ -193,6 +197,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_SOURCE_PLAN,
         "Authorized deployable source paths come from install/deployable_source_plan.py.",
         check_source_plan,
+    ),
+    _rule(
+        GUARD_EFFECTIVE_SELECTION,
+        "Every package deployment takes its skill and target selection from one owner.",
+        check_effective_selection,
     ),
     _rule(
         GUARD_SKILL_PREFLIGHT,

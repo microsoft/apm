@@ -191,6 +191,7 @@ def explicit_target_failure(
     """
     if not targets:
         return None
+    from apm_cli.install.package_resolution import effective_dependency_selection
 
     def _declared_and_effective(node: object) -> tuple[list[str], bool]:
         package = getattr(node, "package", None)
@@ -198,7 +199,7 @@ def explicit_target_failure(
             return [], True
         selection = resolve_effective_package_targets(
             targets,
-            getattr(node.dependency_ref, "target_subset", None),
+            effective_dependency_selection(node.dependency_ref).target_subset,
             package,
             None,
             "",

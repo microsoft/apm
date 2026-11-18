@@ -95,6 +95,7 @@ def _install(
     return integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=[KNOWN_TARGETS[target_name] for target_name in target_names],
         integrators=IntegratorBundle(
             prompt=None,

@@ -109,6 +109,78 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/install/drift.py",
+            "skill_subset=selection.skill_subset,",
+            "skill_subset=package_info.dependency_ref.skill_subset,",
+            id="replay-local-skill-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "dep_target_subset=selection.target_subset,\n            ctx=ctx,\n"
+            "            allow_executables=effective_allow_map(ctx),\n"
+            "            trust_bin=ctx.trust_bin,",
+            "dep_target_subset=dependency.target_subset,\n            ctx=ctx,\n"
+            "            allow_executables=effective_allow_map(ctx),\n"
+            "            trust_bin=ctx.trust_bin,",
+            id="preflight-local-target-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "skill_subset=effective_dependency_selection(None, ctx).skill_subset,",
+            "skill_subset=None,",
+            id="local-content-unallowlisted-none",
+        ),
+        pytest.param(
+            "src/apm_cli/install/deployment_plan.py",
+            "    skill_subset: tuple | None,\n",
+            "    skill_subset: tuple | None = None,\n",
+            id="optional-skill-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "            effective_dependency_selection(dep_ref).target_subset,\n",
+            "            dep_ref.target_subset,\n",
+            id="uninstall-local-target-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "                effective_dependency_selection(dep_ref).target_subset,\n",
+            "                dep_ref.target_subset,\n",
+            id="hook-reconcile-local-target-subset",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "effective_dependency_selection(locked_dep, self.ctx).skill_subset",
+            "effective_deploy_skill_subset(False, self.ctx.skill_subset, None)",
+            id="lockfile-records-outside-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "    from apm_cli.install.services import IntegratorBundle, integrate_package_primitives\n",
+            "    from apm_cli.install.services import IntegratorBundle\n"
+            "    from apm_cli.install.services import integrate_package_primitives as _deploy\n"
+            "    integrate_package_primitives = None\n"
+            "    _deploy(skill_subset=package_info.dependency_ref.skill_subset)\n",
+            id="aliased-deploy-call",
+        ),
+    ],
+)
+def test_deploy_selection_cannot_bypass_owner(path: str, original: str, replacement: str) -> None:
+    """Deploy calls take skill and target selection from one owner (#3760)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-effective-selection"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
@@ -909,6 +981,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="unmanaged = unmanaged_skill or claims.unclaimed(rel)",
         new="unmanaged = unmanaged_skill",
         intent="Audit reports an unclaimed differing file as a managed local edit.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-effective-selection",
+        rule_id="install-deployment-effective-selection",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="                    skill_subset=selection.skill_subset,\n",
+        new="",
+        intent="Uninstall re-integrates survivors without their effective skill selection.",
     ),
     MutationCase(
         guard_id="install-deployment-executable-trust-context",

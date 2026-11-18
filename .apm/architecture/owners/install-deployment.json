@@ -119,6 +119,13 @@
       "guards": ["install-deployment-source-plan"]
     },
     {
+      "id": "dependency-selection",
+      "decision": "Effective skill and target selection deployed for one dependency by install preflight, install deploy, audit replay and uninstall survivor re-integration (including hook reconcile), and the skill subset the lockfile records",
+      "owner": "install/package_resolution.py (effective_dependency_selection, delegating the CLI --skill overlay to effective_deploy_skill_subset); skill_subset is a required keyword of integrate_package_primitives, prepare_package_deployment and DeployableSourcePlan.create; every resolve_effective_package_targets call takes its dependency target subset from the owner",
+      "selectors": ["src/apm_cli/install/package_resolution.py"],
+      "guards": ["install-deployment-effective-selection"]
+    },
+    {
       "id": "unmanaged-skill-preflight",
       "decision": "Whole-plan unmanaged skill refusal and unmatched skills: selection refusal before native deployment",
       "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes",

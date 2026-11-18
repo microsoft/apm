@@ -534,6 +534,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
+    from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import _project_has_root_primitives
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
@@ -684,6 +685,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     dep_key = lock_dep.get_unique_key()
 
+                    # Replay deploys the locked selection, as uninstall does (#3760).
+                    selection = effective_dependency_selection(package_info.dependency_ref)
                     try:
                         result = integrate_package_primitives(
                             package_info,
@@ -703,16 +706,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             package_name=dep_key,
                             logger=None,
                             scope=None,
-                            skill_subset=(
-                                tuple(package_info.dependency_ref.skill_subset or ()) or None
-                                if package_info.dependency_ref
-                                else None
-                            ),
+                            skill_subset=selection.skill_subset,
                             ctx=None,
                             scratch_root=scratch_root,
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the
                             # replay does not write to targets excluded by the consumer (#1923).
-                            dep_target_subset=lock_dep.target_subset or None,
+                            dep_target_subset=selection.target_subset,
                         )
                     except AgentPluginTargetExcludedError:
                         continue

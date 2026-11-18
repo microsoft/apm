@@ -209,7 +209,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     package_name: str = "",
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
-    skill_subset: tuple | None = None,
+    skill_subset: tuple | None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
     policy: Any = None,
@@ -739,6 +739,7 @@ def integrate_local_content(  # noqa: PLR0913
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
+    from .package_resolution import effective_dependency_selection
 
     if source_root is None:
         source_root = project_root
@@ -764,6 +765,7 @@ def integrate_local_content(  # noqa: PLR0913
         package_name="_local",
         logger=logger,
         scope=scope,
+        skill_subset=effective_dependency_selection(None, ctx).skill_subset,
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,

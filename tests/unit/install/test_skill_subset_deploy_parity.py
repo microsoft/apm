@@ -16,15 +16,21 @@ These tests pin the additive *deployment* contract:
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.install.deployment_plan import prepare_package_deployment
 from apm_cli.install.package_resolution import (
     apply_cli_skill_pin,
     cli_skill_subset,
+    effective_dependency_selection,
     effective_deploy_skill_subset,
 )
+from apm_cli.install.services import integrate_package_primitives
 
 # ---------------------------------------------------------------------------
 # Unit: the additive-union helper
@@ -90,6 +96,53 @@ class TestEffectiveDeploySkillSubset:
 # ---------------------------------------------------------------------------
 # Unit: the CLI-subset normalizer + skill-pin applier
 # ---------------------------------------------------------------------------
+
+
+class TestEffectiveDependencySelection:
+    """The single deploy-selection owner shared by install, audit and uninstall (#3760)."""
+
+    def test_without_install_context_returns_persisted_selection(self):
+        dep_ref = SimpleNamespace(skill_subset=["beta", "alpha"], target_subset=["claude"])
+        selection = effective_dependency_selection(dep_ref)
+        assert selection == (("alpha", "beta"), ["claude"])
+
+    def test_install_context_adds_cli_overlay(self):
+        dep_ref = SimpleNamespace(skill_subset=["alpha"], target_subset=None)
+        ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
+        assert effective_dependency_selection(dep_ref, ctx) == (("alpha", "beta"), None)
+
+    def test_lockfile_records_the_selection_the_owner_deploys(self):
+        from apm_cli.install.phases.lockfile import LockfileBuilder
+
+        bundle = SimpleNamespace(package_type="skill_bundle", skill_subset=["alpha"])
+        other = SimpleNamespace(package_type="apm_package", skill_subset=["keep"])
+        ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
+        lockfile = SimpleNamespace(dependencies={"bundle": bundle, "other": other})
+        LockfileBuilder(ctx)._attach_skill_subset_override(lockfile)
+        assert bundle.skill_subset == list(effective_dependency_selection(bundle, ctx)[0])
+        assert bundle.skill_subset == ["alpha", "beta"]
+        assert other.skill_subset == ["keep"]
+
+    def test_first_party_content_has_no_selection(self):
+        ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
+        assert effective_dependency_selection(None, ctx) == (None, None)
+
+    @pytest.mark.parametrize(
+        ("deploy", "extra"),
+        [
+            (
+                integrate_package_primitives,
+                {"integrators": MagicMock(), "force": False, "managed_files": None},
+            ),
+            (prepare_package_deployment, {}),
+        ],
+        ids=["integrate_package_primitives", "prepare_package_deployment"],
+    )
+    def test_deploy_without_skill_subset_is_a_type_error(self, deploy, extra, tmp_path):
+        with pytest.raises(
+            TypeError, match=r"missing 1 required keyword-only argument: 'skill_subset'"
+        ):
+            deploy(MagicMock(), tmp_path, targets=[], diagnostics=None, **extra)
 
 
 class TestCliSkillSubset:

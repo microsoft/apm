@@ -112,6 +112,7 @@ def _dispatch(targets, project_root: Path, integrators=None):
     return _integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=targets,
         force=False,
         managed_files=set(),

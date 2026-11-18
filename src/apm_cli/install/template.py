@@ -21,7 +21,7 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginDeploymentBoundaryError,
     AgentPluginTargetExcludedError,
 )
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.install.services import (
     IntegratorBundle,
     PackageDeploymentPlan,
@@ -181,7 +181,7 @@ def preflight_skill_materializations(
             enforce_agent_plugin_deployment_boundary(materialization.package_info)
         except AgentPluginTargetExcludedError:
             continue
-        dependency = source.dep_ref
+        selection = effective_dependency_selection(source.dep_ref, ctx)
         plan = prepare_package_deployment(
             materialization.package_info,
             ctx.project_root,
@@ -190,12 +190,8 @@ def preflight_skill_materializations(
             package_name=materialization.dep_key,
             logger=ctx.logger,
             scope=ctx.scope,
-            skill_subset=effective_deploy_skill_subset(
-                skill_subset_from_cli=ctx.skill_subset_from_cli,
-                cli_subset=ctx.skill_subset,
-                persisted_subset=dependency.skill_subset,
-            ),
-            dep_target_subset=dependency.target_subset,
+            skill_subset=selection.skill_subset,
+            dep_target_subset=selection.target_subset,
             ctx=ctx,
             allow_executables=effective_allow_map(ctx),
             trust_bin=ctx.trust_bin,
@@ -214,6 +210,7 @@ def preflight_skill_materializations(
             package_name="_local",
             logger=ctx.logger,
             scope=ctx.scope,
+            skill_subset=effective_dependency_selection(None, ctx).skill_subset,
             ctx=ctx,
             is_first_party=True,
         )
@@ -487,21 +484,16 @@ def _integrate_materialization(
         return deltas
 
     try:
-        # Per-package effective subset: ``--skill`` is additive (issue
-        # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
-        # and the current CLI ``--skill`` values -- a targeted ``--skill``
-        # install lands on top of previously pinned skills instead of
-        # erasing them. ``--skill '*'`` resets to the full bundle (None).
-        effective_skill_subset = effective_deploy_skill_subset(
-            skill_subset_from_cli=ctx.skill_subset_from_cli,
-            cli_subset=ctx.skill_subset,
-            persisted_subset=dep_ref.skill_subset,
-        )
+        # Per-package effective selection: ``--skill`` is additive (issue
+        # #1786), so the owner unions the persisted apm.yml ``skills:``
+        # with the current CLI ``--skill`` values. ``--skill '*'`` resets
+        # to the full bundle (None).
+        selection = effective_dependency_selection(dep_ref, ctx)
         # When the additive union deploys more skills than the user named on
         # this invocation, name the retained pins so the deployed set is not
         # a silent surprise (verbose only -- the count already renders).
-        if logger and ctx.skill_subset and effective_skill_subset:
-            retained = sorted(set(effective_skill_subset) - set(ctx.skill_subset))
+        if logger and ctx.skill_subset and selection.skill_subset:
+            retained = sorted(set(selection.skill_subset) - set(ctx.skill_subset))
             if retained:
                 logger.verbose_detail(
                     f"    [i] {dep_key}: retaining previously pinned "
@@ -526,8 +518,8 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            skill_subset=effective_skill_subset,
-            dep_target_subset=dep_ref.target_subset,
+            skill_subset=selection.skill_subset,
+            dep_target_subset=selection.target_subset,
             ctx=ctx,
             allow_executables=effective_allow_map(ctx),
             trust_bin=getattr(ctx, "trust_bin", None),
