@@ -16,24 +16,35 @@ This is the source of truth. Every wrapper on this page is a
 shell-script translation of these lines.
 
 ```bash
-set -euo pipefail
+set -eu
 VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
+# Declare what this release ships; do not infer it from build/.
+SHIP_BUNDLE="${SHIP_BUNDLE:?set to 1 if this release ships a bundle ZIP, else 0}"
+SHIP_CATALOG="${SHIP_CATALOG:?set to 1 if this release ships marketplace.json, else 0}"
+case "$SHIP_BUNDLE$SHIP_CATALOG" in [01][01]) ;; *) echo "use 0 or 1" >&2; exit 1 ;; esac
 
 apm pack --check-versions --check-clean --json > gate-report.json
 apm pack --archive --check-versions --strict-metadata --json > pack-report.json
 
-for f in build/*.zip .claude-plugin/marketplace.json; do
-  [ -f "$f" ] || continue
-  (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
+set --
+if [ "$SHIP_BUNDLE" = 1 ]; then
+  for f in build/*.zip; do
+    [ -f "$f" ] || { echo "release expects a bundle but build/ has no .zip" >&2; exit 1; }
+    set -- "$@" "$f"
+  done
+fi
+if [ "$SHIP_CATALOG" = 1 ]; then
+  f=.claude-plugin/marketplace.json
+  [ -f "$f" ] || { echo "release expects $f but it was not generated" >&2; exit 1; }
+  set -- "$@" "$f"
+fi
+[ "$#" -gt 0 ] || { echo "SHIP_BUNDLE and SHIP_CATALOG are both 0" >&2; exit 1; }
+for f in "$@"; do
+  (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "$f.sha256"
+  set -- "$@" "$f.sha256"
 done
 
-gh release create "$VERSION" \
-  build/*.zip \
-  build/*.zip.sha256 \
-  .claude-plugin/marketplace.json \
-  .claude-plugin/marketplace.json.sha256 \
-  --title "$VERSION" \
-  --notes-file CHANGELOG.md
+gh release create "$VERSION" "$@" --title "$VERSION" --notes-file CHANGELOG.md
 ```
 
 What each command does:
@@ -48,11 +59,17 @@ What each command does:
   for the failure modes. `apm pack --check-versions --strict-metadata`
   generates the release artifacts only after remote metadata is certifiable.
   `--json` writes a machine-readable summary to stdout; human logs go to stderr.
-- `sha256sum` produces one sidecar per artifact. Consumers verify
-  with `sha256sum -c <file>.sha256`.
-- `gh release create` uploads the bundle, the marketplace artifact,
-  and the sidecars under one tag. Use whichever release API your
-  forge exposes; the file set is what matters.
+- `SHIP_BUNDLE` and `SHIP_CATALOG` declare the release's artifacts.
+  A plugin or package repo sets `SHIP_BUNDLE=1`; a catalog-only
+  marketplace repo (no `dependencies:`, so `apm pack` builds no bundle)
+  sets `SHIP_BUNDLE=0 SHIP_CATALOG=1`; a repo that ships both sets both.
+  A declared artifact that is missing fails the job before anything is
+  published.
+- `sha256sum` produces one sidecar per artifact, next to it. Consumers
+  verify with `sha256sum -c <file>.sha256` in the download directory.
+- `gh release create` uploads the declared artifacts and their sidecars
+  under one tag. Use whichever release API your forge exposes; the file
+  set is what matters.
 
 :::caution[Upgrading an existing release pipeline?]
 `--check-clean` is now always read-only. If an older pipeline relied on one
@@ -116,16 +133,29 @@ artifact format.
       - run: |
           apm pack --check-versions --check-clean --json > gate-report.json
           apm pack --archive --check-versions --strict-metadata --json > pack-report.json
-          for f in build/*.zip .claude-plugin/marketplace.json; do
-            [ -f "$f" ] || continue
-            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
+          set --
+          if [ "$SHIP_BUNDLE" = 1 ]; then
+            for f in build/*.zip; do
+              [ -f "$f" ] || { echo "release expects a bundle but build/ has no .zip" >&2; exit 1; }
+              set -- "$@" "$f"
+            done
+          fi
+          if [ "$SHIP_CATALOG" = 1 ]; then
+            f=.claude-plugin/marketplace.json
+            [ -f "$f" ] || { echo "release expects $f but it was not generated" >&2; exit 1; }
+            set -- "$@" "$f"
+          fi
+          [ "$#" -gt 0 ] || { echo "SHIP_BUNDLE and SHIP_CATALOG are both 0" >&2; exit 1; }
+          for f in "$@"; do
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "$f.sha256"
+            set -- "$@" "$f.sha256"
           done
-          gh release create "${GITHUB_REF_NAME}" \
-            build/*.zip build/*.zip.sha256 \
-            .claude-plugin/marketplace.json* \
+          gh release create "${GITHUB_REF_NAME}" "$@" \
             --title "${GITHUB_REF_NAME}" --notes-file CHANGELOG.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHIP_BUNDLE: "1"   # 0 for a catalog-only marketplace repo
+          SHIP_CATALOG: "1"  # 0 if the repo has no marketplace: block
 ```
 
 ## GitLab CI
@@ -136,20 +166,32 @@ release:
   image: python:3.12
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
+  variables:
+    SHIP_BUNDLE: "1"   # 0 for a catalog-only marketplace repo
+    SHIP_CATALOG: "1"  # 0 if the repo has no marketplace: block
   script:
     - pip install apm-cli
     - apm pack --check-versions --check-clean --json > gate-report.json
     - apm pack --archive --check-versions --strict-metadata --json > pack-report.json
     - |
-      for f in build/*.zip .claude-plugin/marketplace.json; do
-        [ -f "$f" ] || continue
-        (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
+      set --
+      if [ "$SHIP_BUNDLE" = 1 ]; then
+        for f in build/*.zip; do
+          [ -f "$f" ] || { echo "release expects a bundle but build/ has no .zip" >&2; exit 1; }
+          set -- "$@" "$f"
+        done
+      fi
+      if [ "$SHIP_CATALOG" = 1 ]; then
+        f=.claude-plugin/marketplace.json
+        [ -f "$f" ] || { echo "release expects $f but it was not generated" >&2; exit 1; }
+        set -- "$@" "$f"
+      fi
+      [ "$#" -gt 0 ] || { echo "SHIP_BUNDLE and SHIP_CATALOG are both 0" >&2; exit 1; }
+      for f in "$@"; do
+        (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "$f.sha256"
+        set -- "$@" "$f.sha256"
       done
-    - |
-      glab release create "$CI_COMMIT_TAG" \
-        build/*.zip build/*.zip.sha256 \
-        .claude-plugin/marketplace.json* \
-        --notes-file CHANGELOG.md
+      glab release create "$CI_COMMIT_TAG" "$@" --notes-file CHANGELOG.md
 ```
 
 ## Jenkins
@@ -157,6 +199,10 @@ release:
 ```groovy
 pipeline {
   agent any
+  environment {
+    SHIP_BUNDLE = '1'   // 0 for a catalog-only marketplace repo
+    SHIP_CATALOG = '1'  // 0 if the repo has no marketplace: block
+  }
   stages {
     stage('release') {
       when { tag pattern: "v.*", comparator: "REGEXP" }
@@ -165,14 +211,24 @@ pipeline {
           pip install apm-cli
           apm pack --check-versions --check-clean --json > gate-report.json
           apm pack --archive --check-versions --strict-metadata --json > pack-report.json
-          for f in build/*.zip .claude-plugin/marketplace.json; do
-            [ -f "$f" ] || continue
-            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
+          set --
+          if [ "$SHIP_BUNDLE" = 1 ]; then
+            for f in build/*.zip; do
+              [ -f "$f" ] || { echo "release expects a bundle but build/ has no .zip" >&2; exit 1; }
+              set -- "$@" "$f"
+            done
+          fi
+          if [ "$SHIP_CATALOG" = 1 ]; then
+            f=.claude-plugin/marketplace.json
+            [ -f "$f" ] || { echo "release expects $f but it was not generated" >&2; exit 1; }
+            set -- "$@" "$f"
+          fi
+          [ "$#" -gt 0 ] || { echo "SHIP_BUNDLE and SHIP_CATALOG are both 0" >&2; exit 1; }
+          for f in "$@"; do
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "$f.sha256"
+            set -- "$@" "$f.sha256"
           done
-          gh release create "${TAG_NAME}" \
-            build/*.zip build/*.zip.sha256 \
-            .claude-plugin/marketplace.json* \
-            --notes-file CHANGELOG.md
+          gh release create "${TAG_NAME}" "$@" --notes-file CHANGELOG.md
         '''
       }
     }
@@ -187,6 +243,9 @@ trigger:
   tags:
     include: [refs/tags/v*]
 pool: { vmImage: ubuntu-latest }
+variables:
+  SHIP_BUNDLE: "1"   # 0 for a catalog-only marketplace repo
+  SHIP_CATALOG: "1"  # 0 if the repo has no marketplace: block
 steps:
   - task: UsePythonVersion@0
     inputs: { versionSpec: "3.12" }
@@ -194,15 +253,24 @@ steps:
   - script: apm pack --check-versions --check-clean --json > gate-report.json
   - script: apm pack --archive --check-versions --strict-metadata --json > pack-report.json
   - script: |
-      for f in build/*.zip .claude-plugin/marketplace.json; do
-        [ -f "$f" ] || continue
-        (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "${f}.sha256"
+      set --
+      if [ "$SHIP_BUNDLE" = 1 ]; then
+        for f in build/*.zip; do
+          [ -f "$f" ] || { echo "release expects a bundle but build/ has no .zip" >&2; exit 1; }
+          set -- "$@" "$f"
+        done
+      fi
+      if [ "$SHIP_CATALOG" = 1 ]; then
+        f=.claude-plugin/marketplace.json
+        [ -f "$f" ] || { echo "release expects $f but it was not generated" >&2; exit 1; }
+        set -- "$@" "$f"
+      fi
+      [ "$#" -gt 0 ] || { echo "SHIP_BUNDLE and SHIP_CATALOG are both 0" >&2; exit 1; }
+      for f in "$@"; do
+        (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "$f.sha256"
+        set -- "$@" "$f.sha256"
       done
-  - script: |
-      gh release create "$(Build.SourceBranchName)" \
-        build/*.zip build/*.zip.sha256 \
-        .claude-plugin/marketplace.json* \
-        --notes-file CHANGELOG.md
+      gh release create "$(Build.SourceBranchName)" "$@" --notes-file CHANGELOG.md
     env:
       GH_TOKEN: $(GITHUB_TOKEN)
 ```
