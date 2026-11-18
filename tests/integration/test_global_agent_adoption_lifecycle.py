@@ -83,3 +83,33 @@ def test_global_reinstall_adopts_agents_whose_links_were_rewritten(
     )
 
     _reinstall(scene, ("copilot", "claude"))
+
+
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "upgrade_0361" / "t3"
+
+
+@pytest.mark.parametrize("label", ["v0.35.1", "v0.36.0"])
+def test_upgrade_adopts_agents_rendered_by_an_earlier_release(
+    scene: HarnessScene, label: str
+) -> None:
+    """Agents a tagged release deployed with ``-g`` are adopted, not skipped."""
+    source = _FIXTURES / label / "user-agents" / "home"
+    for path in sorted(source.rglob("*")):
+        if path.is_file():
+            target = scene.home / path.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(path.read_bytes())
+    paths = [scene.home / relative for relative in _DEPLOYED.values()]
+    before = {path: path.read_bytes() for path in paths}
+    cwd = scene.isolated.work_root / "cwd"
+    cwd.mkdir()
+
+    result = scene.runner.run(
+        ("install", "-g", "--no-policy", "--target", ",".join(_DEPLOYED)),
+        cwd=cwd,
+        env=scene.env,
+    )
+
+    assert result.returncode == 0, describe(result)
+    assert not _SKIPPED.search(flat(result.stdout + result.stderr)), describe(result)
+    assert {path: path.read_bytes() for path in paths} == before

@@ -346,6 +346,29 @@
       ]
     },
     {
+      "issue": 3711,
+      "fixed_in": "0.36.1",
+      "summary": "Antigravity inherited the Gemini remote shape, so APM wrote httpUrl (which Antigravity rejects) and wrote SSE remotes it cannot use.",
+      "failure_modes": ["routing", "outcome"],
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_rewrites_apm_owned_entries_into_the_current_shape"
+      ]
+    },
+    {
+      "issue": 3722,
+      "fixed_in": "0.36.1",
+      "summary": "Global reinstall compared transformed agents (Codex TOML, rewritten links) to their source and reported APM's own files as unmanaged and skipped.",
+      "failure_modes": ["idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_global_agent_adoption_lifecycle.py::test_global_reinstall_adopts_transformed_agents_for_every_target",
+        "tests/integration/test_global_agent_adoption_lifecycle.py::test_global_reinstall_adopts_agents_whose_links_were_rewritten",
+        "tests/integration/test_global_agent_adoption_lifecycle.py::test_upgrade_adopts_agents_rendered_by_an_earlier_release"
+      ]
+    },
+    {
       "issue": 3726,
       "fixed_in": "0.36.1",
       "summary": "A registry behind a gateway that answers with a same-origin redirect failed install and lock replay, because every redirect was refused instead of following those that stay inside the configured registry.",
@@ -358,6 +381,17 @@
         "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_registry_lock_replays_resolved_url_without_churn",
         "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_lookalike_redirect_targets",
         "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_follows_case_only_host_difference"
+      ]
+    },
+    {
+      "issue": 3727,
+      "fixed_in": "0.36.1",
+      "summary": "LSP dependencies had no OpenCode target, and the no-LSP-target error fired after skills and .gitignore were already written.",
+      "failure_modes": ["routing", "transaction"],
+      "properties": ["routing.authorized_targets_only", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_fresh_project_writes_lsp_to_opencode_json",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_target_without_lsp_support_fails_before_any_write"
       ]
     },
     {
@@ -375,6 +409,38 @@
         "tests/integration/test_target_declaration_install_lifecycle.py::test_user_scope_undeployable_singular_target_is_rejected_before_any_write",
         "tests/integration/test_target_declaration_adjacent_commands_lifecycle.py::test_reinit_keeps_the_singular_all_deployment_set",
         "tests/integration/test_target_manifest_upgrade_lifecycle.py::test_upgraded_project_keeps_targets_and_only_policy_verdicts_change"
+      ]
+    },
+    {
+      "issue": 3736,
+      "fixed_in": "0.36.1",
+      "summary": "Registry v0.1 remotes[].type was ignored, so SSE servers rendered as Streamable HTTP for every harness and apm mcp show printed UNKNOWN.",
+      "failure_modes": ["routing", "outcome"],
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_registry_remote_type_reaches_every_harness_in_its_native_shape",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_mcp_show_reports_the_registry_remote_transport"
+      ]
+    },
+    {
+      "issue": 3745,
+      "fixed_in": "0.36.1",
+      "summary": "COPILOT_HOME moved only the MCP config; skills, agents, instructions, hooks and LSP config still landed under ~/.copilot.",
+      "failure_modes": ["routing", "cleanup"],
+      "properties": ["routing.authorized_targets_only", "filesystem.open_world_observation", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_harness_user_root_lifecycle.py::test_copilot_home_receives_every_copilot_user_primitive",
+        "tests/integration/test_harness_user_root_lifecycle.py::test_relative_user_root_is_rejected_before_any_write"
+      ]
+    },
+    {
+      "issue": 3749,
+      "fixed_in": "0.36.1",
+      "summary": "Hermes MCP writes dropped cwd, documented per-server keys and the SSE transport marker.",
+      "failure_modes": ["routing", "idempotency"],
+      "properties": ["routing.authorized_targets_only", "idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_keeps_cwd_extra_keys_and_sse_transport_idempotently"
       ]
     },
     {
