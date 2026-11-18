@@ -24,7 +24,7 @@ from __future__ import annotations
 import hmac
 import logging
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -248,14 +248,6 @@ class HelperCredentialCache:
             self._values[key] = value
             return value
 
-    def holds_secret(self, keys: Iterable[HelperKey], password: str) -> bool:
-        """Return whether any cached answer for *keys* carries *password*."""
-        with self._lock:
-            values = [self._values.get(key) for key in keys]
-        return any(
-            value is not None and hmac.compare_digest(value.password, password) for value in values
-        )
-
     def discard(self, key: HelperKey, value: GitHelperCredential) -> None:
         """Forget *value* for *key* unless a newer answer already replaced it."""
         with self._lock:
@@ -270,25 +262,27 @@ class HelperCredentialCache:
 class HelperReportLedger:
     """Process-wide record of helper reports; one per (key, action).
 
-    Holds only (host, port, path) keys, never secrets.
+    Also keeps, in memory only, the secrets accepted per (host, port), so a 401
+    on another path never erases a secret this process saw work on that host.
+    Secrets are never hashed, logged, or persisted.
     """
 
     def __init__(self) -> None:
         self._claimed: set[tuple[HelperKey, str]] = set()
+        self._accepted: dict[tuple[str, int | None], list[str]] = {}
         self._lock = threading.Lock()
 
-    def approved_keys(self, key: HelperKey) -> tuple[HelperKey, ...]:
-        """Return the keys on *key*'s host and port whose credential was approved."""
+    def decide(self, key: HelperKey, action: str, password: str) -> bool:
+        """Atomically decide whether to report *action* for *key*; claim it if so."""
+        host_port = (key[0], key[1])
+        secret = password.encode("utf-8")
         with self._lock:
-            return tuple(
-                claimed
-                for claimed, action in self._claimed
-                if action == "approve" and claimed[:2] == key[:2]
-            )
-
-    def claim(self, key: HelperKey, action: str) -> bool:
-        """Return True the first time *action* is claimed for *key*."""
-        with self._lock:
+            accepted = self._accepted.setdefault(host_port, [])
+            seen = any(hmac.compare_digest(item.encode("utf-8"), secret) for item in accepted)
+            if action == "approve" and not seen:
+                accepted.append(password)
+            elif action == "reject" and seen:
+                return False
             if (key, action) in self._claimed:
                 return False
             self._claimed.add((key, action))
@@ -297,6 +291,7 @@ class HelperReportLedger:
     def clear(self) -> None:
         with self._lock:
             self._claimed.clear()
+            self._accepted.clear()
 
 
 _HELPER_REPORTS = HelperReportLedger()
@@ -313,9 +308,9 @@ def report_helper_outcome(
 
     ``outcome`` is ``None`` (or ``ok``) when the operation succeeded with
     *credential*: Git is told to ``approve`` it. A verified rejection (HTTP
-    401 for this credential) tells Git to ``reject`` it and drops it from the
-    cache, unless this process already saw the same secret accepted on this
-    host (then the 401 means "no access to this path", not a dead
+    401 for this credential) always drops it from the cache and tells Git to
+    ``reject`` it, unless this process already saw the same secret accepted on
+    this host (then the 401 means "no access to this path", not a dead
     credential). Every other outcome (403, sign-in redirect or page, not
     found, throttle, network, TLS, a returned non-2xx response) is ambiguous
     and is not reported. Failures never reach the operation.
@@ -333,14 +328,12 @@ def report_helper_outcome(
     key = helper_cache_key(host_info, path)
     if credential.host.lower() != key[0] or credential.port != key[1]:
         return
-    if action == "reject" and resolver._helper_cache.holds_secret(
-        _HELPER_REPORTS.approved_keys(key), credential.password
-    ):
-        return
-    if not _HELPER_REPORTS.claim(key, action):
-        return
     if action == "reject":
+        # Every verified rejection drops the cached answer so the next
+        # operation asks the helper again, even when the report is skipped.
         resolver._helper_cache.discard(key, credential)
+    if not _HELPER_REPORTS.decide(key, action, credential.password):
+        return
     try:
         resolver._token_manager.report_git_helper_credential(
             credential, accepted=action == "approve"

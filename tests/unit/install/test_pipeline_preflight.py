@@ -175,6 +175,26 @@ class TestPreflightAuthCheckTimeout:
         # Should complete without raising
         _preflight_auth_check(ctx, resolver, verbose=False)
 
+    @patch("subprocess.run")
+    def test_ado_probe_timeout_is_an_outcome_not_a_success(self, mock_run: MagicMock) -> None:
+        """The auth chain must see a timeout, never a value it would approve (#3765)."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired(["git"], 30)
+        seen: list[BaseException] = []
+
+        def _attempt(_host, operation, **_kwargs):
+            try:
+                return operation("pat", {})
+            except subprocess.TimeoutExpired as exc:
+                seen.append(exc)
+                raise
+
+        resolver = _make_resolver()
+        resolver.try_with_fallback.side_effect = _attempt
+        _preflight_auth_check(_make_ctx(), resolver, verbose=False)
+        assert seen, "the ADO probe returned a timeout sentinel to the auth chain"
+
 
 # ---------------------------------------------------------------------------
 # _preflight_auth_check: non-auth failure continues

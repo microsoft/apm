@@ -228,7 +228,8 @@ _REJECTED_PHRASES = (
 # Status-anchored only, with a separator: a bare or glued "401" (team-401,
 # http401) may be part of a repository URL.
 _STATUS_PREFIX = (
-    r"(?:\bhttp(?: error)?\s+|returned error:\s*|\bstatus(?: code)?\s*[=:]\s*|\bstatus\s+)"
+    r"(?:\bhttp(?:/\d(?:\.\d)?| error)?\s+|returned error:\s*"
+    r"|\bstatus(?: code)?\s*[=:]\s*|\bstatus\s+)"
 )
 _REJECTED_STATUS_RE = re.compile(_STATUS_PREFIX + r"401\b", re.IGNORECASE)
 _FORBIDDEN_STATUS_RE = re.compile(_STATUS_PREFIX + r"403\b", re.IGNORECASE)
@@ -237,19 +238,27 @@ _PROXY_SIGNAL_RE = re.compile(r"proxy|\b407\b", re.IGNORECASE)
 _URL_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
 
 
+_DEFAULT_PORTS = {"https": 443, "http": 80}
+
+
 def _names_other_host(text: str, host: str | None, port: int | None) -> bool:
-    """Return whether *text* names a URL on a host other than the requested one."""
+    """Return whether *text* names a URL other than the requested HTTPS endpoint.
+
+    Without a requested host no URL can be confirmed, so any URL counts.
+    """
     if not host:
-        return False
+        return _URL_RE.search(text) is not None
+    wanted_port = port if port is not None else _DEFAULT_PORTS["https"]
     for match in _URL_RE.finditer(text):
         try:
             parsed = urlsplit(match.group(0))
-            other_port = parsed.port
+            scheme = parsed.scheme.lower()
+            other_port = parsed.port if parsed.port is not None else _DEFAULT_PORTS.get(scheme)
         except ValueError:
             return True
-        if (parsed.hostname or "").lower() != host.lower():
+        if scheme != "https" or (parsed.hostname or "").lower() != host.lower():
             return True
-        if other_port is not None and other_port != port and other_port not in (80, 443):
+        if other_port != wanted_port:
             return True
     return False
 
@@ -348,6 +357,11 @@ def _header(headers: Mapping[str, str] | None, name: str) -> str:
     return str(value or "")
 
 
+def _text_attr(obj: Any, name: str) -> str | None:
+    value = getattr(obj, name, None)
+    return value if isinstance(value, str) else None
+
+
 def _failure(kind_presented: bool) -> AuthOutcomeKind:
     return AuthOutcomeKind.CREDENTIAL_REJECTED if kind_presented else AuthOutcomeKind.AUTH_REQUIRED
 
@@ -365,6 +379,12 @@ def _classify_response(
     if not isinstance(status, int):
         return AuthOutcome(AuthOutcomeKind.OTHER, "response without status")
     if is_ado:
+        # A response that landed on the sign-in service (followed by a
+        # redirect helper that keeps no history) is never a direct rejection.
+        if is_ado_signin_location(_text_attr(response, "url")):
+            return AuthOutcome(
+                _failure(credential_presented), "Azure DevOps redirected to sign-in", status
+            )
         for previous in getattr(response, "history", None) or ():
             if is_ado_signin_location(_header(getattr(previous, "headers", None), "Location")):
                 return AuthOutcome(
@@ -431,13 +451,16 @@ def _classify_text(
         if _PUBLIC_GITHUB_STATUS_RE.search(lowered):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         return AuthOutcome(AuthOutcomeKind.OTHER, detail)
-    # A 403, not-found, proxy signal, or a URL on another host makes a
-    # rejection ambiguous: never verified.
+    # A 403, not-found, proxy signal, or a URL on another endpoint makes a
+    # rejection ambiguous: never verified. URLs are matched separately so a
+    # repository named "proxy" or "team-404" does not hide a real rejection.
+    prose = _URL_RE.sub(" ", text)
     ambiguous = (
         bool({403, 404} & set(statuses))
-        or _FORBIDDEN_STATUS_RE.search(text) is not None
-        or _NOT_FOUND_RE.search(text) is not None
-        or _PROXY_SIGNAL_RE.search(text) is not None
+        or _FORBIDDEN_STATUS_RE.search(prose) is not None
+        or _NOT_FOUND_RE.search(prose) is not None
+        or "not found" in prose.lower()
+        or _PROXY_SIGNAL_RE.search(prose) is not None
         or _names_other_host(text, host, port)
     )
     if any(status in {401, 403} for status in statuses):
@@ -451,8 +474,8 @@ def _classify_text(
             credential_presented
             and not ambiguous
             and (
-                any(phrase in lowered for phrase in _REJECTED_PHRASES)
-                or _REJECTED_STATUS_RE.search(text) is not None
+                any(phrase in prose.lower() for phrase in _REJECTED_PHRASES)
+                or _REJECTED_STATUS_RE.search(prose) is not None
             )
         )
         return AuthOutcome(_failure(credential_presented), detail, rejection_verified=verified)

@@ -109,6 +109,9 @@ def test_ado_git_stderr_classification(error: str, expected: bool) -> None:
             False,
         ),
         ({"error": "Received HTTP code 407 from proxy; HTTP 401"}, False),
+        ({"error": "HTTP/2 403\nfatal: Authentication failed for 'https://dev.azure.com/'"}, False),
+        ({"error": "HTTP/1.1 403 Forbidden; Authentication failed"}, False),
+        ({"error": "HTTP/1.1 401 Unauthorized"}, True),
         (
             {
                 "response": _response(
@@ -122,10 +125,11 @@ def test_ado_git_stderr_classification(error: str, expected: bool) -> None:
 )
 def test_only_a_401_for_a_presented_credential_verifies_rejection(kwargs, verified) -> None:
     """Only a verified rejection may erase a helper credential (#3765)."""
-    presented = classify_auth_outcome(host_kind="ado", credential_presented=True, **kwargs)
+    host_info = AuthResolver.classify_host("dev.azure.com")
+    presented = classify_auth_outcome(host_info=host_info, credential_presented=True, **kwargs)
     assert presented.is_auth_failure
     assert presented.is_verified_rejection is verified
-    anonymous = classify_auth_outcome(host_kind="ado", credential_presented=False, **kwargs)
+    anonymous = classify_auth_outcome(host_info=host_info, credential_presented=False, **kwargs)
     assert not anonymous.is_verified_rejection
 
 
@@ -144,6 +148,59 @@ def test_rejection_naming_another_host_is_never_verified() -> None:
     )
     assert other.is_auth_failure and not other.is_verified_rejection
     assert same.is_verified_rejection
+
+
+def test_rejection_naming_a_url_without_a_requested_host_is_never_verified() -> None:
+    outcome = classify_auth_outcome(
+        host_kind="ado",
+        error="fatal: Authentication failed for 'https://dev.azure.com/o/'",
+        credential_presented=True,
+    )
+    assert outcome.is_auth_failure and not outcome.is_verified_rejection
+
+
+def test_rejection_on_another_port_or_scheme_is_never_verified() -> None:
+    """Another port or plain HTTP is a different endpoint than the requested one."""
+    with_port = AuthResolver.classify_host("dev.azure.com", port=8443)
+    for url in (
+        "https://dev.azure.com:443/o/",
+        "https://dev.azure.com/o/",
+        "http://dev.azure.com/o/",
+    ):
+        outcome = classify_auth_outcome(
+            host_info=with_port,
+            error=f"fatal: Authentication failed for '{url}'",
+            credential_presented=True,
+        )
+        assert outcome.is_auth_failure and not outcome.is_verified_rejection, url
+    same = classify_auth_outcome(
+        host_info=with_port,
+        error="fatal: Authentication failed for 'https://dev.azure.com:8443/o/'",
+        credential_presented=True,
+    )
+    assert same.is_verified_rejection
+
+
+def test_repository_names_never_hide_a_real_rejection() -> None:
+    """A project named proxy or a repo named team-404 is a URL, not a signal."""
+    outcome = classify_auth_outcome(
+        host_info=AuthResolver.classify_host("dev.azure.com"),
+        error="fatal: Authentication failed for 'https://dev.azure.com/o/proxy/_git/team-404/'",
+        credential_presented=True,
+    )
+    assert outcome.is_verified_rejection
+
+
+def test_401_after_a_followed_signin_redirect_is_never_verified() -> None:
+    """A redirect helper without history still lands on the sign-in URL."""
+    response = SimpleNamespace(
+        status_code=401,
+        headers={},
+        history=[],
+        url="https://dev.azure.com/_signin?realm=dev.azure.com",
+    )
+    outcome = classify_auth_outcome(host_kind="ado", response=response, credential_presented=True)
+    assert outcome.is_auth_failure and not outcome.is_verified_rejection
 
 
 def test_transport_errors_never_escalate() -> None:

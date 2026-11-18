@@ -28,7 +28,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from apm_cli.core.auth_outcome import sanitize_diagnostic_detail
 from apm_cli.utils.git_env import get_gh_executable, get_git_executable
 from apm_cli.utils.github_host import (
     default_host,
@@ -394,7 +393,9 @@ class GitHubTokenManager:
         if (
             attributes.get("protocol") != "https"
             or attributes.get("host", "").lower() != credential.host_field.lower()
-            or not attributes.get("password")
+            or attributes.get("password") != credential.password
+            or attributes.get("username") != credential.username
+            or ("path" in attributes and attributes["path"] != credential.path)
         ):
             logger.debug("Skipping git credential report: description does not match the request")
             return False
@@ -422,12 +423,12 @@ class GitHubTokenManager:
             )
             return False
         if result.returncode != 0:
+            # Helper stderr may echo the description it was given; never log it.
             logger.debug(
-                "git credential %s for %s exited %d: %s",
+                "git credential %s for %s exited %d",
                 action,
                 credential.host_field,
                 result.returncode,
-                sanitize_diagnostic_detail(result.stderr),
             )
             return False
         return True

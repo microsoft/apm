@@ -263,7 +263,7 @@ def test_approve_is_once_per_process_across_resolvers(helper):
 )
 def test_verified_rejection_rejects_once_and_drops_the_cache(helper, helper_outcome):
     resolver = AuthResolver()
-    for _ in range(2):
+    for _ in range(3):
         with pytest.raises(AdoAuthChainExhaustedError):
             _run(_helper_answers(helper_outcome), resolver=resolver)
 
@@ -277,8 +277,8 @@ def test_verified_rejection_rejects_once_and_drops_the_cache(helper, helper_outc
         USER,
         SECRET,
     )
-    # The rejected answer was dropped, so the second operation asked fill again.
-    assert len(_actions(helper, "get")) == 2
+    # Every rejected answer was dropped, so each operation asked fill again.
+    assert len(_actions(helper, "get")) == 3
 
 
 def test_rejected_then_refreshed_credential_is_approved(helper):
@@ -426,3 +426,57 @@ def test_report_error_never_fails_the_operation(helper):
         GitHubTokenManager, "report_git_helper_credential", side_effect=RuntimeError("boom")
     ):
         assert _run(_accept_secret) == "ok"
+
+
+def test_secret_accepted_by_another_resolver_is_not_rejected(helper):
+    assert _run(_accept_secret, resolver=AuthResolver()) == "ok"
+    with pytest.raises(AdoAuthChainExhaustedError):
+        _run(_helper_answers(_response(401)), resolver=AuthResolver(), path="other/project/repo")
+    assert _actions(helper, "erase") == [], helper.events()
+
+
+def test_non_ascii_secret_is_compared_without_error():
+    ledger = auth_chain.HelperReportLedger()
+    key = (HOST, None, HELPER_PATH)
+    assert ledger.decide(key, "approve", "p\u00e4ss-\u00fcber")
+    assert not ledger.decide((HOST, None, "other"), "reject", "p\u00e4ss-\u00fcber")
+    assert ledger.decide((HOST, None, "other"), "reject", "another-secret")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param(("username", "someone-else"), id="username"),
+        pytest.param(("path", "other/project/_git/repo"), id="path"),
+        pytest.param(("password", "different-secret"), id="password"),
+    ],
+)
+def test_description_not_matching_the_sent_credential_is_never_reported(helper, field):
+    filled = GitHubTokenManager.resolve_git_helper_credential(HOST, path=HELPER_PATH)
+    assert filled is not None
+    changed = tuple(
+        (key, field[1] if key == field[0] else value) for key, value in filled.description
+    )
+    tampered = GitHelperCredential(
+        host=filled.host,
+        password=filled.password,
+        username=filled.username,
+        path=filled.path,
+        description=changed,
+    )
+    assert not GitHubTokenManager.report_git_helper_credential(tampered, accepted=True)
+    assert _actions(helper, "store") == []
+
+
+def test_helper_stderr_is_never_logged(helper, caplog):
+    git_config = Path(os.environ["GIT_CONFIG_GLOBAL"])
+    with git_config.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '[credential]\n\thelper = "!f() { test \\"$1\\" = store && '
+            'echo could not store helper-secret-sentinel-3765 >&2 && exit 1; }; f"\n'
+        )
+    filled = GitHubTokenManager.resolve_git_helper_credential(HOST, path=HELPER_PATH)
+    assert filled is not None
+    with caplog.at_level("DEBUG", logger="apm_cli.core.token_manager"):
+        GitHubTokenManager.report_git_helper_credential(filled, accepted=True)
+    assert SECRET not in caplog.text

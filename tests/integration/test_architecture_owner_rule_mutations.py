@@ -3410,7 +3410,7 @@ _CRED_REPORT_RULE = "transport-platform-credential-report-owner"
         ),
         pytest.param(
             "src/apm_cli/core/auth_chain.py",
-            "    if not _HELPER_REPORTS.claim(key, action):\n        return\n",
+            "    if not _HELPER_REPORTS.decide(key, action, credential.password):\n        return\n",
             "",
             id="no-once-per-key",
         ),
