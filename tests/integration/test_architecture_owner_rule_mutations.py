@@ -959,6 +959,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-lsp-capability-gate",
+        rule_id="install-deployment-lsp-capability-gate",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="    preflight_lsp_targets(ctx)\n",
+        new="",
+        intent="The integrate phase deploys packages without the LSP capability gate.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",
@@ -970,9 +978,20 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-lsp-target-contract",
         rule_id="install-deployment-lsp-target-contract",
         path="src/apm_cli/integration/lsp_integrator.py",
-        old="return BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
-        new="return spec.path(project_root, user_scope=False)",
-        intent="Claude LSP plugin writes bypass the canonical deployment-path gate.",
+        old=(
+            "return BaseIntegrator.resolve_deploy_path(\n"
+            "            relative_path,\n"
+            "            root,\n"
+            "            allowed_prefixes=(relative_path,),\n"
+            "        )"
+        ),
+        new=(
+            "return spec.path(\n"
+            "            project_root,\n"
+            "            user_scope=user_scope,\n"
+            "        )"
+        ),
+        intent="LSP target config writes bypass the canonical deployment-path gate.",
     ),
     MutationCase(
         guard_id="install-deployment-manifest-snapshot",

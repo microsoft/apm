@@ -247,8 +247,7 @@ def test_native_guard_does_not_adopt_unrecorded_native_ownership(legacy: bool) -
             lock,
             mcp_servers={"managed"},
             mcp_targets=["intellij"],
-            lsp_servers=set(),
-            lsp_targets=[],
+            lsp_target_servers={},
             current_mcp=None,
             user_scope=False,
         )
@@ -264,8 +263,7 @@ def test_native_guard_requires_actual_source_evidence_even_without_claims() -> N
             LockFile(),
             mcp_servers=set(),
             mcp_targets=[],
-            lsp_servers=set(),
-            lsp_targets=[],
+            lsp_target_servers={},
             current_mcp=CurrentMcpConfigView(
                 dependencies=(),
                 configs={},
@@ -284,12 +282,38 @@ def test_native_ownership_diagnostic_escapes_non_ascii_server_names() -> None:
             LockFile(),
             mcp_servers={"snowman-\u2603"},
             mcp_targets=["intellij"],
-            lsp_servers=set(),
-            lsp_targets=[],
+            lsp_target_servers={},
             current_mcp=None,
             user_scope=False,
         )
     assert failure.value.reasons == [
         "  - MCP server 'snowman-\\u2603' target 'intellij' "
         "ownership is not recorded in apm.lock.yaml"
+    ]
+
+
+def test_native_guard_checks_lsp_ownership_per_target() -> None:
+    lock = LockFile(
+        lsp_servers=["gopls", "socket-srv"],
+        lsp_target_servers={"copilot": ["gopls", "socket-srv"], "opencode": ["gopls"]},
+    )
+    InstallService.enforce_frozen_services(
+        lock,
+        mcp_servers=set(),
+        mcp_targets=[],
+        lsp_target_servers={"copilot": {"gopls", "socket-srv"}, "opencode": {"gopls"}},
+        current_mcp=None,
+        user_scope=False,
+    )
+    with pytest.raises(FrozenInstallError, match="cannot replay") as failure:
+        InstallService.enforce_frozen_services(
+            lock,
+            mcp_servers=set(),
+            mcp_targets=[],
+            lsp_target_servers={"opencode": {"gopls", "socket-srv"}},
+            current_mcp=None,
+            user_scope=False,
+        )
+    assert failure.value.reasons == [
+        "  - LSP server 'socket-srv' target 'opencode' ownership is not recorded in apm.lock.yaml"
     ]

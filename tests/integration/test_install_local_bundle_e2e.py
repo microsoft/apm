@@ -1447,7 +1447,7 @@ class TestInstallLocalBundleLsp:
         assert result.exit_code == 0, result.output
         lockfile = LockFile.read(project / "apm.lock.yaml")
         assert lockfile is not None
-        assert set(lockfile.lsp_target_servers) <= {"claude", "copilot"}
+        assert set(lockfile.lsp_target_servers) <= {"claude", "copilot", "opencode"}
         assert "bundle-lsp" in lockfile.lsp_servers
 
     def test_root_install_reads_source_policy_for_bundle_lsp(
