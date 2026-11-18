@@ -20,7 +20,11 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry_proxy import RegistryConfig
 from apm_cli.install.errors import InstallFailureAlreadyRendered
 from apm_cli.install.pipeline import run_install_pipeline
-from apm_cli.install.source_helpers import lockfile_refresh_command, ref_update_operation_label
+from apm_cli.install.source_helpers import (
+    lockfile_refresh_command,
+    ref_update_operation_label,
+    supply_chain_mismatch_hint,
+)
 
 pytestmark = pytest.mark.component
 
@@ -135,6 +139,17 @@ class TestRemediationCommands:
     def test_refresh_command_follows_scope(self) -> None:
         assert lockfile_refresh_command(InstallScope.PROJECT) == "apm update"
         assert lockfile_refresh_command(InstallScope.USER) == "apm update -g"
+
+    def test_mismatch_hint_targets_a_direct_dependency(self) -> None:
+        ctx = MagicMock(scope=InstallScope.USER, declared_direct_refs={"owner/repo": ()})
+        hint = supply_chain_mismatch_hint(ctx, "owner/repo")
+        assert "Use 'apm update -g owner/repo' to accept new content for this package" in hint
+
+    def test_mismatch_hint_for_transitive_dependency_names_full_refresh(self) -> None:
+        ctx = MagicMock(scope=InstallScope.PROJECT, declared_direct_refs={"owner/root": ()})
+        hint = supply_chain_mismatch_hint(ctx, "owner/child")
+        assert "Use 'apm update' to accept new content" in hint
+        assert "owner/child" not in hint
 
     @pytest.mark.parametrize(
         ("command_path", "expected"),

@@ -14,11 +14,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from .models import (
-    REMEDY_ADD,
-    REMEDY_PIN,
-    REMEDY_REMOVE,
     CheckResult,
     CIAuditResult,
+    PolicyRemedy,
     PolicySubject,
 )
 
@@ -121,7 +119,7 @@ def _with_mcp_declarers(
     brought_in_by = brought_in_by or {}
 
     def _hint(subject: PolicySubject) -> PolicySubject:
-        if subject.ref not in transitive or subject.remedy != REMEDY_REMOVE:
+        if subject.ref not in transitive or subject.remedy != PolicyRemedy.REMOVE:
             return subject
         declarer = brought_in_by.get(subject.ref)
         if declarer:
@@ -247,7 +245,7 @@ def _check_required_packages(
         message=f"{len(missing)} required package(s) missing from manifest",
         details=missing,
         subjects=tuple(
-            PolicySubject(name, "required by org policy but not declared", remedy=REMEDY_ADD)
+            PolicySubject(name, "required by org policy but not declared", remedy=PolicyRemedy.ADD)
             for name in missing
         ),
     )
@@ -1256,7 +1254,7 @@ def _check_pinned_constraints(
                 PolicySubject(
                     judged.get_canonical_dependency_string(),
                     humanize_reason(reason, judged),
-                    remedy=REMEDY_PIN,
+                    remedy=PolicyRemedy.PIN,
                 )
             )
     violations = list(dict.fromkeys(violations))

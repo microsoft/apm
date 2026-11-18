@@ -509,8 +509,9 @@ def check_target_mismatch(
     bundle_set = {t.strip() for t in bundle_targets if t and t.strip()}
     # Issue #1207: ``"all"`` (or empty after stripping) means target-agnostic.
     # Such bundles cover any install target, so no mismatch warning is
-    # appropriate.
-    if "all" in bundle_set:
+    # appropriate. ``"minimal"`` is what older ``apm pack`` recorded for a
+    # project with no target folder; it names no target either.
+    if bundle_set & {"all", "minimal"}:
         return None
     install_set = {t.strip() for t in install_targets if t and t.strip()}
     from ..core.target_detection import normalize_target_name

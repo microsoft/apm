@@ -7,6 +7,7 @@ baseline checks (``ci_checks``) and policy checks (``policy_checks``).
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -47,9 +48,18 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
 # ── Result data classes ───────────────────────────────────────────
 
 
-REMEDY_REMOVE = "remove"
-REMEDY_ADD = "add"
-REMEDY_PIN = "pin"
+class PolicyRemedy(StrEnum):
+    """The apm.yml edit a policy violation hint may suggest.
+
+    The single vocabulary for install remediation hints: producers
+    (``policy_checks``) pick a member and the install logger branches on
+    members only. ``None`` (or anything outside this enum) means no apm.yml
+    edit applies.
+    """
+
+    REMOVE = "remove"
+    ADD = "add"
+    PIN = "pin"
 
 
 @dataclass(frozen=True)
@@ -57,10 +67,10 @@ class PolicySubject:
     """One offending dependency or MCP server named by a policy check.
 
     ``remedy`` selects the apm.yml edit the install hint suggests:
-    ``"remove"`` (the subject is declared and must go), ``"add"`` (a
-    required subject is missing), ``"pin"`` (the declared ref must be
-    bounded), or ``None`` (no apm.yml edit applies;
-    ``reason`` carries the remediation). ``declared_by`` is the lock key of
+    :attr:`PolicyRemedy.REMOVE` (the subject is declared and must go),
+    :attr:`PolicyRemedy.ADD` (a required subject is missing),
+    :attr:`PolicyRemedy.PIN` (the declared ref must be bounded), or ``None``
+    (no apm.yml edit applies; ``reason`` carries the remediation). ``declared_by`` is the lock key of
     the direct apm.yml dependency that brings in a transitive MCP server
     (never a package display name), so the hint points at an entry the user
     can actually remove.
@@ -68,7 +78,7 @@ class PolicySubject:
 
     ref: str
     reason: str
-    remedy: str | None = REMEDY_REMOVE
+    remedy: PolicyRemedy | None = PolicyRemedy.REMOVE
     declared_by: str | None = None
 
 

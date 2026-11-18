@@ -34,11 +34,22 @@ def lockfile_refresh_command(scope: Any) -> str:
     return "apm update -g" if scope is InstallScope.USER else "apm update"
 
 
-def supply_chain_mismatch_hint(scope: Any) -> str:
-    """Explain a lockfile content mismatch and name the command that re-pins it."""
+def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
+    """Explain a lockfile content mismatch and name the command that re-pins it.
+
+    A direct dependency gets the targeted ``apm update <dep_key>``: its key is
+    the ``replace:``-projected unique key ``apm update`` matches. A transitive
+    one cannot be named on that command line, so it gets the full refresh.
+    """
+    command = lockfile_refresh_command(ctx.scope)
+    if dep_key in (getattr(ctx, "declared_direct_refs", None) or {}):
+        return (
+            f"This may indicate a supply-chain attack. Use '{command} {dep_key}' to "
+            "accept new content for this package and re-pin it in the lockfile."
+        )
     return (
-        "This may indicate a supply-chain attack. Use "
-        f"'{lockfile_refresh_command(scope)}' to accept new content and update the lockfile."
+        f"This may indicate a supply-chain attack. Use '{command}' to accept "
+        "new content and update the lockfile."
     )
 
 
@@ -205,7 +216,7 @@ def ensure_carried_licenses_match(
     raise DirectDependencyError(
         f"Licence file mismatch for {dep_key}: the licence files carried "
         "from the repository differ from the lockfile record. "
-        + supply_chain_mismatch_hint(ctx.scope)
+        + supply_chain_mismatch_hint(ctx, dep_key)
     )
 
 

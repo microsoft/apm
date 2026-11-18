@@ -1132,6 +1132,47 @@ def test_required_lsp_only_dry_run_reports_plan_without_writing_state(
     _assert_same_state(before, after)
 
 
+def test_required_bootstrap_dry_run_previews_manifest_without_writing_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Project-scope dry-run with no apm.yml previews bootstrap and writes nothing (#3836)."""
+    scenario = _new_scenario(tmp_path / "bootstrap-dry-run", apm_binary_path)
+    project_root = scenario.isolated.work_root / "bootstrap-consumer"
+    local_sources = LocalPackageFactory(project_root)
+    package = local_sources.create("pkg")
+    local_sources.add_skill(package, "bootstrap", _skill("bootstrap"))
+    capture_args = {
+        "targets": ("claude",),
+        "config_paths": (
+            PurePosixPath("apm_modules"),
+            PurePosixPath(".claude/skills/bootstrap/SKILL.md"),
+        ),
+        "external_roots": (_apm_home_root(scenario),),
+    }
+    before = LifecycleStateSnapshot.capture(project_root, **capture_args)
+    assert before.manifest_bytes is None
+
+    result = scenario.runner.run(
+        (*_INSTALL_ARGS, "./pkg", "--dry-run", "--target", "claude"),
+        scenario_id="bootstrap-dry-run-install",
+        cwd=project_root,
+        env=scenario.environment,
+    )
+    after = LifecycleStateSnapshot.capture(project_root, **capture_args)
+
+    assert result.returncode == 0, _result_evidence(result)
+    assert "Dry run: Would create apm.yml" in result.stdout
+    assert "Created apm.yml" not in result.stdout
+    assert after.manifest_bytes is None
+    assert after.file("apm_modules").kind == "missing"
+    assert after.file(".claude/skills/bootstrap/SKILL.md").kind == "missing"
+    assert after.file("apm.yml", root_id="apm-home").kind == "missing"
+    assert after.file("apm.lock.yaml", root_id="apm-home").kind == "missing"
+    assert sorted(project_root.iterdir()) == [package.root]
+    _assert_same_state(before, after)
+
+
 def test_required_conflicted_lockfile_preserves_durable_state(
     tmp_path: Path,
     apm_binary_path: Path,

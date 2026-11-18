@@ -47,14 +47,16 @@ aborts:
 [x] Content hash mismatch for owner/repo: expected sha256:abc..., got sha256:def...
     The downloaded content differs from the lockfile record.
     This may indicate a supply-chain attack.
-    Use 'apm update' to accept new content and update the lockfile.
+    Use 'apm update owner/repo' to accept new content for this package and re-pin it in the lockfile.
 ```
 
 Exit code is non-zero and the partially-downloaded directory is
 removed before APM exits. Source: `src/apm_cli/install/sources.py`.
 
-The opt-in escape hatch is `apm update`, which re-resolves
-refs and accepts new content into the lockfile. Use it when you
+The opt-in escape hatch is `apm update <pkg>` (`apm update -g <pkg>` at
+user scope), which re-resolves that package and accepts its new content
+into the lockfile. A transitive dependency cannot be targeted, so its
+hint names the full `apm update`. Use it when you
 intentionally bumped a dependency upstream and expect the hash to
 change.
 

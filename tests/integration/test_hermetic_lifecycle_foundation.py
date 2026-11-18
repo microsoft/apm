@@ -430,7 +430,10 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         assert "Content hash mismatch" in normalized_stdout
         assert f"expected sha256:{'0' * 64}" in normalized_stdout
         assert "This may indicate a supply-chain attack." in normalized_stdout
-        assert "Use 'apm update' to accept new content" in normalized_stdout
+        dep_key = normalized_stdout.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
+        assert f"Use 'apm update {dep_key}' to accept new content for this package" in (
+            normalized_stdout
+        )
         assert result.stderr == ""
     else:
         payload = json.loads(result.stdout)

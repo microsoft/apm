@@ -9,17 +9,17 @@ from pathlib import Path
 
 from apm_cli.constants import APM_YML_FILENAME
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.models.dependency.manifest_host import ManifestHostScope, manifest_host_scope_for
 
 
-def _load_manifest_for_add(apm_yml_path: Path, logger=None) -> tuple[dict, str | None]:
-    """Read apm.yml round-trip and return it with its validated ``default_host``.
+def _load_manifest_for_add(apm_yml_path: Path, logger=None) -> tuple[dict, ManifestHostScope]:
+    """Read apm.yml round-trip and return it with its ``default_host`` scope.
 
     OpenAPM req-mf-019: the manifest's ``default_host:`` selects the host that
     shorthand entries resolve against and that canonical writes strip (#3843).
     Exits 1 with an error when the manifest is unreadable or the host invalid.
     """
     from apm_cli.models.manifest_io import load_manifest_roundtrip
-    from apm_cli.utils.github_host import validate_manifest_default_host
 
     try:
         data = load_manifest_roundtrip(apm_yml_path) or {}
@@ -27,7 +27,7 @@ def _load_manifest_for_add(apm_yml_path: Path, logger=None) -> tuple[dict, str |
         (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)
     try:
-        return data, validate_manifest_default_host(data.get("default_host"))
+        return data, manifest_host_scope_for(data)
     except ValueError as e:
         (logger or InstallLogger()).error(str(e))
         sys.exit(1)

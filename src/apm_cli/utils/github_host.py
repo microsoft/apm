@@ -71,7 +71,8 @@ def default_host() -> str:
 
 
 # ``default_host:`` of the manifest whose dependency entries are being read or
-# written. Set only through :func:`manifest_default_host_scope`.
+# written. Set only through :func:`manifest_default_host_scope`, which callers
+# enter via ``apm_cli.models.dependency.manifest_host.manifest_host_scope_for``.
 _MANIFEST_DEFAULT_HOST: ContextVar[str | None] = ContextVar(
     "apm_manifest_default_host", default=None
 )

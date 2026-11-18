@@ -329,6 +329,37 @@ class TestLockfileMode:
         # Should still find the warning in guide.md
         assert result.exit_code == 2
 
+    @pytest.mark.parametrize("package", ["acme/x", "gitlab.com/acme/x"])
+    def test_package_filter_resolves_under_manifest_default_host(
+        self, runner, tmp_path, monkeypatch, package
+    ):
+        """#3843: shorthand resolves against apm.yml ``default_host`` like install."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        (tmp_path / "apm.yml").write_text(
+            "name: project\nversion: 1.0.0\ndefault_host: gitlab.com\n"
+            "dependencies:\n  apm:\n    - acme/x\n",
+            encoding="utf-8",
+        )
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="acme/x",
+                host="gitlab.com",
+                deployed_files=[".github/prompts/x.md"],
+            )
+        )
+        lock.write(tmp_path / "apm.lock.yaml")
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
+        (tmp_path / ".github" / "prompts" / "x.md").write_text("Hidden\u200b\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(audit, [package])
+
+        # The package's deployed file is scanned: warning -> exit 2.
+        assert result.exit_code == 2, result.output
+        assert "not installed" not in result.output
+
     def test_package_filter_not_found_fails(self, runner, lockfile_project, monkeypatch):
         """#3840: an unknown package exits non-zero so a CI typo cannot pass."""
         monkeypatch.chdir(lockfile_project)

@@ -705,13 +705,9 @@ class APMPackage:
         # ``default_host:`` (OpenAPM req-mf-019): shorthand dependencies in
         # this manifest resolve against it instead of the implementation
         # default (GITHUB_HOST or github.com).
-        from ..utils.github_host import (
-            manifest_default_host_scope,
-            validate_manifest_default_host,
-        )
+        from .dependency.manifest_host import manifest_host_scope_for
 
-        manifest_default_host = validate_manifest_default_host(data.get("default_host"))
-        with manifest_default_host_scope(manifest_default_host):
+        with manifest_host_scope_for(data) as manifest_default_host:
             dependencies, dev_dependencies = cls._parse_dependency_sections(data, source_manifest)
 
         # Merge user/policy registry URLs and config.json default routing.

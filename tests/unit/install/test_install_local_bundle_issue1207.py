@@ -121,6 +121,10 @@ class TestPackTargetAllIsUniversal:
         assert check_target_mismatch(["all"], ["copilot", "claude"]) is None
         assert check_target_mismatch(["all"], []) is None
 
+    def test_check_target_mismatch_ignores_legacy_minimal_pack_target(self) -> None:
+        # Older `apm pack` recorded "minimal" for projects with no target folder.
+        assert check_target_mismatch(["minimal"], ["claude"]) is None
+
     def test_check_target_mismatch_still_warns_on_real_mismatch(self) -> None:
         warning = check_target_mismatch(["copilot"], ["opencode"])
         assert warning is not None

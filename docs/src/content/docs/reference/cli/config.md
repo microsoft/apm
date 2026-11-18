@@ -83,7 +83,7 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 
 ### Deprecated keys
 
-`auto-integrate` has no effect: no command reads it. `apm config get` and `apm config set` still accept it, so existing scripts keep working, but print a deprecation warning. It is not listed in the config summary and will be removed in a future release.
+`auto-integrate` has no effect: no command reads it. `apm config get` and `apm config set` still accept it, so existing scripts keep working, but print a deprecation warning; `set` stores the value and reports `Stored auto-integrate=<value> (no effect)` instead of a success line. It is not listed in the config summary and will be removed in a future release.
 
 ### Resolution order
 

@@ -587,9 +587,13 @@ def set(key, value):  # noqa: F811
 
     setter, label = config_entry
     setter(enabled)
-    logger.success(f"{label} set to {'true' if enabled else 'false'}")
+    rendered = "true" if enabled else "false"
     if key in _DEPRECATED_CONFIG_KEYS:
+        # A success line would imply the setting does something.
         logger.warning(_DEPRECATED_CONFIG_KEYS[key])
+        logger.info(f"Stored {key}={rendered} (no effect)")
+    else:
+        logger.success(f"{label} set to {rendered}")
 
     # Warn when persisting allow-protocol-fallback=true in a CI environment where
     # $HOME is often shared across jobs -- the persisted value will affect all

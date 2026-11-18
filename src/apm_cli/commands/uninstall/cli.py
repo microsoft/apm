@@ -166,14 +166,14 @@ def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) 
     Uninstall must parse declarations exactly as ``apm install`` recorded them,
     so ``apm uninstall acme/x`` finds the ``gitlab.com/acme/x`` lock entry.
     """
-    from ...utils.github_host import manifest_default_host_scope, validate_manifest_default_host
+    from ...models.dependency.manifest_host import manifest_host_scope_for
 
     try:
-        manifest_host = validate_manifest_default_host(data.get("default_host"))
+        scope = manifest_host_scope_for(data)
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
-    stack.enter_context(manifest_default_host_scope(manifest_host))
+    stack.enter_context(scope)
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:

@@ -295,7 +295,7 @@ an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
 
 ## Content integrity hashing
 
-APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm update` to accept new upstream content and refresh the lockfile.
+APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). The error names `apm update <pkg>` to accept that package's new upstream content and re-pin it in the lockfile (the full `apm update` for a transitive dependency).
 
 Replacement packages download and pass package-shape validation in an isolated
 staging directory while the current package remains in place. APM publishes the

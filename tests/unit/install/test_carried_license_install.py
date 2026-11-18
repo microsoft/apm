@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.carried_license import CarriedLicense, carry_licenses
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.phases._redownload import _should_skip_redownload
@@ -94,6 +95,32 @@ def test_carried_mismatch_with_lock_fails_closed(tmp_path: Path) -> None:
         ensure_carried_licenses_match(ctx, "k", package, SimpleNamespace(carried_licenses=forged))
     assert "Use 'apm update' to accept new content" in str(exc_info.value)
     assert not package.exists()
+
+
+@pytest.mark.parametrize(
+    ("scope", "command"),
+    [(InstallScope.PROJECT, "apm update"), (InstallScope.USER, "apm update -g")],
+)
+def test_carried_mismatch_hint_names_targeted_update_for_direct_dep(
+    tmp_path: Path, scope, command
+) -> None:
+    package, _legacy_hash, records = _package(tmp_path)
+    forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
+    ctx = _ctx(
+        tmp_path,
+        package_carried_licenses={"owner/repo/sub": records},
+        declared_direct_refs={"owner/repo/sub": ()},
+        scope=scope,
+    )
+
+    with pytest.raises(DirectDependencyError) as exc_info:
+        ensure_carried_licenses_match(
+            ctx, "owner/repo/sub", package, SimpleNamespace(carried_licenses=forged)
+        )
+    assert (
+        f"Use '{command} owner/repo/sub' to accept new content for this package "
+        "and re-pin it in the lockfile."
+    ) in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

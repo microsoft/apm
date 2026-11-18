@@ -380,7 +380,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
 
         try:
             detected, _reason = detect_target(project_root)
-            effective_target = detected if detected else None
+            # "minimal" means no target folder was found: record no target.
+            effective_target = detected if detected and detected != "minimal" else None
         except Exception:
             effective_target = None
     else:

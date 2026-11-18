@@ -237,6 +237,16 @@ class TestConfigSet:
         assert result.exit_code == 0
         assert "[!] 'auto-integrate' is deprecated and has no effect" in output
 
+    def test_set_auto_integrate_warns_first_and_claims_no_success(self):
+        """A deprecated key never prints a success line implying it took effect."""
+        with patch("apm_cli.config.set_auto_integrate"):
+            result = self.runner.invoke(config, ["set", "auto-integrate", "false"])
+        output = " ".join(result.output.split())
+        assert result.exit_code == 0
+        assert "Auto-integration set to" not in output
+        assert "[i] Stored auto-integrate=false (no effect)" in output
+        assert output.index("deprecated") < output.index("Stored auto-integrate")
+
     def test_set_target(self):
         """Set install default target."""
         with patch("apm_cli.config.set_install_target", return_value="claude") as mock_set:

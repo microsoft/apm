@@ -9,12 +9,26 @@ Single owner for both directions of the override:
   host-less shorthand, so ``parse(serialize(ref))`` keeps the same repository
   boundary and virtual path.
 
+- Scoping: :func:`manifest_host_scope_for` is the only way callers validate a
+  manifest's ``default_host:`` and enter it, so install, uninstall, audit, and
+  manifest parsing resolve shorthand identically.
+
 Without an override (or when it equals ``GITHUB_HOST`` / ``github.com``) both
 directions keep the implementation-default behaviour.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from contextlib import AbstractContextManager
+
 from ...cache.url_normalize import SCP_LIKE_RE
-from ...utils.github_host import default_host, shorthand_default_host
+from ...utils.github_host import (
+    default_host,
+    manifest_default_host_scope,
+    shorthand_default_host,
+    validate_manifest_default_host,
+)
 
 _EXPLICIT_SOURCE_PREFIXES = ("git@", "https://", "http://", "ssh://", "/", ".", "~")
 
@@ -49,3 +63,31 @@ def manifest_host_strips(host: str, stripped: str) -> bool:
     if override is None:
         return host.lower() == default_host().lower()
     return host.lower() == override.lower() and is_hostless_shorthand(stripped)
+
+
+class ManifestHostScope(AbstractContextManager):
+    """Validated ``default_host:`` of one manifest; entering it scopes shorthand."""
+
+    def __init__(self, host: str | None) -> None:
+        self.host = host
+        self._scope: AbstractContextManager | None = None
+
+    def __enter__(self) -> str | None:
+        self._scope = manifest_default_host_scope(self.host)
+        self._scope.__enter__()
+        return self.host
+
+    def __exit__(self, *exc_info) -> bool | None:
+        scope, self._scope = self._scope, None
+        return scope.__exit__(*exc_info) if scope is not None else None
+
+
+def manifest_host_scope_for(data: object) -> ManifestHostScope:
+    """Validate *data*'s ``default_host:`` now and return a scope to enter later.
+
+    *data* is a parsed apm.yml mapping (anything else means no override).
+    Raises ``ValueError`` with a user-facing message when the value is not a
+    bare hostname; callers own how that error is reported.
+    """
+    value = data.get("default_host") if isinstance(data, Mapping) else None
+    return ManifestHostScope(validate_manifest_default_host(value))

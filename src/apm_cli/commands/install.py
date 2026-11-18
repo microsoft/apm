@@ -620,9 +620,7 @@ def _validate_and_add_packages_to_apm_yml(
 
     # Shorthand packages and existing entries resolve against this manifest's
     # ``default_host:``, and new entries strip only that host (req-mf-019).
-    from ..utils.github_host import manifest_default_host_scope
-
-    with manifest_default_host_scope(manifest_host):
+    with manifest_host:
         dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
         cross_section = borrow_cross_section_declarations(
             packages, current_deps, other_deps, dev=dev
