@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.36.1] - 2026-11-18
 ### Added
 
-- New `apm manifest migrate [--global] [--dry-run] [--yes]` rewrites the deprecated top-level `target:` key in `apm.yml` to `targets:`, keeping comments and deploying the same files and MCP destinations (`vscode` stays `vscode`, `agents` becomes `copilot`, `agy` becomes `antigravity`, `target: all` becomes the explicit list `apm install` deploys today); it refuses `intellij`/`copilot-app`, changes nothing on a migrated manifest, and under `CI=true` prints the diff and exits 1. `apm install` never rewrites the manifest. (#3801)
+- New `apm manifest migrate [--global] [--dry-run] [--yes]` rewrites the deprecated top-level `target:` key in `apm.yml` to `targets:`, keeping comments and deploying the same files and MCP destinations (`vscode` stays `vscode`, `agents` becomes `copilot`, `agy` becomes `antigravity`, `target: all` becomes the explicit list `apm install` deploys today, except in `~/.apm/apm.yml`, where it is refused because `apm compile -g` would narrow); it refuses `intellij`/`copilot-app`, changes nothing on a migrated manifest, and under `CI=true` prints the diff and exits 1. `apm install` never rewrites the manifest. (#3801)
 
 ### Deprecated
 

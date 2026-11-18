@@ -181,7 +181,7 @@ comments and deploys exactly the same files and MCP configuration:
 | `vscode` | `[vscode]` (MCP config stays in `.vscode/mcp.json`) |
 | `agents` | `[copilot]` |
 | `agy` | `[antigravity]` |
-| `all` | the explicit list `apm install` deploys today; remove the ones you do not use |
+| `all` | the explicit list `apm install` deploys today; remove the ones you do not use. Refused for `~/.apm/apm.yml`, where `apm compile -g` would narrow; edit it by hand |
 | `intellij`, `copilot-app` | refused: no `targets:` equivalent; remove the token from `target:` and pass `--target <name>` to `apm install` |
 :::
 

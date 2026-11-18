@@ -63,7 +63,7 @@ def migrate(global_: bool, dry_run: bool, yes: bool, verbose: bool) -> None:
         sys.exit(1)
 
     try:
-        migration = plan_manifest_migration(manifest_path)
+        migration = plan_manifest_migration(manifest_path, user_scope=global_)
     except (ManifestMigrationError, ValueError, yaml.YAMLError, OSError) as exc:
         logger.error(str(exc), symbol="error")
         sys.exit(1)

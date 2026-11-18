@@ -51,7 +51,7 @@ reminds you when the manifest still sets it.
 | `vscode` | `[vscode]` (MCP config stays in `.vscode/mcp.json`) |
 | `agents` | `[copilot]` |
 | `agy` | `[antigravity]` |
-| `all` | Expanded to the explicit list `apm install` deploys today. |
+| `all` | Expanded to the explicit list `apm install` deploys today. With `--global`, refused (exit 1): `apm compile -g` writes every known target for `all`, so any list would narrow it; replace it by hand. |
 | empty (`target:`) | The key is removed; APM keeps auto-detecting targets. |
 | `intellij`, `copilot-app`, other experimental or MCP-only targets | Refused (exit 1). Remove the token from `target:` and pass `--target <name>` to `apm install`. |
 

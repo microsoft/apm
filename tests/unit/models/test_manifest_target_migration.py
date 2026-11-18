@@ -221,3 +221,71 @@ def test_plan_does_not_write(tmp_path):
     plan_manifest_migration(manifest)
 
     assert manifest.read_text(encoding="utf-8") == original
+
+
+def test_failed_write_keeps_the_original_manifest(tmp_path, monkeypatch):
+    original = "name: demo\nversion: 1.0.0\n# keep me\ntarget: claude\n"
+    manifest = _write(tmp_path / "apm.yml", original)
+    migration = plan_manifest_migration(manifest)
+
+    def _disk_full(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("apm_cli.utils.atomic_io.os.replace", _disk_full)
+
+    with pytest.raises(OSError, match="No space left"):
+        migration.write()
+    assert manifest.read_text(encoding="utf-8") == original
+    assert [path.name for path in tmp_path.iterdir()] == ["apm.yml"]
+
+
+def test_user_scope_target_all_is_refused_because_compile_g_would_narrow(tmp_path):
+    manifest = _write(tmp_path / "apm.yml", "name: demo\nversion: 1.0.0\ntarget: all\n")
+
+    with pytest.raises(ManifestMigrationError, match=r"apm compile -g' writes every known"):
+        plan_manifest_migration(manifest, user_scope=True)
+    assert plan_manifest_migration(manifest).changed
+
+
+@pytest.mark.parametrize(
+    ("original", "migrated"),
+    [
+        pytest.param(
+            "target: # deploy notes\nname: demo\n",
+            "# deploy notes\nname: demo\n",
+            id="first-key",
+        ),
+        pytest.param(
+            "name: demo # the name\ntarget: # deploy notes\nversion: 1.0.0\n",
+            "name: demo # the name\n# deploy notes\nversion: 1.0.0\n",
+            id="previous-key-has-comment",
+        ),
+    ],
+)
+def test_removing_empty_key_keeps_its_comment(tmp_path, original, migrated):
+    manifest = _write(tmp_path / "apm.yml", original)
+
+    assert plan_manifest_migration(manifest).migrated_text == migrated
+
+
+def test_anchored_list_is_rewritten_without_changing_its_aliases(tmp_path):
+    manifest = _write(
+        tmp_path / "apm.yml",
+        "name: demo\ntarget: &t\n  - agy\ncompilation:\n  exclude: *t\n",
+    )
+
+    migrated = plan_manifest_migration(manifest).migrated_text
+
+    assert "targets:\n  - antigravity\n" in migrated
+    assert "compilation:\n  exclude:\n    - agy\n" in migrated
+
+
+def test_multiline_flow_list_keeps_item_comments(tmp_path):
+    manifest = _write(
+        tmp_path / "apm.yml",
+        "name: demo\ntarget: [claude, # keep this\n  agents]\n",
+    )
+
+    assert plan_manifest_migration(manifest).migrated_text == (
+        "name: demo\ntargets:\n  - claude # keep this\n  - copilot\n"
+    )

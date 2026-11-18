@@ -31,7 +31,8 @@ from typing import Any
 
 from ..core.errors import TargetResolutionError
 from ..core.target_detection import AgentsTargetDeprecationWarning, EffectiveTargetDecision
-from ..utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip_str, yaml_roundtrip_to_str
+from ..utils.atomic_io import atomic_write_text
+from ..utils.yaml_io import load_yaml_roundtrip_str, yaml_roundtrip_to_str
 from .manifest_targets import ManifestTargetDeclaration
 
 _LEGACY_KEY = "target"
@@ -64,7 +65,6 @@ class ManifestMigration:
     migrated_text: str
     plan: TargetMigrationPlan | None
     ignored_compilation_target: bool = False
-    _document: Any = None
 
     @property
     def changed(self) -> bool:
@@ -83,9 +83,12 @@ class ManifestMigration:
         )
 
     def write(self) -> None:
-        """Write the migrated manifest (comment-preserving, LF line endings)."""
+        """Atomically write the migrated manifest (comment-preserving, LF line endings).
+
+        A failed write (disk full, quota) leaves the original manifest intact.
+        """
         if self.changed:
-            dump_yaml_roundtrip(self._document, self.path)
+            atomic_write_text(self.path, self.migrated_text)
 
 
 def _no_equivalent(token: str) -> ManifestMigrationError:
@@ -103,8 +106,13 @@ def _decision_profile(decision: EffectiveTargetDecision) -> tuple[frozenset[str]
     )
 
 
-def plan_target_migration(value: object, *, source_path: Path | None = None) -> TargetMigrationPlan:
+def plan_target_migration(
+    value: object, *, source_path: Path | None = None, user_scope: bool = False
+) -> TargetMigrationPlan:
     """Map a legacy ``target:`` value to an equivalent ``targets:`` list.
+
+    With *user_scope*, the user manifest also drives ``apm compile -g``, which
+    writes every known target when the declaration does not restrict them.
 
     Raises:
         ValueError: The legacy value is invalid (same error as install).
@@ -127,10 +135,17 @@ def plan_target_migration(value: object, *, source_path: Path | None = None) -> 
         except TargetResolutionError:
             raise _no_equivalent(token) from None
 
-    migrated = EffectiveTargetDecision(
-        ManifestTargetDeclaration.from_mapping({_CURRENT_KEY: list(targets)}).selection,
-        "apm.yml",
-    )
+    migrated_declaration = ManifestTargetDeclaration.from_mapping({_CURRENT_KEY: list(targets)})
+    migrated = EffectiveTargetDecision(migrated_declaration.selection, "apm.yml")
+    if user_scope and legacy_declaration.legacy_all:
+        # Singular ``all`` leaves ``apm compile -g`` unrestricted; any list narrows it.
+        label = source_path.as_posix() if source_path else "~/.apm/apm.yml"
+        raise ManifestMigrationError(
+            f"Cannot migrate 'target: all' in {label} automatically: 'apm compile -g' "
+            "writes every known target for it, including targets 'apm install -g' does "
+            "not deploy, and any 'targets:' list would narrow that. Replace 'target: all' "
+            "by hand with the 'targets:' you use."
+        )
     if _decision_profile(migrated) != _decision_profile(legacy):
         raise ManifestMigrationError(
             f"Cannot migrate 'target:' in {source_path.name if source_path else 'apm.yml'} "
@@ -140,21 +155,45 @@ def plan_target_migration(value: object, *, source_path: Path | None = None) -> 
     return TargetMigrationPlan(targets=targets, expanded_all=legacy_declaration.legacy_all)
 
 
-def _move_key_comments(document: Any, old_key: str, new_key: str | None, position: int) -> None:
-    """Re-attach comments of *old_key* to *new_key* (or the preceding key)."""
-    comments = document.ca.items.pop(old_key, None)
-    if comments is None:
+def _comment_tokens(entry: Any) -> list[Any]:
+    tokens: list[Any] = []
+    for slot in entry or ():
+        if isinstance(slot, list):
+            tokens.extend(token for token in slot if token is not None)
+        elif slot is not None:
+            tokens.append(slot)
+    return tokens
+
+
+def _keep_removed_key_comments(document: Any, key: str, position: int) -> None:
+    """Keep the comments of a removed key on its neighbour so none are lost."""
+    from ruamel.yaml.tokens import CommentToken
+
+    tokens = _comment_tokens(document.ca.items.pop(key, None))
+    if not tokens:
         return
-    if new_key is not None:
-        document.ca.items[new_key] = comments
+    text = "".join(token.value for token in tokens)
+    if not text.endswith("\n"):
+        text += "\n"
+    keys = [name for name in document if name != key]
+    if position > 0:
+        previous = keys[position - 1]
+        entry = document.ca.items.setdefault(previous, [None, None, None, None])
+        existing = entry[2]
+        if existing is None:
+            entry[2] = CommentToken(text, tokens[0].start_mark)
+        else:
+            existing.value = existing.value.rstrip("\n") + "\n" + text
         return
-    keys = list(document.keys())
-    if position > 0 and keys[position - 1] not in document.ca.items:
-        document.ca.items[keys[position - 1]] = comments
+    lines = "\n".join(line.lstrip("#").strip() for line in text.splitlines() if line.strip())
+    if keys:
+        document.yaml_set_comment_before_after_key(keys[0], before=lines)
+    else:
+        document.yaml_set_start_comment(lines)
 
 
 def _replace_sequence_items(sequence: Any, items: tuple[str, ...]) -> Any:
-    """Rewrite a block list in place so per-item and trailing comments survive."""
+    """Rewrite a list in place so per-item and trailing comments survive."""
     trailing = sequence.ca.items.pop(len(sequence) - 1, None) if len(sequence) else None
     for index, item in enumerate(items):
         if index < len(sequence):
@@ -169,6 +208,43 @@ def _replace_sequence_items(sequence: Any, items: tuple[str, ...]) -> Any:
     return sequence
 
 
+def _detached_sequence(sequence: Any) -> Any:
+    """Copy *sequence* with its comments and style, but not its anchor.
+
+    An anchored ``target:`` list may be aliased elsewhere in the manifest;
+    rewriting a copy keeps those aliases unchanged.
+    """
+    from ruamel.yaml.comments import CommentedSeq
+
+    copy = CommentedSeq(list(sequence))
+    copy.ca.items.update(sequence.ca.items)
+    copy.ca.comment = sequence.ca.comment
+    if sequence.fa.flow_style():
+        copy.fa.set_flow_style()
+    return copy
+
+
+def _flow_comments_to_block(sequence: Any) -> None:
+    """Switch a commented flow list to block style so its comments survive.
+
+    ruamel drops comments inside a flow list when it writes the list back, so
+    each comment moves to the end of the line of the item before it.
+    """
+    from ruamel.yaml.error import CommentMark
+    from ruamel.yaml.tokens import CommentToken
+
+    moved: dict[int, list[Any]] = {}
+    for index, entry in sequence.ca.items.items():
+        tokens = _comment_tokens(entry)
+        if tokens:
+            moved.setdefault(max(index - 1, 0), []).extend(tokens)
+    sequence.ca.items.clear()
+    for index, tokens in moved.items():
+        text = "".join(token.value for token in tokens)
+        sequence.ca.items[index] = [CommentToken(text, CommentMark(0)), None]
+    sequence.fa.set_block_style()
+
+
 def _rewrite_document(document: Any, plan: TargetMigrationPlan) -> None:
     from ruamel.yaml.comments import CommentedSeq
 
@@ -176,15 +252,24 @@ def _rewrite_document(document: Any, plan: TargetMigrationPlan) -> None:
     position = keys.index(_LEGACY_KEY)
     legacy_value = document[_LEGACY_KEY]
     if plan.targets is None:
-        _move_key_comments(document, _LEGACY_KEY, None, position)
+        _keep_removed_key_comments(document, _LEGACY_KEY, position)
         del document[_LEGACY_KEY]
         return
 
-    if isinstance(legacy_value, CommentedSeq) and not legacy_value.fa.flow_style():
-        value = _replace_sequence_items(legacy_value, plan.targets)
+    fits_flow = len(", ".join(plan.targets)) <= _FLOW_LIST_MAX_WIDTH
+    if isinstance(legacy_value, CommentedSeq):
+        # Rewrite the authored list so per-item comments survive.
+        sequence = (
+            _detached_sequence(legacy_value) if legacy_value.anchor.value else legacy_value
+        )
+        if sequence.fa.flow_style() and sequence.ca.items:
+            _flow_comments_to_block(sequence)
+        value = _replace_sequence_items(sequence, plan.targets)
+        if value.fa.flow_style() and not fits_flow:
+            value.fa.set_block_style()
     else:
         value = CommentedSeq(plan.targets)
-        if len(", ".join(plan.targets)) <= _FLOW_LIST_MAX_WIDTH:
+        if fits_flow:
             value.fa.set_flow_style()
         else:
             value.fa.set_block_style()
@@ -195,8 +280,11 @@ def _rewrite_document(document: Any, plan: TargetMigrationPlan) -> None:
         document.ca.items[_CURRENT_KEY] = comments
 
 
-def plan_manifest_migration(path: Path) -> ManifestMigration:
+def plan_manifest_migration(path: Path, *, user_scope: bool = False) -> ManifestMigration:
     """Plan the rewrite of *path* without writing it.
+
+    *user_scope* marks the user manifest (``~/.apm/apm.yml``), which also
+    drives ``apm compile -g``.
 
     A manifest without a top-level ``target:`` key is already migrated:
     the result reports no change.
@@ -230,7 +318,7 @@ def plan_manifest_migration(path: Path) -> ManifestMigration:
         except TargetResolutionError as exc:
             raise ValueError(exc.format_message()) from None
 
-    plan = plan_target_migration(document[_LEGACY_KEY], source_path=path)
+    plan = plan_target_migration(document[_LEGACY_KEY], source_path=path, user_scope=user_scope)
     _rewrite_document(document, plan)
     return ManifestMigration(
         path=path,
@@ -238,5 +326,4 @@ def plan_manifest_migration(path: Path) -> ManifestMigration:
         migrated_text=yaml_roundtrip_to_str(document),
         plan=plan,
         ignored_compilation_target=ignored_compilation_target,
-        _document=document,
     )
