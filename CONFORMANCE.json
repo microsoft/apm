@@ -657,9 +657,11 @@
       "keyword": "MUST",
       "section": "4.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_enforces_yaml_safe_subset"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_enforces_yaml_safe_subset",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_manifest_anchor_and_alias[alias]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_manifest_anchor_and_alias[anchor]"
       ]
     },
     {

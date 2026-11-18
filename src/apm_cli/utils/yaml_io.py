@@ -29,6 +29,18 @@ _DUMP_DEFAULTS: dict[str, Any] = dict(
 )
 
 
+class _NoAliasSafeDumper(yaml.SafeDumper):
+    """SafeDumper that writes a repeated object out in full instead of ``&id001``.
+
+    PyYAML anchors any object that appears twice in the data. APM refuses
+    YAML anchors and aliases in apm.yml (OpenAPM req-mf-020(b)), so no file
+    APM writes may contain one.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
 class _BoundedSafeLoader(yaml.SafeLoader):
     """SafeLoader that bounds YAML merge-key (``<<``) expansion.
 
@@ -370,6 +382,8 @@ def _roundtrip_yaml() -> Any:
         )
 
     rt = YAML(typ="rt")
+    # Write repeated objects in full: apm.yml may not contain anchors (req-mf-020(b)).
+    rt.representer.ignore_aliases = lambda _data: True
     # Class-level constructor registration is intentional: every round-trip
     # YAML instance in this process should reject unsafe Python tags.
     rt.Constructor.add_multi_constructor("tag:yaml.org,2002:python/", reject_python_tag)
@@ -564,7 +578,7 @@ def dump_yaml(
     """
     from .atomic_io import write_text_lf
 
-    text = yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+    text = yaml_to_str(data, sort_keys=sort_keys)
     write_text_lf(Path(path), text)
 
 
@@ -574,7 +588,7 @@ def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
     Use instead of bare ``yaml.dump()`` when building YAML content
     for later file writes or string returns.
     """
-    return yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+    return yaml.dump(data, Dumper=_NoAliasSafeDumper, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
 
 
 def write_yaml_text_atomic(

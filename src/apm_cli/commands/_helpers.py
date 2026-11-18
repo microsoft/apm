@@ -669,7 +669,7 @@ def _create_plugin_json(config, mode: str = "agent", target_path: Path | None = 
     output_path.write_text(json.dumps(plugin_data, indent=2) + "\n", encoding="utf-8")
 
 
-def _create_minimal_apm_yml(config, plugin=False, target_path=None):
+def _create_minimal_apm_yml(config, plugin=False, target_path=None, *, verify=False):
     """Create minimal apm.yml file with auto-detected metadata.
 
     Args:
@@ -678,6 +678,13 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
             Optional 'target' key: CSV string of targets to pin.
         plugin: if True, include a devDependencies section.
         target_path: explicit file path to write (defaults to cwd/apm.yml).
+        verify: parse the rendered manifest back through the manifest target
+            declaration owner and refuse to write one APM would reject. ``apm init``
+            sets it because a re-init rewrites an existing manifest's targets.
+
+    Raises:
+        TargetRewriteError: *verify* is set and APM would reject the
+            rendered manifest; nothing is written.
     """
     # Create minimal apm.yml structure
     apm_yml_data = {
@@ -718,15 +725,10 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
 
     apm_yml_data["scripts"] = {}
 
-    # Write apm.yml
-    from ..utils.yaml_io import dump_yaml
+    from ..utils.yaml_io import yaml_to_str
 
-    out_path = target_path or APM_YML_FILENAME
-    dump_yaml(apm_yml_data, out_path)
-
-    # Post-process: add target comment header
-    out_file = Path(out_path)
-    content = out_file.read_text(encoding="utf-8")
+    out_file = Path(target_path or APM_YML_FILENAME)
+    content = yaml_to_str(apm_yml_data)
 
     # architecture-authority-exempt: bootstrap-writer
     if "targets" in apm_yml_data:
@@ -750,6 +752,10 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         )
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 
+    if verify:
+        from ..models.manifest_targets import verify_rewritten_manifest
+
+        verify_rewritten_manifest(out_file, content)
     out_file.write_text(content, encoding="utf-8")
 
 

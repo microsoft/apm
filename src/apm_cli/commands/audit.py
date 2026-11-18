@@ -1022,6 +1022,20 @@ def _require_installed_package_key(
     sys.exit(1)
 
 
+def _reject_invalid_manifest(project_root: Path, logger: CommandLogger) -> None:
+    """Refuse an apm.yml every command refuses, before scanning or stripping."""
+    from ..models.manifest_io import InvalidManifestError, read_manifest_text
+
+    manifest_path = project_root / "apm.yml"
+    if not manifest_path.is_file():
+        return
+    try:
+        read_manifest_text(manifest_path)
+    except InvalidManifestError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
+
 def _audit_content_scan(
     cfg: _AuditConfig,
     package: str | None,
@@ -1560,6 +1574,9 @@ def audit(  # noqa: PLR0913 -- Click handler
             "--policy requires --ci mode. "
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
+
+    if not file_path:
+        _reject_invalid_manifest(project_root, logger)
 
     _audit_content_scan(
         cfg,

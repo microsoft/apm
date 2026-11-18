@@ -35,6 +35,18 @@ Fix: run `apm manifest migrate` (add `--global` for `~/.apm/apm.yml`) and commit
 
 See also: [`apm manifest` reference](../../reference/cli/manifest/), [Manifest schema: targets](../../reference/manifest-schema/#36-target-and-targets)
 
+### `<path>/apm.yml uses the YAML anchor '&<name>' on line <n>`
+
+```
+[x] /home/me/project/apm.yml uses the YAML anchor '&shared' on line 4. apm.yml must not use YAML anchors (&name) or aliases (*name). Write the value out in full wherever it is used, then retry.
+```
+
+Cause: `apm.yml` defines a YAML anchor (`&name`) or reuses one with an alias (`*name`), including `<<: *name` merge keys. OpenAPM manifests forbid both, so `apm install`, `apm compile`, `apm audit`, `apm manifest migrate` and every other command that reads the manifest refuse it before changing any file. The message names the file and the first offending line; the same error reports an alias as `YAML alias '*<name>'`.
+
+Fix: delete the `&name` marker and replace each `*name` with a copy of the value it pointed to, then re-run the command.
+
+See also: [Manifest schema](../../reference/manifest-schema/)
+
 ### `lockfile not found at <path>; run 'apm install' to generate it`
 
 ```

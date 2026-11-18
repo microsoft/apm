@@ -277,6 +277,25 @@ def test_consumer_enforces_yaml_safe_subset():
     assert_spec_contains("YAML safe", "&anchor", "MUST be rejected", "YAML 1.1 octal")
 
 
+@pytest.mark.req("req-mf-020")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "name: demo\nversion: 1.0.0\nx-shared: &deps [owner/one]\n",
+        "name: demo\nversion: 1.0.0\ndependencies:\n  apm: *deps\n",
+    ],
+    ids=["anchor", "alias"],
+)
+def test_consumer_rejects_manifest_anchor_and_alias(tmp_path: Path, text: str) -> None:
+    """req-mf-020(b): the consumer manifest loader rejects anchors and aliases."""
+    from apm_cli.models.manifest_io import ManifestAnchorError
+
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(text, encoding="utf-8")
+    with pytest.raises(ManifestAnchorError, match=r"on line [34]\. apm\.yml must not use"):
+        APMPackage.from_apm_yml(manifest)
+
+
 @pytest.mark.req("req-mf-023")
 def test_consumer_resolves_runtime_argument_templates_without_secret_leakage():
     """Runtime templates resolve completely and keep secret bytes target-native."""

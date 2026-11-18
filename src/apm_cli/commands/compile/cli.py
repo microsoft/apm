@@ -409,6 +409,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     from ...compilation import compile_user_root_contexts
     from ...core.errors import TargetResolutionError
     from ...core.scope import InstallScope, get_apm_dir
+    from ...models.manifest_io import InvalidManifestError
 
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
@@ -440,6 +441,9 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
             symbol="error",
         )
+        return 1
+    except InvalidManifestError as exc:
+        logger.error(f"{exc}", symbol="error")
         return 1
     except OSError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)

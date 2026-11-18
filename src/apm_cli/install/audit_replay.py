@@ -90,7 +90,13 @@ def prepare_ci_audit_replay(
             f"lockfile not found at {lockfile_path}; run 'apm install' to generate it"
         )
 
-    manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
+    from apm_cli.models.manifest_io import InvalidManifestError
+
+    try:
+        manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
+    except InvalidManifestError as exc:
+        # Reported as a failed check, so JSON/SARIF output still renders.
+        raise CiAuditReplayError(str(exc)) from exc
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")

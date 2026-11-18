@@ -24,8 +24,11 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.models.manifest_targets import (
     ManifestTargetDeclaration,
+    TargetRewriteError,
     manifest_target_restriction,
     read_manifest_target_declaration,
+    rewrite_target_names,
+    verify_rewritten_manifest,
 )
 from apm_cli.utils.yaml_io import dump_yaml
 
@@ -194,13 +197,65 @@ def test_stand_in_packages_route_through_the_owner():
     assert manifest_target_restriction(None) == []
 
 
-def test_reinit_prefill_expands_singular_all_with_install_spellings():
-    """Re-init writes the spellings install deploys, so MCP keeps .vscode/mcp.json."""
-    names = _declaration(target="all").prefill_names()
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        pytest.param({}, None, id="nothing-declared"),
+        pytest.param({"target": None}, None, id="empty-singular"),
+        pytest.param({"target": "agents"}, ("copilot",), id="agents-to-copilot"),
+        pytest.param({"target": "agents,claude"}, ("copilot", "claude"), id="csv-to-list"),
+        pytest.param({"target": "agy"}, ("antigravity",), id="agy-to-antigravity"),
+        pytest.param({"targets": ["claude", "cursor"]}, ("claude", "cursor"), id="plural-kept"),
+        pytest.param({"targets": ["all"]}, ("all",), id="plural-all-kept"),
+    ],
+)
+def test_rewrite_target_names_keeps_what_deploys(fields, expected):
+    """The one apm.yml target rewrite mapping (#3857)."""
+    assert rewrite_target_names(ManifestTargetDeclaration.from_mapping(fields)) == expected
+
+
+def test_rewrite_of_singular_all_is_the_install_expansion():
+    """Re-init keeps writing the list ``apm install`` deploys for ``target: all``."""
+    names = rewrite_target_names(_declaration(target="all"))
+    assert names == EffectiveTargetDecision("all", "apm.yml").runtime_targets
     assert len(names) > 1
-    assert "vscode" in names
-    assert "copilot" not in names
-    assert _declaration(targets=["all"]).prefill_names() == ["all"]
+
+
+@pytest.mark.parametrize("token", ["intellij", "copilot-app"])
+def test_rewrite_refuses_a_token_with_no_targets_equivalent(token):
+    with pytest.raises(TargetRewriteError) as excinfo:
+        rewrite_target_names(_declaration(target=f"claude,{token}"))
+    assert str(excinfo.value).startswith(f"Target '{token}' has no 'targets:' equivalent.")
+
+
+@pytest.mark.parametrize(
+    ("fields", "error", "message"),
+    [
+        pytest.param({"target": "foo"}, ValueError, "'foo' is not a valid target", id="unknown"),
+        pytest.param(
+            {"targets": ["agents"]}, UnknownTargetError, "Unknown target 'agents'", id="plural"
+        ),
+        pytest.param(
+            {"target": "claude", "targets": ["claude"]},
+            ConflictingTargetsError,
+            "both 'target:' and 'targets:'",
+            id="both",
+        ),
+    ],
+)
+def test_rewrite_refuses_a_declaration_install_rejects(fields, error, message):
+    with pytest.raises(error, match=message):
+        rewrite_target_names(ManifestTargetDeclaration.from_mapping(fields))
+
+
+def test_verify_refuses_a_rewrite_apm_would_reject(tmp_path):
+    manifest = tmp_path / "apm.yml"
+    with pytest.raises(TargetRewriteError, match=r"Refusing to write apm.yml.*Unknown target"):
+        verify_rewritten_manifest(manifest, "name: demo\ntargets:\n- agents\n")
+    with pytest.raises(TargetRewriteError, match=r"YAML anchor '&t' on line 1"):
+        verify_rewritten_manifest(manifest, "x: &t [claude]\ntargets: *t\n")
+    verify_rewritten_manifest(manifest, "name: demo\ntargets:\n- copilot\n")
+    assert not manifest.exists()
 
 
 @pytest.mark.parametrize(

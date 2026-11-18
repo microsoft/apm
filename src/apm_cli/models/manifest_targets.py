@@ -2,7 +2,10 @@
 
 Canonical owner of how an apm.yml's package targets are read, including the
 once-per-process deprecation warning for the singular ``target:`` key (and the
-ignored ``compilation.target``) in the consumer manifest. Dependency
+ignored ``compilation.target``) in the consumer manifest, and of the one
+mapping every apm.yml rewrite uses to turn a declaration into an equivalent
+``targets:`` list (:func:`rewrite_target_names`, checked by
+:func:`verify_rewritten_manifest` before the rewrite is written). Dependency
 ``targets:`` subsets, ``compilation.target`` resolution, and policy targets are
 separate decisions owned elsewhere.
 """
@@ -266,25 +269,6 @@ class ManifestTargetDeclaration:
             return []
         return [name.strip() for name in str(value).split(",") if name.strip()]
 
-    def prefill_names(self) -> list[str]:
-        """Names a re-init writes as ``targets:`` without changing what deploys.
-
-        Singular ``target: all`` expands at install, so it is written as that
-        explicit set; plural ``targets: [all]`` already means omitted.
-        """
-        if self.spelling == "target" and self.legacy_all:
-            from ..core.errors import TargetResolutionError
-            from ..core.target_catalog import expand_all
-
-            try:
-                selection = self.selection
-            except (ValueError, TargetResolutionError):
-                return self.authored_names()
-            if selection == _LEGACY_ALL_TARGET:
-                # Spelling-preserving, so ``vscode`` keeps its MCP destination.
-                return list(expand_all("install"))
-        return self.authored_names()
-
     def validate_for_install(self) -> None:
         """Reject declared targets ``apm install`` cannot deploy.
 
@@ -297,6 +281,102 @@ class ManifestTargetDeclaration:
         parse_targets_field({"targets": list(self.canonical)})
 
 
+class TargetRewriteError(ValueError):
+    """A declaration has no ``targets:`` list that deploys exactly the same."""
+
+
+def _no_targets_equivalent(token: str) -> TargetRewriteError:
+    return TargetRewriteError(
+        f"Target '{token}' has no 'targets:' equivalent. Remove '{token}' from "
+        f"'target:' in apm.yml and pass '--target {token}' to 'apm install' instead."
+    )
+
+
+def _decision_profile(decision: Any) -> tuple[frozenset[str], ...]:
+    return (
+        frozenset(decision.canonical_targets or ()),
+        frozenset(decision.runtime_targets or ()),
+        frozenset(decision.lsp_targets or ()),
+    )
+
+
+def rewrite_target_names(declaration: ManifestTargetDeclaration) -> tuple[str, ...] | None:
+    """Return the ``targets:`` list that deploys what *declaration* deploys.
+
+    The one target rewrite mapping for apm.yml. A singular ``target:`` value is
+    spelled by the runtime identities the effective target decision keeps
+    (``agents`` -> ``copilot``, ``agy`` -> ``antigravity``, a CSV becomes a
+    list, legacy ``all`` expands to what ``apm install`` deploys today); a
+    plural ``targets:`` list is kept as written. ``None`` when nothing is
+    selected.
+
+    Raises:
+        ValueError, click.UsageError: The declaration is invalid (as for install).
+        TargetRewriteError: No ``targets:`` list deploys the same targets.
+    """
+    import warnings
+
+    from ..core.errors import TargetResolutionError
+    from ..core.target_detection import AgentsTargetDeprecationWarning, EffectiveTargetDecision
+
+    if declaration.spelling != "target":
+        names = declaration.authored_names()
+        if not names:
+            return None
+        # Also refuses a manifest that declares both keys.
+        rewritten = {**dict(declaration.fields), "targets": names}
+        _ = ManifestTargetDeclaration.from_mapping(rewritten, declaration.source_path).selection
+        return tuple(names)
+    with warnings.catch_warnings():
+        # Rewriting away from the alias is the fix this warning asks for.
+        warnings.simplefilter("ignore", AgentsTargetDeprecationWarning)
+        selection = declaration.selection
+    if selection is None:
+        return None
+    # The decision owner expands ``all`` and keeps each runtime spelling.
+    legacy = EffectiveTargetDecision(selection, "apm.yml")
+    targets = tuple(legacy.runtime_targets or ())
+    for token in targets:
+        try:
+            _ = ManifestTargetDeclaration.from_mapping({"targets": [token]}).selection
+        except TargetResolutionError:
+            raise _no_targets_equivalent(token) from None
+    rewritten_selection = ManifestTargetDeclaration.from_mapping({"targets": list(targets)})
+    rewritten = EffectiveTargetDecision(rewritten_selection.selection, "apm.yml")
+    if _decision_profile(rewritten) != _decision_profile(legacy):
+        name = declaration.source_path.name if declaration.source_path else "apm.yml"
+        raise TargetRewriteError(
+            f"'target:' in {name} cannot be rewritten automatically: "
+            f"'targets: [{', '.join(targets)}]' would change what APM deploys. "
+            "Replace 'target:' with a 'targets:' list by hand."
+        )
+    return targets
+
+
+def verify_rewritten_manifest(path: Path, text: str) -> None:
+    """Refuse a rewritten apm.yml that APM would reject when it reads it back.
+
+    Parses *text* with the apm.yml read checks and validates its target
+    declaration the way install does. Call before writing *text* to *path*.
+
+    Raises:
+        TargetRewriteError: The rewrite would leave an invalid manifest.
+    """
+    from .manifest_io import load_manifest_text
+
+    try:
+        data = load_manifest_text(path, text)
+        if not isinstance(data, Mapping):
+            raise ValueError(f"{path} must contain a YAML mapping")
+        ManifestTargetDeclaration.from_mapping(data, path).validate_for_install()
+    except (ValueError, TypeError, yaml.YAMLError, click.UsageError) as exc:
+        detail = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        raise TargetRewriteError(
+            f"Refusing to write {path.name}: APM would reject the rewritten manifest. "
+            f"{detail.strip().removeprefix('[x] ')}"
+        ) from exc
+
+
 def read_manifest_target_declaration(
     manifest_path: Path,
     *,
@@ -306,18 +386,20 @@ def read_manifest_target_declaration(
 
     Returns ``None`` when the file is absent. A strict read is authoritative:
     a symlink, a non-file, or a document that is not a YAML mapping raises
-    (``OSError`` / ``yaml.YAMLError``), so a broken manifest never reads as
+    (``OSError`` / ``yaml.YAMLError``), and a manifest the read owner refuses
+    (duplicate key, YAML anchor or alias) raises ``InvalidManifestError``, so
+    a broken manifest never reads as
     "nothing declared" and silently widens the caller's target set. With
     *lenient*, unreadable or malformed manifests return ``None`` instead.
     Tokens are validated when a view (``selection``, ``restriction()``) is read.
     """
-    from ..utils.yaml_io import load_yaml
+    from .manifest_io import load_manifest
 
     if lenient:
         try:
             if not manifest_path.is_file():
                 return None
-            data = load_yaml(manifest_path)
+            data = load_manifest(manifest_path)
         except (OSError, ValueError, TypeError, yaml.YAMLError):
             return None
         if not isinstance(data, Mapping):
@@ -329,7 +411,11 @@ def read_manifest_target_declaration(
         return None
     if not manifest_path.is_file():
         raise OSError(f"{manifest_path.name} must be a regular, non-symlink file")
-    data = load_yaml(manifest_path)
+    try:
+        data = load_manifest(manifest_path)
+    except UnicodeDecodeError as exc:
+        # Same contract as the bounded YAML loader: undecodable bytes are YAML errors.
+        raise yaml.YAMLError(f"UnicodeDecodeError: {exc}") from exc
     if not isinstance(data, Mapping):
         got = "an empty document" if data is None else str(type(data))
         raise yaml.YAMLError(f"{manifest_path.name} must contain a YAML object, got {got}")
