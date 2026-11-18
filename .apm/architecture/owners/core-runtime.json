@@ -11,7 +11,7 @@
     {
       "id": "manifest-target-declaration",
       "decision": "Package manifest target declaration: target:/targets: spelling, token validation, legacy all, the views readers consume, the deprecated target: warning, and the one target rewrite mapping every apm.yml rewrite uses",
-      "owner": "models/manifest_targets.py (ManifestTargetDeclaration, read_manifest_target_declaration, _warn_deprecated_manifest_keys) via models/apm_package.py (APMPackage.target_declaration, package_target_declaration); models/manifest_target_migration.py (rewritten_manifest_targets, verify_rewritten_manifest), reachable only from commands/manifest.py (apm manifest migrate) and the apm init re-init (commands/init.py, commands/_helpers.py)",
+      "owner": "models/manifest_targets.py (ManifestTargetDeclaration, read_manifest_target_declaration, _warn_deprecated_manifest_keys) via models/apm_package.py (APMPackage.target_declaration, package_target_declaration); the target rewrite mapping and its write check (rewrite_target_names, verify_rewritten_manifest) in models/manifest_targets.py, used by the apm init re-init (commands/init.py, commands/_helpers.py) and by models/manifest_target_migration.py, reachable only from commands/manifest.py (apm manifest migrate)",
       "selectors": [
         "src/apm_cli/models/manifest_targets.py",
         "src/apm_cli/models/manifest_target_migration.py"

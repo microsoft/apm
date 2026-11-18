@@ -23,6 +23,7 @@ _COMMANDS = (
     ("install", "--no-policy"),
     ("compile",),
     ("audit",),
+    ("audit", "--ci"),
     ("manifest", "migrate", "--yes"),
 )
 
@@ -98,3 +99,28 @@ def test_manifest_anchor_is_refused_before_any_write(
     manifest.write_text(_CLEAN, encoding="ascii")
     again = runner.run(("install", "--no-policy"), cwd=project, env=env)
     assert again.returncode == 0, again.stdout + again.stderr
+
+
+def test_dependency_manifest_anchor_is_refused_before_any_write(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A dependency's own apm.yml is read by the same owner, so its anchors fail too."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = dict(isolated.subprocess_env())
+    env.pop("CI", None)
+    project = isolated.work_root / "consumer"
+    _package(project / "pkgs" / "alpha", "alpha")
+    (project / "pkgs" / "alpha" / "apm.yml").write_text(
+        "name: alpha\nx-version: &v 1.0.0\nversion: *v\n", encoding="ascii"
+    )
+    (project / "apm.yml").write_text(_CLEAN, encoding="ascii")
+    before = _snapshot(project)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    result = runner.run(("install", "--no-policy"), cwd=project, env=env)
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode != 0, output
+    assert "./pkgs/alpha" in output and "YAML anchor '&v' on line 2" in output, output
+    assert "must not use YAML anchors" in output and "Traceback" not in output, output
+    assert not (project / ".github" / "instructions" / "alpha.instructions.md").exists()
+    assert {key: value for key, value in _snapshot(project).items() if key in before} == before

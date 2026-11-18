@@ -678,12 +678,12 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None, *, verify=Fa
             Optional 'target' key: CSV string of targets to pin.
         plugin: if True, include a devDependencies section.
         target_path: explicit file path to write (defaults to cwd/apm.yml).
-        verify: parse the rendered manifest back through the apm.yml target
-            rewrite owner and refuse to write one APM would reject. ``apm init``
+        verify: parse the rendered manifest back through the manifest target
+            declaration owner and refuse to write one APM would reject. ``apm init``
             sets it because a re-init rewrites an existing manifest's targets.
 
     Raises:
-        ManifestMigrationError: *verify* is set and APM would reject the
+        TargetRewriteError: *verify* is set and APM would reject the
             rendered manifest; nothing is written.
     """
     # Create minimal apm.yml structure
@@ -753,7 +753,7 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None, *, verify=Fa
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 
     if verify:
-        from ..models.manifest_target_migration import verify_rewritten_manifest
+        from ..models.manifest_targets import verify_rewritten_manifest
 
         verify_rewritten_manifest(out_file, content)
     out_file.write_text(content, encoding="utf-8")

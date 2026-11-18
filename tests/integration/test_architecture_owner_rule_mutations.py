@@ -3390,8 +3390,8 @@ def test_policy_target_projection_guard_rejects_raw_selections(
         ),
         pytest.param(
             "src/apm_cli/commands/init.py",
-            "    return rewritten_manifest_targets(ManifestTargetDeclaration.from_mapping(",
-            "    return list(ManifestTargetDeclaration.from_mapping(",
+            "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
+            "ManifestTargetDeclaration.from_mapping(data, apm_yml_path).selection",
             id="reinit-bypasses-rewrite-mapping",
         ),
         pytest.param(
@@ -3408,10 +3408,34 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             id="scaffold-writes-unverified-rewrite",
         ),
         pytest.param(
+            "src/apm_cli/commands/init.py",
+            "_create_minimal_apm_yml(config, plugin=plugin, verify=True)",
+            "_create_minimal_apm_yml(config, plugin=plugin)",
+            id="init-skips-rewrite-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            "target_path=staged_manifest, verify=True)",
+            "target_path=staged_manifest)",
+            id="plugin-init-skips-rewrite-verification",
+        ),
+        pytest.param(
             "src/apm_cli/models/manifest_target_migration.py",
             "    verify_rewritten_manifest(path, migrated_text)\n",
             "",
             id="migrate-writes-unverified-rewrite",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_target_migration.py",
+            "    targets = rewrite_target_names(legacy_declaration)\n",
+            "    targets = tuple(legacy_declaration.canonical) or None\n",
+            id="migrate-keeps-its-own-mapping",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_targets.py",
+            "def rewrite_target_names(",
+            "def _rewrite_target_names_removed(",
+            id="declaration-owner-loses-rewrite-mapping",
         ),
     ],
 )

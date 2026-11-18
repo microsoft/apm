@@ -165,9 +165,9 @@ the author and target harness remain responsible for compliance.
   home-rooted paths accepted by the installer.
 - **Target seeding on re-init:** when `apm.yml` exists, the prompt
   pre-checks targets read from its existing `targets:` list, or from the
-  legacy `target:` field mapped as
-  [`apm manifest migrate`](../manifest/#mapping) maps it (for example,
-  `agents` becomes `copilot`). A legacy target with no `targets:`
+  legacy `target:` field rewritten to an equivalent `targets:` list (for
+  example, `agents` becomes `copilot` and `agy` becomes `antigravity`). A
+  legacy target with no `targets:`
   equivalent (such as `intellij`) is not carried over: `--yes` and
   non-interactive runs exit `1` before writing; pass `--target` to choose
   targets explicitly. The rewritten manifest is parsed back before it is

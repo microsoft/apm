@@ -22,10 +22,8 @@ from ..core.target_detection import (
     manifest_targets_from_target_option,
 )
 from ..install.locking import serialized_lifecycle_unless
-from ..models.manifest_target_migration import (
-    ManifestMigrationError,
-    rewritten_manifest_targets,
-)
+from ..models.manifest_io import InvalidManifestError
+from ..models.manifest_targets import rewrite_target_names
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -577,12 +575,8 @@ def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) 
     mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
     with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
         staged_root = Path(stage)
-        _create_minimal_apm_yml(
-            config,
-            plugin=True,
-            target_path=staged_root / APM_YML_FILENAME,
-            verify=True,
-        )
+        staged_manifest = staged_root / APM_YML_FILENAME
+        _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest, verify=True)
         _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
         (staged_root / "mcp.json").write_text(
             json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
@@ -775,10 +769,11 @@ def _resolve_init_targets(
         # Re-init: seed from existing apm.yml target field
         try:
             existing_targets = _read_existing_targets(project_root)
-        except ManifestMigrationError as exc:
+        except (ValueError, click.UsageError) as exc:
+            detail = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
             message = (
                 f"Cannot carry the targets of the existing {APM_YML_FILENAME} into the new "
-                f"one: {exc}"
+                f"one: {detail.strip().removeprefix('[x] ')}"
             )
             if yes or not is_tty:
                 logger.error(message)
@@ -829,15 +824,16 @@ def _resolve_init_targets(
 def _read_existing_targets(project_root: Path) -> list[str]:
     """Return the ``targets:`` a re-init writes for the existing apm.yml.
 
-    Routes through the one apm.yml target rewrite mapping (the one
-    ``apm manifest migrate`` uses): legacy ``target: agents`` becomes
-    ``copilot``, ``vscode`` is kept, ``target: all`` expands to what install
-    deploys today. An unreadable manifest yields no targets, since re-init
+    Routes through the declaration owner's one target rewrite mapping
+    (``rewrite_target_names``): for example legacy ``target: agents`` becomes
+    ``copilot``. An unreadable manifest yields no targets, since re-init
     replaces it.
 
     Raises:
-        ManifestMigrationError: A declared target has no ``targets:``
-            equivalent, so carrying it over would change what APM deploys.
+        ValueError, click.UsageError: The declaration is invalid, a declared
+            target has no ``targets:`` equivalent (``TargetRewriteError``), or
+            the manifest uses a YAML anchor, alias or duplicate top-level key
+            (``InvalidManifestError``).
     """
     import yaml
 
@@ -847,9 +843,13 @@ def _read_existing_targets(project_root: Path) -> list[str]:
     apm_yml_path = project_root / APM_YML_FILENAME
     try:
         data = load_manifest(apm_yml_path) if apm_yml_path.is_file() else None
+    except InvalidManifestError:
+        raise
     except (OSError, ValueError, yaml.YAMLError):
         return []
-    return rewritten_manifest_targets(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))
+    return list(
+        rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path)) or ()
+    )
 
 
 def _parse_toggle_input(response: str, max_n: int) -> tuple[list[int], str | None]:

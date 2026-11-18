@@ -1,12 +1,11 @@
 """Rewrite the deprecated top-level ``target:`` key of apm.yml to ``targets:``.
 
-The one target rewrite mapping for apm.yml. ``apm manifest migrate`` rewrites
-the key in place (comment-preserving, top-level key only; dependency
-``targets:`` subsets are left alone), and the ``apm init`` re-init carries the
-declared targets into its new manifest through :func:`rewritten_manifest_targets`.
-Install and every other command never rewrite the manifest. A rewritten
-manifest is parsed back with :func:`verify_rewritten_manifest` before it is
-written, so no rewrite can leave a manifest APM then rejects.
+Only ``apm manifest migrate`` uses this module: it rewrites the key in place
+(comment-preserving, top-level key only; dependency ``targets:`` subsets are
+left alone). The token mapping belongs to the declaration owner
+(``manifest_targets.rewrite_target_names``), which the ``apm init`` re-init
+uses too; the rewritten text is checked with
+``manifest_targets.verify_rewritten_manifest`` before it is written.
 
 Mapping (each selected target is spelled by its MCP runtime identity, so the
 MCP destination does not move):
@@ -27,20 +26,20 @@ LSP targets, or the migration is refused.
 from __future__ import annotations
 
 import difflib
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import click
-import yaml
-
 from ..core.errors import TargetResolutionError
-from ..core.target_detection import AgentsTargetDeprecationWarning, EffectiveTargetDecision
 from ..utils.atomic_io import atomic_write_text
 from ..utils.yaml_io import load_yaml_roundtrip_str, yaml_roundtrip_to_str
-from .manifest_io import load_manifest_text, read_manifest_text
-from .manifest_targets import ManifestTargetDeclaration
+from .manifest_io import read_manifest_text
+from .manifest_targets import (
+    ManifestTargetDeclaration,
+    TargetRewriteError,
+    rewrite_target_names,
+    verify_rewritten_manifest,
+)
 
 _LEGACY_KEY = "target"
 _CURRENT_KEY = "targets"
@@ -48,8 +47,8 @@ _CURRENT_KEY = "targets"
 _FLOW_LIST_MAX_WIDTH = 60
 
 
-class ManifestMigrationError(ValueError):
-    """The manifest cannot be migrated without changing what APM deploys."""
+# The manifest cannot be migrated without changing what APM deploys.
+ManifestMigrationError = TargetRewriteError
 
 
 @dataclass(frozen=True)
@@ -98,53 +97,14 @@ class ManifestMigration:
             atomic_write_text(self.path, self.migrated_text)
 
 
-def _error_text(exc: Exception) -> str:
-    text = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
-    return text.strip().removeprefix("[x] ")
-
-
-def verify_rewritten_manifest(path: Path, text: str) -> None:
-    """Refuse a rewritten manifest that APM would reject when it reads it back.
-
-    Parses *text* with the apm.yml read checks and validates its target
-    declaration the way install does. Call before writing *text* to *path*.
-
-    Raises:
-        ManifestMigrationError: The rewrite would leave an invalid manifest.
-    """
-    try:
-        data = load_manifest_text(path, text)
-        if not isinstance(data, dict):
-            raise ValueError(f"{path} must contain a YAML mapping")
-        ManifestTargetDeclaration.from_mapping(data, path).validate_for_install()
-    except (ValueError, TypeError, yaml.YAMLError, click.UsageError) as exc:
-        raise ManifestMigrationError(
-            f"Refusing to write {path.name}: APM would reject the rewritten manifest. "
-            f"{_error_text(exc)}"
-        ) from None
-
-
-def _no_equivalent(token: str) -> ManifestMigrationError:
-    return ManifestMigrationError(
-        f"Target '{token}' has no 'targets:' equivalent. Remove '{token}' from "
-        f"'target:' in apm.yml and pass '--target {token}' to 'apm install' instead."
-    )
-
-
-def _decision_profile(decision: EffectiveTargetDecision) -> tuple[frozenset[str], ...]:
-    return (
-        frozenset(decision.canonical_targets or ()),
-        frozenset(decision.runtime_targets or ()),
-        frozenset(decision.lsp_targets or ()),
-    )
-
-
 def plan_target_migration(
     value: object, *, source_path: Path | None = None, user_scope: bool = False
 ) -> TargetMigrationPlan:
     """Map a legacy ``target:`` value to an equivalent ``targets:`` list.
 
-    With *user_scope*, the user manifest also drives ``apm compile -g``, which
+    Delegates to the declaration owner's rewrite mapping
+    (:func:`~apm_cli.models.manifest_targets.rewrite_target_names`). With
+    *user_scope*, the user manifest also drives ``apm compile -g``, which
     writes every known target when the declaration does not restrict them.
 
     Raises:
@@ -152,24 +112,9 @@ def plan_target_migration(
         ManifestMigrationError: A token has no ``targets:`` equivalent.
     """
     legacy_declaration = ManifestTargetDeclaration.from_mapping({_LEGACY_KEY: value}, source_path)
-    with warnings.catch_warnings():
-        # Migrating away from the alias is the fix this warning asks for.
-        warnings.simplefilter("ignore", AgentsTargetDeprecationWarning)
-        selection = legacy_declaration.selection
-    if selection is None:
+    targets = rewrite_target_names(legacy_declaration)
+    if targets is None:
         return TargetMigrationPlan(targets=None)
-
-    # The decision owner expands ``all`` and keeps each runtime spelling.
-    legacy = EffectiveTargetDecision(selection, "apm.yml")
-    targets = tuple(legacy.runtime_targets or ())
-    for token in targets:
-        try:
-            _ = ManifestTargetDeclaration.from_mapping({_CURRENT_KEY: [token]}).selection
-        except TargetResolutionError:
-            raise _no_equivalent(token) from None
-
-    migrated_declaration = ManifestTargetDeclaration.from_mapping({_CURRENT_KEY: list(targets)})
-    migrated = EffectiveTargetDecision(migrated_declaration.selection, "apm.yml")
     if user_scope and legacy_declaration.legacy_all:
         # Singular ``all`` leaves ``apm compile -g`` unrestricted; any list narrows it.
         label = source_path.as_posix() if source_path else "~/.apm/apm.yml"
@@ -179,41 +124,7 @@ def plan_target_migration(
             "not deploy, and any 'targets:' list would narrow that. Replace 'target: all' "
             "by hand with the 'targets:' you use."
         )
-    if _decision_profile(migrated) != _decision_profile(legacy):
-        raise ManifestMigrationError(
-            f"Cannot migrate 'target:' in {source_path.name if source_path else 'apm.yml'} "
-            f"automatically: 'targets: [{', '.join(targets)}]' would change what APM "
-            "deploys. Replace 'target:' with a 'targets:' list by hand."
-        )
     return TargetMigrationPlan(targets=targets, expanded_all=legacy_declaration.legacy_all)
-
-
-def rewritten_manifest_targets(declaration: ManifestTargetDeclaration) -> list[str]:
-    """Return the ``targets:`` list a rewrite of *declaration* writes.
-
-    Singular ``target:`` values map exactly as ``apm manifest migrate``
-    rewrites them; a plural ``targets:`` list is kept. Empty when nothing is
-    declared.
-
-    Raises:
-        ManifestMigrationError: The declaration is invalid or a token has no
-            ``targets:`` equivalent.
-    """
-    fields = dict(declaration.fields)
-    try:
-        if declaration.spelling == _LEGACY_KEY:
-            plan = plan_target_migration(fields[_LEGACY_KEY], source_path=declaration.source_path)
-            return list(plan.targets or ())
-        names = declaration.authored_names()
-        if names:
-            # Also refuses a manifest that declares both keys.
-            rewritten = {**fields, _CURRENT_KEY: names}
-            _ = ManifestTargetDeclaration.from_mapping(rewritten, declaration.source_path).selection
-        return names
-    except ManifestMigrationError:
-        raise
-    except (ValueError, TypeError, click.UsageError) as exc:
-        raise ManifestMigrationError(_error_text(exc)) from None
 
 
 def _comment_tokens(entry: Any) -> list[Any]:

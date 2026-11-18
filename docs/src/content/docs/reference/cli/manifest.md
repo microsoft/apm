@@ -29,8 +29,7 @@ The rewrite:
 - changes nothing on a manifest that already uses `targets:` (exit 0).
 
 `apm install` and other commands never rewrite the manifest. Run this
-command yourself and commit the result. `apm init` on an existing manifest
-carries its targets over with the same mapping.
+command yourself and commit the result.
 
 A manifest that uses YAML anchors or aliases (`&name` / `*name`) is refused
 before planning, like every other command that reads `apm.yml`.
