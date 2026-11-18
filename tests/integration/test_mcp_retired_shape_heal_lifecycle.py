@@ -305,21 +305,22 @@ def test_heal_does_not_slip_past_a_declared_transport_deny(scene: HarnessScene) 
 
 
 @_needs_openssl
-def test_registry_sse_heal_is_not_newly_blocked_by_effective_transport(
+def test_registry_sse_heal_is_blocked_by_effective_transport(
     scene: HarnessScene,
 ) -> None:
-    """Only declared transports are judged in 0.36.1, so the healed SSE remote passes."""
+    """0.37 (#3764): policy judges the effective registry transport, so SSE is blocked pre-write."""
     _governed(scene, drop=("heal-sse",))
+    before = _snapshot(scene, user=False)
     with local_gitlab_policy_fixture(scene.isolated.root / "policy-proxy") as fixture:
         fixture.publish({_POLICY_PROJECT: _policy(["stdio", "http", "streamable-http"])})
-        verdict_before = _transport_verdict(scene, fixture)
 
         result = _governed_install(scene, fixture)
 
-        assert result.returncode == 0, describe(result)
-        copilot = _entry(scene, "copilot", "heal-registry", user=False)
-        assert copilot.get("type") == "sse", copilot
-        assert _transport_verdict(scene, fixture) == verdict_before is True
+        assert result.returncode != 0, describe(result)
+        assert "heal-registry" in result.stdout + result.stderr
+        assert "transport 'sse' not in allowed" in result.stdout + result.stderr
+        assert _snapshot(scene, user=False) == before, "blocked install rewrote native files"
+        assert _transport_verdict(scene, fixture) is False
 
 
 @_needs_openssl
