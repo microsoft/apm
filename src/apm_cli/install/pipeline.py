@@ -420,6 +420,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     if scope is None:
         scope = InstallScope.PROJECT
 
+    from .phases.targets import reject_undeployable_manifest_targets
+
+    reject_undeployable_manifest_targets(apm_package, logger)  # before any write
+
     apm_deps = apm_package.get_apm_dependencies()
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
     all_apm_deps = apm_deps + dev_apm_deps

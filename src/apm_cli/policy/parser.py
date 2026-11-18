@@ -314,7 +314,7 @@ def _build_policy(data: dict) -> ApmPolicy:
     )
 
     comp_data = data.get("compilation") or {}
-    target_data = comp_data.get("target") or {}
+    target_data = comp_data.get("target") or {}  # architecture-authority-exempt: policy-schema
     strategy_data = comp_data.get("strategy") or {}
     compilation = CompilationPolicy(
         target=CompilationTargetPolicy(

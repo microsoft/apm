@@ -794,8 +794,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-mcp-target-selection",
         rule_id="mutation_writes.mcp_target_selection",
         path="src/apm_cli/integration/mcp_integrator_install.py",
-        old="parse_targets_field(apm_config)",
-        new="parse_target_fields(apm_config)",
+        old="manifest_target_restriction(apm_config)",
+        new="manifest_target_restrictions(apm_config)",
         intent="MCP install adapter stops parsing targets through the manifest owner.",
     ),
     MutationCase(
@@ -1418,6 +1418,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         new="target_decision = _resolve_effective_target_decision_REMOVED(",
         intent="Install pipeline stops resolving the shared EffectiveTargetDecision.",
         replace_all=True,
+    ),
+    MutationCase(
+        guard_id="registry-delegation-manifest-target-declaration",
+        rule_id="registry_delegation.target_vocabulary",
+        path="src/apm_cli/install/target_filter.py",
+        old='    package = getattr(package_source, "package", package_source)\n',
+        new=(
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = vars(package).get("targets")\n'
+        ),
+        intent="Package-target authorization re-reads the raw manifest targets field.",
     ),
     MutationCase(
         guard_id="registry-delegation-output-diagnostics",
@@ -3095,6 +3106,98 @@ def test_policy_target_projection_guard_rejects_raw_selections(
     mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)
     rule_id = "registry_delegation.policy_target_projection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "    manifest_decision = EffectiveTargetDecision(",
+            '    raw_target = (raw_yml or {}).get("target")\n'
+            "    manifest_decision = EffectiveTargetDecision(",
+            id="audit-raw-get",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/policy_target_check.py",
+            "    target_decision = ctx.target_decision\n",
+            "    target_decision = ctx.target_decision\n"
+            '    config_target = getattr(ctx.apm_package, "target", None)\n',
+            id="install-gate-getattr",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/compile/cli.py",
+            "        if isinstance(config_target, list) and len(config_target) == 1:\n",
+            "        config_target = parse_targets_field({})\n"
+            "        if isinstance(config_target, list) and len(config_target) == 1:\n",
+            id="compile-reparse",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/parser.py",
+            "# architecture-authority-exempt: policy-schema",
+            "# architecture-authority-exempt: anything-goes",
+            id="unknown-exemption-concept",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            '        apm_yml_data["targets"] = list(config["targets"])\n',
+            '        apm_yml_data["targets"] = list(config["targets"])\n'
+            "        leaked = package.targets\n",
+            id="exempt-block-does-not-cover-nested-read",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/local_bundle.py",
+            '    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata\n',
+            '    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata\n'
+            '    leaked = lockfile.get("targets")\n',
+            id="trailing-marker-does-not-cover-next-line",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            "    if package.targets:\n"
+            "        # architecture-authority-exempt: bootstrap-writer\n"
+            "        pass\n",
+            id="body-marker-does-not-cover-header",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = package_source["targets"]\n',
+            id="raw-subscript",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    declared = "targets" in vars(package)\n',
+            id="raw-key-test",
+        ),
+        pytest.param(
+            "src/apm_cli/install/target_filter.py",
+            '    package = getattr(package_source, "package", package_source)\n',
+            '    package = getattr(package_source, "package", package_source)\n'
+            '    raw_targets = dict(vars(package)).pop("targets", None)\n',
+            id="raw-pop",
+        ),
+    ],
+)
+def test_manifest_target_declaration_guard_rejects_raw_readers(
+    path: str, old: str, new: str
+) -> None:
+    """Every package-target reader routes through ManifestTargetDeclaration (#3732)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.target_vocabulary"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(

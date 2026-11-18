@@ -1327,7 +1327,7 @@ class DeploymentLedgerCodec:
             active_owner = str(row.get("active_owner") or "")
             locator = DeploymentLocator(
                 kind=LocatorKind(str(row["kind"])),
-                target=str(row["target"]),
+                target=str(row["target"]),  # architecture-authority-exempt: ledger-row
                 value=str(row["value"]),
                 runtime=str(row["runtime"]) if row.get("runtime") is not None else None,
                 scope=str(row["scope"]),
@@ -1352,7 +1352,7 @@ class DeploymentLedgerCodec:
                 raise ValueError(f"Lockfile deployment row {index} must be a mapping")
             try:
                 LocatorKind(str(row["kind"]))
-                target = row["target"]
+                target = row["target"]  # architecture-authority-exempt: ledger-row
                 value = row["value"]
                 scope = row["scope"]
             except (KeyError, TypeError, ValueError) as exc:

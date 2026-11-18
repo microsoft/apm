@@ -20,14 +20,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from apm_cli.models.apm_package import APMPackage
+
 
 def _ctx_with_apm_yml(tmp_path: Path, body: str) -> MagicMock:
     project = tmp_path / "proj"
     project.mkdir()
     (project / "apm.yml").write_text(body, encoding="utf-8")
     ctx = MagicMock()
-    ctx.apm_package = MagicMock()
-    ctx.apm_package.package_path = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
     return ctx
 
 
@@ -108,13 +109,13 @@ def test_read_yaml_targets_unknown_token_in_list_raises_clean_error(tmp_path):
     """Unknown token inside a YAML list must surface a readable headline,
     not a Python list-repr fragment like '['copilot''.
     """
+    from types import SimpleNamespace
+
     from apm_cli.core.errors import UnknownTargetError
     from apm_cli.install.phases.targets import _read_yaml_targets
 
-    ctx = _ctx_with_apm_yml(
-        tmp_path,
-        "name: demo\nversion: 0.1.0\ntarget: [bogus]\n",
-    )
+    ctx = MagicMock()
+    ctx.apm_package = SimpleNamespace(target=["bogus"])
     with pytest.raises(UnknownTargetError) as exc_info:
         _read_yaml_targets(ctx)
     headline = str(exc_info.value).splitlines()[0]

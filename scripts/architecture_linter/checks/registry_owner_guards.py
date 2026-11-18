@@ -11,7 +11,8 @@ Owner guard (executed exactly once)     Legacy shell provenance
 registry-delegation-runtime-descriptors AC1 "Runtime names must come from
                                         runtime/registry.py"
 registry-delegation-target-vocabulary   AC1 "Manifest target consumers must
-                                        use canonical_targets"
+                                        use canonical_targets", widened to
+                                        deny-by-default over src/apm_cli
 registry-delegation-install-target-     AC1 "Package, MCP, and LSP phases
 selection                               must share EffectiveTargetDecision"
 registry-delegation-policy-target-      Compilation-target policy judges
@@ -83,14 +84,34 @@ _RUNTIME_NAME_PATTERN = (
 )
 
 
-_TARGET_VOCAB_CONSUMERS: tuple[str, ...] = (
-    "src/apm_cli/bundle/packer.py",
-    "src/apm_cli/install/mcp/integration.py",
-    "src/apm_cli/commands/uninstall/engine.py",
+_TARGET_DECLARATION_OWNERS: frozenset[str] = frozenset(
+    {
+        "src/apm_cli/models/manifest_targets.py",
+        "src/apm_cli/models/apm_package.py",
+        "src/apm_cli/core/apm_yml.py",
+        "src/apm_cli/core/target_detection.py",
+    }
 )
-
-
-_TARGET_VOCAB_PATTERN = r"(package|apm_package)\.(target|targets)\b"
+# The user default (``apm config target``) is parsed with the --target rules.
+_TARGET_FIELD_PARSER_USERS: frozenset[str] = frozenset({"src/apm_cli/config.py"})
+_TARGET_FIELD_PARSERS: frozenset[str] = frozenset({"parse_targets_field", "parse_target_field"})
+_TARGET_KEYS: frozenset[str] = frozenset({"target", "targets"})
+_PACKAGE_RECEIVERS: frozenset[str] = frozenset(
+    {"package", "apm_package", "pkg", "apm_pkg", "manifest", "root_package"}
+)
+# Reads of a ``target``/``targets`` key that are a different decision than the
+# package-level manifest declaration. Each must say which one it is.
+_TARGET_EXEMPT_CONCEPTS: frozenset[str] = frozenset(
+    {
+        "dependency-target-subset",
+        "policy-schema",
+        "bundle-pack-metadata",
+        "ledger-row",
+        "display-row",
+        "bootstrap-writer",
+        "compilation-target-field",
+    }
+)
 
 
 _EFFECTIVE_TARGET_OWNER = "src/apm_cli/core/target_detection.py"
@@ -302,22 +323,233 @@ def _check_runtime_descriptors(provider: FactsProvider) -> Iterable[Violation]:
     )
 
 
-def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
-    """Manifest target consumers must route through ``canonical_targets``.
+def _is_package_receiver(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in _PACKAGE_RECEIVERS
+    return isinstance(node, ast.Attribute) and node.attr in _PACKAGE_RECEIVERS
 
-    Ports the AC1 ``check_pattern`` forbidding raw ``package.target`` /
-    ``apm_package.targets`` attribute reads in the three manifest-target
-    consumer modules.
+
+def _is_target_key(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value in _TARGET_KEYS
+
+
+def _raw_target_read(node: ast.AST, path: str) -> str | None:
+    """Describe a raw package-target read outside the declaration owner."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Load)
+        and node.attr in _TARGET_KEYS
+        and _is_package_receiver(node.value)
+    ):
+        return f"raw package .{node.attr} read"
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        if _is_target_key(node.slice):
+            return f"raw [{node.slice.value!r}] read"
+        return None
+    if isinstance(node, ast.Compare):
+        if _is_target_key(node.left) and any(
+            isinstance(op, (ast.In, ast.NotIn)) for op in node.ops
+        ):
+            return f"raw {node.left.value!r} key test"
+        return None
+    if not isinstance(node, ast.Call):
+        return None
+    name = _call_name(node)
+    if name in _TARGET_FIELD_PARSERS and path not in _TARGET_FIELD_PARSER_USERS:
+        return f"{name} outside the declaration owner"
+    if name == "_package_field":
+        return "_package_field stand-in read"
+    if name in {"get", "pop", "setdefault"} and node.args and _is_target_key(node.args[0]):
+        return f"raw .{name}({node.args[0].value!r}) read"
+    if (
+        name == "getattr"
+        and len(node.args) >= 2
+        and _is_target_key(node.args[1])
+        and _is_package_receiver(node.args[0])
+    ):
+        return f"raw getattr(..., {node.args[1].value!r}) read"
+    return None
+
+
+def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -> str | None:
+    """Return the exemption concept declared for *node*, if any.
+
+    The marker must sit on a line of the innermost statement holding *node*
+    (only its header, for a compound statement) or alone on the line directly
+    above that statement. It never covers a sibling or nested statement.
+    """
+    statement: ast.AST | None = node
+    while statement is not None and not isinstance(statement, ast.stmt):
+        statement = index.parent(statement)
+    anchor = statement if statement is not None else node
+    first = anchor.lineno
+    last = getattr(anchor, "end_lineno", None) or first
+    body = getattr(anchor, "body", None)
+    if isinstance(anchor, ast.Match) and anchor.cases:
+        body = [anchor.cases[0].pattern]
+    if isinstance(anchor, ast.stmt) and isinstance(body, list) and body:
+        last = max(first, body[0].lineno - 1)
+        # Comments between a header and its body belong to the body.
+        while last > first and lines[last - 1].lstrip()[:1] in {"", "#"}:
+            last -= 1
+    candidates = list(range(first, last + 1))
+    if 1 < first <= len(lines) + 1 and lines[first - 2].lstrip().startswith("#"):
+        candidates.append(first - 1)
+    for line in candidates:
+        if 0 < line <= len(lines):
+            marker = lines[line - 1].partition(EXEMPT_MARKER)[2].strip()
+            if marker:
+                return marker.split()[0]
+    return None
+
+
+def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
+    """Package manifest targets are read only through the declaration owner.
+
+    Deny-by-default over ``src/apm_cli``: outside ``models/apm_package.py``
+    (``ManifestTargetDeclaration``) and its parsers, no module may read a
+    package's ``target``/``targets`` attributes or keys, or call the target
+    field parsers. Reads of a different decision carry
+    ``# architecture-authority-exempt: <concept>`` naming it.
     """
     rule_id = "registry_delegation.target_vocabulary"
-    return line_pattern_violations(
-        provider,
-        rule_id=rule_id,
-        paths=_TARGET_VOCAB_CONSUMERS,
-        pattern=_TARGET_VOCAB_PATTERN,
-        message="manifest target consumers must use canonical_targets",
-        exempt_marker=EXEMPT_MARKER,
-    )
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        if path in _TARGET_DECLARATION_OWNERS:
+            continue
+        facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            reason = _raw_target_read(node, path)
+            if reason is None:
+                continue
+            line = getattr(node, "lineno", 1)
+            concept = _target_exemption(index, node, facts.lines)
+            if concept in _TARGET_EXEMPT_CONCEPTS:
+                continue
+            message = (
+                f"{reason}: route package targets through ManifestTargetDeclaration"
+                if concept is None
+                else f"{reason}: unknown exemption concept {concept!r}"
+            )
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    message,
+                    line=line,
+                    column=getattr(node, "col_offset", 0) + 1,
+                )
+            )
+    return findings
+
+
+_POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
+    {"run_dependency_policy_checks", "run_policy_preflight"}
+)
+_POLICY_TARGET_CHECK = "_check_compilation_target"
+_POLICY_TARGET_SEAM_PARAMETER = "effective_target"
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_canonical_targets(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "canonical_targets"
+
+
+def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violation]:
+    """Compilation-target policy judges only the canonical decision projection.
+
+    Every target selection handed to the policy seams must be an
+    ``EffectiveTargetDecision.canonical_targets`` expression, the check itself
+    must never read the raw manifest, and no sibling normalizer may exist.
+    """
+    rule_id = "registry_delegation.policy_target_projection"
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            line = getattr(node, "lineno", 1)
+            if isinstance(node, FUNCTION_NODES) and node.name == "normalize_policy_targets":
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "policy target normalization belongs to "
+                        "EffectiveTargetDecision.canonical_targets",
+                        line=line,
+                    )
+                )
+            elif isinstance(node, FUNCTION_NODES) and node.name == _POLICY_TARGET_CHECK:
+                first = node.args.args[0].arg if node.args.args else None
+                if first != "targets":
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must take canonical targets, not {first}",
+                            line=line,
+                        )
+                    )
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            anchor = index.definition_anchor(node)
+            # A seam may forward its own already-projected parameter.
+            passthrough = isinstance(anchor, FUNCTION_NODES) and anchor.name in _POLICY_TARGET_SEAMS
+            if name in _POLICY_TARGET_SEAMS:
+                for keyword in node.keywords:
+                    if keyword.arg != _POLICY_TARGET_SEAM_PARAMETER:
+                        continue
+                    value = keyword.value
+                    if isinstance(value, ast.Constant) and value.value is None:
+                        continue
+                    if passthrough and _is_name(value, _POLICY_TARGET_SEAM_PARAMETER):
+                        continue
+                    if not _is_canonical_targets(value):
+                        findings.append(
+                            violation(
+                                rule_id,
+                                path,
+                                f"{name} effective_target must be an "
+                                "EffectiveTargetDecision.canonical_targets projection",
+                                line=line,
+                            )
+                        )
+            elif name == _POLICY_TARGET_CHECK:
+                first_arg = node.args[0] if node.args else None
+                if not (
+                    _is_canonical_targets(first_arg)
+                    or (passthrough and _is_name(first_arg, _POLICY_TARGET_SEAM_PARAMETER))
+                ):
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must receive "
+                            "EffectiveTargetDecision.canonical_targets",
+                            line=line,
+                        )
+                    )
+    return findings
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
@@ -1325,8 +1557,11 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id="registry_delegation.target_vocabulary",
         group=GROUP,
-        guard_ids=("registry-delegation-target-vocabulary",),
-        description="Manifest target consumers must use core/target_catalog canonical targets.",
+        guard_ids=(
+            "registry-delegation-target-vocabulary",
+            "registry-delegation-manifest-target-declaration",
+        ),
+        description=("Package manifest targets are read only through ManifestTargetDeclaration."),
         check=_check_target_vocabulary,
     ),
     Rule(

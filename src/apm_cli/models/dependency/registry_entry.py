@@ -78,7 +78,7 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
     skills_raw = entry.get("skills")
     skill_subset = parse_skill_subset(skills_raw) if skills_raw is not None else None
 
-    targets_raw = entry.get("targets")
+    targets_raw = entry.get("targets")  # architecture-authority-exempt: dependency-target-subset
     target_subset = parse_target_subset(targets_raw) if targets_raw is not None else None
 
     # Reject any unknown keys to catch typos early.

@@ -1867,6 +1867,9 @@ def _install_apm_packages(ctx, outcome):
 
     apm_count = 0
 
+    from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
+
+    reject_undeployable_manifest_targets(apm_package, logger)  # before the lockfile rename
     migrate_lockfile_if_needed(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.

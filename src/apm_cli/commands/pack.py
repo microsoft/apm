@@ -1012,7 +1012,7 @@ def _log_bundle_meta(result, output_dir, logger):
     if not meta:
         return
 
-    bundle_target = meta.get("target", "")
+    bundle_target = meta.get("target", "")  # architecture-authority-exempt: bundle-pack-metadata
     dep_count = len(result.dependency_files) if result.dependency_files else 0
     file_count = len(result.files) if result.files else 0
 
