@@ -289,7 +289,7 @@ def _check_credential_report_owner(provider: FactsProvider) -> tuple[Violation, 
                 ("re", _REPORT_RUNNER_CALL.pattern, 1, "eq"),
                 ("sub", "    if outcome is None or outcome.kind is AuthOutcomeKind.OK:", 1, "eq"),
                 ("sub", "    elif outcome.is_verified_rejection:", 1, "eq"),
-                ("sub", "    elif _HELPER_REPORTS.was_accepted(key, digest):", 1, "eq"),
+                ("sub", "_HELPER_REPORTS.approved_keys(key), credential.password", 1, "eq"),
                 ("sub", "    if not _HELPER_REPORTS.claim(key, action):", 1, "eq"),
                 (
                     "sub",

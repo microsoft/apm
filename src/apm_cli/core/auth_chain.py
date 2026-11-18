@@ -21,10 +21,10 @@ Invariants:
 
 from __future__ import annotations
 
-import hashlib
+import hmac
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -248,6 +248,14 @@ class HelperCredentialCache:
             self._values[key] = value
             return value
 
+    def holds_secret(self, keys: Iterable[HelperKey], password: str) -> bool:
+        """Return whether any cached answer for *keys* carries *password*."""
+        with self._lock:
+            values = [self._values.get(key) for key in keys]
+        return any(
+            value is not None and hmac.compare_digest(value.password, password) for value in values
+        )
+
     def discard(self, key: HelperKey, value: GitHelperCredential) -> None:
         """Forget *value* for *key* unless a newer answer already replaced it."""
         with self._lock:
@@ -262,23 +270,21 @@ class HelperCredentialCache:
 class HelperReportLedger:
     """Process-wide record of helper reports; one per (key, action).
 
-    Also remembers (in memory, as digests) which secrets were accepted per
-    (host, port), so a 401 on another path never erases a secret this process
-    has already seen work on that host.
+    Holds only (host, port, path) keys, never secrets.
     """
 
     def __init__(self) -> None:
         self._claimed: set[tuple[HelperKey, str]] = set()
-        self._accepted: set[tuple[str, int | None, str]] = set()
         self._lock = threading.Lock()
 
-    def note_accepted(self, key: HelperKey, digest: str) -> None:
+    def approved_keys(self, key: HelperKey) -> tuple[HelperKey, ...]:
+        """Return the keys on *key*'s host and port whose credential was approved."""
         with self._lock:
-            self._accepted.add((key[0], key[1], digest))
-
-    def was_accepted(self, key: HelperKey, digest: str) -> bool:
-        with self._lock:
-            return (key[0], key[1], digest) in self._accepted
+            return tuple(
+                claimed
+                for claimed, action in self._claimed
+                if action == "approve" and claimed[:2] == key[:2]
+            )
 
     def claim(self, key: HelperKey, action: str) -> bool:
         """Return True the first time *action* is claimed for *key*."""
@@ -291,7 +297,6 @@ class HelperReportLedger:
     def clear(self) -> None:
         with self._lock:
             self._claimed.clear()
-            self._accepted.clear()
 
 
 _HELPER_REPORTS = HelperReportLedger()
@@ -328,10 +333,9 @@ def report_helper_outcome(
     key = helper_cache_key(host_info, path)
     if credential.host.lower() != key[0] or credential.port != key[1]:
         return
-    digest = hashlib.sha256(credential.password.encode("utf-8")).hexdigest()
-    if action == "approve":
-        _HELPER_REPORTS.note_accepted(key, digest)
-    elif _HELPER_REPORTS.was_accepted(key, digest):
+    if action == "reject" and resolver._helper_cache.holds_secret(
+        _HELPER_REPORTS.approved_keys(key), credential.password
+    ):
         return
     if not _HELPER_REPORTS.claim(key, action):
         return
