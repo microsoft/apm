@@ -18,6 +18,7 @@ from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.models.apm_package import (
     APMPackage,
     canonical_package_target_config,
+    canonical_package_targets,
     package_target_declaration,
     package_target_selection,
 )
@@ -200,3 +201,20 @@ def test_reinit_prefill_expands_singular_all_with_install_spellings():
     assert "vscode" in names
     assert "copilot" not in names
     assert _declaration(targets=["all"]).prefill_names() == ["all"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"target": "claude,vscode"}, {"targets": ["claude", "vscode"]}],
+    ids=["target", "targets"],
+)
+def test_both_spellings_resolve_vscode_to_copilot_for_dependency_intersection(tmp_path, fields):
+    """A package migrated to ``targets: [vscode]`` still deploys to copilot (#3762)."""
+    manifest = tmp_path / "apm.yml"
+    dump_yaml({"name": "p", "version": "1.0.0", **fields}, manifest)
+
+    assert ManifestTargetDeclaration.from_mapping(fields).canonical == ("claude", "copilot")
+    assert canonical_package_targets(APMPackage.from_apm_yml(manifest)) == ("claude", "copilot")
+    assert canonical_package_target_config(APMPackage.from_apm_yml(manifest)) == {
+        "targets": ["claude", "copilot"]
+    }

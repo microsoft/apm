@@ -9,7 +9,7 @@ separate decisions owned elsewhere.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -101,6 +101,17 @@ def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path)
         _rich_warning(message, symbol="warning", err=True)
 
 
+def canonical_target_names(names: Iterable[str]) -> tuple[str, ...]:
+    """Resolve declared target names to canonical ones, keeping legacy ``all``.
+
+    The single alias rule for both ``target:`` and ``targets:``: ``vscode``
+    and ``agents`` become ``copilot``.
+    """
+    return tuple(
+        name if name == _LEGACY_ALL_TARGET else normalize_target_name(name) for name in names
+    )
+
+
 def _authored_target_tokens(value: Any) -> list[str]:
     if isinstance(value, str):
         return [token.strip().lower() for token in value.split(",") if token.strip()]
@@ -177,12 +188,12 @@ class ManifestTargetDeclaration:
         if "targets" in data:
             # Also rejects a manifest that declares both keys.
             parsed = parse_targets_field(data)
-            return (list(parsed) or None), tuple(parsed)
+            # ``selection`` keeps ``vscode`` for its MCP destination; the
+            # canonical view resolves it to ``copilot`` for both spellings.
+            return (list(parsed) or None), canonical_target_names(parsed)
         value = parse_target_field(data.get("target"), source_path=self.source_path)
         values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
-        return value, tuple(
-            name if name == _LEGACY_ALL_TARGET else normalize_target_name(name) for name in values
-        )
+        return value, canonical_target_names(values)
 
     @property
     def selection(self) -> str | list[str] | None:
