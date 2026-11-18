@@ -89,7 +89,7 @@ Common surprises:
 - Severity can only be raised by a child, never lowered.
 
 The full merge semantics live in
-[Policy schema -> Merge rules (tighten-only)](../../reference/policy-schema/#merge-rules-tighten-only).
+[Policy schema -> Merge rules (tighten-only)](../../reference/policy-schema/#merge-rules).
 Read that section before arguing with a parent policy.
 
 ## 4. Discovery surprises
@@ -98,19 +98,20 @@ APM resolves policy in this order:
 
 1. `--policy-source <ref>` on `apm policy status`, or `--policy <ref>`
    on `apm audit --ci`. Explicit always wins.
-2. Project-local `apm.yml` (`policy:` block, if present).
-3. Auto-discovery: `<owner>/.github/apm-policy.yml` for the repo's
-   GitHub owner.
-4. None -- no enforcement.
+2. Auto-discovery from the git remote: `apm-policy.yml` in the owner's
+   `.github-private`, `.github`, `.apm`, then `_apm` repo.
+3. None -- no enforcement. (`policy:` in `apm.yml` only pins `hash`
+   and `fetch_failure_default`; it does not choose the source.)
 
 Things that bite:
 
 - **Wrong owner.** Auto-discovery uses the *current repo's* GitHub
   owner. If your fork is under a personal account, the org policy
-  will not auto-apply. Use `apm policy status --policy-source org`
-  to test against the upstream owner.
+  will not auto-apply. Use `apm policy status --policy-source
+  <upstream-owner>/.github` to test against the upstream owner.
 - **Stale cache.** Policy is cached on disk. If an admin just rolled
-  out a fix, run with `--no-cache` (or `apm install --refresh ...`).
+  out a fix, run `apm policy status --no-cache` (or
+  `apm audit --ci --no-cache`) to refetch and refresh the cache.
 - **Discovery silently disabled.** `APM_POLICY_DISABLE=1` in the
   shell environment skips discovery for **every** APM command in that
   session. See the call-out below.
@@ -140,15 +141,14 @@ shortest path to green.
 
 ### `dependency-allowlist` / `dependency-denylist`
 
-- **Symptom:** `Dependency '<owner>/<repo>' is not on the org
-  allowlist` (or `is on the org denylist`).
+- **Symptom:** `Policy violation: <owner>/<repo> -- not in allowed
+  sources` (or `denied by pattern: <pattern>`).
 - **Fix:** Replace the dep with an allowed equivalent, or open a PR
   against the org policy file to add it (see step 6).
 
 ### `mcp-transport` excluding `stdio`
 
-- **Symptom:** `MCP server '<name>' uses transport 'stdio' which is
-  not on the allowed transport list`.
+- **Symptom:** `<name>: transport 'stdio' not in allowed ['http', 'sse']`.
 - **Cause:** Org has narrowed transports to remote-only (`http`,
   `sse`) and your `apm.yml` pins a stdio command.
 - **Fix:** Re-install the server from the registry with `--url` (HTTP
@@ -156,25 +156,25 @@ shortest path to green.
 
 ### `mcp-self-defined`
 
-- **Symptom:** `Self-defined MCP server '<name>' is not allowed; only
-  registry-resolved servers are permitted`.
+- **Symptom:** `N self-defined MCP server(s) denied by policy`, with
+  `<name>: self-defined server` in the details.
 - **Cause:** Org requires every MCP server to come from the registry,
   not be hand-rolled in `apm.yml`.
 - **Fix:** Find the server in the registry and `apm install
-  mcp:<name>`. Remove the hand-rolled entry.
+  --mcp <name>`. Remove the hand-rolled entry.
 
 ### `required-manifest-fields`
 
-- **Symptom:** `Required manifest field 'description' is missing from
-  apm.yml`.
+- **Symptom:** `1 required manifest field(s) missing`, with the field
+  name (for example `description`) in the details.
 - **Fix:** Edit `apm.yml` and add the listed field. Org policy
   defines the required set; check
   [Policy schema](../../reference/policy-schema/).
 
 ### `unmanaged-files`
 
-- **Symptom:** `Unmanaged file detected in target directory:
-  .github/instructions/extra.md`.
+- **Symptom:** `N unmanaged file(s) in governance directories`, with
+  each path (for example `.github/instructions/extra.md`) in the details.
 - **Cause:** A hand-edited file in a target directory APM owns. With
   `action: deny`, any file APM did not write blocks the build.
 - **Fix:** Either move the file out of the target directory, or

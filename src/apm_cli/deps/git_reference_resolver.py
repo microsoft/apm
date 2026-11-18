@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from git.exc import GitCommandError
 
+from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.auth_outcome import classify_auth_outcome
 from ..models.apm_package import (
     DependencyReference,
     GitReferenceType,
@@ -46,7 +48,6 @@ from ..models.dependency.host_virtual import (
 from ..utils.git_env import get_git_executable, git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
-    is_ado_auth_failure_signal,
     is_github_hostname,
 )
 from .git_remote_ops import validate_ls_remote_tag_output
@@ -271,7 +272,8 @@ class GitReferenceResolver:
 
             result = git_remote_refs(url, env=env, options=ls_args)
             if result.returncode != 0:
-                # auth-delegated: _primary_op and _bearer_op select this environment.
+                # auth-delegated: try_with_fallback (or the caller's resolved
+                # context) selects this environment.
                 raise GitCommandError(
                     [get_git_executable(), "ls-remote", *ls_args, url],
                     result.returncode,
@@ -286,41 +288,8 @@ class GitReferenceResolver:
             except GitCommandError as exc:
                 return ("err", exc)
 
-        def _bearer_op(bearer):
-            # SECURITY: _build_git_env(scheme="bearer") yields a clean env
-            # (no leaked PAT). JWT travels via http.extraHeader.
-            bearer_env = host.auth_resolver._build_git_env(
-                bearer,
-                scheme="bearer",
-                host_kind="ado",
-                base_env=host.git_env,
-            )
-            bearer_url = host._build_repo_url(
-                repo_url_base,
-                use_ssh=False,
-                dep_ref=dep_ref,
-                token=None,
-                auth_scheme="bearer",
-            )
-            try:
-                output = _run_remote(bearer_url, bearer_env)
-                return ("ok", output)
-            except GitCommandError as exc:
-                return ("err", exc)
-
-        def _is_auth_failure(outcome):
-            if outcome is None or outcome[0] != "err":
-                return False
-            return is_ado_auth_failure_signal(str(outcome[1]))
-
-        ado_eligible = (
-            is_ado
-            and not use_ssh
-            and transport_attempt.use_token
-            and dep_auth_scheme == "basic"
-            and dep_token is not None
-        )
-
+        ado_chain = is_ado and not use_ssh
+        ado_attempts = None
         if public_github_https_first:
 
             def _public_github_op(
@@ -350,16 +319,29 @@ class GitReferenceResolver:
                 )
             except (GitCommandError, OSError) as exc:
                 outcome = ("err", exc)
-            ado_bearer_also_failed = False
-        elif ado_eligible:
-            fb = host.auth_resolver.execute_with_bearer_fallback(
-                dep_ref, _primary_op, _bearer_op, _is_auth_failure
-            )
-            outcome = fb.outcome
-            ado_bearer_also_failed = fb.bearer_attempted and _is_auth_failure(outcome)
+        elif ado_chain:
+
+            def _ado_op(_token: str | None, git_env: dict[str, str]) -> tuple[str, str]:
+                # auth-delegated: try_with_fallback walks PAT -> az bearer ->
+                # path-scoped helper and classifies each failure.
+                return ("ok", _run_remote(remote_url, git_env))
+
+            try:
+                outcome = host.auth_resolver.try_with_fallback(
+                    dep_host,
+                    _ado_op,
+                    org=dependency_repository_owner(dep_ref),
+                    port=dep_ref.port,
+                    path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
+                    remote_url=transport_attempt.effective_url or remote_url,
+                    base_env=host.git_env,
+                )
+            except (GitCommandError, OSError, AdoAuthChainExhaustedError) as exc:
+                outcome = ("err", exc)
+            ado_attempts = getattr(outcome[1], "attempts", None) if outcome[0] == "err" else None
         else:
             outcome = _primary_op()
-            ado_bearer_also_failed = False
 
         if outcome[0] == "ok":
             if not include_heads:
@@ -374,7 +356,14 @@ class GitReferenceResolver:
 
         ref_kind = "remote refs" if include_heads else "remote tags"
         error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
-        if public_github_https_first and not host.auth_resolver.is_public_github_auth_failure(e):
+        if (
+            public_github_https_first
+            and not classify_auth_outcome(
+                host_kind="github",
+                error=e,
+                public_github_anonymous=True,
+            ).is_auth_failure
+        ):
             error_msg += (
                 f"Could not connect to {dep_host or default_host()} "
                 "(network error, not an auth failure). "
@@ -403,7 +392,7 @@ class GitReferenceResolver:
                 org=org,
                 port=dep_ref.port if dep_ref else None,
                 dep_url=dep_ref.repo_url if dep_ref else None,
-                bearer_also_failed=ado_bearer_also_failed,
+                attempts=ado_attempts,
             )
 
         sanitized = host._sanitize_git_error(git_subprocess_error_text(e))

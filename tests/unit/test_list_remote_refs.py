@@ -63,17 +63,12 @@ def _build_downloader():
             AuthResolver.build_noninteractive_git_env
         )
 
-        # Wire execute_with_bearer_fallback to delegate to primary_op so
-        # tests can drive the auth-eligible (ADO + basic + token) path
-        # without configuring a fake bearer provider. The real helper
-        # short-circuits to primary when is_auth_failure(primary) is False
-        # (success case) or when the bearer provider is unavailable.
-        def _exec_bearer_fallback(dep_ref, primary_op, bearer_op, is_auth_failure):
-            from apm_cli.core.auth import BearerFallbackOutcome
+        # Single-attempt chain: run the operation once with the caller's env so
+        # tests can drive the ADO path without configuring credential sources.
+        def _single_attempt(_host, operation, **kwargs):
+            return operation(None, dict(kwargs.get("base_env") or {}))
 
-            return BearerFallbackOutcome(primary_op(), False)
-
-        mock_auth.execute_with_bearer_fallback.side_effect = _exec_bearer_fallback
+        mock_auth.try_with_fallback.side_effect = _single_attempt
         downloader = GitHubPackageDownloader(auth_resolver=mock_auth)
     return downloader
 

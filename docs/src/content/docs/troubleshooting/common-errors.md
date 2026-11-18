@@ -41,7 +41,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: not found in lockfile
-1 ref mismatch(es) -- run 'apm install' to update lockfile
+1 ref mismatch -- run 'apm install --update' to update lockfile
 ```
 
 Cause: a dependency exists in `apm.yml` but has no entry in `apm.lock.yaml`. Most often hit in CI when the lockfile was not regenerated after editing the manifest.
@@ -54,7 +54,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: manifest ref 'v2' != lockfile ref 'v1'
-N ref mismatch(es) -- run 'apm install' to update lockfile
+N ref mismatches -- run 'apm install' to update lockfile
 ```
 
 Cause: the version or ref pinned in `apm.yml` was changed without re-running install. The lockfile is stale.
@@ -113,12 +113,12 @@ See also: [Policy debugging](../policy-debugging/)
 (message similar to)
 
 ```
-[x] Refusing to install from unapproved host(s): <host>.
+[x] Re-run with --allow-insecure-host <host> to allow transitive HTTP dependencies from unapproved host(s): <host>.
 ```
 
-Cause: a dependency resolves to a host outside the configured allowlist.
+Cause: a transitive dependency uses an `http://` URL on a host you have not approved for this install.
 
-Fix: add the host to the allowlist, or pass `--allow-insecure-host <host>` for a one-off install. Do not bypass the allowlist in CI.
+Fix: switch the dependency to HTTPS, or, if you trust the host, re-run with `--allow-insecure-host <host>` (repeat per host). Do not bypass this check in CI.
 
 See also: [Policy debugging](../policy-debugging/)
 
@@ -136,9 +136,9 @@ See also: [Install failures](../install-failures/)
 
 ## Compile
 
-### `No primitives matched`
+### `Compilation completed but produced no output files`
 
-(message similar to) printed when compile produces zero output.
+Printed when compile produces zero output.
 
 Cause: no primitives in the project (or filtered subset) match the active target's compilation rules. Common causes: wrong `--target`, missing frontmatter, glob filter matched nothing, or org policy stripped everything.
 
@@ -197,7 +197,7 @@ See also: [Policy debugging](../policy-debugging/), [`apm audit` reference](../.
 
 Cause: the org policy file fetched from the configured source does not match the pinned hash. Either the policy was updated upstream and the pin is stale, or the source was tampered with.
 
-Fix: confirm the upstream change is legitimate, then update the policy pin in your APM config to the new hash.
+Fix: confirm the upstream change is legitimate, then update `policy.hash` in `apm.yml` to the new hash.
 
 See also: [Policy debugging](../policy-debugging/)
 
@@ -212,7 +212,7 @@ Available scripts in apm.yml: <list>
 
 Cause: `apm run <name>` could not match `<name>` to a script in `apm.yml`, an auto-discovered prompt file, or an installable virtual package.
 
-Fix: check the available scripts list printed under the error. To list discoverable prompts, run `apm list`. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
+Fix: check the available scripts list printed under the error (`apm list` shows the same scripts). The error also lists where APM looks for prompts. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
 
 See also: [`apm run` reference](../../reference/cli/run/), [`apm list` reference](../../reference/cli/list/)
 
@@ -250,11 +250,12 @@ path instead.
 
 See also: [Install failures](../install-failures/), [Authentication](../../getting-started/authentication/)
 
-### `Authentication failed for <host>`
+### `Authentication failed for <operation> on <host>`
 
 ```
-[x] Authentication failed for <host>
-... -- check `gh auth status` and `GITHUB_APM_PAT`
+Authentication failed for <operation> on <host>.
+No token available.
+Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'.
 ```
 
 Cause: the remote host rejected APM's credentials, or no credentials were available. Token resolution order for GitHub: per-org `GITHUB_APM_PAT_<ORG>`, then `GITHUB_APM_PAT`, then `GITHUB_TOKEN`, then `GH_TOKEN`, then `gh auth token`, then git credential helpers.
@@ -284,7 +285,7 @@ See also: [SSL issues](../ssl-issues/)
 
 ### Network timeout or host unreachable
 
-(no fixed string; surfaces as `requests` / git transport errors after the 15s API or 30s git timeout)
+(no fixed string; surfaces as `requests` / git transport errors after a timeout)
 
 Cause: the host is unreachable, the proxy is down, or DNS is failing.
 

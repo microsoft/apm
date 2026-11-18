@@ -598,15 +598,9 @@ class TestPluginManifestProducer:
     def test_conflicting_targets_raises_build_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from apm_cli.core.errors import ConflictingTargetsError
-
         apm = self._apm_yml(tmp_path, "claude")
+        apm.write_text(apm.read_text() + "targets: [cursor]\n")
         opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
 
-        def _raise(data: dict) -> list[str]:
-            raise ConflictingTargetsError("both target and targets set")
-
-        monkeypatch.setattr("apm_cli.core.apm_yml.parse_targets_field", _raise)
-
-        with pytest.raises(BuildError, match=r"both target and targets set"):
+        with pytest.raises(BuildError, match=r"target"):
             PluginManifestProducer().produce(opts, logger=None)

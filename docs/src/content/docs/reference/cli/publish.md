@@ -108,8 +108,8 @@ Some registries return `201` with an empty body; APM still treats the upload as 
 | Code | Meaning |
 |---|---|
 | `0` | Published successfully, or `--dry-run` completed without error. |
-| `1` | Publish failure: missing `apm.yml` or `.apm/`, invalid manifest, auth error (401/403), version conflict (409), server validation rejection (422), network/registry error, registries feature disabled, or other unhandled error. |
-| `2` | Usage error: cannot infer `owner/repo`, multiple registries without `--registry`, unknown `--registry` name, or invalid flag combination. |
+| `1` | Publish failure: missing `apm.yml` or `.apm/`, invalid manifest, auth error (401/403), version conflict (409), server validation rejection (422), unknown `--registry` name, no `registries:` block, network/registry error, registries feature disabled, or other unhandled error. |
+| `2` | Usage error: cannot infer `owner/repo`, multiple registries without `--registry`, or invalid flag combination. |
 
 ## Related
 

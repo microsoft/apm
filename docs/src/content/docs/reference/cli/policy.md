@@ -72,6 +72,7 @@ The table and JSON renderers expose the same fields:
 | `rule_summary` | Human one-liners for non-empty rule axes. |
 | `rule_counts` | Per-axis integer counts. `-1` means "no opinion" (allow-list omitted); `0` means "explicitly empty". JSON only. |
 | `fetch_error`, `error` | Populated when discovery or refresh failed. |
+| `warnings` | Non-fatal warnings raised while loading the policy. |
 
 #### Exit codes
 
@@ -143,6 +144,7 @@ APM Policy Status
   Cache age        4m ago
   Extends chain    acme-corp/apm-baseline
   Effective rules  3 dependency denies; 2 mcp denies; 1 required manifest fields
+  Warnings         none
 ```
 
 ## Related

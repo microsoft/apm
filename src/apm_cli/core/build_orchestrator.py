@@ -338,7 +338,7 @@ class PluginManifestProducer:
 
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
         from ..bundle.formats import BundleFormat, coerce_bundle_format
-        from .apm_yml import parse_targets_field
+        from ..models.manifest_targets import manifest_target_restriction
         from .errors import (
             ConflictingTargetsError,
             EmptyTargetsListError,
@@ -362,7 +362,7 @@ class PluginManifestProducer:
                 pass
 
         try:
-            targets = parse_targets_field(data)
+            targets = manifest_target_restriction(data)
         except (
             ConflictingTargetsError,
             EmptyTargetsListError,
@@ -475,7 +475,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
 
     # Check target: field for 'claude' or 'copilot' (plugin-manifest ecosystems).
     if data:
-        from .apm_yml import parse_targets_field
+        from ..models.manifest_targets import manifest_target_restriction
         from .errors import (
             ConflictingTargetsError,
             EmptyTargetsListError,
@@ -484,7 +484,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
         from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
 
         try:
-            targets = parse_targets_field(data)
+            targets = manifest_target_restriction(data)
         except (
             ConflictingTargetsError,
             EmptyTargetsListError,

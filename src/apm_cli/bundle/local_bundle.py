@@ -190,7 +190,7 @@ def _extract_pack_targets(lockfile: dict[str, Any] | None) -> list[str]:
     if not lockfile:
         return []
     pack = lockfile.get("pack") or {}
-    target = pack.get("target")
+    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata
     if target is None:
         return []
     if isinstance(target, list):

@@ -8,7 +8,7 @@ sidebar:
 ## Synopsis
 
 ```bash
-apm plugin init [PROJECT_NAME] [-y] [--target TARGETS] [-v]
+apm plugin init [PROJECT_NAME] [-y] [--target TARGETS] [--format FORMAT | --claude-plugin] [-v]
 
 # Example
 apm plugin init my-skill --yes
@@ -40,7 +40,7 @@ apm plugin init my-skill --target copilot,claude --yes
 
 | Flag | Description |
 |---|---|
-| `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be non-empty kebab-case without path separators and must not be `..`. If a filesystem root has no directory name, APM uses `my-project`. |
+| `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be 1-64 lowercase letters, numbers, dots, or hyphens, begin and end with a letter or number, and not contain `..` or `--`. If a filesystem root has no directory name, APM uses `my-project`. |
 | `--yes`, `-y` | Skip interactive prompts and use auto-detected defaults. |
 | `--target` | Comma-separated target list (e.g. `copilot,claude,codex`). Skips the target prompt and writes selections directly. |
 | `--claude-plugin` | Scaffold the Claude-compatible layout. This is what `apm plugin init` writes with zero flags. |

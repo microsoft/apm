@@ -35,6 +35,7 @@ from apm_cli.install.errors import (
 )
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
+from apm_cli.install.lsp.integration import LspPreflight
 from apm_cli.install.manifest_helpers import (
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
@@ -1866,6 +1867,9 @@ def _install_apm_packages(ctx, outcome):
 
     apm_count = 0
 
+    from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
+
+    reject_undeployable_manifest_targets(apm_package, logger)  # before the lockfile rename
     migrate_lockfile_if_needed(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
@@ -1942,6 +1946,7 @@ def _install_apm_packages(ctx, outcome):
                 refresh=ctx.refresh,
                 trust_bin=ctx.trust_bin,
                 transaction=ctx.transaction,
+                lsp_preflight=LspPreflight.for_install(ctx),
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(
@@ -1975,9 +1980,9 @@ def _install_apm_packages(ctx, outcome):
             raise
         except click.UsageError:
             raise
-        except CopilotSettingsCollisionError as e:
-            # Dependencies installed cleanly; only the Copilot settings merge
-            # collided. Surface the already-actionable message verbatim (no
+        except (CopilotSettingsCollisionError, RequiredIntegrationError) as e:
+            # A Copilot settings merge collision or the LSP capability gate.
+            # Surface the already-actionable message verbatim (no
             # "Failed to install..." prefix) and keep the raw decoder detail,
             # when present, behind --verbose.
             logger.error(str(e))

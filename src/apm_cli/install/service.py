@@ -85,14 +85,17 @@ class InstallService:
         *,
         mcp_servers: set[str],
         mcp_targets: list[str],
-        lsp_servers: set[str],
-        lsp_targets: list[str],
+        lsp_target_servers: dict[str, set[str]],
         current_mcp: CurrentMcpConfigView | None,
         user_scope: bool,
         project_root: Path | None = None,
         mcp_declared_transports: dict[str, str | None] | None = None,
     ) -> frozenset[tuple[str, str]]:
         """Refuse unrecorded service claims before either service mutates native state.
+
+        MCP claims every server on every target. LSP claims are per target
+        (*lsp_target_servers* maps each selected runtime to the servers it can
+        express), so a server a target skips is never required to be owned there.
 
         Returns the MCP ``(server, runtime)`` pairs that may be unclaimed only
         because the runtime refuses the server's remote transport (never
@@ -124,27 +127,27 @@ class InstallService:
                     "from the available source declarations"
                 )
         deferred: set[tuple[str, str]] = set()
-        for service, names, targets, recorded in (
-            ("MCP", mcp_servers, mcp_targets, mcp_ownership),
-            ("LSP", lsp_servers, lsp_targets, lockfile.lsp_target_servers),
-        ):
-            for target in targets:
-                for name in sorted(names - set(recorded.get(target, ()))):
-                    if (
-                        service == "MCP"
-                        and name in lockfile.mcp_servers
-                        and may_refuse_remote(target, (mcp_declared_transports or {}).get(name))
-                        and not native_mcp_entry_present(
-                            target,
-                            name,
-                            stored_config=lockfile.mcp_configs.get(name),
-                            project_root=project_root,
-                            user_scope=user_scope,
-                        )
-                    ):
-                        deferred.add((name, target))
-                        continue
-                    reasons.append(frozen_unrecorded_reason(service, name, target))
+        claims = [("MCP", target, mcp_servers, mcp_ownership) for target in mcp_targets] + [
+            ("LSP", target, names, lockfile.lsp_target_servers)
+            for target, names in lsp_target_servers.items()
+        ]
+        for service, target, names, recorded in claims:
+            for name in sorted(names - set(recorded.get(target, ()))):
+                if (
+                    service == "MCP"
+                    and name in lockfile.mcp_servers
+                    and may_refuse_remote(target, (mcp_declared_transports or {}).get(name))
+                    and not native_mcp_entry_present(
+                        target,
+                        name,
+                        stored_config=lockfile.mcp_configs.get(name),
+                        project_root=project_root,
+                        user_scope=user_scope,
+                    )
+                ):
+                    deferred.add((name, target))
+                    continue
+                reasons.append(frozen_unrecorded_reason(service, name, target))
         if reasons:
             raise frozen_services_error(reasons)
         return frozenset(deferred)
@@ -245,6 +248,7 @@ class InstallService:
             lockfile_only=request.lockfile_only,
             trust_bin=request.trust_bin,
             transaction=request.transaction,
+            lsp_preflight=request.lsp_preflight,
         )
 
     # -- Lifecycle script helpers ------------------------------------------

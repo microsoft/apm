@@ -715,7 +715,7 @@ Violation classes:
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
 | `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal tag (`vX.Y.Z`, or `{name}-vX.Y.Z` / `{name}--vX.Y.Z` for the dep's own package name), or a full SHA. The constraint is judged as declared in `apm.yml` (a `replace:` rule by the ref it selects), not the tag a range resolved to. Roll out enforcement with `warn` before `block`. |
 | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
-| `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
+| `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `targets:` in `apm.yml` |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |
 
 Full message text per outcome and per class lives in

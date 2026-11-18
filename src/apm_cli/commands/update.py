@@ -82,6 +82,7 @@ from ..install.errors import (
     RequiredIntegrationError,
 )
 from ..install.locking import serialized_lifecycle
+from ..install.lsp.integration import LspPreflight
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import (
@@ -253,6 +254,7 @@ def _run_mcp_lsp_integration(
     """
     from apm_cli.core.scope import InstallScope, get_modules_dir
     from apm_cli.install.lsp import run_lsp_integration
+    from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
     from apm_cli.install.mcp import run_mcp_integration
     from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
     from apm_cli.policy.install_preflight import PolicyBlockError
@@ -273,9 +275,26 @@ def _run_mcp_lsp_integration(
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
+    # Declared LSP without a capable target fails before any MCP write (#3727).
+    apm_config = lsp_target_config(apm_package)
+    prepared_lsp = prepare_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        project_root=project_root,
+        should_install=True,
+        logger=logger,
+        existing_lock=existing_lock,
+        user_scope=user_scope,
+        target_context=(apm_config, effective_target, scope),
+        target_decision=target_decision,
+        diagnostics=diagnostics,
+        executable_context=(effective_allow_executables, effective_allow_resolved),
+    )
+    prepared_lsp.require_capable_target()
 
     try:
-        _mcp_count, mcp_apm_config = run_mcp_integration(
+        _mcp_count, _mcp_apm_config = run_mcp_integration(
             apm_package=apm_package,
             mcp_deps=apm_package.get_all_mcp_dependencies(),
             apm_modules_path=apm_modules_path,
@@ -314,12 +333,13 @@ def _run_mcp_lsp_integration(
         should_install=True,
         logger=logger,
         diagnostics=diagnostics,
-        target_context=(mcp_apm_config, effective_target, scope),
+        target_context=(apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
         effective_allow_executables=effective_allow_executables,
         effective_allow_resolved=effective_allow_resolved,
         force=force,
+        prepared=prepared_lsp,
     )
 
 
@@ -823,6 +843,7 @@ def _run_dep_update_locked(
             logger=logger,
             plan_callback=_plan_callback,
             target=target,
+            lsp_preflight=LspPreflight(),
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -839,7 +860,7 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError) as e:
+    except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
         _rich_error(str(e))
         sys.exit(1)
     except click.UsageError:

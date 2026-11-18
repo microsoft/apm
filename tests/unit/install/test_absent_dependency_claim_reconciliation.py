@@ -554,7 +554,7 @@ def test_template_accepts_only_typed_owner_matched_completion(
         }[receipt]
     integrate = Mock(return_value=integration_result)
     monkeypatch.setattr(template, "integrate_package_primitives", integrate)
-    monkeypatch.setattr(template, "_effective_allow", lambda _ctx: None)
+    monkeypatch.setattr(template, "effective_allow_map", lambda _ctx: None)
 
     deltas = run_integration_template(
         source,

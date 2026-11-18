@@ -14,7 +14,6 @@ Targets uncovered branches in:
 - _fetch_from_repo (stale fallback on error, garbage result)
 - _fetch_github_contents (403, redirect, non-200, timeout, connection error)
 - _is_github_host (*.ghe.com, GITHUB_HOST env)
-- _get_token_for_host (resolver-only, no environment fallback)
 - _detect_garbage (YAML error with cache_entry)
 - _read_cache_entry (expected_hash checks)
 - _write_cache (tmp_meta OSError + unlink)
@@ -40,7 +39,6 @@ from apm_cli.policy.discovery import (
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
-    _get_token_for_host,
     _is_github_host,
     _parse_remote_url,
     _read_cache_entry,
@@ -581,30 +579,6 @@ class TestIsGithubHost:
         """Empty GITHUB_HOST env var doesn't match arbitrary hosts."""
         with patch.dict(os.environ, {"GITHUB_HOST": ""}):
             assert _is_github_host("random.host.com") is False
-
-
-# ---------------------------------------------------------------------------
-# _get_token_for_host
-# ---------------------------------------------------------------------------
-
-
-class TestGetTokenForHost:
-    def test_returns_resolver_token(self) -> None:
-        resolved = MagicMock(token="resolved-token")
-        with patch("apm_cli.core.auth.AuthResolver.resolve", return_value=resolved):
-            assert _get_token_for_host("github.com") == "resolved-token"
-
-    @pytest.mark.parametrize("host", ["github.com", "acme.ghe.com", "dev.azure.com"])
-    def test_resolver_failure_returns_none_without_env_fallback(self, host: str) -> None:
-        env = {"GITHUB_TOKEN": "env-token", "GITHUB_APM_PAT": "env-pat", "GH_TOKEN": "gh-token"}
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, env, clear=True),
-        ):
-            assert _get_token_for_host(host) is None
 
 
 # ---------------------------------------------------------------------------
