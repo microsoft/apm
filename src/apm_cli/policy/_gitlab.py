@@ -15,6 +15,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ._policy_http import policy_get
 from ._remote import _remote_url_parts
 from .parser import PolicyValidationError, load_policy
 from .schema import ApmPolicy
@@ -691,12 +692,7 @@ def _authenticated_gitlab_request(
     from ..core.auth_outcome import AuthAttemptFailed
 
     def _request(token: str | None, _git_env: dict[str, str]):
-        response = requests.get(
-            api_url,
-            headers=AuthResolver.gitlab_rest_headers(token),
-            timeout=10,
-            allow_redirects=False,
-        )
+        response = policy_get(api_url, headers=AuthResolver.gitlab_rest_headers(token))
         if response.status_code != 200:
             # The auth chain classifies the outcome and decides whether to
             # escalate; non-auth outcomes return to the caller unchanged.

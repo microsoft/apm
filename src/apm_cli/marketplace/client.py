@@ -336,10 +336,6 @@ def _fetch_url_direct(
         raise MarketplaceFetchError(url, str(exc)) from exc
 
     try:
-        final_url = getattr(resp, "url", url)
-        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
         if resp.status_code == 304:
             return None
         if resp.status_code == 404:
@@ -479,8 +475,9 @@ def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -
 
 def _github_headers(token: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github.v3.raw", "User-Agent": "apm-cli"}
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth import AuthResolver
+
+    headers.update(AuthResolver.github_rest_headers(token))
     return headers
 
 

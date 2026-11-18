@@ -451,8 +451,9 @@ class GitReferenceResolver:
 
         def _request(token: str | None, _git_env: dict[str, str]) -> str | None:
             headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
-            if token:
-                headers["Authorization"] = f"token {token}"
+            from ..core.auth import AuthResolver
+
+            headers.update(AuthResolver.github_rest_headers(token))
             response = host._resilient_get(
                 api_url,
                 headers=headers,

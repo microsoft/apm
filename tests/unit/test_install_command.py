@@ -716,7 +716,7 @@ class TestValidationFailureReasonMessages:
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,
     )
-    @patch("apm_cli.install.validation.requests.get")
+    @patch("apm_cli.install.validation._github_api_get")
     def test_verbose_validation_failure_calls_build_error_context(self, mock_get, _mock_cred):
         """When GitHub validation fails in verbose mode, build_error_context should be invoked."""
         mock_get.return_value = MagicMock(ok=False, status_code=404, reason="Not Found", headers={})
@@ -1423,7 +1423,7 @@ class TestGenericHostSshFirstValidation:
 
         from apm_cli.commands.install import _validate_package_exists
 
-        with patch("apm_cli.install.validation.requests.get") as mock_get:
+        with patch("apm_cli.install.validation._github_api_get") as mock_get:
             mock_get.return_value = MagicMock(
                 ok=False, status_code=404, reason="Not Found", headers={}
             )

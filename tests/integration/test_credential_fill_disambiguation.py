@@ -84,7 +84,7 @@ def test_credential_fill_receives_path_for_per_url_disambiguation(
         patch(
             "subprocess.run", side_effect=_make_credential_fill_stub(captured_stdin)
         ) as mock_subproc,
-        patch("apm_cli.install.validation.requests.get", side_effect=fake_requests_get),
+        patch("apm_cli.install.validation._github_api_get", side_effect=fake_requests_get),
     ):
         result = _validate_package_exists("acme/widgets", verbose=False)
 
@@ -153,7 +153,7 @@ def test_gh_cli_success_short_circuits_credential_fill_in_validation(isolated_en
             "subprocess.run",
             return_value=MagicMock(returncode=0, stdout=""),
         ),
-        patch("apm_cli.install.validation.requests.get", side_effect=fake_requests_get),
+        patch("apm_cli.install.validation._github_api_get", side_effect=fake_requests_get),
     ):
         result = _validate_package_exists("acme/widgets", verbose=False)
 
@@ -204,7 +204,7 @@ def test_credential_fill_receives_path_on_parse_failure_fallback(
         patch(
             "subprocess.run", side_effect=_make_credential_fill_stub(captured_stdin)
         ) as mock_subproc,
-        patch("apm_cli.install.validation.requests.get", side_effect=fake_requests_get),
+        patch("apm_cli.install.validation._github_api_get", side_effect=fake_requests_get),
     ):
         result = _validate_package_exists("acme/widgets", verbose=False)
 

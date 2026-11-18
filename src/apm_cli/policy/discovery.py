@@ -27,6 +27,7 @@ from ..utils.github_host import (
 from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from . import _gitlab
+from ._policy_http import policy_get
 from ._remote import (  # noqa: F401  -- re-exported for callers/tests
     _extract_org_from_git_remote,
     _extract_org_host_port_from_git_remote,
@@ -1059,7 +1060,7 @@ def _fetch_from_url(
     content: str | None = None
 
     try:
-        resp = requests.get(url, timeout=10, allow_redirects=False)
+        resp = policy_get(url)
         if resp.status_code == 404:
             return PolicyFetchResult(
                 source=source_label,
@@ -1265,10 +1266,11 @@ def _fetch_github_contents(
     from ..core.auth_outcome import AuthAttemptFailed
 
     def _request(token: str | None, _git_env: dict[str, str]):
+        from ..core.auth import AuthResolver
+
         headers = {"Accept": "application/vnd.github.v3+json"}
-        if token:
-            headers["Authorization"] = f"token {token}"
-        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
+        headers.update(AuthResolver.github_rest_headers(token))
+        resp = policy_get(api_url, headers=headers)
         if resp.status_code != 200:
             raise AuthAttemptFailed(response=resp)
         return resp
@@ -1464,20 +1466,18 @@ def _fetch_ado_contents(
     host_label = f"{host}:{port}" if port is not None else host
     repo_ref = f"{host_label}/{org}/{project}/{repo}"
 
-    from ..core.auth_chain import AttemptAuth
+    from ..core.auth_chain import authorization_headers
     from ..core.auth_outcome import AuthAttemptFailed
 
     auth_resolver = _policy_auth_resolver()
 
     def _request(_token: str | None, git_env: dict[str, str]):
-        # ``auth=`` applies exactly the credential the auth chain selected
-        # (PAT, az bearer, or the path-scoped helper) and keeps ambient netrc
-        # from replacing it.
-        response = requests.get(
+        # Send exactly the credential the auth chain selected (PAT, az
+        # bearer, or the path-scoped helper); ambient netrc never replaces it.
+        response = policy_get(
             api_url,
-            auth=AttemptAuth(git_env),
-            timeout=10,
-            allow_redirects=False,
+            headers=authorization_headers(git_env),
+            ambient_credentials=False,
         )
         if response.status_code != 200:
             raise AuthAttemptFailed(response=response)

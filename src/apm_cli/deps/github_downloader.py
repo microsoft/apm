@@ -649,10 +649,10 @@ class GitHubPackageDownloader:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
-        allow_redirects: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
-        extra = {} if allow_redirects else {"allow_redirects": False}
+        extra = {} if redirect_base is None else {"redirect_base": redirect_base}
         return self._strategies.resilient_get(
             url,
             headers,

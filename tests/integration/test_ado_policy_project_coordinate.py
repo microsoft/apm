@@ -77,7 +77,7 @@ def test_policy_status_uses_valid_ado_policy_coordinate_and_cache(
     with (
         patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
         patch("apm_cli.core.auth.AuthResolver", return_value=resolver),
-        patch("apm_cli.policy.discovery.requests.get", return_value=_ado_response()) as request,
+        patch("apm_cli.policy.discovery.policy_get", return_value=_ado_response()) as request,
     ):
         result = runner.invoke(
             cli,
@@ -121,7 +121,7 @@ def test_policy_status_uses_legacy_ado_coordinate_only_after_primary_404(
         patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
         patch("apm_cli.core.auth.AuthResolver", return_value=resolver),
         patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=[missing, _ado_response()],
         ) as request,
     ):

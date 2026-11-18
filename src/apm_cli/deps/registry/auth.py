@@ -58,6 +58,11 @@ class RegistryAuthContext:
             return f"Basic {base64.b64encode(credentials).decode('ascii')}"
         return None
 
+    def headers(self) -> dict[str, str]:
+        """Return the credential headers for one registry call (empty when anonymous)."""
+        value = self.auth_header()
+        return {"Authorization": value} if value else {}
+
 
 def _sanitized(registry_name: str) -> str:
     return registry_name.upper().replace("-", "_").replace(".", "_")

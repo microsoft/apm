@@ -688,7 +688,7 @@ class TestArtifactoryBoundaryResolver:
         ok_url = "/artifactory/apm/acme-group/shared-modules/pkg-utils/"
 
         with patch(
-            "apm_cli.install.artifactory_resolver.requests.head",
+            "apm_cli.install.artifactory_resolver._head_probe",
             side_effect=self._fake_head(ok_url),
         ):
             resolved = _resolve_artifactory_boundary(package, auth, verbose=False)
@@ -716,7 +716,7 @@ class TestArtifactoryBoundaryResolver:
             return resp
 
         with patch(
-            "apm_cli.install.artifactory_resolver.requests.head",
+            "apm_cli.install.artifactory_resolver._head_probe",
             side_effect=_head,
         ):
             resolved = _resolve_artifactory_boundary(package, auth, verbose=False)
@@ -758,7 +758,7 @@ class TestArtifactoryBoundaryResolver:
             resp.status_code = 404
             return resp
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_404):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_all_404):
             with pytest.raises(ValueError, match="did not resolve"):
                 _resolve_artifactory_boundary(package, auth, verbose=False)
 
@@ -779,7 +779,7 @@ class TestArtifactoryBoundaryResolver:
             resp.status_code = 401
             return resp
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_401):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_all_401):
             with pytest.raises(ValueError, match="authentication problem"):
                 _resolve_artifactory_boundary(package, auth, verbose=False)
 
@@ -792,7 +792,7 @@ class TestArtifactoryBoundaryResolver:
         auth = Mock()
         auth.resolve_for_dep.return_value = Mock(token=None)
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head") as mock_head:
+        with patch("apm_cli.install.artifactory_resolver._head_probe") as mock_head:
             resolved = _resolve_artifactory_boundary(package, auth, verbose=False, dep_ref=dep_ref)
 
         assert resolved is dep_ref
@@ -829,7 +829,7 @@ class TestArtifactoryBoundaryResolver:
                 )
                 return resp
 
-            with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+            with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_head):
                 resolved = _resolve_artifactory_boundary(package, auth, verbose=False, dep_ref=dep)
 
         assert resolved.repo_url == "group/sub/repo"

@@ -1483,7 +1483,7 @@ class TestValidatePackageExistsGitHub:
 
         with (
             patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=False),
-            patch("requests.get", return_value=mock_resp),
+            patch("apm_cli.install.validation._github_api_get", return_value=mock_resp),
         ):
             result = _validate_package_exists(
                 "owner/valid-repo",

@@ -1651,6 +1651,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="ADO policy fetch regrows a local 401/403 auth classification.",
     ),
     MutationCase(
+        guard_id="transport-platform-authenticated-egress",
+        rule_id="transport-platform-authenticated-egress",
+        path="src/apm_cli/marketplace/builder.py",
+        old="resp = origin_bounded_request(",
+        new="resp = urllib.request.urlopen(",
+        intent="Credentialed marketplace metadata fetches return to urllib, outside the owners.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-authenticated-egress-credential-headers",
+        rule_id="transport-platform-authenticated-egress",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="return cfg.headers_for(scheme, host)",
+        new='return {"Authorization": f"Bearer {cfg.token}"}',
+        intent="Artifactory downloads assemble a credential header outside its owners.",
+    ),
+    MutationCase(
         guard_id="transport-platform-cache-cleanup-outcome",
         rule_id="transport-platform-cache-cleanup-outcome",
         path="src/apm_cli/cache/git_cache.py",

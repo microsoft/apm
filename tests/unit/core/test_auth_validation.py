@@ -176,6 +176,21 @@ class TestGitlabRestHeaders:
         assert headers == {"Authorization": "Bearer mytoken"}
 
 
+@pytest.mark.parametrize(
+    ("builder", "token", "expected"),
+    [
+        (AuthResolver.github_rest_headers, None, {}),
+        (AuthResolver.github_rest_headers, "", {}),
+        (AuthResolver.github_rest_headers, "tok", {"Authorization": "token tok"}),
+        (AuthResolver.bearer_headers, None, {}),
+        (AuthResolver.bearer_headers, "", {}),
+        (AuthResolver.bearer_headers, "tok", {"Authorization": "Bearer tok"}),
+    ],
+)
+def test_rest_credential_header_builders(builder, token, expected) -> None:
+    assert builder(token) == expected
+
+
 # ---------------------------------------------------------------------------
 # _org_to_env_suffix
 # ---------------------------------------------------------------------------

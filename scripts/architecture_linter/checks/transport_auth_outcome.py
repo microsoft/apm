@@ -93,7 +93,11 @@ _ROUTED_CONSUMERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "src/apm_cli/policy/discovery.py",
-        ("auth=AttemptAuth(git_env)", "_policy_auth_resolver().try_with_fallback(", "org=owner,"),
+        (
+            "headers=authorization_headers(git_env)",
+            "_policy_auth_resolver().try_with_fallback(",
+            "org=owner,",
+        ),
     ),
 )
 _CLASSIFICATION_FREE = (

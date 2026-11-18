@@ -280,30 +280,25 @@ class TestFetchMarketplace:
         assert seen_headers[0]["If-Modified-Since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
 
     def test_fetch_remote_marketplace_url_rejects_redirect_to_http(self, monkeypatch):
+        """The origin-bounded owner refuses an HTTPS downgrade; it is never followed."""
         source_url = "https://catalog.example.com/marketplace.json"
-
-        class Response:
-            status_code = 200
-            url = "http://catalog.example.com/marketplace.json"
-
-            def __init__(self):
-                self.headers: dict[str, str] = {}
-
-            def raise_for_status(self):
-                return None
-
-            def close(self):
-                return None
+        calls: list[str] = []
 
         class Session:
-            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
-                assert stream is True
-                return Response()
+            def request(self, method, url, headers=None, allow_redirects=None, **_kwargs):
+                assert allow_redirects is False
+                calls.append(url)
+                return SimpleNamespace(
+                    status_code=302,
+                    headers={"Location": "http://catalog.example.com/marketplace.json"},
+                    close=lambda: None,
+                )
 
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
-        with pytest.raises(MarketplaceFetchError, match="redirect to non-HTTPS URL rejected"):
+        with pytest.raises(MarketplaceFetchError, match="downgrades HTTPS to HTTP"):
             client_mod._fetch_url_direct(source_url)
+        assert calls == [source_url]
 
     def test_http_get_clears_session_cookies_between_hosts(self, monkeypatch):
         class Cookies:

@@ -431,8 +431,26 @@ class AuthResolver:
         if not token:
             return {}
         if oauth_bearer:
-            return {"Authorization": f"Bearer {token}"}
+            return AuthResolver.bearer_headers(token)
         return {"PRIVATE-TOKEN": token}
+
+    @staticmethod
+    def github_rest_headers(token: str | None) -> dict[str, str]:
+        """Build the credential header for GitHub-family REST API calls.
+
+        Returns an empty dict when *token* is empty. Callers must not log the
+        returned dict.
+        """
+        if not token:
+            return {}
+        return {"Authorization": f"token {token}"}
+
+    @staticmethod
+    def bearer_headers(token: str | None) -> dict[str, str]:
+        """Build an ``Authorization: Bearer`` header, or an empty dict."""
+        if not token:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
 
     # -- core resolution ----------------------------------------------------
 
