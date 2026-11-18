@@ -63,13 +63,17 @@ def user_manifest_bootstrap_config(
     holds a token the reader rejects (#3870); a target with no ``targets:``
     spelling is refused here, before anything is written.
     """
-    from ...commands._helpers import _get_bootstrap_config
     from ...core.project_name import resolve_bootstrap_project_name
-    from ...models.manifest_targets import TargetRewriteError, bootstrap_target_names
+    from ...models.manifest_bootstrap import bootstrap_config
+    from ...models.manifest_targets import (
+        IdeTargetError,
+        TargetRewriteError,
+        bootstrap_target_names,
+    )
 
     if manifest_path.exists():
         return None
-    config = _get_bootstrap_config(resolve_bootstrap_project_name(Path.home().name))
+    config = bootstrap_config(resolve_bootstrap_project_name(Path.home().name))
     flag, requested = ("--target", target) if target is not None else ("--runtime", runtime)
     if requested is None:
         return config
@@ -80,11 +84,16 @@ def user_manifest_bootstrap_config(
             raise
         rendered = requested if isinstance(requested, str) else ",".join(requested)
         label = manifest_path.as_posix()
+        reason = (
+            f"{exc}"
+            if isinstance(exc, IdeTargetError)
+            else f"target '{exc.token}' has no 'targets:' equivalent, so later "
+            "'apm install -g' runs could not read the new manifest."
+        )
         raise click.UsageError(
-            f"Cannot create {label} for {flag} {rendered}: target '{exc.token}' has no "
-            "'targets:' equivalent, so later 'apm install -g' runs could not read the new "
-            f"manifest. Nothing was written. Create {label} with just 'name:' and "
-            f"'version:', then rerun; {flag} {rendered} will apply to that install only."
+            f"Cannot create {label} for {flag} {rendered}: {reason} Nothing was written. "
+            f"Create {label} with just 'name:' and 'version:', then rerun; {flag} "
+            f"{rendered} will apply to that install only."
         ) from None
     return config
 
@@ -248,10 +257,10 @@ def run_mcp_install(  # noqa: PLR0913
         return
 
     if initial_manifest_config is not None:
-        from ...commands._helpers import _create_minimal_apm_yml
+        from ...models.manifest_bootstrap import write_minimal_manifest
 
         apm_dir.mkdir(parents=True, exist_ok=True)
-        _create_minimal_apm_yml(initial_manifest_config, target_path=manifest_path)
+        write_minimal_manifest(initial_manifest_config, target_path=manifest_path)
         logger.success(f"Created {manifest_path}")
 
     status, _diff = add_mcp_to_apm_yml(

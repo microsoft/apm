@@ -5,14 +5,15 @@ Extracted from the trailing block of ``_install_apm_dependencies`` in
 ``if X > 0:`` stat blocks, the ``if not logger:`` bare-success fallback,
 and the unpinned-dependency warning.
 
-``_rich_success`` is resolved through the ``_install_mod`` indirection so
-that test patches at ``apm_cli.commands.install._rich_success`` remain
-effective.
+``_rich_success`` comes from the console owner directly; the install layer
+does not import the commands layer (#3879).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from apm_cli.utils.console import _rich_success
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -198,8 +199,6 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
 
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
-    from apm_cli.commands import install as _install_mod
-
     # Show integration stats (verbose-only when logger is available)
     if ctx.total_links_resolved > 0:
         if ctx.logger:
@@ -221,7 +220,7 @@ def run(ctx: InstallContext) -> InstallResult:
 
     # Summary is now emitted by the caller via logger.install_summary()
     if not ctx.logger:
-        _install_mod._rich_success(f"Installed {ctx.installed_count} APM dependencies")
+        _rich_success(f"Installed {ctx.installed_count} APM dependencies")
 
     if ctx.unpinned_count:
         # Enumerate names of unpinned deps so the user knows which to pin.

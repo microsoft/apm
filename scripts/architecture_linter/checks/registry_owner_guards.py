@@ -440,7 +440,10 @@ _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
     _TARGET_REWRITE_OWNER: (
         "def rewrite_target_names(",
         "def bootstrap_target_names(",
+        "def option_target_names(",
         "def verify_rewritten_manifest(",
+        "    _refuse_ide_targets(selected)",
+        "    _refuse_ide_targets([target] if isinstance(target, str) else target)",
     ),
     _TARGET_MIGRATION_OWNER: (
         "targets = rewrite_target_names(legacy_declaration)",
@@ -448,18 +451,25 @@ _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/commands/init.py": (
         "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
+        "targets = option_target_names(target_flag)",
     ),
+    "src/apm_cli/install/manifest_helpers.py": ("return option_target_names(target)",),
     "src/apm_cli/install/mcp/command.py": (
         'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
     ),
     "src/apm_cli/commands/install.py": (
+        "bootstrap_manifest_targets(target, manifest_display)",
         "from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap",
         "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes,",
     ),
-    "src/apm_cli/commands/_helpers.py": ("    verify_rewritten_manifest(out_file, content)",),
+    "src/apm_cli/models/manifest_bootstrap.py": (
+        "    verify_rewritten_manifest(out_file, content)",
+    ),
 }
 # Authored (unvalidated) names feed only the rewrite mapping.
 _TARGET_AUTHORED_NAMES_CALL = ".authored_names("
+# The former second authority for --target -> manifest tokens (#3878).
+_RETIRED_TARGET_OPTION_MAPPERS = frozenset({"manifest_targets_from_target_option"})
 
 
 def _has_rewrite_call(line: str, required: str) -> bool:
@@ -491,6 +501,17 @@ def _target_deprecation_findings(
             for literal in facts.literals
             if _TARGET_DEPRECATION_PHRASE in literal.value_repr
         )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"{definition.name} decides manifest target tokens outside the owner; "
+            f"use {_TARGET_REWRITE_OWNER}::option_target_names",
+            line=definition.line,
+        )
+        for definition in facts.definitions
+        if definition.name in _RETIRED_TARGET_OPTION_MAPPERS
+    )
     findings.extend(
         violation(
             rule_id,
@@ -1670,6 +1691,72 @@ def _check_process_interrupt_signals(provider: FactsProvider) -> Iterable[Violat
     return tuple(findings)
 
 
+_MANIFEST_BOOTSTRAP_OWNER = "src/apm_cli/models/manifest_bootstrap.py"
+_MANIFEST_BOOTSTRAP_FUNCTIONS = ("bootstrap_config", "write_minimal_manifest")
+_INSTALL_LAYER = "src/apm_cli/install/"
+_COMMANDS_PACKAGE = "apm_cli.commands"
+
+
+def _absolute_import_module(path: str, module: str | None, level: int) -> str:
+    """Resolve an import statement's target module for a file under ``src/``."""
+    if level == 0:
+        return module or ""
+    package = path.removeprefix("src/").removesuffix(".py").split("/")[:-1]
+    base = package[: len(package) - (level - 1)] if level > 1 else package
+    return ".".join([*base, *([module] if module else [])])
+
+
+def _imports_commands(path: str, fact: object) -> bool:
+    target = _absolute_import_module(path, getattr(fact, "module", None), fact.level)
+    if target == _COMMANDS_PACKAGE or target.startswith(_COMMANDS_PACKAGE + "."):
+        return True
+    names = getattr(fact, "names", ())
+    return target == "apm_cli" and "commands" in names
+
+
+def _check_install_layering(provider: FactsProvider) -> Iterable[Violation]:
+    """The install layer never imports the commands layer (#3879).
+
+    The minimal apm.yml bootstrap writer is owned by
+    ``models/manifest_bootstrap.py`` (defined nowhere else), so ``apm init``,
+    the install auto-bootstrap and the ``install --mcp`` user-manifest
+    bootstrap share it without ``install/`` importing ``commands/``. Any
+    import from ``src/apm_cli/install/**`` into ``apm_cli.commands``
+    (absolute, relative or ``TYPE_CHECKING``-only) is refused.
+    """
+    rule_id = "registry_delegation.install_layering"
+    findings: list[Violation] = []
+    for name in _MANIFEST_BOOTSTRAP_FUNCTIONS:
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        if not failures and definers != frozenset({_MANIFEST_BOOTSTRAP_OWNER}):
+            findings.append(
+                violation(
+                    rule_id,
+                    _MANIFEST_BOOTSTRAP_OWNER,
+                    f"{name} must be defined only by {_MANIFEST_BOOTSTRAP_OWNER}",
+                )
+            )
+    for path in _python_paths(provider, under=_INSTALL_LAYER):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "the install layer must not import the commands layer; move the shared "
+                "helper below both (see models/manifest_bootstrap.py, install/orphans.py)",
+                line=fact.line,
+                column=fact.column + 1,
+            )
+            for fact in facts.imports
+            if _imports_commands(path, fact)
+        )
+    return findings
+
+
 def _check_version_rendering(provider: FactsProvider) -> Iterable[Violation]:
     """CLI version rendering must route through ``version_output.py``.
 
@@ -1856,6 +1943,16 @@ RULES: tuple[Rule, ...] = (
             "primitives/models.py (resolve_user_invocable)."
         ),
         check=_check_user_invocable_resolution,
+    ),
+    Rule(
+        id="registry_delegation.install_layering",
+        group=GROUP,
+        guard_ids=("registry-delegation-install-layering",),
+        description=(
+            "The install layer never imports the commands layer; the minimal apm.yml "
+            "bootstrap writer lives in models/manifest_bootstrap.py."
+        ),
+        check=_check_install_layering,
     ),
     Rule(
         id="registry_delegation.version_rendering",

@@ -10,6 +10,8 @@ from uuid import uuid4
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile, lockfile_parent_identity
+from ...install.orphans import build_children_index as _build_children_index  # noqa: F401
+from ...install.orphans import collect_orphan_candidates as _collect_orphan_candidates
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
@@ -41,40 +43,6 @@ def _is_marketplace_ref(package: str) -> bool:
     from ...marketplace.resolver import parse_marketplace_ref
 
     return parse_marketplace_ref(package) is not None
-
-
-def _build_children_index(lockfile):
-    """Index every recorded original parent in one pass over the locked edges."""
-    children = {}
-    for dep in lockfile.get_package_dependencies():
-        for parent in dep.parent_keys:
-            if parent is not None:
-                children.setdefault(parent, []).append(dep)
-    return children
-
-
-def _collect_orphan_candidates(
-    lockfile: LockFile, packages_to_remove: list[object]
-) -> tuple[set[str], set[str]]:
-    """Share the backward edge scan without changing preview's cold-cache behavior."""
-    removed_parents: set[str] = set()
-    for package in packages_to_remove:
-        try:
-            reference = _parse_dependency_entry(package)
-            removed_parents.add(lockfile_parent_identity(reference, lockfile.replacements))
-        except (ValueError, TypeError, AttributeError, KeyError):
-            removed_parents.add(str(package))
-    children = _build_children_index(lockfile)
-    candidates: set[str] = set()
-    queue = list(removed_parents)
-    while queue:
-        for dependency in children.get(queue.pop(), ()):
-            key = dependency.get_unique_key()
-            if key in candidates:
-                continue
-            candidates.add(key)
-            queue.append(lockfile_parent_identity(dependency, lockfile.replacements))
-    return candidates, removed_parents
 
 
 def _dependency_public_label(dep_entry: object) -> str:

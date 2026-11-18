@@ -19,11 +19,10 @@ from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
     detect_signals,
-    manifest_targets_from_target_option,
 )
 from ..install.locking import serialized_lifecycle_unless
 from ..models.manifest_io import InvalidManifestError
-from ..models.manifest_targets import rewrite_target_names
+from ..models.manifest_targets import IdeTargetError, option_target_names, rewrite_target_names
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -754,7 +753,12 @@ def _resolve_init_targets(
     """
     # Case 1: --target flag provided -- wins unconditionally
     if target_flag is not None:
-        targets = manifest_targets_from_target_option(target_flag)
+        try:
+            targets = option_target_names(target_flag)
+        except IdeTargetError as exc:
+            logger.error(f"Cannot record --target {exc.token} in {APM_YML_FILENAME}: {exc}")
+            logger.progress("Nothing was written.", symbol="info")
+            sys.exit(1)
         if not targets:
             return None
         logger.progress(f"Targets set: {', '.join(targets)} (via --target flag)", symbol="info")

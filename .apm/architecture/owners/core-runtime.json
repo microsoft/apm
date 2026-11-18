@@ -94,6 +94,13 @@
       "guards": ["registry-delegation-bootstrap-project-name"]
     },
     {
+      "id": "manifest-bootstrap-writer",
+      "decision": "Minimal apm.yml bootstrap config and writer shared by apm init, install auto-bootstrap and install --mcp, so the install layer never imports the commands layer",
+      "owner": "models/manifest_bootstrap.py (bootstrap_config, write_minimal_manifest); commands/_helpers.py re-exports the historical names",
+      "selectors": ["src/apm_cli/models/manifest_bootstrap.py"],
+      "guards": ["registry-delegation-install-layering"]
+    },
+    {
       "id": "user-invocable-resolution",
       "decision": "Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
       "owner": "primitives/models.py (resolve_user_invocable)",

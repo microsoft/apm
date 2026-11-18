@@ -336,7 +336,7 @@ def _remove_dropped_package_dirs(
     the next install. *paths* reuses a precomputed
     :func:`_released_and_retained_install_paths` result.
     """
-    from apm_cli.commands._helpers import _find_orphaned_packages
+    from apm_cli.install.orphans import find_orphaned_packages as _find_orphaned_packages
     from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 
     if paths is None:
@@ -374,8 +374,10 @@ def _released_and_retained_install_paths(
     ``None`` means there is no ``apm_modules`` copy to act on or some path
     could not be computed, so no removal is provable.
     """
-    from apm_cli.commands._helpers import _build_expected_install_paths
     from apm_cli.deps.lockfile import _SELF_KEY
+    from apm_cli.install.orphans import (
+        build_expected_install_paths as _build_expected_install_paths,
+    )
     from apm_cli.utils.path_security import PathTraversalError
 
     # Partial contexts (tests, embedders) may omit apm_modules_dir entirely.
@@ -433,7 +435,7 @@ def _trim_superseded_package_roots(
     *paths* reuses a precomputed :func:`_released_and_retained_install_paths`
     result.
     """
-    from apm_cli.commands._helpers import _find_orphaned_packages
+    from apm_cli.install.orphans import find_orphaned_packages as _find_orphaned_packages
     from apm_cli.utils.path_security import (
         PathTraversalError,
         ensure_path_within,

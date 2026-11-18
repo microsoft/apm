@@ -532,7 +532,7 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     )
     # Prune and the expected-path selector ask the same owner which lock
     # entries are retained instead of re-deriving ``depth > 1`` (#3668).
-    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/commands/_helpers.py"):
+    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/install/orphans.py"):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
         if failures:

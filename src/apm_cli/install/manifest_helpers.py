@@ -146,3 +146,23 @@ def _report_bootstrap_manifest(
         logger.progress(f"Dry run: Would set targets: {target_list} (in {manifest_display})")
         return
     logger.progress(f"Targets set: {target_list} (persisted to {manifest_display})")
+
+
+def bootstrap_manifest_targets(
+    target: str | list[str] | None, manifest_display: str
+) -> list[str] | None:
+    """Spell the ``targets:`` a bootstrapped manifest records, or refuse first.
+
+    Runs before ``apm install <pkg>`` creates its manifest or takes the
+    workspace lock, so a refused ``--target`` leaves nothing behind (#3878).
+    """
+    import click
+
+    from apm_cli.models.manifest_targets import IdeTargetError, option_target_names
+
+    try:
+        return option_target_names(target)
+    except IdeTargetError as exc:
+        raise click.ClickException(
+            f"Cannot create {manifest_display} for --target {exc.token}: {exc} Nothing was written."
+        ) from None

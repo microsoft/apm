@@ -63,9 +63,11 @@ Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
 
 `init` writes only manifest-safe stable targets, canonicalizing aliases first.
-For example, `--target agents`, `--target vscode`, and the MCP-only
-`--target intellij` persist `copilot`, `--target agy` persists `antigravity`,
-and `--target all` expands to the default stable set.
+For example, `--target agents` and `--target vscode` persist `copilot`,
+`--target agy` persists `antigravity`, and `--target all` expands to the
+default stable set. `--target intellij` names an IDE, not a target: `init`
+exits `1` before writing anything (use `copilot` for GitHub Copilot in
+JetBrains IDEs).
 Experimental selectors such as `grok-cloud` are accepted by the shared CLI
 target parser but are not persisted in `apm.yml`; enable them, then select them
 with `apm install --target grok-cloud`.
