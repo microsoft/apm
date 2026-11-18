@@ -48,7 +48,7 @@ _SESSION_FACTORIES = frozenset({"Session", "session"})
 _SESSION_METHODS = _HTTP_VERBS | {"send"}
 _URLLIB_EGRESS = frozenset({"build_opener", "urlopen"})
 _HEADER_SETTERS = frozenset({"add_header", "add_unredirected_header", "putheader", "setdefault"})
-_PREFILTER_EGRESS = ("requests", "urlopen", "build_opener")
+_PREFILTER_EGRESS = ("requests", "urlopen", "build_opener", "session")
 # The credential header vocabulary is read from its runtime owner, never
 # restated here.
 _CREDENTIAL_NAMES_OWNER = "src/apm_cli/utils/http_credentials.py"

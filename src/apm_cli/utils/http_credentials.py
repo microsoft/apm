@@ -16,6 +16,7 @@ Two decisions live here:
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import re
 import urllib.parse
@@ -344,6 +345,27 @@ def origin_bounded_request(
         _close_quietly(response)
         hops += 1
         current = target
+
+
+def split_url_credentials(url: str) -> tuple[str, dict[str, str]]:
+    """Move userinfo out of *url* into an explicit HTTP Basic credential header.
+
+    Returns the URL without userinfo and the header (empty when the URL has
+    none). The percent-decoded user and password match what ``requests``
+    derives from a URL. The header then follows the same origin rules as any
+    other credential; redirect targets that embed userinfo stay refused.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.username is None and parts.password is None:
+        return url, {}
+    host = parts.netloc.rpartition("@")[2]
+    stripped = urllib.parse.urlunsplit(
+        (parts.scheme, host, parts.path, parts.query, parts.fragment)
+    )
+    user = urllib.parse.unquote(parts.username or "")
+    password = urllib.parse.unquote(parts.password or "")
+    token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    return stripped, {"Authorization": f"Basic {token}"}
 
 
 def unfollowed_redirect_request(

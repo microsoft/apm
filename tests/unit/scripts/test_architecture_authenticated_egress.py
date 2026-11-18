@@ -134,3 +134,12 @@ def test_header_vocabulary_must_stay_owned_by_http_credentials() -> None:
     ).replace('"Proxy-Authorization",\n)', '"Proxy-Authorization",\n))', 1)
     violations = _run({path: mutated})
     assert any("CREDENTIAL_HEADER_NAMES must stay a literal tuple" in v.message for v in violations)
+
+
+def test_session_call_is_flagged_in_a_module_without_other_egress_tokens() -> None:
+    path = "src/apm_cli/utils/short_sha.py"
+    source = _source(path)
+    assert not any(token in source for token in ("requests", "urlopen", "build_opener"))
+    snippet = "\n\ndef _egress_isolated(self, u):\n    return self.http_session.post(u)\n"
+    violations = _run({path: source + snippet})
+    assert [(v.path, " _egress_isolated" in v.message) for v in violations] == [(path, True)]
