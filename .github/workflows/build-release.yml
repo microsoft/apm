@@ -162,6 +162,15 @@ jobs:
       contents: read
 
     steps: &build-and-test-steps
+      # On branch pushes, do not build, sign or upload a Windows binary until
+      # every test job actually succeeded. Empty/skipped is not success.
+      - name: Require Windows push tests
+        if: matrix.platform == 'windows' && github.event_name == 'push' && github.ref_type == 'branch'
+        shell: bash
+        run: |
+          echo "Plan / installer / unit 1 / unit 2: $PUSH_RESULTS"
+          test "$PUSH_RESULTS" = "push:success:success:success:success"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # PyInstaller bundles the build interpreter's libpython. The setup-python
@@ -194,11 +203,11 @@ jobs:
       # Keep the installer gate ahead of the broad unit suite so an unrelated
       # platform test failure cannot hide installer-specific Windows evidence.
       - name: Test install.ps1 end-to-end (Windows)
-        if: matrix.platform == 'windows' && needs.release-plan.outputs.run_unit == 'true'
+        if: matrix.platform == 'windows' && needs.release-plan.outputs.full == 'true'
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
-        run: >-
+        run: &windows-installer-test >-
           uv run --frozen pytest
           tests/integration/test_windows_installer_launchers.py
           -vv -ra --tb=short
@@ -215,9 +224,9 @@ jobs:
       # Named starts/outcomes identify unfinished tests without dumping captures.
       # This bounds an opaque hang; it does not turn a timeout into success.
       - name: Run unit tests (Windows diagnostics)
-        if: matrix.platform == 'windows' && needs.release-plan.outputs.run_unit == 'true'
+        if: matrix.platform == 'windows' && needs.release-plan.outputs.full == 'true'
         timeout-minutes: 60
-        env:
+        env: &windows-unit-env
           PYTHONUNBUFFERED: "1"
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
@@ -354,7 +363,8 @@ jobs:
   build-windows:
     name: Build & Test
     needs: [release-plan]
-    strategy:
+    if: needs.release-plan.outputs.mode != 'push'
+    strategy: &windows-binary-strategy
       matrix:
         include:
           - os: windows-latest
@@ -364,6 +374,69 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    steps: *build-and-test-steps
+
+  # Branch pushes only. Full validation and promoted tags keep their original
+  # single Windows job and release dependency graph.
+  windows-installer:
+    name: Windows installer
+    if: &branch-push github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: windows-latest
+    steps:
+      - &push-checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - &push-python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - &push-uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - &push-sync
+        run: uv sync --frozen --extra dev --extra build
+      - name: Test install.ps1 end-to-end (Windows)
+        shell: pwsh
+        env:
+          APM_E2E_TESTS: "1"
+        run: *windows-installer-test
+
+  windows-unit-1:
+    name: Windows units (1/2)
+    if: *branch-push
+    runs-on: windows-latest
+    env:
+      SHARD: "1"
+    steps: &windows-unit-steps
+      - *push-checkout
+      - *push-python
+      - *push-uv
+      - *push-sync
+      - name: Run unit tests (Windows diagnostics)
+        timeout-minutes: 60
+        env: *windows-unit-env
+        run: >-
+          uv run --frozen python -m pytest tests/unit tests/test_console.py -n auto --dist worksteal
+          -vv --tb=short --show-capture=no --no-showlocals
+          -p scripts.ci_sharding --shard-count 2 --shard-index $env:SHARD
+          --shard-durations .github/ci-durations/windows-unit.json
+
+  windows-unit-2:
+    name: Windows units (2/2)
+    if: *branch-push
+    runs-on: windows-latest
+    env:
+      SHARD: "2"
+    steps: *windows-unit-steps
+
+  build-windows-push:
+    name: Build tested Windows binary
+    needs: [release-plan, windows-installer, windows-unit-1, windows-unit-2]
+    if: always() && github.event_name == 'push' && github.ref_type == 'branch'
+    strategy: *windows-binary-strategy
+    runs-on: ${{ matrix.os }}
+    env:
+      PUSH_RESULTS: ${{ needs.release-plan.outputs.mode }}:${{ needs.release-plan.result }}:${{ needs.windows-installer.result }}:${{ needs.windows-unit-1.result }}:${{ needs.windows-unit-2.result }}
     steps: *build-and-test-steps
 
   # Consolidated macOS Intel build + validation. macOS capacity is scarce, so

@@ -513,7 +513,9 @@ ledger, and failure/retry contracts when changing those behaviors.
 
 **Releasing:** push a `v*` tag, as before. `scripts/release_plan.py` picks how
 much the run validates:
-- **push** (push to `main`): unit tests and Linux/Windows binaries.
+- **push** (push to `main`): unit tests and Linux/Windows binaries. The Windows
+  installer runs alongside two duration-balanced unit shards. All three must
+  succeed before the Windows binary is built or uploaded.
 - **full** (nightly schedule or `repository_dispatch`): every lane. A green
   full run is promotion evidence for its SHA.
 - **promoted** (tag whose SHA already has a green full run on `main`): builds,
@@ -534,6 +536,12 @@ gh api repos/microsoft/apm/dispatches -f event_type=publish-existing-tag \
 
 The run refuses a tag that is not a published stable GitHub release, or whose
 version is already on PyPI.
+
+On qualifying PRs and merge groups, `Spec conformance gate` requires three
+serial pytest shards on isolated runners plus the statement check. Only the
+statement job's full collection is used to regenerate `CONFORMANCE.{json,md}`.
+The seeds in `.github/ci-durations/{windows-unit,spec-conformance}.json` weight
+the current pytest collection; they are not lists of tests to run.
 
 **Full-run lanes:**
 - **Linux x86_64 and arm64**: hermetic integration (`not live and not
