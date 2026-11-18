@@ -354,8 +354,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             "src/apm_cli/deps/github_downloader_validation.py",
             (
                 "downloader.auth_resolver.git_env_for_remote(",
-                "downloader.auth_resolver.execute_with_bearer_fallback(",
-                "downloader.auth_resolver.build_ado_bearer_git_env(",
+                "downloader.auth_resolver.try_with_fallback(",
             ),
         ),
         (
@@ -385,16 +384,15 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
         (
             "src/apm_cli/install/validation.py",
             (
-                "auth_resolver.execute_with_bearer_fallback(",
-                "auth_resolver.build_ado_bearer_git_env(",
+                "run_result = auth_resolver.try_with_fallback(",
+                "base_env=ado_downloader.git_env,",
             ),
         ),
         (
             "src/apm_cli/deps/clone_engine.py",
             (
                 "host.auth_resolver.git_env_for_remote(",
-                "host.auth_resolver.execute_with_bearer_fallback(",
-                "host.auth_resolver.build_ado_bearer_git_env(",
+                'host.auth_resolver.try_with_fallback(\n                        dep_host or "dev.azure.com",',
                 "attempt.effective_url or attempt_url,\n                    base_env=host.git_env,",
             ),
         ),
@@ -402,7 +400,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             "src/apm_cli/deps/git_reference_resolver.py",
             (
                 "host.auth_resolver.git_env_for_remote(",
-                "host.auth_resolver.execute_with_bearer_fallback(",
+                "host.auth_resolver.try_with_fallback(",
                 "transport_attempt.effective_url or rewrite_candidate,\n"
                 "                base_env=host.git_env,",
             ),
@@ -780,7 +778,8 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             inv,
             _RID_ARTIFACTORY_NETRC,
             _ARTIFACTORY_NETRC_CONSUMER,
-            (("sub", "allow_netrc=False", 3, "eq"),),
+            # Three Artifactory paths plus the Azure DevOps Items API download.
+            (("sub", "allow_netrc=False", 4, "eq"),),
             "Every Artifactory resilient GET path must suppress ambient netrc auth",
         )
     )

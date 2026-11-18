@@ -64,6 +64,7 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.dependency.reference import DependencyReference
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 # ---------------------------------------------------------------------------
 # Helpers / factories
@@ -94,6 +95,7 @@ def _make_host(
         api_base="https://api.github.com",
     )
     host.auth_resolver.build_error_context.return_value = "Use GITHUB_APM_PAT."
+    install_simulated_ado_chain(host.auth_resolver)
     host._resolve_dep_auth_ctx = MagicMock(
         side_effect=lambda *a, **k: host.auth_resolver.resolve.return_value
     )

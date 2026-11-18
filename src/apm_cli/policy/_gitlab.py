@@ -647,6 +647,17 @@ def _fetch_gitlab_contents(
         if 300 <= resp.status_code < 400:
             return None, f"Refusing HTTP redirect ({resp.status_code}) from {api_url}"
         if resp.status_code != 200:
+            from ..core.auth_outcome import classify_auth_outcome
+
+            if classify_auth_outcome(host_kind="gitlab", response=resp).is_auth_failure:
+                return None, _gitlab_access_denied_error(
+                    auth_resolver,
+                    RuntimeError(f"{resp.status_code}: unauthorized"),
+                    host=host,
+                    org=org,
+                    port=port,
+                    repo_ref=repo_ref,
+                )
             return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
         return resp.text, None
     except requests.exceptions.Timeout:
@@ -677,6 +688,7 @@ def _authenticated_gitlab_request(
 ) -> requests.Response:
     """Run the GitLab REST request through the selected AuthResolver credential."""
     from ..core.auth import AuthResolver
+    from ..core.auth_outcome import AuthAttemptFailed
 
     def _request(token: str | None, _git_env: dict[str, str]):
         response = requests.get(
@@ -685,21 +697,26 @@ def _authenticated_gitlab_request(
             timeout=10,
             allow_redirects=False,
         )
-        if response.status_code in (401, 403):
-            raise RuntimeError(f"{response.status_code}: unauthorized")
+        if response.status_code != 200:
+            # The auth chain classifies the outcome and decides whether to
+            # escalate; non-auth outcomes return to the caller unchanged.
+            raise AuthAttemptFailed(response=response)
         return response
 
-    return auth_resolver.try_with_fallback(
-        host,
-        _request,
-        **{
-            "org": org,
-            "port": port,
-            "path": project_path,
-            "host_type": "gitlab",
-            "unauth_first": False,
-        },
-    )
+    try:
+        return auth_resolver.try_with_fallback(
+            host,
+            _request,
+            **{
+                "org": org,
+                "port": port,
+                "path": project_path,
+                "host_type": "gitlab",
+                "unauth_first": False,
+            },
+        )
+    except AuthAttemptFailed as failed:
+        return failed.response
 
 
 def _gitlab_access_denied_error(

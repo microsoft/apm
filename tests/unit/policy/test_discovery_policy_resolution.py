@@ -14,7 +14,6 @@ Targets uncovered branches in:
 - _fetch_from_repo (stale fallback on error, garbage result)
 - _fetch_github_contents (403, redirect, non-200, timeout, connection error)
 - _is_github_host (*.ghe.com, GITHUB_HOST env)
-- _get_token_for_host (token manager exception, fallback)
 - _detect_garbage (YAML error with cache_entry)
 - _read_cache_entry (expected_hash checks)
 - _write_cache (tmp_meta OSError + unlink)
@@ -41,7 +40,6 @@ from apm_cli.policy.discovery import (
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
-    _get_token_for_host,
     _is_github_host,
     _parse_remote_url,
     _read_cache_entry,
@@ -689,46 +687,6 @@ class TestIsGithubHost:
 
 
 # ---------------------------------------------------------------------------
-# _get_token_for_host
-# ---------------------------------------------------------------------------
-
-
-class TestGetTokenForHost:
-    def test_resolver_failure_ignores_github_token_env(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token is None
-
-    def test_returns_none_for_non_github_host_on_failure(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {}, clear=True),
-        ):
-            token = _get_token_for_host("dev.azure.com")
-        assert token is None
-
-    def test_resolver_failure_ignores_github_apm_pat_env(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token is None
-
-
-# ---------------------------------------------------------------------------
 # _detect_garbage -- YAML error with cache_entry (line 1165)
 # ---------------------------------------------------------------------------
 
@@ -831,3 +789,31 @@ class TestWriteCacheOsError:
         with patch.object(Path, "write_text", selective_fail):
             _write_cache("owner/.github", policy, tmp_path)
         # No exception raised
+
+
+@pytest.mark.parametrize(
+    ("repo_ref", "env"),
+    [
+        ("org/.github", {"GITHUB_TOKEN": "env-github-token"}),
+        ("org/.github", {"GITHUB_APM_PAT": "env-apm-pat"}),
+        ("org/.github", {"GH_TOKEN": "env-gh-token"}),
+        ("ghe.example.com/org/.github", {"GITHUB_TOKEN": "env-github-token"}),
+    ],
+    ids=["github-token", "github-apm-pat", "gh-token", "non-github-host"],
+)
+def test_policy_fetch_resolver_failure_never_falls_back_to_env_tokens(repo_ref, env) -> None:
+    """When AuthResolver fails, no raw environment token is sent."""
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch(
+            "apm_cli.core.auth.AuthResolver.resolve",
+            side_effect=RuntimeError("resolver unavailable"),
+        ),
+        patch("apm_cli.policy.discovery.requests.get") as http_get,
+    ):
+        content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
+
+    assert content is None
+    assert error
+    sent = [str(call.kwargs.get("headers", {})) for call in http_get.call_args_list]
+    assert not any(token in header for token in env.values() for header in sent)

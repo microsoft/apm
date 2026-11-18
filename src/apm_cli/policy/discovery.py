@@ -17,6 +17,7 @@ import requests
 import yaml
 
 from ..cache.paths import get_cache_root
+from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..utils.github_host import (
     build_ado_api_url,
     is_azure_devops_hostname,
@@ -1261,25 +1262,27 @@ def _fetch_github_contents(
     else:
         api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}"
 
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    token = _get_token_for_host(host)
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth_outcome import AuthAttemptFailed
+
+    def _request(token: str | None, _git_env: dict[str, str]):
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
+        if resp.status_code != 200:
+            raise AuthAttemptFailed(response=resp)
+        return resp
 
     try:
-        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
-        if resp.status_code == 404:
-            return None, "404: Policy file not found"
-        if resp.status_code == 403:
-            return None, f"403: Access denied to {repo_ref}"
-        if 300 <= resp.status_code < 400:
-            location = resp.headers.get("Location", "<no Location header>")
-            return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-            )
-        if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
-
+        # Per-org GITHUB_APM_PAT_{ORG} applies to <org>/.github, and a rejected
+        # credential walks the same fallback chain as dependency access.
+        resp = _policy_auth_resolver().try_with_fallback(
+            host,
+            _request,
+            org=owner,
+            path=f"{owner}/{repo}",
+            unauth_first=False,
+        )
         data = resp.json()
         if data.get("encoding") == "base64" and data.get("content"):
             content = base64.b64decode(data["content"]).decode("utf-8")
@@ -1288,12 +1291,29 @@ def _fetch_github_contents(
             return data["content"], None
         else:
             return None, f"Unexpected response format from {repo_ref}"
+    except AuthAttemptFailed as failed:
+        status = getattr(failed.response, "status_code", None)
+        if status == 404:
+            return None, "404: Policy file not found"
+        if status == 403:
+            return None, f"403: Access denied to {repo_ref}"
+        if isinstance(status, int) and 300 <= status < 400:
+            location = failed.response.headers.get("Location", "<no Location header>")
+            return None, (f"Refusing HTTP redirect ({status}) from {api_url} to {location}")
+        return None, f"HTTP {status} fetching policy from {repo_ref}"
     except requests.exceptions.Timeout:
         return None, f"Timeout fetching policy from {repo_ref}"
     except requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
     except Exception as e:
         return None, f"Error fetching policy from {repo_ref}: {e}"
+
+
+def _policy_auth_resolver():
+    """Return the AuthResolver every policy repository fetch routes through."""
+    from ..core.auth import AuthResolver
+
+    return AuthResolver()
 
 
 # ---------------------------------------------------------------------------
@@ -1444,32 +1464,23 @@ def _fetch_ado_contents(
     host_label = f"{host}:{port}" if port is not None else host
     repo_ref = f"{host_label}/{org}/{project}/{repo}"
 
-    # ADO auth is centralized in AuthResolver: ADO_APM_PAT uses Basic auth,
-    # and az CLI AAD tokens use Bearer auth. No GitHub PATs are consulted.
-    from ..core.auth import AuthResolver
+    from ..core.auth_chain import AttemptAuth
+    from ..core.auth_outcome import AuthAttemptFailed
 
-    auth_resolver = AuthResolver()
+    auth_resolver = _policy_auth_resolver()
 
-    def _headers(token: str | None, git_env: dict[str, str]) -> dict[str, str]:
-        if not token:
-            return {}
-        count = int(git_env.get("GIT_CONFIG_COUNT", "0") or "0")
-        for index in range(max(0, count)):
-            value = git_env.get(f"GIT_CONFIG_VALUE_{index}", "")
-            if value.lower().startswith("authorization: bearer "):
-                return {"Authorization": f"Bearer {token}"}
-        basic_cred = base64.b64encode(f":{token}".encode()).decode()
-        return {"Authorization": f"Basic {basic_cred}"}
-
-    def _request(token: str | None, git_env: dict[str, str]):
+    def _request(_token: str | None, git_env: dict[str, str]):
+        # ``auth=`` applies exactly the credential the auth chain selected
+        # (PAT, az bearer, or the path-scoped helper) and keeps ambient netrc
+        # from replacing it.
         response = requests.get(
             api_url,
-            headers=_headers(token, git_env),
+            auth=AttemptAuth(git_env),
             timeout=10,
             allow_redirects=False,
         )
-        if response.status_code in (401, 403):
-            raise RuntimeError(f"{response.status_code}: unauthorized")
+        if response.status_code != 200:
+            raise AuthAttemptFailed(response=response)
         return response
 
     try:
@@ -1478,26 +1489,25 @@ def _fetch_ado_contents(
             _request,
             org=org,
             port=port,
-            path=f"{org}/{project}/{repo}",
+            path=f"{org}/{project}/_git/{repo}",
             unauth_first=False,
         )
-        if resp.status_code == 404:
-            return None, "404: Policy file not found"
-        if 300 <= resp.status_code < 400:
-            location = resp.headers.get("Location", "<no Location header>")
-            return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-            )
-        if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
         # ADO Items API returns raw file content by default
         return resp.text, None
+    except AuthAttemptFailed as failed:
+        status = getattr(failed.response, "status_code", None)
+        if status == 404:
+            return None, "404: Policy file not found"
+        if isinstance(status, int) and 300 <= status < 400:
+            location = failed.response.headers.get("Location", "<no Location header>")
+            return None, (f"Refusing HTTP redirect ({status}) from {api_url} to {location}")
+        return None, f"HTTP {status} fetching policy from {repo_ref}"
     except requests.exceptions.Timeout:
         return None, f"Timeout fetching policy from {repo_ref}"
     except requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
-    except RuntimeError as exc:
-        error_kwargs = {"org": org}
+    except AdoAuthChainExhaustedError as exc:
+        error_kwargs = {"org": org, "attempts": exc.attempts}
         if port is not None:
             error_kwargs["port"] = port
         remediation = auth_resolver.build_error_context(
@@ -1525,21 +1535,6 @@ def _is_github_host(host: str) -> bool:
     if gh_host and host == gh_host:  # noqa: SIM103
         return True
     return False
-
-
-def _get_token_for_host(host: str) -> str | None:
-    """Get the authentication token for *host* through AuthResolver only.
-
-    A resolution failure yields no token; credentials are never read from
-    the environment outside the resolver's host classification.
-    """
-    try:
-        from ..core.auth import AuthResolver
-
-        return AuthResolver().resolve(host).token
-    except Exception as exc:
-        logger.debug("Token resolution failed for %s: %s", host, exc)
-        return None
 
 
 # -- Cache ----------------------------------------------------------

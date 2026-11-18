@@ -183,9 +183,19 @@ supported. Resolution order:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
-3. After an operation's HTTP 401/403 or recognized Git authentication failure:
-   path-scoped `git credential fill` (Git Credential Manager)
-4. If the helper is empty or rejected: an error naming the attempted steps
+3. After an auth failure: path-scoped `git credential fill` (Git Credential
+   Manager), asked for `org/project/_git/repo` and sent as HTTP Basic
+   `username:password`
+4. If the helper is empty or rejected: an error listing every step in order
+
+Every ADO operation uses this chain (validation, clone, ref resolution,
+`--update` pre-flight, file downloads, org policy discovery, marketplace).
+Auth failures are HTTP 401/403, a redirect to the ADO sign-in service, an
+HTML sign-in page instead of the file, or a Git auth error. DNS, TLS,
+timeout, and not-found errors stop the chain. ADO requests use only the
+credential chosen by the chain (an unrelated `~/.netrc` entry is ignored).
+APM never runs `git credential approve`/`reject`, and sets
+`GCM_INTERACTIVE=0` when stdin is not a terminal or `CI` is set.
 
 ```bash
 # Recommended: bearer mode (no env var needed)
@@ -260,7 +270,8 @@ DNS, TLS, and timeout errors do not trigger it.
 | `ADO_APM_PAT is set, but the Azure DevOps request failed` | Stale or wrong-org PAT, no az | Rotate the PAT, run `az login --tenant <tenant>`, or store a Git Credential Manager credential |
 | `ADO_APM_PAT was rejected; az cli bearer was also rejected` | PAT and az both failed | `unset ADO_APM_PAT`, run `az login --tenant <correct-tenant>`, or store a Git Credential Manager credential |
 | `Azure DevOps Server requires ADO_APM_PAT or a Git credential helper` | On-prem Server, no PAT or fill | Set `ADO_APM_PAT` or store a repository credential in Git Credential Manager (`az` does not apply) |
-| `Authentication failed for <host>: <attempted steps> ... rejected` | Helper empty or rejected after an auth failure | Refresh `ADO_APM_PAT`, run `az login` on Services, or store a repository credential in Git Credential Manager |
+| `Azure DevOps authentication failed. Tried in order: ...` | Every chain step failed (each step's outcome is listed) | Refresh `ADO_APM_PAT`, run `az login` on Services, or store a repository credential in Git Credential Manager |
+| `Azure CLI is installed but could not get a token for Azure DevOps: <reason>` | `az` failed to issue a token (for example `AADSTS50076`, MFA required) | Run `az login` (with `--tenant` if the reason names a tenant), or set `ADO_APM_PAT` |
 | On-prem host classified as GHES / GitHub credentials selected | `GITHUB_HOST` set without an ADO host configuration | Add `ADO_HOST=your-ado-server.example.com` (or list it in `APM_ADO_HOSTS`); ADO takes precedence |
 
 ## GitHub Enterprise Server (GHES)

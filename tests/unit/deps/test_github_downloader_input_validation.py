@@ -35,6 +35,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from git.exc import GitCommandError
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps import github_downloader_validation as gdv
@@ -663,14 +664,14 @@ class TestRefExistsViaLsRemote:
                 stderr="",
             )
 
-        def canonical_fallback(_dep, primary_op, bearer_op, is_auth_failure):
-            first = primary_op()
-            assert is_auth_failure(first)
-            second = bearer_op("selected-az-bearer")
-            return type("Outcome", (), {"outcome": second, "bearer_attempted": True})()
+        def canonical_chain(_host, operation, **kwargs):
+            assert kwargs["remote_url"] == primary.url
+            try:
+                return operation("stale-pat", {"PRIMARY": "1"})
+            except GitCommandError:
+                return operation("selected-az-bearer", {"BEARER": "1"})
 
-        dl.auth_resolver.execute_with_bearer_fallback.side_effect = canonical_fallback
-        dl.auth_resolver.build_ado_bearer_git_env.return_value = {"BEARER": "1"}
+        dl.auth_resolver.try_with_fallback.side_effect = canonical_chain
 
         with (
             patch.object(gdv, "_build_validation_attempts", return_value=[primary]),
@@ -679,13 +680,9 @@ class TestRefExistsViaLsRemote:
             ok, winning = _ref_exists_via_ls_remote(dl, dep, "main", self._log)
 
         assert ok is True
-        assert winning == AttemptSpec(
-            "ADO authenticated HTTPS (bearer header)",
-            primary.url,
-            {"BEARER": "1"},
-        )
+        assert winning == AttemptSpec(primary.label, primary.url, {"BEARER": "1"})
         assert calls == [{"PRIMARY": "1"}, {"BEARER": "1"}]
-        dl.auth_resolver.execute_with_bearer_fallback.assert_called_once()
+        dl.auth_resolver.try_with_fallback.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

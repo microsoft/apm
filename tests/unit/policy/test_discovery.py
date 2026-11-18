@@ -8,6 +8,7 @@ import os
 import subprocess
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
@@ -54,6 +55,7 @@ from apm_cli.policy.discovery import (
 from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy
 from apm_cli.utils.git_env import get_git_executable
+from tests.utils.simulated_ado_chain import StaticPolicyResolver
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
@@ -522,7 +524,9 @@ class TestFetchGithubContents(unittest.TestCase):
             "content": base64.b64encode(content.encode()).decode(),
         }
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_200_base64_content(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -534,7 +538,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_200_plain_content(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -546,7 +552,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_404(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -557,7 +565,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("404", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_403(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -568,7 +578,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("403", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_timeout(self, mock_requests, _mock_token):
         import requests as real_requests
@@ -580,7 +592,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("Timeout", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_connection_error(self, mock_requests, _mock_token):
         import requests as real_requests
@@ -592,7 +606,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("Connection error", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_unexpected_response_format(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -604,14 +620,19 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("Unexpected response", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_invalid_repo_ref(self, mock_requests, _mock_token):
         content, error = _fetch_github_contents("invalid", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("Invalid repo reference", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ghp_test123")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver",
+        return_value=StaticPolicyResolver("ghp_test123"),
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_auth_header_sent(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -625,7 +646,9 @@ class TestFetchGithubContents(unittest.TestCase):
         self.assertIn("Authorization", call_kwargs["headers"])
         self.assertEqual(call_kwargs["headers"]["Authorization"], "token ghp_test123")
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
     @patch("apm_cli.policy.discovery.requests")
     def test_ghe_api_url(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
@@ -1710,13 +1733,20 @@ class TestFetchAdoContents(unittest.TestCase):
         ctx = MagicMock()
         ctx.token = token
         ctx.auth_scheme = scheme
-        ctx.git_env = {}
-        if scheme == "bearer" and token:
-            ctx.git_env = {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {token}",
-            }
+        ctx.git_env = (
+            _RealAuthResolver._build_git_env(token, scheme=scheme, host_kind="ado", base_env={})
+            if token
+            else {}
+        )
         return ctx
+
+    @staticmethod
+    def _sent_authorization(call) -> str | None:
+        request = types.SimpleNamespace(headers=dict(call.kwargs.get("headers") or {}))
+        auth = call.kwargs.get("auth")
+        if callable(auth):
+            auth(request)
+        return request.headers.get("Authorization")
 
     def _resolver(self, mock_resolver_cls, token: str | None, scheme: str = "basic"):
         resolver = mock_resolver_cls.return_value
@@ -1746,9 +1776,7 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
         # Verify Basic auth header was sent with ADO_APM_PAT
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers", {})
-        self.assertIn("Basic", headers.get("Authorization", ""))
+        self.assertIn("Basic", self._sent_authorization(mock_get.call_args) or "")
         resolver.resolve.assert_called_once_with("dev.azure.com", org="contoso")
 
     @patch("apm_cli.core.auth.AuthResolver")
@@ -1766,18 +1794,23 @@ class TestFetchAdoContents(unittest.TestCase):
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
     def test_401_returns_error(self, mock_get, mock_resolver_cls):
+        from apm_cli.core.auth_chain import AdoAuthChainExhaustedError, AuthAttemptLog
+
         resolver = self._resolver(mock_resolver_cls, "my-ado-pat")
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
-        mock_get.return_value = mock_resp
+        attempts = AuthAttemptLog()
+        resolver.try_with_fallback.side_effect = AdoAuthChainExhaustedError(
+            "Authentication failed for dev.azure.com. Tried in order: ADO_APM_PAT was rejected",
+            attempts=attempts,
+        )
 
         content, error = _fetch_ado_contents("contoso", "apm", "apm-policy", "apm-policy.yml")
         self.assertIsNone(content)
-        self.assertIn("401", error)
+        self.assertIn("ADO_APM_PAT was rejected", error)
         self.assertIn("auth remediation", error)
         resolver.build_error_context.assert_called_once_with(
-            "dev.azure.com", "fetch org policy", org="contoso"
+            "dev.azure.com", "fetch org policy", org="contoso", attempts=attempts
         )
+        mock_get.assert_not_called()
 
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
@@ -1805,9 +1838,7 @@ class TestFetchAdoContents(unittest.TestCase):
         _content, error = _fetch_ado_contents("contoso", "apm", "apm-policy", "apm-policy.yml")
         self.assertIsNone(error)
         # Verify no Authorization header was sent
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers", {})
-        self.assertNotIn("Authorization", headers)
+        self.assertIsNone(self._sent_authorization(mock_get.call_args))
 
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
@@ -1821,9 +1852,7 @@ class TestFetchAdoContents(unittest.TestCase):
 
         _content, error = _fetch_ado_contents("contoso", "apm", "apm-policy", "apm-policy.yml")
         self.assertIsNone(error)
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers", {})
-        self.assertEqual(headers.get("Authorization"), "Bearer fallback-token")
+        self.assertEqual(self._sent_authorization(mock_get.call_args), "Bearer fallback-token")
 
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
@@ -1880,6 +1909,7 @@ class TestFetchAdoContents(unittest.TestCase):
                     "fresh-bearer",
                     {
                         "GIT_CONFIG_COUNT": "1",
+                        "GIT_CONFIG_KEY_0": "http.extraheader",
                         "GIT_CONFIG_VALUE_0": ("Authorization: Bearer fresh-bearer"),
                     },
                 )
@@ -1896,9 +1926,7 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
         self.assertEqual(mock_get.call_count, 2)
-        scheme, credential = (
-            mock_get.call_args_list[1].kwargs["headers"]["Authorization"].split(" ", 1)
-        )
+        scheme, credential = self._sent_authorization(mock_get.call_args_list[1]).split(" ", 1)
         self.assertEqual(scheme, "Bearer")
         self.assertEqual(credential, "fresh-bearer")
 
@@ -2067,37 +2095,6 @@ class TestFetchFromAdoRepo(unittest.TestCase):
             )
             self.assertFalse(result.found)
             self.assertEqual(result.outcome, "hash_mismatch")
-
-
-class TestGetTokenForHost(unittest.TestCase):
-    """Test _get_token_for_host delegation."""
-
-    @patch.dict(os.environ, {"GITHUB_TOKEN": "test-tok"}, clear=True)
-    @patch(
-        "apm_cli.core.auth.AuthResolver.resolve",
-        side_effect=Exception("simulated failure"),
-    )
-    def test_resolver_failure_ignores_env_vars(self, _mock_method):
-        from apm_cli.policy.discovery import _get_token_for_host
-
-        token = _get_token_for_host("github.com")
-        self.assertIsNone(token)
-
-    @patch.dict(
-        os.environ,
-        {"GITHUB_TOKEN": "", "GITHUB_APM_PAT": "", "GH_TOKEN": ""},
-        clear=True,
-    )
-    @patch(
-        "apm_cli.core.auth.AuthResolver.resolve",
-        side_effect=Exception("simulated failure"),
-    )
-    def test_no_token_available(self, _mock_method):
-        from apm_cli.policy.discovery import _get_token_for_host
-
-        token = _get_token_for_host("github.com")
-        # All env vars are empty strings, which are falsy
-        self.assertFalse(token)
 
 
 class TestFetchGitlabContents(unittest.TestCase):
