@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - When several manifests narrow the same dependency with different `skills:` and `targets:`, each skill now deploys only to the harnesses its own declaration selected, instead of every selected skill reaching every selected harness; for example `alpha` for Claude and `gamma` for Copilot no longer cross over. `apm.lock.yaml` records the exact pairing in a new optional `subset_pairings` field (only when needed, so other lockfiles are unchanged), and `apm audit`, `apm uninstall` and `--frozen` read it; OpenAPM proposes this as `req-rs-018`. Upgrade note: a lockfile written by an earlier APM for such a diamond fails `apm install --frozen` with "selection for <dep> changed" until you run `apm install` once and commit `apm.lock.yaml`. (#3769)
+- Azure DevOps installs now tell your Git credential helper how its credential went, as Git does: `git credential approve` after it worked and `git credential reject` after Azure DevOps refused it with HTTP 401, so Git Credential Manager can replace an expired credential instead of offering it again. A 403, a sign-in redirect, or a network, TLS or not-found failure is never reported; `ADO_APM_PAT` and `az` tokens are never reported; each report happens at most once per repository per run; and a helper failure never fails the command (#3765, #3818)
 
 ### Fixed
 

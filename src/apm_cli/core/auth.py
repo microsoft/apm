@@ -46,6 +46,7 @@ from apm_cli.core.auth_chain import (  # AdoAuthChainExhaustedError: re-exported
     AuthAttemptLog,
     HelperCredentialCache,
     authorization_headers,
+    helper_cache_key,
     run_ado_chain,
 )
 from apm_cli.core.auth_outcome import (
@@ -270,7 +271,7 @@ class AuthResolver:
 
     def _helper_credential(self, host_info: HostInfo, path: str | None):
         """Return the cached path-scoped ``git credential fill`` answer."""
-        key = (host_info.host.lower(), host_info.port, path)
+        key = helper_cache_key(host_info, path)
         return self._helper_cache.get(
             key,
             lambda: self._token_manager.resolve_git_helper_credential(

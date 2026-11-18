@@ -13,8 +13,13 @@ brief sections 5.1-5.3, 5.6 items 3, 4, 6):
   only the credential the chain selected (no ambient netrc). Call sites never
   classify status codes, HTML sign-in pages, or Git stderr themselves.
 * The helper step stays inside the chain: no other module runs
-  ``git credential fill`` for a chain credential, and nothing calls
-  ``git credential approve``/``reject``.
+  ``git credential fill`` for a chain credential.
+
+A second rule, ``transport-platform-credential-report-owner``, keeps
+``git credential approve``/``reject`` (the git-credential contract's step 4)
+inside the chain owner: ``auth_chain.report_helper_outcome`` is the only
+caller of the runner in ``token_manager.py``, and it rejects only on a
+classifier-verified rejection.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from scripts.architecture_linter.groups.common import source_text, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 _RULE_ID = "transport-platform-auth-outcome-owner"
+_REPORT_RULE_ID = "transport-platform-credential-report-owner"
 
 _AUTH = "src/apm_cli/core/auth.py"
 _OUTCOME = "src/apm_cli/core/auth_outcome.py"
@@ -52,6 +58,9 @@ _CREDENTIAL_STORE_MUTATION = re.compile(
     r"""["']credential["']\s*,\s*["'](?:approve|reject)["']"""
     r"|\bcredential\s+(?:approve|reject)\b"
 )
+_REPORT_ACTION_LITERAL = r"""["'](?:approve|reject)["']"""
+_REPORT_RUNNER_CALL = re.compile(r"\breport_git_helper_credential\(")
+_REPORT_OWNER_CALL = re.compile(r"\breport_helper_outcome\(")
 # Hand-rolled auth classification that the routed call sites must not regrow.
 _LOCAL_CLASSIFICATION = re.compile(
     r"status_code\s*(?:==|in)\s*[\(\{\[]?\s*40[13]\b"
@@ -231,17 +240,6 @@ def _check_auth_outcome_owner(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inventory,
             _RULE_ID,
-            _src_python(provider),
-            _CREDENTIAL_STORE_MUTATION,
-            "APM must never call git credential approve or reject",
-            exempt=False,
-        )
-    )
-    findings.extend(
-        _forbid_scan(
-            provider,
-            inventory,
-            _RULE_ID,
             _CLASSIFICATION_FREE,
             _LOCAL_CLASSIFICATION,
             "Routed call sites must report raw outcomes; classify_auth_outcome decides",
@@ -263,7 +261,110 @@ def _check_auth_outcome_owner(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def _check_credential_report_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    inventory = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    findings.extend(
+        _count_checks(
+            provider,
+            inventory,
+            _REPORT_RULE_ID,
+            _CREDENTIAL_FILL_OWNER,
+            (
+                ("sub", "def report_git_helper_credential(", 1, "eq"),
+                ("re", _REPORT_ACTION_LITERAL, 1, "eq"),
+            ),
+            "git credential approve/reject must have one runner next to fill",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inventory,
+            _REPORT_RULE_ID,
+            _CHAIN,
+            (
+                ("sub", "def report_helper_outcome(", 1, "eq"),
+                ("re", _REPORT_OWNER_CALL.pattern, 2, "eq"),
+                ("re", _REPORT_RUNNER_CALL.pattern, 1, "eq"),
+                ("sub", "    if outcome is None or outcome.kind is AuthOutcomeKind.OK:", 1, "eq"),
+                ("sub", "    elif outcome.is_verified_rejection:", 1, "eq"),
+                (
+                    "sub",
+                    "    if not _HELPER_REPORTS.decide(key, action, credential.password):",
+                    1,
+                    "eq",
+                ),
+                ("sub", '            elif action == "reject" and seen:', 1, "eq"),
+                (
+                    "sub",
+                    "report_helper_outcome(resolver, host_info, helper_path, credential,",
+                    1,
+                    "eq",
+                ),
+            ),
+            "Only the chain owner reports a helper credential, once per key and action, "
+            "and rejects only on a verified rejection",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inventory,
+            _REPORT_RULE_ID,
+            _OUTCOME,
+            ("rejection_verified=credential_presented and status == 401",),
+            "Only an HTTP 401 for a presented credential verifies a rejection",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _REPORT_RULE_ID,
+            _src_python(provider, exclude={_CREDENTIAL_FILL_OWNER}),
+            _CREDENTIAL_STORE_MUTATION,
+            "git credential approve/reject runs only in GitHubTokenManager."
+            "report_git_helper_credential",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _REPORT_RULE_ID,
+            _src_python(provider, exclude={_CREDENTIAL_FILL_OWNER, _CHAIN}),
+            _REPORT_RUNNER_CALL,
+            "Only auth_chain.report_helper_outcome reports helper credentials",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _REPORT_RULE_ID,
+            _src_python(provider, exclude={_CHAIN}),
+            _REPORT_OWNER_CALL,
+            "Only run_ado_chain reports a helper credential outcome",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_REPORT_RULE_ID,
+        group=GROUP,
+        guard_ids=(_REPORT_RULE_ID,),
+        description=(
+            "git credential approve/reject is reported only by the ADO chain owner for "
+            "helper credentials, and reject only after a verified HTTP 401."
+        ),
+        check=_check_credential_report_owner,
+    ),
     Rule(
         id=_RULE_ID,
         group=GROUP,

@@ -1736,6 +1736,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Artifactory downloads attach the registry token to any requested origin.",
     ),
     MutationCase(
+        guard_id="transport-platform-credential-report-owner",
+        rule_id="transport-platform-credential-report-owner",
+        path="src/apm_cli/core/auth_chain.py",
+        old="    elif outcome.is_verified_rejection:",
+        new="    elif outcome.is_auth_failure:",
+        intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
@@ -3369,3 +3377,51 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+# ---------------------------------------------------------------------------
+# Helper credential report side doors (#3765)
+# ---------------------------------------------------------------------------
+
+_CRED_REPORT_RULE = "transport-platform-credential-report-owner"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/core/auth.py",
+            "            if cred:\n",
+            "            if cred:\n                subprocess.run(['git', 'credential', 'approve'])\n",
+            id="raw-argv-outside-runner",
+        ),
+        pytest.param(
+            "src/apm_cli/core/auth.py",
+            "            if cred:\n",
+            "            if cred:\n"
+            "                self._token_manager.report_git_helper_credential(cred, accepted=True)\n",
+            id="runner-called-outside-chain",
+        ),
+        pytest.param(
+            "src/apm_cli/core/auth_outcome.py",
+            "rejection_verified=credential_presented and status == 401,",
+            "rejection_verified=credential_presented,",
+            id="403-counts-as-verified",
+        ),
+        pytest.param(
+            "src/apm_cli/core/auth_chain.py",
+            "    if not _HELPER_REPORTS.decide(key, action, credential.password):\n        return\n",
+            "",
+            id="no-once-per-key",
+        ),
+    ],
+)
+def test_credential_report_guard_rejects_side_doors(path: str, old: str, new: str) -> None:
+    """approve/reject stays in the chain owner, once per key, reject only on a 401."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (_CRED_REPORT_RULE,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(v.rule_id == _CRED_REPORT_RULE for v in report.violations)
