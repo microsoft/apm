@@ -303,6 +303,7 @@ class TestGlobalCanvasGuards:
 
         assert result.files_integrated == 0
 
+    @pytest.mark.windows_compat
     def test_global_nondefault_copilot_home_refused(self, tmp_path: Path) -> None:
         """Non-default COPILOT_HOME refuses global canvas deploy."""
         from apm_cli.core.scope import InstallScope
@@ -319,7 +320,7 @@ class TestGlobalCanvasGuards:
 
         with (
             patch("apm_cli.integration.canvas_integrator.is_enabled", return_value=True),
-            patch.dict("os.environ", {"COPILOT_HOME": "/custom/path"}),
+            patch.dict("os.environ", {"COPILOT_HOME": str(tmp_path / "custom-copilot")}),
             patch.object(integrator, "_copilot_home_is_nondefault", return_value=True),
         ):
             result = integrator.integrate_canvases_for_target(
