@@ -198,10 +198,10 @@
     },
     {
       "id": "lsp-lifecycle",
-      "decision": "LSP lifecycle orchestration and reconciliation",
-      "owner": "install/lsp/integration.py",
+      "decision": "LSP lifecycle orchestration and reconciliation, including the pre-write refusal of declared LSP with no LSP-capable target (#3727)",
+      "owner": "install/lsp/integration.py (require_lsp_capable_target, preflight_lsp_targets)",
       "selectors": ["src/apm_cli/install/lsp/integration.py"],
-      "guards": ["install-deployment-lsp-lifecycle"]
+      "guards": ["install-deployment-lsp-lifecycle", "install-deployment-lsp-capability-gate"]
     },
     {
       "id": "post-uninstall-dependency-reachability",

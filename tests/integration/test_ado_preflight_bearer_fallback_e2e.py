@@ -206,7 +206,7 @@ def test_preflight_falls_back_from_stale_pat_to_bearer(tmp_path, monkeypatch):
         project_root=tmp_path, apm_dir=tmp_path, deps_to_install=[dep], update_refs=True
     )
 
-    # Real AuthResolver -- this drives execute_with_bearer_fallback through
+    # Real AuthResolver -- this drives the try_with_fallback ADO chain through
     # the real azure_cli provider, which shells out to our fake `az`.
     resolver = AuthResolver()
 

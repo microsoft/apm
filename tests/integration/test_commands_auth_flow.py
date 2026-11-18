@@ -26,7 +26,6 @@ from apm_cli.commands.install import (
 from apm_cli.commands.pack import pack_cmd
 from apm_cli.core.auth import (
     AuthResolver,
-    BearerFallbackOutcome,
     HostInfo,
     _org_to_env_suffix,
 )
@@ -594,17 +593,6 @@ class TestEmitStalePat:
 
         hosts_warned = {w for w in warnings if "visualstudio.com" in w}
         assert len(hosts_warned) == 2
-
-
-class TestBearerFallbackOutcome:
-    def test_named_tuple_fields(self) -> None:
-        bfo = BearerFallbackOutcome(outcome="result", bearer_attempted=True)
-        assert bfo.outcome == "result"
-        assert bfo.bearer_attempted is True
-
-    def test_bearer_not_attempted(self) -> None:
-        bfo = BearerFallbackOutcome(outcome=None, bearer_attempted=False)
-        assert bfo.bearer_attempted is False
 
 
 # ===========================================================================

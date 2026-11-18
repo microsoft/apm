@@ -74,6 +74,7 @@ class InstallContext:
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
     transaction: Any = None  # InstallTransaction
+    lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
 
     dry_run: bool = False
     lockfile_only: bool = False

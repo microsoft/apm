@@ -29,7 +29,6 @@ import zipfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -46,6 +45,7 @@ from apm_cli.deps.transport_selection import (
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -80,12 +80,7 @@ def _make_host(
     ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
-    auth.execute_with_bearer_fallback.side_effect = (
-        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
-            outcome=primary_op(),
-            bearer_attempted=False,
-        )
-    )
+    install_simulated_ado_chain(auth)
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",

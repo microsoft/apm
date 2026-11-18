@@ -1,0 +1,11 @@
+name: consumer
+version: 1.0.0
+description: registry upgrade fixture
+targets: [copilot]
+registries:
+  fixture:
+    url: https://registry.corp.example/apm
+  default: fixture
+dependencies:
+  apm:
+    - acme/widget#1.0.0

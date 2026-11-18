@@ -34,10 +34,7 @@ def _ado_host(git_env: dict) -> MagicMock:
     ctx.host_info.kind = "ado"
     host._resolve_dep_auth_ctx.return_value = ctx
     resolver_impl = AuthResolver()
-    host.auth_resolver.execute_with_bearer_fallback.side_effect = (
-        resolver_impl.execute_with_bearer_fallback
-    )
-    host.auth_resolver.build_ado_bearer_git_env.side_effect = resolver_impl.build_ado_bearer_git_env
+    host.auth_resolver.try_with_fallback.side_effect = resolver_impl.try_with_fallback
     host.auth_resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
     host.auth_resolver._build_git_env.side_effect = AuthResolver._build_git_env
     host._build_repo_url = MagicMock(
@@ -67,16 +64,19 @@ def test_bearer_retry_sets_header_preserving_retained_git_config(tmp_path: Path)
 
     def clone_action(url: str, env: dict, target: Path) -> None:
         envs_seen.append(dict(env))
-        if "pat-url" in url:
+        if "Authorization: Bearer" not in "".join(map(str, env.values())):
             raise sp.CalledProcessError(128, ["git"], stderr=b"Authentication failed")
 
     bearer_provider = MagicMock()
     bearer_provider.is_available.return_value = True
     bearer_provider.get_bearer_token.return_value = "fake-bearer-token"
 
-    with patch(
-        "apm_cli.core.azure_cli.get_bearer_provider",
-        return_value=bearer_provider,
+    with (
+        patch.dict("os.environ", {"ADO_APM_PAT": "pat-token"}),
+        patch(
+            "apm_cli.core.azure_cli.get_bearer_provider",
+            return_value=bearer_provider,
+        ),
     ):
         CloneEngine(host).execute(
             "org/proj/_git/repo",

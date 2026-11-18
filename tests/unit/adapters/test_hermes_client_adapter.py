@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import stat
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -130,14 +131,15 @@ class TestHermesConfigPath(unittest.TestCase):
         expected = (fake_home / ".hermes" / "config.yaml").resolve(strict=False)
         self.assertEqual(path, expected)
 
-
-@pytest.mark.windows_compat
-def test_hermes_home_override(tmp_path, monkeypatch):
-    # A tmp_path root is absolute on every OS; a POSIX literal is relative on Windows.
-    custom = tmp_path / "custom" / "hermes"
-    monkeypatch.setenv("HERMES_HOME", str(custom))
-    path = Path(HermesClientAdapter().get_config_path())
-    assert path == custom.resolve(strict=False) / "config.yaml"
+    @pytest.mark.windows_compat
+    def test_hermes_home_override(self):
+        adapter = HermesClientAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            # A platform-absolute value: "/custom/hermes" has no drive on Windows.
+            custom = Path(tmp) / "custom" / "hermes"
+            with patch.dict("os.environ", {"HERMES_HOME": str(custom)}):
+                path = Path(adapter.get_config_path())
+        self.assertEqual(path, custom.resolve(strict=False) / "config.yaml")
 
 
 class TestHermesUpdateConfig(unittest.TestCase):

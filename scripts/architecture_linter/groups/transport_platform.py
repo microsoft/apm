@@ -1,5 +1,11 @@
 """Thin rule catalog for transport/platform architecture checks."""
 
+from scripts.architecture_linter.checks.transport_auth_outcome import (
+    COLLECTORS as _AUTH_OUTCOME_COLLECTORS,
+)
+from scripts.architecture_linter.checks.transport_auth_outcome import (
+    RULES as _AUTH_OUTCOME_RULES,
+)
 from scripts.architecture_linter.checks.transport_auth_platform import (
     COLLECTORS as _AUTH_COLLECTORS,
 )
@@ -42,6 +48,7 @@ from scripts.architecture_linter.checks.transport_sparse_and_updates import (
 
 RULES = (
     _AUTH_RULES
+    + _AUTH_OUTCOME_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
     + _SPARSE_RULES
@@ -53,6 +60,7 @@ RULES = (
 )
 COLLECTORS = (
     _AUTH_COLLECTORS
+    + _AUTH_OUTCOME_COLLECTORS
     + _CACHE_COLLECTORS
     + _SPARSE_COLLECTORS
     + _REVISION_PIN_COLLECTORS

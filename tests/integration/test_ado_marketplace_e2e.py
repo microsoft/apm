@@ -58,7 +58,7 @@ class _RecordingAuthResolver:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None]] = []
 
-    def resolve(self, host: str, org: str | None = None):
+    def resolve(self, host: str, org: str | None = None, **_kwargs: object):
         self.calls.append((host, org))
         return SimpleNamespace(token="ado-secret-token", source="ADO_APM_PAT", auth_scheme="basic")
 

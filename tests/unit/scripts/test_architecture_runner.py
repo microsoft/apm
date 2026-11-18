@@ -647,6 +647,7 @@ install-deployment-lock-parent-placement
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-locked-skill-subset-reconstruction
+install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract
 install-deployment-manifest-inheritance-includes
@@ -756,6 +757,7 @@ registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-auth-outcome-owner
 transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope

@@ -959,6 +959,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-lsp-capability-gate",
+        rule_id="install-deployment-lsp-capability-gate",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="    preflight_lsp_targets(ctx)\n",
+        new="",
+        intent="The integrate phase deploys packages without the LSP capability gate.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",
@@ -970,9 +978,20 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-lsp-target-contract",
         rule_id="install-deployment-lsp-target-contract",
         path="src/apm_cli/integration/lsp_integrator.py",
-        old="return BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
-        new="return spec.path(project_root, user_scope=False)",
-        intent="Claude LSP plugin writes bypass the canonical deployment-path gate.",
+        old=(
+            "return BaseIntegrator.resolve_deploy_path(\n"
+            "            relative_path,\n"
+            "            root,\n"
+            "            allowed_prefixes=(relative_path,),\n"
+            "        )"
+        ),
+        new=(
+            "return spec.path(\n"
+            "            project_root,\n"
+            "            user_scope=user_scope,\n"
+            "        )"
+        ),
+        intent="LSP target config writes bypass the canonical deployment-path gate.",
     ),
     MutationCase(
         guard_id="install-deployment-manifest-snapshot",
@@ -1474,9 +1493,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-ado-validation-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/install/validation.py",
-        old="        fallback = auth_resolver.execute_with_bearer_fallback(",
-        new="        fallback = _bypass_ado_bearer_fallback(",
-        intent="Install validation bypasses canonical ADO PAT-to-bearer fallback.",
+        old="            run_result = auth_resolver.try_with_fallback(",
+        new="            run_result = _bypass_ado_auth_chain(",
+        intent="Install validation bypasses the canonical ADO credential chain.",
     ),
     MutationCase(
         guard_id="transport-platform-ado-validation-caller-config",
@@ -1496,9 +1515,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-ado-validation-clone-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/deps/clone_engine.py",
-        old="                    fallback = host.auth_resolver.execute_with_bearer_fallback(",
-        new="                    fallback = _execute_ado_bearer_fallback_locally(",
-        intent="Clone execution bypasses AuthResolver's PAT-to-bearer owner.",
+        old='                    host.auth_resolver.try_with_fallback(\n                        dep_host or "dev.azure.com",',
+        new='                    _run_ado_chain_locally(\n                        dep_host or "dev.azure.com",',
+        intent="Clone execution bypasses AuthResolver's ADO credential chain.",
     ),
     MutationCase(
         guard_id="transport-platform-ado-validation-helper-suppression",
@@ -1523,6 +1542,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="                    with _NoNetrcSession() as session:",
         new="                    with _requests.Session() as session:",
         intent="Direct Artifactory entry requests regain ambient netrc credentials.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-auth-outcome-owner",
+        rule_id="transport-platform-auth-outcome-owner",
+        path="src/apm_cli/policy/discovery.py",
+        old="        if response.status_code != 200:\n            raise AuthAttemptFailed(response=response)\n        return response\n\n    try:\n        resp = auth_resolver.try_with_fallback(",
+        new="        if response.status_code in (401, 403):\n            raise AuthAttemptFailed(response=response)\n        return response\n\n    try:\n        resp = auth_resolver.try_with_fallback(",
+        intent="ADO policy fetch regrows a local 401/403 auth classification.",
     ),
     MutationCase(
         guard_id="transport-platform-cache-cleanup-outcome",

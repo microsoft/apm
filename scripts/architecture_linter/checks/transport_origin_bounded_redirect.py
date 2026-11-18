@@ -57,6 +57,10 @@ _ALLOW_REDIRECTS_EXEMPT: Mapping[str, tuple[int, str]] = {
         1,
         "lifecycle HTTP dispatch validates each hop against SSRF; no APM credential",
     ),
+    "src/apm_cli/deps/download_strategies.py": (
+        1,
+        "ADO file download refuses every redirect; the auth-outcome owner classifies sign-in 3xx",
+    ),
     "src/apm_cli/install/artifactory_resolver.py": (
         1,
         "registry boundary HEAD probe refuses every redirect; migrates in the guard PR",

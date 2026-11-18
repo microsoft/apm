@@ -72,6 +72,11 @@ def _make_resolver(
     del dep_ctx.source
     resolver.resolve_for_dep.return_value = dep_ctx
     resolver.build_error_context.return_value = "    Diagnostic payload"
+
+    def _single_attempt(_host, operation, **_kwargs):
+        return operation(dep_ctx.token, dict(dep_ctx.git_env))
+
+    resolver.try_with_fallback.side_effect = _single_attempt
     return resolver
 
 

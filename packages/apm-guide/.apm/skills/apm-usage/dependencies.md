@@ -765,8 +765,8 @@ relative values are rejected.
 ## LSP dependency formats
 
 LSP (Language Server Protocol) servers give supported runtimes real-time
-code intelligence. APM currently writes LSP config for Claude Code and
-GitHub Copilot CLI while keeping the dependency schema runtime-neutral.
+code intelligence. APM currently writes LSP config for Claude Code, GitHub
+Copilot CLI and OpenCode while keeping the dependency schema runtime-neutral.
 
 ```yaml
 dependencies:
@@ -804,8 +804,11 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 project installs use the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs use
 `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. GitHub Copilot CLI uses
-`.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI uses
-`fileExtensions` on disk;
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. OpenCode uses the `lsp`
+key of `opencode.json` or `~/.config/opencode/opencode.json`
+(`command` array, `extensions`, `env`, `initialization`; socket and name-only
+servers are skipped), and creating that key also enables OpenCode's built-in
+language servers. Copilot CLI uses `fileExtensions` on disk;
 manifests continue to use `extensionToLanguage`. A dependency package's source
 `.lsp.json` may use either a flat server map or a
 `{ "lspServers": { ... } }` envelope; it is distinct from the Claude project
