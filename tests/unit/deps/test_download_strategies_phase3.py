@@ -211,6 +211,33 @@ class TestResilientGet:
         assert result is rate_resp
         mock_sleep.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "failures",
+        [
+            [_fake_response(503, b"", headers={})],
+            [requests.exceptions.ConnectionError("reset")],
+        ],
+        ids=["503", "connection-error"],
+    )
+    def test_redirect_base_attempts_keep_retry_semantics(self, failures) -> None:
+        """Owner-routed attempts still retry transient failures, one hop each."""
+        url = "https://dev.azure.com/o/p/_apis/git/repositories/r/items"
+        ok_resp = _fake_response(200, b"ok")
+        with (
+            patch(
+                "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+                side_effect=[*failures, ok_resp],
+            ) as request,
+            patch("time.sleep"),
+        ):
+            result = self.delegate.resilient_get(
+                url, {"Authorization": "Bearer t"}, max_retries=3, redirect_base=url
+            )
+        assert result is ok_resp
+        assert request.call_count == 2
+        assert all(call.kwargs["allow_redirects"] is False for call in request.call_args_list)
+        assert all(call.kwargs.get("auth") is not None for call in request.call_args_list)
+
     def test_503_triggers_retry(self) -> None:
         rate_resp = _fake_response(503, b"unavail", headers={})
         ok_resp = _fake_response(200, b"ok")

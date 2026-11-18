@@ -39,7 +39,7 @@
     {
       "id": "host-credential-resolution",
       "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds, including registry-proxy route equivalence of lock rows; authenticated host access: escalation chain entry point and auth-outcome classification",
-      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback), core/auth_outcome.py (classify_auth_outcome), core/auth_chain.py (run_ado_chain), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
+      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback, AuthResolver.github_rest_headers, AuthResolver.bearer_headers, AuthResolver.gitlab_rest_headers), core/auth_outcome.py (classify_auth_outcome), core/auth_chain.py (run_ado_chain), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
       "selectors": [
         "src/apm_cli/core/auth.py",
         "src/apm_cli/core/auth_chain.py",
@@ -206,7 +206,7 @@
     {
       "id": "credential-origin-scope",
       "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops)",
-      "owner": "utils/http_credentials.py (strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request); deps/registry_proxy.py (RegistryConfig.headers_for); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, adapters/client/copilot.py",
+      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
       "selectors": [
         "src/apm_cli/utils/http_credentials.py",
         "src/apm_cli/deps/registry_proxy.py"

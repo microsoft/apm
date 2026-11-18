@@ -236,3 +236,40 @@ def test_github_api_probe_keeps_its_credential_on_the_api_origin() -> None:
     ):
         _github_api_get("https://api.github.com/repos/o/r", headers=headers, timeout=15)
     assert request.call_count == 1
+
+
+@pytest.mark.parametrize("probe_path", PROBE_PATHS)
+def test_authenticated_probe_sends_the_github_rest_token_scheme(probe_path: str) -> None:
+    ok = SimpleNamespace(ok=True, status_code=200, reason="OK", headers={})
+    with patch(
+        "apm_cli.install.validation._github_api_get", side_effect=[_response(404), ok]
+    ) as get:
+        resolver = _resolver()
+        with patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=False):
+            if probe_path == "primary":
+                dep_ref = SimpleNamespace(
+                    host="github.com", port=None, repo_url="owner/repo", host_type=None
+                )
+                result = validation._validate_github_package(
+                    dep_ref, resolver, False, None, "owner/repo", MagicMock()
+                )
+            else:
+                result = validation._validate_parse_failure_fallback(
+                    "owner/repo", resolver, None, MagicMock()
+                )
+
+    assert result is True
+    anonymous, authenticated = (call.kwargs["headers"] for call in get.call_args_list)
+    assert "Authorization" not in anonymous
+    assert authenticated["Authorization"] == "token test-token"
+
+
+@pytest.mark.parametrize("probe_path", PROBE_PATHS)
+def test_refused_cross_origin_redirect_defers_to_download(probe_path: str) -> None:
+    from apm_cli.utils.http_credentials import REFUSED_OUTSIDE_ORIGIN, RedirectRefusedError
+
+    refused = RedirectRefusedError(reason=REFUSED_OUTSIDE_ORIGIN, origin="https://api.github.com")
+    result, _resolver_mock, logger = _run_probe(probe_path, refused, verbose=True)
+
+    assert result is True
+    assert "redirect not followed" in str(logger.verbose_detail.call_args_list)

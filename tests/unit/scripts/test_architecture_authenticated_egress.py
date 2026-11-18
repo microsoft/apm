@@ -44,6 +44,7 @@ _FLAGGED = {
         ),
         "_header_add": ('def _header_add(r, t):\n    r.add_header("PRIVATE-TOKEN", t)\n'),
         "_header_kwarg": ("def _header_kwarg(t):\n    return dict(Authorization=t)\n"),
+        "_header_proxy": ('def _header_proxy(t):\n    return {"Proxy-Authorization": t}\n'),
         "_header_dict": ('def _header_dict(t):\n    return {"Authorization": t}\n'),
     },
 }
@@ -110,3 +111,26 @@ def test_retired_exemption_is_reported_stale() -> None:
     assert [
         (v.path, "stale egress exemption for _archive_get" in v.message) for v in violations
     ] == [(path, True)]
+
+
+def test_new_site_inside_an_exempt_function_changes_its_count() -> None:
+    path = "src/apm_cli/utils/archive.py"
+    source = _source(path)
+    old = "response = _ARCHIVE_SESSION.get(url, **kwargs)"
+    assert source.count(old) == 1
+    extra = "_ARCHIVE_SESSION.head(url)\n    " + old
+    violations = _run({path: source.replace(old, extra)})
+    assert [
+        (v.path, "expects 1 site(s) in _archive_get, found 2" in v.message) for v in violations
+    ] == [(path, True)]
+
+
+def test_header_vocabulary_must_stay_owned_by_http_credentials() -> None:
+    path = "src/apm_cli/utils/http_credentials.py"
+    source = _source(path)
+    assert source.count("CREDENTIAL_HEADER_NAMES: tuple[str, ...] = (") == 1
+    mutated = source.replace(
+        "CREDENTIAL_HEADER_NAMES: tuple[str, ...] = (", "CREDENTIAL_HEADER_NAMES = list(("
+    ).replace('"Proxy-Authorization",\n)', '"Proxy-Authorization",\n))', 1)
+    violations = _run({path: mutated})
+    assert any("CREDENTIAL_HEADER_NAMES must stay a literal tuple" in v.message for v in violations)

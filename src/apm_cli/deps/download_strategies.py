@@ -151,10 +151,10 @@ class DownloadDelegate:
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
             allow_netrc: Whether Requests may use ambient netrc credentials.
-            redirect_base: When set, every attempt goes through
-                ``origin_bounded_request`` bounded to this base URL; a redirect
-                outside it is returned unfollowed so the auth-outcome
-                classifier sees it. Auth-chain callers pass the request URL.
+            redirect_base: When set, every attempt goes through the redirect
+                owner (``unfollowed_redirect_request``) with *url* bounded to
+                this base. No redirect is followed: a 3xx is returned so the
+                auth-outcome classifier sees it.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -666,8 +666,8 @@ class DownloadDelegate:
                     headers=resolver.http_authorization_headers(git_env),
                     timeout=30,
                     allow_netrc=False,
-                    # Bounded to the request URL: no redirect is followed, and
-                    # a sign-in 3xx returns to the auth-outcome classifier.
+                    # No redirect is followed; a sign-in 3xx returns to the
+                    # auth-outcome classifier.
                     redirect_base=url,
                 )
                 if response.status_code != 200:

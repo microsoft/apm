@@ -52,7 +52,12 @@ from ..utils.github_host import (
     is_github_hostname,
     is_gitlab_hostname,
 )
-from ..utils.http_credentials import CredentialScopedSession, origin_bounded_request, origin_root
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
+)
 from .errors import AuthenticationError
 from .phases.local_content import LocalPackageError, read_local_package_source
 
@@ -99,6 +104,8 @@ def _inconclusive_github_probe_detail(exc: BaseException) -> str | None:
         if exc.status_code == 408 or 500 <= exc.status_code < 600:
             return f"HTTP {exc.status_code}"
         return None
+    if isinstance(exc, RedirectRefusedError):
+        return f"redirect not followed: {exc}"
     if isinstance(exc, requests.exceptions.Timeout):
         return "request timeout"
     if isinstance(exc, requests.exceptions.ConnectionError):

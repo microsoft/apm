@@ -98,6 +98,29 @@ class TestRedirectLeakGuard:
         assert all(call["allow_redirects"] is False for call in calls)
         assert all(urlparse(call["url"]).hostname == "art.example.com" for call in calls)
 
+    def test_same_path_redirect_is_existence_proof_not_followed(self):
+        """An in-path 3xx still proves the archive exists; it is not followed."""
+        package = "art.example.com/artifactory/apm/group/repo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token=None)
+        calls: list[str] = []
+
+        def _request(method, url=None, **_kwargs):
+            calls.append(url)
+            resp = MagicMock()
+            resp.status_code = 302
+            resp.headers = {"Location": f"{url}?signed=1"}
+            return resp
+
+        with patch(
+            "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+            side_effect=_request,
+        ):
+            result = _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        assert result is not None
+        assert all("signed=1" not in url for url in calls)
+
 
 # ---------------------------------------------------------------------------
 # Mode 2 token-audience guard
