@@ -405,3 +405,186 @@ def test_user_scope_diamond_merges_then_shrinks_on_uninstall(
         world.run(("uninstall", "-g", b), cwd=cwd, env=env, scenario_id="l10-uninstall-b")
         assert skill_dirs(skills_root) == []
         assert locked(apm_home, bundle) is None
+
+
+# -- cross-track (T3 COPILOT_HOME) and adjacent commands (0.36.1 red team) ---------
+
+
+@pytest.mark.parametrize("survivor_evidence", ["complete", "missing-survivor-manifest"])
+def test_copilot_home_user_scope_diamond_shrinks_under_copilot_home(
+    tmp_path: Path, apm_binary_path: Path, survivor_evidence: str
+) -> None:
+    """Cross-track T3 (COPILOT_HOME, D1) x T4: -g legacy skill paths under an external COPILOT_HOME."""
+    world = _world(tmp_path, apm_binary_path)
+    copilot_home = world.isolated.root / "elsewhere" / "copilot-profile"
+    copilot_home.mkdir(parents=True)
+    world.extra_env["COPILOT_HOME"] = str(copilot_home)
+    bundle, a, b = _diamond(world, {"skills": ["alpha", "beta"]}, {"skills": ["gamma", "delta"]})
+    _user_manifest(world, [a, b])
+    apm_home = world.isolated.config_root
+    skills_root = copilot_home / "skills"
+    default_copilot = world.isolated.home / ".copilot"
+    cwd = world.isolated.work_root
+    with world.serve() as env:
+        world.run(
+            (*_GLOBAL_INSTALL, "--legacy-skill-paths"), cwd=cwd, env=env, scenario_id="ch-install"
+        )
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        assert not default_copilot.exists(), sorted(map(str, default_copilot.rglob("*")))
+        if survivor_evidence == "missing-survivor-manifest":
+            (apm_home / "apm_modules" / "fixture-org" / "pkg-b" / "apm.yml").unlink()
+        world.run(("uninstall", "-g", a), cwd=cwd, env=env, scenario_id="ch-uninstall-a")
+        expected = ["delta", "gamma"] if survivor_evidence == "complete" else sorted(_SKILLS)
+        assert skill_dirs(skills_root) == expected
+        assert locked(apm_home, bundle)["skill_subset"] == expected
+        assert not default_copilot.exists()
+        assert skill_dirs(world.isolated.home / _PROJECT_SKILLS) == []
+        if survivor_evidence == "complete":
+            _assert_audit_green(world, apm_home, env, "ch-audit")
+            world.run(("uninstall", "-g", b), cwd=cwd, env=env, scenario_id="ch-uninstall-b")
+            assert skill_dirs(skills_root) == []
+            assert locked(apm_home, bundle) is None
+
+
+def test_copilot_home_user_scope_default_skill_root_never_writes_the_home_copilot_dir(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cross-track: default -g skills stay in shared ~/.agents/skills, follow the union, skip ~/.copilot."""
+    world = _world(tmp_path, apm_binary_path)
+    copilot_home = world.isolated.root / "elsewhere" / "copilot-profile"
+    copilot_home.mkdir(parents=True)
+    world.extra_env["COPILOT_HOME"] = str(copilot_home)
+    _bundle, a, b = _diamond(world, {"skills": ["alpha"]}, {"skills": ["gamma"]})
+    _user_manifest(world, [a, b])
+    cwd = world.isolated.work_root
+    shared = world.isolated.home / _PROJECT_SKILLS
+    with world.serve() as env:
+        world.run(_GLOBAL_INSTALL, cwd=cwd, env=env, scenario_id="chd-install")
+        assert skill_dirs(shared) == ["alpha", "gamma"]
+        world.run(("uninstall", "-g", a), cwd=cwd, env=env, scenario_id="chd-uninstall-a")
+        assert skill_dirs(shared) == ["gamma"]
+        _assert_audit_green(world, world.isolated.config_root, env, "chd-audit")
+    assert skill_dirs(copilot_home / "skills") == []
+    assert not (world.isolated.home / ".copilot").exists()
+
+
+def test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """N5 at -g: survivors stay under $COPILOT_HOME/skills, never the shared ~/.agents/skills."""
+    world = _world(tmp_path, apm_binary_path)
+    copilot_home = world.isolated.root / "elsewhere" / "copilot-profile"
+    copilot_home.mkdir(parents=True)
+    world.extra_env["COPILOT_HOME"] = str(copilot_home)
+    bundle = world.publish("bundle", skills=_SKILLS).slug
+    c = world.publish("pkg-c", instructions=["c-rules"]).slug
+    _user_manifest(world, [_edge(bundle, skills=["alpha"]), c])
+    cwd = world.isolated.work_root
+    apm_home = world.isolated.config_root
+    with world.serve() as env:
+        world.run(
+            (*_GLOBAL_INSTALL, "--legacy-skill-paths"), cwd=cwd, env=env, scenario_id="n5g-in"
+        )
+        assert skill_dirs(copilot_home / "skills") == ["alpha"]
+        recorded = set(locked(apm_home, bundle)["deployed_files"])
+        world.run(("uninstall", "-g", c), cwd=cwd, env=env, scenario_id="n5g-rm")
+        assert skill_dirs(copilot_home / "skills") == ["alpha"]
+        assert skill_dirs(world.isolated.home / _PROJECT_SKILLS) == []
+        assert set(locked(apm_home, bundle)["deployed_files"]) == recorded
+        _assert_audit_green(world, apm_home, env, "n5g-audit")
+    assert not (world.isolated.home / ".copilot").exists()
+
+
+def test_prune_dry_run_and_cold_restore_keep_the_merged_selection(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """prune, install --dry-run and a cold plain install never narrow the union."""
+    world = _world(tmp_path, apm_binary_path)
+    bundle, a, b = _diamond(world, {"skills": ["alpha", "beta"]}, {"skills": ["gamma", "delta"]})
+    project = world.project("consumer", dependencies=[a, b])
+    skills_root = project / _PROJECT_SKILLS
+    with world.serve() as env:
+        dry = world.run((*INSTALL, "--dry-run"), cwd=project, env=env, scenario_id="h-dry")
+        assert not lock_path(project).exists() and not skills_root.exists(), dry.stdout[-2000:]
+        world.run(INSTALL, cwd=project, env=env, scenario_id="h-install")
+        lock_bytes = lock_path(project).read_bytes()
+        world.run(("prune",), cwd=project, env=env, scenario_id="h-prune")
+        assert lock_path(project).read_bytes() == lock_bytes
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        shutil.rmtree(project / "apm_modules")
+        shutil.rmtree(project / ".agents")
+        world.run(INSTALL, cwd=project, env=env, scenario_id="h-cold")
+        assert lock_path(project).read_bytes() == lock_bytes
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        tree = world.run(("deps", "tree"), cwd=project, env=env, scenario_id="h-tree")
+        why = world.run(("deps", "why", bundle), cwd=project, env=env, scenario_id="h-why")
+    assert bundle in tree.stdout
+    assert a in why.stdout, why.stdout[-2000:]
+
+
+def test_pack_ships_the_merged_skill_selection(tmp_path: Path, apm_binary_path: Path) -> None:
+    """pack reads the lock, so the shipped bundle carries every selected skill."""
+    world = _world(tmp_path, apm_binary_path)
+    _bundle, a, b = _diamond(world, {"skills": ["alpha"]}, {"skills": ["gamma"]})
+    project = world.project("consumer", dependencies=[a, b])
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="pack-install")
+        before = {p for p in project.rglob("*") if p.is_file()}
+        world.run(("pack", "-o", "dist"), cwd=project, env=env, scenario_id="pack")
+    shipped = sorted(p.parent.name for p in (project / "dist").rglob("SKILL.md") if p not in before)
+    assert sorted(set(shipped)) == ["alpha", "gamma"], shipped
+
+
+def test_uninstall_keeps_non_skill_primitives_and_only_selected_skills_of_a_survivor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """U1 adjacent: survivor re-integration keeps its hook/instruction and selected skills."""
+    world = _world(tmp_path, apm_binary_path)
+    hook = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo tools"}]}
+            ]
+        }
+    }
+    tools = world.publish(
+        "tools", skills=_SKILLS, instructions=["tools-rules"], hooks={"pretool": hook}
+    ).slug
+    c = world.publish("pkg-c", instructions=["c-rules"]).slug
+    project = world.project("consumer", dependencies=[_edge(tools, skills=["alpha"]), c])
+    skills_root = project / _PROJECT_SKILLS
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="u1h-install")
+        entry = locked(project, tools)
+        others = sorted(f for f in entry.get("deployed_files") or [] if "/skills/" not in f)
+        assert any("hook" in f for f in others), others
+        assert any("instruction" in f for f in others), others
+        assert skill_dirs(skills_root) == ["alpha"]
+        world.run(("uninstall", c), cwd=project, env=env, scenario_id="u1h-uninstall")
+        assert skill_dirs(skills_root) == ["alpha"]
+        entry = locked(project, tools)
+        assert sorted(f for f in entry.get("deployed_files") or [] if "/skills/" not in f) == others
+        for rel in others:
+            assert (project / rel).exists(), rel
+        _assert_audit_green(world, project, env, "u1h-audit")
+
+
+def test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """U1 for local paths: ``install ./bundle --skill alpha`` survives an unrelated uninstall."""
+    world = _world(tmp_path, apm_binary_path)
+    project = world.project("consumer")
+    local_bundle = world.isolated.work_root / "local-bundle"
+    from tests.utils.skill_selection_world import _write_package
+
+    _write_package(local_bundle, name="local-bundle", skills=_SKILLS)
+    local_c = world.isolated.work_root / "local-c"
+    _write_package(local_c, name="local-c", instructions=["c-rules"])
+    skills_root = project / _PROJECT_SKILLS
+    env = world.isolated.subprocess_env()
+    world.run((*INSTALL, "../local-bundle", "--skill", "alpha"), cwd=project, env=env)
+    world.run((*INSTALL, "../local-c"), cwd=project, env=env)
+    assert skill_dirs(skills_root) == ["alpha"]
+    world.run(("uninstall", "../local-c"), cwd=project, env=env, scenario_id="u1l-uninstall")
+    assert skill_dirs(skills_root) == ["alpha"]
