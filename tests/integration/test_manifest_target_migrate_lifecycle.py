@@ -281,3 +281,15 @@ def test_migrated_dependency_manifest_keeps_its_consumers_deploys(
     assert {k: v for k, v in migrated.items() if k not in source_owned} == {
         k: v for k, v in legacy.items() if k not in source_owned
     }
+
+    deployed_by_dependency = [
+        name for name in legacy if name.startswith("project/.github/") and "mcp.json" not in name
+    ]
+    assert deployed_by_dependency
+    sentinel = scenario.project / ".github" / "user-notes.md"
+    sentinel.write_text("mine\n", encoding="utf-8")
+    uninstall = scenario.apm("uninstall", "./packages/fixture")
+    assert uninstall.returncode == 0, uninstall.stdout + uninstall.stderr
+    remaining = scenario.deployed()
+    assert not any(name in remaining for name in deployed_by_dependency)
+    assert sentinel.read_text(encoding="utf-8") == "mine\n"

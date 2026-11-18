@@ -215,3 +215,6 @@ def test_both_spellings_resolve_vscode_to_copilot_for_dependency_intersection(tm
 
     assert ManifestTargetDeclaration.from_mapping(fields).canonical == ("claude", "copilot")
     assert canonical_package_targets(APMPackage.from_apm_yml(manifest)) == ("claude", "copilot")
+    assert canonical_package_target_config(APMPackage.from_apm_yml(manifest)) == {
+        "targets": ["claude", "copilot"]
+    }
