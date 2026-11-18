@@ -1807,9 +1807,11 @@
       "keyword": "MUST",
       "section": "8.5.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only"
+        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only",
+        "tests/spec_conformance/test_manifest_reqs.py::test_targets_admits_preserved_vscode_and_rejects_agents",
+        "tests/spec_conformance/test_manifest_reqs.py::test_targets_vscode_narrows_like_copilot"
       ]
     },
     {

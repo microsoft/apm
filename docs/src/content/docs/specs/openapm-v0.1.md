@@ -334,8 +334,8 @@ The manifest top-level fields are:
 | `author`        | no       | string                                                                                        |
 | `license`       | no       | string (SPDX identifier RECOMMENDED)                                                          |
 | `default_host`  | no       | string; see [Section 4.2.4](#424-default_host) and [req-mf-019](#req-mf-019)                  |
-| `target`        | no       | string, list of strings, or null; mutually exclusive with `targets` (see [req-tg-008](#req-tg-008)) |
-| `targets`       | no       | string or non-empty list of lowercase canonical identifiers or `all`; mutually exclusive with `target` (see [req-tg-008](#req-tg-008)) |
+| `target`        | no       | string, list of strings, or null; deprecated in favor of `targets` on adoption of proposed amendment 0.1.61 (Appendix D); mutually exclusive with `targets` (see [req-tg-008](#req-tg-008)) |
+| `targets`       | no       | string or non-empty list of lowercase canonical identifiers, the preserved legacy identifier `vscode`, or `all`; mutually exclusive with `target` (see [Section 4.2.1](#421-target) and [req-tg-008](#req-tg-008)) |
 | `type`          | no       | string (advisory, see [Section 4.2.2](#422-type-advisory))                                    |
 | `scripts`       | no       | mapping `string -> string`                                                                    |
 | `includes`      | no       | literal `auto` or list of paths                                                               |
@@ -353,15 +353,13 @@ The canonical set of `target` identifiers registered by this
 specification at v0.1 is:
 
 ```
-copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all
+copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, hermes, grok-bot, all
 ```
 
-The legacy aliases `vscode` and `agents` MAY appear in input manifests.
-When the manifest is rewritten, `agents` MUST be normalised to
-`copilot`, and `vscode` MUST be preserved as `vscode`, because it
-selects a different MCP configuration destination than `copilot`
-(`.vscode/mcp.json` rather than `.github/mcp.json`).
-[Errata 2026-11-17](#appendix-d-revision-history)
+The legacy aliases `vscode` and `agents` MAY appear under `target:` in input manifests. When the manifest is rewritten, `agents` MUST be normalised to `copilot`, and `vscode` MUST be preserved as `vscode`, because the two identifiers select distinct MCP configuration destinations. `vscode` is the only legacy identifier also admitted under `targets:` (see [req-tg-008](#req-tg-008)); `agents` is not. For target selection, under either field, `vscode` denotes the `copilot` target; it differs from `copilot` only in the MCP configuration destination it selects for the declaring project. (Amendment 0.1.61, proposed; see [Appendix D](#appendix-d-revision-history).)
+
+> **Note (non-normative).** Per-target MCP configuration destinations are published in the OpenAPM Target Registry v0.1 companion. At this revision `vscode` writes `.vscode/mcp.json` and `copilot` writes `.github/mcp.json`. This revision does not settle whether a dependency that declares `vscode` can change the consuming project's MCP configuration destination, nor which destination or destinations apply when one declared set contains both `vscode` and `copilot`; both questions are tracked in #3853.
+
 The internal fallback value `minimal` MUST NOT be set explicitly in a
 manifest; it is reserved for the auto-detection fallback described in
 [Section 8.4](#84-target-detection-signals-normative). In an
@@ -3308,14 +3306,19 @@ expand either (a) or (b). Omitting both package fields, or including the
 universal `all` value, adds no package-side restriction. Scalar and list
 spellings under `target:` accept the aliases defined in
 [Section 4.2.1](#421-target); `targets:` accepts lowercase identifiers
-from the canonical set in Section 4.2.1 and the literal `all` sentinel.
+from the canonical set in Section 4.2.1, the preserved legacy identifier
+`vscode` defined there, and the literal `all` sentinel. In the effective
+target intersection, a package-declared `vscode` denotes the `copilot`
+target: a declared set containing `vscode` restricts deployment exactly
+as the same set with `vscode` replaced by `copilot` would, and `vscode`
+does not activate, add, or remove any other target.
 The `all` token remains a literal no-restriction sentinel and MUST NOT
 be expanded to the auto-detectable target set during this intersection.
 A null value under singular `target:` is treated as field omission for
 legacy compatibility; a consumer MUST reject an empty string or empty
 list. A declaration with both fields (even when either value is null),
-a null or empty `targets:` value, a `targets:` token that is neither
-canonical nor `all`, or a `target:` token that does not satisfy
+a null or empty `targets:` value, a `targets:` token that is not
+canonical, `vscode`, or `all`, or a `target:` token that does not satisfy
 [req-mf-005](#req-mf-005) MUST be rejected before target-scoped
 deployment with a diagnostic naming the invalid declaration or token.
 
@@ -4916,25 +4919,18 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.58 (proposed) | 2026-11-12 | Amendment for accepted issue #1744 in PR #2030. Added [req-tg-018](#req-tg-018) (Section 8.5.10, consumer MUST): at project and user scope, a Cursor instruction whose normalized `applyTo` is exactly one universal `**` pattern (scalar, padded scalar, or single-item sequence) emits `alwaysApply: true` with no `globs`; every other non-empty set, including `**` mixed with scoped patterns, keeps `globs` and never `alwaysApply`; absent, empty, or null `applyTo` emits neither key. Under Section 9.2 this changes generated bytes for the Cursor target only: rules previously emitted as `globs: **` are replaced on reinstall. No source frontmatter field, scoped-glob serialization, or other target changes. Sections 1.3, 8.7, 11.3.2 and Appendix C, the requirements manifest and conformance test binding are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.59 (proposed) | 2026-11-12 | Amendment for accepted issue #3509 in PR #3606. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place with clause (g): a `dependencies.allow` or `dependencies.deny` pattern whose first segment contains U+002E and does not begin with it is host-qualified and matches only when the dependency's effective host (written host, or the implementation-default host), after port and trailing-dot removal and ASCII case folding, equals the named host. Hostless patterns still match every host; `dependencies.require` is unchanged. Updated the Section 6.3.1 table, the source-replacement policy sentence, the Section 10.8 note and the requirements-manifest notes. No new normative statement; count unchanged at 138 (133 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 | 0.1.60 (proposed) | 2026-11-17 | Amendment for accepted issue #3763. Added [req-rs-018](#req-rs-018) (new Section 7.4.1, consumer MUST): when several edges reach one dependency, its deployment selection is the union over edges of each edge's `skills` x `targets` product; omitting an axis selects all for that edge; the result and its lock entry are independent of declaration order, discovery order and depth, with no first-wins or last-wins choice; `skill_subset` and `target_subset` record the unions and a new optional `subset_pairings` lock field records the exact per-target selection in a canonical form, only when the two flat fields would over-select; a malformed or inconsistent `subset_pairings` value is invalid lock state; and frozen install fails, naming the dependency, when the derived selection differs from the recorded one. Under Section 9.2 this defines previously unspecified merge behavior, not behavior-neutral errata: a consumer that kept one edge's subsets, or unioned each field independently, now deploys different skills for divergent diamonds, and a frozen install over a lock written by such a consumer fails until the lock is regenerated when the selections differ. Locks whose flat fields are already exact are unchanged byte for byte. `subset_pairings` is additive and optional and `lockfile_version` is unchanged. The fields are typed in the distinct proposed `lockfile-v0.1.60.schema.json` (Appendix A); earlier schema bytes and IDs are unchanged, and since their entries admit additional properties, new lockfiles still validate against them. Older readers that preserve the unknown field without implementing it fall back to the flat product. Added the `target_subset` and `subset_pairings` rows to the Section 5.2 field table and req-rs-018 to the Section 10.11 lockfile-tampering row. Sections 1.3, 4.3.2, 5.2, 7.11, 10.11, 11.3.2, Appendices A and C, the requirements manifest and conformance coverage are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
-| 0.1.61 (proposed) | 2026-11-18 | Amendment for issue #3847. Revised the `fetch_failure` row of the [req-pl-006](#req-pl-006) merge table (Section 6.4, governance MUST) from "Child overrides if set" to stricter wins (`block` > `warn`, an unset value being the `warn` default per Section 6.2), so a child policy can tighten but never relax the parent's fail-closed choice, matching the tighten-only inheritance principle of Section 6.4 and the `enforcement` row. Under Section 9.2 this changes an evaluation already defined by a normative statement, so it is an amendment, not behavior-neutral errata: the only verdict class that changes is a chain whose parent sets `fetch_failure: block` and whose child sets `warn` (or leaves it unset), which now merges to `block` and fails closed on a policy fetch failure instead of warning. Chains where the child is at least as strict as the parent are unchanged. The reference implementation already merges this way. No statement is added or removed; the statement count is unchanged. Section 9.3 review and public comment remain pending; this proposal is not adopted. |
+| 0.1.61 (proposed) | 2026-11-18 | Amendment for issue #3762, introduced in PR #3801 and corrected in PR #3851 (issue #3860). Revised Section 4.2.1 in place: on manifest rewrite the legacy alias `vscode` is preserved instead of normalised to `copilot`, because the two select distinct MCP configuration destinations; `agents` still normalises to `copilot`. Revised the Section 4.2 `targets` row and [req-tg-008](#req-tg-008) in place to admit the preserved legacy identifier `vscode` under `targets:`, so manifests rewritten from `target: vscode` to `targets: [vscode]` remain valid, stated that `vscode` under either field denotes the `copilot` target in the [req-tg-008](#req-tg-008) effective target intersection, differing from `copilot` only in the declaring project's MCP configuration destination (whether a dependency's `vscode` can affect the consumer's MCP destination, and which destination or destinations apply when `vscode` and `copilot` are declared together, are tracked in #3853), and added `hermes` and `grok-bot` to the Section 4.2.1 canonical-set block to match its explicit-only enumeration. Under Section 9.2 this is not behavior-neutral errata: a consumer that normalised `vscode` to `copilot` on rewrite no longer conforms, and `targets:` values containing `vscode`, `hermes` or `grok-bot` that previously had to be rejected are now accepted. Because `hermes` and `grok-bot` now belong to the canonical set, a producer conforming to [req-mf-005](#req-mf-005) accepts `target: hermes` and `target: grok-bot` (scalar or list element), which it previously had to reject. The reference implementation's manifest re-initialisation (rewrite) path already preserved `vscode`, so the rewrite rule now matches that path; the reference implementation's intersection of `targets: [vscode]` as `copilot` under [req-tg-008](#req-tg-008) was fixed in PR #3864 (issue #3861). Proposed deprecation announcement under Section 9.5: singular `target:` becomes deprecated in favor of `targets:` only when this amendment is adopted under Section 9.3, and the Section 9.5 90-day window starts on the adoption date, not on this proposal date; until then `target:` is not deprecated, and removal requires a later revision after that window has elapsed. Manifest JSON Schema bytes are unchanged because the `targets` pattern already admits these tokens. Section 9.3 review and public comment remain pending; this proposal is not adopted. Statement count remains 139 (134 MUST, 5 SHOULD). |
+| 0.1.62 (proposed) | 2026-11-18 | Amendment for issue #3847. Revised the `fetch_failure` row of the [req-pl-006](#req-pl-006) merge table (Section 6.4, governance MUST) from "Child overrides if set" to stricter wins (`block` > `warn`, an unset value being the `warn` default per Section 6.2), so a child policy can tighten but never relax the parent's fail-closed choice, matching the tighten-only inheritance principle of Section 6.4 and the `enforcement` row. Under Section 9.2 this changes an evaluation already defined by a normative statement, so it is an amendment, not behavior-neutral errata: the only verdict class that changes is a chain whose parent sets `fetch_failure: block` and whose child sets `warn` (or leaves it unset), which now merges to `block` and fails closed on a policy fetch failure instead of warning. Chains where the child is at least as strict as the parent are unchanged. The reference implementation already merges this way. No statement is added or removed; the statement count is unchanged. Section 9.3 review and public comment remain pending; this proposal is not adopted. |
 
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises
-[req-tg-005](#req-tg-005) in place and 0.1.59 revises
-[req-pl-018](#req-pl-018) in place; neither adds a statement. Together, this
+0.1.60 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place and 0.1.61 revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and 0.1.62 revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
 working draft
 contains 139 statements (134 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
 Errata:
 
-- **2026-11-17, Section 4.2.1** (#3762). The rewrite rule for the
-  legacy `vscode` alias said to normalise it to `copilot`. Doing so
-  would move MCP configuration from `.vscode/mcp.json` to
-  `.github/mcp.json`. A rewrite now preserves `vscode`; `agents` is
-  still normalised to `copilot`. No implementation rewrote the alias
-  before this erratum, so no existing behaviour changes. No
-  requirement ID, keyword, or statement count changes.
+- **2026-11-17, Section 4.2.1** (#3762), withdrawn 2026-11-18. This entry was published in PR #3801 as behavior-neutral errata that preserved the legacy `vscode` alias on manifest rewrite. It is withdrawn and reclassified as proposed amendment 0.1.61, because the same change admits `vscode` under `targets:` and is therefore not behavior-neutral under Section 9.2 (corrected in PR #3851, issue #3860). Withdrawing it changes no requirement ID, keyword, or statement count.
 
 ---
 
@@ -4970,3 +4966,5 @@ is excluded from canonical-emission stability checks per
 [Section 5.6](#56-git-semver-fields-constraint-resolved_tag-resolved_at). Round-
 trip conformance ([req-cf-001](#req-cf-001)) treats this field as
 permitted-to-vary.
+
+**E.5 Legacy target aliases.** [Section 4.2.1](#421-target) admits two legacy aliases under `target:`. `agents` is normalised to `copilot` on manifest rewrite and is not admitted under `targets:`. `vscode` is preserved on rewrite and is admitted under `targets:`, because it selects a distinct MCP configuration destination (see the OpenAPM Target Registry v0.1 companion). Some implementations accept further spellings, such as `agy` for `antigravity`; this specification does not yet register them, and a normative alias table is planned for a later 0.1.x revision. The manifest JSON Schema `targets` pattern is intentionally permissive: a value that validates against the schema is not therefore accepted under [req-tg-008](#req-tg-008), which also rejects any `targets:` token that is not canonical, `vscode`, or `all` (for example `agents`).
