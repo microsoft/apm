@@ -20,7 +20,7 @@ from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
 
 MARKETPLACE_DOCS_URL = (
-    "https://microsoft.github.io/apm/producer/publish-to-a-marketplace/#consume-from-any-assistant"
+    "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
 )
 
 _PACK_HELP = """\
@@ -59,9 +59,11 @@ Examples:
   # marketplace.claude.output / marketplace.codex.output
 
 Exit codes:
+
+\b
   0  Success
-  1  Build or runtime error
-  2  Manifest schema validation error
+  1  Build or runtime error (including apm.yml parse or schema errors)
+  2  Usage error (invalid flags or arguments)
   3  Version alignment check failed (--check-versions)
   4  Marketplace working-tree drift detected (--check-clean)
   5  Strict marketplace metadata check failed (--strict-metadata)
@@ -378,7 +380,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
 
         try:
             detected, _reason = detect_target(project_root)
-            effective_target = detected if detected else None
+            # "minimal" means no target folder was found: record no target.
+            effective_target = detected if detected and detected != "minimal" else None
         except Exception:
             effective_target = None
     else:
@@ -791,8 +794,9 @@ def _render_bundle_result(
             )
         elif fmt == BundleFormat.CLAUDE_PLUGIN:
             logger.progress(
-                "Claude plugin bundle ready -- contains plugin.json plus "
-                "plugin-native directories and an embedded apm.lock.yaml."
+                "Claude plugin bundle ready -- contains plugin.json, "
+                "plugin-native directories, and an embedded apm.lock.yaml "
+                "for integrity verification."
             )
         # Issue #1207: target-agnostic bundles install into any consumer
         # project.  Print a copy-pasteable share line so packing creates

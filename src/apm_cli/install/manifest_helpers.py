@@ -9,6 +9,55 @@ from pathlib import Path
 
 from apm_cli.constants import APM_YML_FILENAME
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.models.dependency.manifest_host import ManifestHostScope, manifest_host_scope_for
+
+
+def _load_manifest_for_add(apm_yml_path: Path, logger=None) -> tuple[dict, ManifestHostScope]:
+    """Read apm.yml round-trip and return it with its ``default_host`` scope.
+
+    OpenAPM req-mf-019: the manifest's ``default_host:`` selects the host that
+    shorthand entries resolve against and that canonical writes strip (#3843).
+    Exits 1 with an error when the manifest is unreadable or the host invalid.
+    """
+    from apm_cli.models.manifest_io import load_manifest_roundtrip
+
+    try:
+        data = load_manifest_roundtrip(apm_yml_path) or {}
+    except Exception as e:
+        (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        sys.exit(1)
+    try:
+        return data, manifest_host_scope_for(data)
+    except ValueError as e:
+        (logger or InstallLogger()).error(str(e))
+        sys.exit(1)
+
+
+def _build_prospective_package(
+    data: dict,
+    dep_section: str,
+    dependencies: list,
+    *,
+    manifest_path: Path,
+    source_root: Path,
+    create_config: bool,
+):
+    """Build the dry-run package as if *dependencies* were written to apm.yml.
+
+    Local paths resolve against *source_root*, the caller's real project (or
+    user) directory, even when the preview manifest lives in a temp file.
+    """
+    from apm_cli.models.apm_package import APMPackage
+
+    data[dep_section]["apm"] = dependencies
+    return APMPackage.from_mapping(
+        data,
+        package_path=source_root,
+        source_path=source_root,
+        manifest_path=manifest_path,
+        create_config=create_config,
+        warning_handler=None,  # The disk parse emits the manifest diagnostic.
+    )
 
 
 def _merge_packages_into_yml(
@@ -48,11 +97,10 @@ def _prepare_dry_run_manifest_path(
     manifest_path: Path,
     *,
     dry_run: bool,
-    user_scope: bool,
     has_packages: bool,
 ) -> tuple[Path, tempfile.TemporaryDirectory | None]:
-    """Redirect an absent user manifest to temporary storage during previews."""
-    if not (dry_run and user_scope and has_packages and not manifest_path.exists()):
+    """Redirect an absent manifest to temporary storage during previews."""
+    if not (dry_run and has_packages and not manifest_path.exists()):
         return manifest_path, None
 
     temp_dir = tempfile.TemporaryDirectory(prefix="apm-dry-run-")
@@ -85,17 +133,16 @@ def _report_bootstrap_manifest(
     manifest_display: str,
     manifest_targets: list[str],
     dry_run: bool,
-    user_scope: bool,
 ) -> None:
     """Render bootstrap messages with dry-run-safe wording."""
-    if dry_run and user_scope:
+    if dry_run:
         logger.progress(f"Dry run: Would create {manifest_display}")
     else:
         logger.success(f"Created {manifest_display}")
     if not manifest_targets:
         return
     target_list = ", ".join(manifest_targets)
-    if dry_run and user_scope:
+    if dry_run:
         logger.progress(f"Dry run: Would set targets: {target_list} (in {manifest_display})")
         return
     logger.progress(f"Targets set: {target_list} (persisted to {manifest_display})")

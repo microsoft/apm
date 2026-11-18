@@ -30,7 +30,7 @@ The project's `apm.yml` must declare a `registries:` block with at least one reg
 | Flag | Default | Description |
 |---|---|---|
 | `--registry NAME` | _(required when multiple registries configured)_ | Registry name from the `registries:` block. |
-| `--package OWNER/REPO` | _(required)_ | Package identity to publish as (e.g. `acme/my-skill`). Owner and repository are normalized to lowercase. |
+| `--package OWNER/REPO` | _(required)_ | Package identity to publish as, written exactly as consumers write the registry dependency's `id:` (e.g. `acme/my-skill` or `gitlab.com/acme/my-skill`). See [Package identity](#package-identity). Normalized to lowercase. |
 | `--zip PATH` | auto-pack | Path to a pre-built `.zip`. Skips auto-pack. (renamed from `--tarball` in v0.20.0) |
 | `--dry-run` | off | Print what would be uploaded; do not call the registry. |
 | `--verbose`, `-v` | off | Show auto-pack details (archive path). |
@@ -56,11 +56,29 @@ Publish a pre-built zip:
 apm publish --package acme/my-skill --zip ./build/my-skill-0.0.1.zip
 ```
 
-Specify the registry package identity explicitly:
+Publish a package that lives on GitLab:
 
 ```bash
-apm publish --package acme/my-package --registry corp-main
+apm publish --package gitlab.com/acme/my-package --registry corp-main
 ```
+
+## Package identity
+
+`--package` uses the same identity as `apm install` and the
+[Registry HTTP API](../../registry-http-api/#12-identity): the last part is
+`{repo}` and everything before it, including any host, is `{owner}`. A leading
+`https://` is dropped; the host is kept.
+
+| `--package` | Registry path |
+|---|---|
+| `acme/my-skill` | `/v1/packages/acme/my-skill/...` |
+| `gitlab.com/acme/my-skill` or `https://gitlab.com/acme/my-skill` | `/v1/packages/gitlab.com%2Facme/my-skill/...` |
+| `github.com/acme/my-skill` | `/v1/packages/github.com%2Facme/my-skill/...` |
+
+A host is part of the identity, so `acme/my-skill` and
+`github.com/acme/my-skill` are different packages. Publish with the same string
+consumers put in `id:` (a consumer writing `id: acme/my-skill` requests
+`acme/my-skill`).
 
 ## Output
 

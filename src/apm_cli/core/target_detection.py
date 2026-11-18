@@ -67,12 +67,16 @@ TargetType = Literal[
     "antigravity",
     "claude",
     "codex",
+    "copilot-app",
+    "copilot-cowork",
     "cursor",
     "gemini",
     "grok-bot",
     "grok-build",
+    "grok-cloud",
     "hermes",
     "kiro",
+    "openclaw",
     "opencode",
     "vscode",
     "windsurf",
@@ -125,6 +129,27 @@ UserTargetType = Literal[
 ]
 
 
+def _declared_target(value: str | None) -> TargetType | None:
+    """Resolve an explicit or configured target through the target catalog.
+
+    Copilot spellings and MCP-only targets route to the internal ``vscode``
+    value; every other catalog target keeps its canonical name, so targets
+    without root-context output (skills-only and experimental targets) are
+    honored instead of falling back to auto-detection (#3842).
+    """
+    if not value:
+        return None
+    if value == "all":
+        return "all"
+    try:
+        capability = get_target_capability(value)
+    except KeyError:
+        return None
+    if capability.compile_family == "vscode" or capability.mcp_only:
+        return "vscode"
+    return capability.name  # type: ignore[return-value]
+
+
 def detect_target(  # noqa: PLR0911
     project_root: Path,
     explicit_target: str | None = None,
@@ -143,69 +168,14 @@ def detect_target(  # noqa: PLR0911
         - reason: Human-readable explanation for the choice
     """
     # Priority 1: Explicit --target flag
-    if explicit_target:
-        if (
-            explicit_target in ("copilot", "vscode", "agents")
-            or explicit_target in MCP_ONLY_TARGETS
-        ):
-            return "vscode", "explicit --target flag"
-        elif explicit_target == "claude":
-            return "claude", "explicit --target flag"
-        elif explicit_target == "cursor":
-            return "cursor", "explicit --target flag"
-        elif explicit_target == "opencode":
-            return "opencode", "explicit --target flag"
-        elif explicit_target == "codex":
-            return "codex", "explicit --target flag"
-        elif explicit_target == "gemini":
-            return "gemini", "explicit --target flag"
-        elif explicit_target == "antigravity":
-            return "antigravity", "explicit --target flag"
-        elif explicit_target == "windsurf":
-            return "windsurf", "explicit --target flag"
-        elif explicit_target == "kiro":
-            return "kiro", "explicit --target flag"
-        elif explicit_target == "grok-bot":
-            return "grok-bot", "explicit --target flag"
-        elif explicit_target == "grok-build":
-            return "grok-build", "explicit --target flag"
-        elif explicit_target == "agent-skills":
-            return "agent-skills", "explicit --target flag"
-        elif explicit_target == "hermes":
-            return "hermes", "explicit --target flag"
-        elif explicit_target == "all":
-            return "all", "explicit --target flag"
+    declared = _declared_target(explicit_target)
+    if declared is not None:
+        return declared, "explicit --target flag"
 
     # Priority 2: apm.yml target setting
-    if config_target:
-        if config_target in ("copilot", "vscode", "agents") or config_target in MCP_ONLY_TARGETS:
-            return "vscode", "apm.yml target"
-        elif config_target == "claude":
-            return "claude", "apm.yml target"
-        elif config_target == "cursor":
-            return "cursor", "apm.yml target"
-        elif config_target == "opencode":
-            return "opencode", "apm.yml target"
-        elif config_target == "codex":
-            return "codex", "apm.yml target"
-        elif config_target == "gemini":
-            return "gemini", "apm.yml target"
-        elif config_target == "antigravity":
-            return "antigravity", "apm.yml target"
-        elif config_target == "windsurf":
-            return "windsurf", "apm.yml target"
-        elif config_target == "kiro":
-            return "kiro", "apm.yml target"
-        elif config_target == "grok-bot":
-            return "grok-bot", "apm.yml target"
-        elif config_target == "grok-build":
-            return "grok-build", "apm.yml target"
-        elif config_target == "agent-skills":
-            return "agent-skills", "apm.yml target"
-        elif config_target == "hermes":
-            return "hermes", "apm.yml target"
-        elif config_target == "all":
-            return "all", "apm.yml target"
+    declared = _declared_target(config_target)
+    if declared is not None:
+        return declared, "apm.yml target"
 
     # Priority 3: Auto-detect from existing folders
     github_exists = (project_root / ".github").exists()
@@ -291,6 +261,22 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "all",
         "minimal",
     )
+
+
+def target_without_compile_output(target: CompileTargetType | None) -> TargetCapability | None:
+    """Return the catalog capability when *target* has no root-context output.
+
+    Derived from ``TargetCapability.compile_family``: targets without a compile
+    family (skills-only and experimental targets) make ``apm compile`` a
+    successful no-op, so new catalog targets inherit the behavior.
+    """
+    if not isinstance(target, str):
+        return None
+    try:
+        capability = get_target_capability(target)
+    except KeyError:
+        return None
+    return capability if capability.compile_family is None else None
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -499,7 +485,9 @@ def manifest_targets_from_target_option(target: str | list[str] | None) -> list[
         expanded = expand_all("install") if raw_target == "all" else [str(raw_target)]
         for item in expanded:
             capability = get_target_capability(item)
-            canonical = capability.primitive_profile if item in capability.runtimes else item
+            canonical = (
+                capability.primitive_profile if item in capability.runtimes else capability.name
+            )
             if canonical in CANONICAL_TARGETS and canonical not in seen:
                 seen.add(canonical)
                 manifest_targets.append(canonical)

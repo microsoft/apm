@@ -845,6 +845,43 @@ def _report_protected_no_write(
     )
 
 
+def _coerce_provenance_targets(value: object) -> list[str]:
+    """Return the user-facing target names shown on the provenance line."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    if isinstance(value, list):
+        return [str(t) for t in value]
+    if isinstance(value, frozenset):
+        return sorted(value)
+    return []
+
+
+def _report_target_without_compile_output(
+    logger: CommandLogger, effective_target: CompileTargetType
+) -> bool:
+    """Report the no-op for a target without root-context output.
+
+    Returns True when *effective_target* compiles nothing, so the caller
+    stops before running the compiler. Experimental targets whose flag is
+    off also get the canonical enable hint.
+    """
+    from ...core.target_detection import target_without_compile_output
+    from ...install.target_hints import emit_disabled_experimental_target_hint
+
+    capability = target_without_compile_output(effective_target)
+    if capability is None:
+        return False
+    emit_disabled_experimental_target_hint(capability.name, (), logger, create_config=False)
+    logger.progress(
+        f"{capability.name} has no compile outputs -- skipping. "
+        f"Run 'apm install --target {capability.name}' to deploy to it.",
+        symbol="info",
+    )
+    return True
+
+
 @serialized_lifecycle_unless("dry_run")
 def _run_compilation(
     logger: CommandLogger,
@@ -898,17 +935,6 @@ def _run_compilation(
     # the user wrote (e.g. "copilot"), so compile must too, otherwise
     # parity drifts (compile would print "agents, vscode" for the
     # same input).
-    def _coerce_provenance_targets(value):
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [t.strip() for t in value.split(",") if t.strip()]
-        if isinstance(value, list):
-            return [str(t) for t in value]
-        if isinstance(value, frozenset):
-            return sorted(value)
-        return []
-
     if detection_reason == "explicit --target flag":
         _provenance_targets = _coerce_provenance_targets(target)
         _provenance_source = "--target flag"
@@ -935,6 +961,9 @@ def _run_compilation(
             ),
             symbol="info",
         )
+
+    if _report_target_without_compile_output(logger, effective_target):
+        return
 
     # Build config with distributed compilation flags (Task 7)
     config = CompilationConfig.from_apm_yml(

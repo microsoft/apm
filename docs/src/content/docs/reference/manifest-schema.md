@@ -54,6 +54,7 @@ type:          <enum>
 scripts:       <map<string, string>>
 includes:      <enum | list<string>>
 registries:    <map<string, RegistryEntry> & {default?: <string>}>
+default_host:  <string>                  # OPTIONAL; host for shorthand deps, see 3.15
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
@@ -166,7 +167,7 @@ actionable nudge (the authoring path only).
 | **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
 | **Default** | Auto-detect from filesystem signals (see below). [`apm compile -g`](../cli/compile/#global-compilation) instead writes every supported user-scope target when both fields are omitted. |
-| **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
+| **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `hermes`, `grok-bot`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
@@ -469,6 +470,25 @@ Unknown entry keys are rejected. Registering a marketplace does not install
 packages or grant trust. See
 [Declare marketplaces in your user manifest](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
 
+### 3.15. `default_host`
+
+| | |
+|---|---|
+| **Type** | `string` (bare hostname, e.g. `gitlab.com`) |
+| **Required** | OPTIONAL |
+| **Default** | The `GITHUB_HOST` environment variable, or `github.com` when it is unset. |
+| **Description** | Host that shorthand `owner/repo` dependencies in this manifest resolve against. When APM writes a dependency into this manifest, it shortens URLs on this host to `owner/repo` and keeps the FQDN of every other host. |
+
+```yaml
+default_host: gitlab.com
+dependencies:
+  apm:
+    - acme/standards            # https://gitlab.com/acme/standards
+    - github.com/acme/skills    # host-qualified entries are unaffected
+```
+
+The value MUST be a bare hostname: no scheme, port, or path. Each manifest uses its own value, so a dependency's `apm.yml` without `default_host:` falls back to the default above, not to the consumer's value. Normative contract: [req-mf-019](../../specs/openapm-v01/#req-mf-019).
+
 ---
 
 ## 4. Dependencies
@@ -507,7 +527,7 @@ When a default registry is configured - via `registries.default` in `apm.yml` or
 
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
-| `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
+| `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to the manifest's [`default_host`](#315-default_host), else `GITHUB_HOST`, else `github.com`. |
 | `port` | OPTIONAL | `1`-`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Also accepted in HTTPS shorthand as `host:PORT/owner/repo`; `:443` normalizes to no port. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._~-]+` on non-Azure-DevOps hosts; `[a-zA-Z0-9._\- ]+` (allows spaces, not tilde) on Azure DevOps | Repository path. GitHub uses exactly 2 segments. Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). Tilde supports Bitbucket Data Center personal-repo segments (`/scm/~user/repo.git`) and Sourcehut `~user` paths. |
 | `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory or file within the repo. See Section 4.1.3. |
@@ -696,7 +716,7 @@ Registry dependency (whole package or virtual sub-path):
   registry: jf-skills
   version: ^2.0.0
   skills: [deploy, lint]           # OPTIONAL - install only named skills (same as git-longhand)
-  targets: [docker]                # OPTIONAL - restrict deployment targets
+  targets: [claude]                # OPTIONAL - restrict deployment targets
 ```
 
 `id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. Range selection skips pre-release versions unless the range itself names a pre-release on the same `major.minor.patch` (for example `>=1.2.0-alpha <1.3.0` admits `1.2.0-beta` but not `1.3.0-beta`); an exact `version:` such as `1.3.0-beta.1` still selects that release. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.

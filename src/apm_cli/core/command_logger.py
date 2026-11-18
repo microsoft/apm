@@ -23,6 +23,7 @@ from apm_cli.utils.console import (
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
     from apm_cli.install.failure_residue import FailedInstallResidue
+    from apm_cli.policy.models import PolicyRemedy
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -839,6 +840,10 @@ class InstallLogger(CommandLogger):
         reason: str,
         severity: str,
         source: str | None = None,
+        *,
+        remedy: PolicyRemedy | None = None,
+        declared_by: str | None = None,
+        rule: str | None = None,
     ):
         """Record a policy violation for a dependency.
 
@@ -855,6 +860,14 @@ class InstallLogger(CommandLogger):
             source: Optional policy source (used for block-mode next-step
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
+            remedy: apm.yml edit the hint suggests, a
+                :class:`~apm_cli.policy.models.PolicyRemedy` member. ``None``
+                (the default) or any other value suggests no apm.yml edit.
+            declared_by: Direct apm.yml dependency (lock key) that brings
+                in a transitive MCP server; the hint names it instead of
+                *dep_ref*.
+            rule: Policy check (category) that fired, named in the hint
+                so the user can find the policy field.
         """
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
@@ -874,7 +887,10 @@ class InstallLogger(CommandLogger):
             _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
             if source:
                 _rich_echo(
-                    f"  {self._policy_reason_blocked(dep_ref, source)}",
+                    "  "
+                    + self._policy_reason_blocked(
+                        dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
+                    ),
                     color="dim",
                 )
 
@@ -916,11 +932,35 @@ class InstallLogger(CommandLogger):
         return f"Policy at {source} is malformed -- contact your org admin to fix the policy file"
 
     @staticmethod
-    def _policy_reason_blocked(dep_ref: str, source: str) -> str:
-        """Actionable reason for a blocked dependency."""
+    def _policy_reason_blocked(
+        dep_ref: str,
+        source: str,
+        *,
+        remedy: PolicyRemedy | None = None,
+        declared_by: str | None = None,
+        rule: str | None = None,
+    ) -> str:
+        """Actionable reason for a blocked dependency.
+
+        Only :class:`~apm_cli.policy.models.PolicyRemedy` members render an
+        apm.yml edit; ``None`` or an unknown remedy renders none.
+        """
+        from apm_cli.policy.models import PolicyRemedy
+
+        if remedy == PolicyRemedy.ADD:
+            edit = f"add `{dep_ref}` to apm.yml, "
+        elif remedy == PolicyRemedy.PIN:
+            edit = f"pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, "
+        elif remedy == PolicyRemedy.REMOVE and declared_by:
+            edit = f"remove `{declared_by}` (it brings in `{dep_ref}`) from apm.yml, "
+        elif remedy == PolicyRemedy.REMOVE:
+            edit = f"remove `{dep_ref}` from apm.yml, "
+        else:
+            edit = ""
+        rule_part = f" ({rule})" if rule and rule != dep_ref else ""
         return (
-            f"Blocked by org policy at {source} "
-            f"-- remove `{dep_ref}` from apm.yml, contact admin to update policy, "
+            f"Blocked by org policy at {source}{rule_part} "
+            f"-- {edit}contact admin to update policy, "
             "or use `--no-policy` for one-off bypass"
         )
 

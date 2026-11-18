@@ -1203,6 +1203,24 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A second git-remote origin read appears outside the single canonical reader.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-violation-subjects",
+        rule_id="install-deployment-policy-violation-subjects",
+        path="src/apm_cli/install/phases/policy_target_check.py",
+        old=(
+            "            emit_check_violations(\n"
+            "                ctx.logger,\n"
+            "                check,\n"
+            "                severity=severity,\n"
+        ),
+        new=(
+            "            ctx.logger.policy_violation(\n"
+            "                dep_ref=check.name,\n"
+            "                reason=check.message,\n"
+            "                severity=severity,\n"
+        ),
+        intent="An install policy phase reports the check name as the dependency (#3835).",
+    ),
+    MutationCase(
         guard_id="install-deployment-primitive-classification",
         rule_id="install-deployment-primitive-classification",
         path="src/apm_cli/install/primitive_classification.py",

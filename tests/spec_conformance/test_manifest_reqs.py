@@ -227,6 +227,43 @@ def test_consumer_supports_default_host_field():
     assert doc.get("default_host"), "fixture must exercise default_host"
 
 
+@pytest.mark.req("req-mf-019")
+def test_consumer_resolves_shorthand_against_manifest_default_host(tmp_path, monkeypatch):
+    """Shorthand resolves against ``default_host:``; other hosts keep their FQDN."""
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.github_host import manifest_default_host_scope
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    package = APMPackage.from_mapping(
+        {
+            "name": "p",
+            "version": "1.0.0",
+            "default_host": "gitlab.com",
+            "dependencies": {"apm": ["acme/x", "github.com/acme/y"]},
+        },
+        package_path=tmp_path,
+    )
+    shorthand, qualified = package.get_apm_dependencies()
+    assert (shorthand.host, shorthand.repo_url) == ("gitlab.com", "acme/x")
+    assert (qualified.host, qualified.repo_url) == ("github.com", "acme/y")
+
+    # Omitted: the declared implementation default (GITHUB_HOST, else github.com).
+    default = APMPackage.from_mapping(
+        {"name": "p", "version": "1.0.0", "dependencies": {"apm": ["acme/x"]}},
+        package_path=tmp_path,
+    )
+    assert default.get_apm_dependencies()[0].host == "github.com"
+
+    # req-mf-009 writer side: only the selected default host is stripped.
+    with manifest_default_host_scope("gitlab.com"):
+        assert DependencyReference.parse("git@gitlab.com:acme/x.git").to_apm_yml_entry() == (
+            "acme/x"
+        )
+        assert DependencyReference.parse("https://github.com/acme/y").to_apm_yml_entry() == (
+            "github.com/acme/y"
+        )
+
+
 @pytest.mark.req("req-mf-020")
 def test_consumer_enforces_yaml_safe_subset():
     """Anchors / aliases MUST be rejected by a conforming consumer.

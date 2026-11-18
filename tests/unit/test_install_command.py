@@ -499,9 +499,12 @@ class TestInstallCommandAutoBootstrap:
 
             # Should show what would be added
             assert result.exit_code == 0
-            assert "Would add" in result.output or "Dry run" in result.output
-            # Dry-run preserves the bootstrap configuration for the next run.
-            assert Path("apm.yml").exists()
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Created apm.yml" not in result.output
+            # Dry-run plans against a temporary manifest and writes nothing (#3836).
+            assert not Path("apm.yml").exists()
+            assert not Path("apm.lock.yaml").exists()
+            assert not Path("apm_modules").exists()
 
     def test_positional_local_package_dry_run_previews_validated_addition(self):
         """Dry-run renders a validated local addition without changing the project."""
@@ -528,6 +531,47 @@ class TestInstallCommandAutoBootstrap:
             assert not Path("apm.lock.yaml").exists()
             assert not Path("apm_modules").exists()
             assert not Path(".github").exists()
+
+    def test_local_package_dry_run_without_manifest_writes_nothing(self):
+        """Project-scope dry-run bootstrap plans against a temp manifest (#3836)."""
+        with self._chdir_tmp():
+            local_package = Path("local-package")
+            local_package.mkdir()
+            (local_package / "apm.yml").write_text(
+                "name: local-package\nversion: 1.0.0\n",
+                encoding="utf-8",
+            )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Dry run: Would set targets: claude (in apm.yml)" in result.output
+            assert "Created apm.yml" not in result.output
+            assert "./local-package" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["local-package"]
+
+    def test_dry_run_without_manifest_resolves_local_paths_from_project(self):
+        """The temp preview manifest must not move local-path resolution (#3836)."""
+        with self._chdir_tmp():
+            for name, deps in (
+                ("local-package", "dependencies:\n  apm:\n    - ../dep2\n"),
+                ("dep2", ""),
+            ):
+                Path(name).mkdir()
+                (Path(name) / "apm.yml").write_text(
+                    f"name: {name}\nversion: 1.0.0\n{deps}", encoding="utf-8"
+                )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "../dep2 -> install" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["dep2", "local-package"]
 
     def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
         """Dry-run renders and counts only the requested positional package."""

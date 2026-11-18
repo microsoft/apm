@@ -65,6 +65,11 @@ from .errors import (
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
+from .source_helpers import (
+    lockfile_refresh_command,
+    proxy_only_lock_entries,
+    ref_update_operation_label,
+)
 from .transaction import InstallTransaction, transactional_pipeline
 
 if TYPE_CHECKING:
@@ -282,7 +287,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                         f"\n    {exhausted}\n"
                         + auth_resolver.build_error_context(
                             host,
-                            "install --update",
+                            ref_update_operation_label(),
                             org=org,
                             dep_url=dep.repo_url,
                             attempts=exhausted.attempts,
@@ -326,7 +331,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                 _trace(f"Preflight: {host_display} -- auth rejected")
                 _diag = auth_resolver.build_error_context(
                     host,
-                    "install --update",
+                    ref_update_operation_label(),
                     org=org,
                     dep_url=dep.repo_url,
                     attempts=chain_attempts if dep.is_azure_devops() else None,
@@ -726,10 +731,12 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             # Conflict: registry-only mode requires all locked deps to route
             # through the configured proxy. Deps locked to direct VCS sources
-            # (github.com, GHE Cloud, GHES) are incompatible.
+            # (github.com, GHE Cloud, GHES) are incompatible. A ref update
+            # re-resolves its selection through the registry; only the
+            # entries it keeps as-is are checked.
             if registry_config and registry_config.enforce_only:
                 conflicts = registry_config.validate_lockfile_deps(
-                    builtins.list(existing_lockfile.dependencies.values())
+                    proxy_only_lock_entries(existing_lockfile, update_refs=update_refs, ctx=ctx)
                 )
                 if conflicts:
                     _rich_error(
@@ -743,7 +750,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             name = f"{name}/{dep.virtual_path}"
                         _rich_error(f"  - {name} (host: {host})")
                     _rich_error(
-                        "Re-run with 'apm install --update' to re-resolve "
+                        f"Run '{lockfile_refresh_command(scope)}' to re-resolve "
                         "through the registry, or unset PROXY_REGISTRY_ONLY."
                     )
                     raise InstallFailureAlreadyRendered(
@@ -752,15 +759,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             # Supply chain warning: registry-proxy entries without a
             # content_hash cannot be verified on re-install.
-            if registry_config and registry_config.enforce_only:
+            if registry_config and registry_config.enforce_only and not update_refs:
                 missing = registry_config.find_missing_hashes(
                     builtins.list(existing_lockfile.dependencies.values())
                 )
                 if missing:
                     diagnostics.warn(
                         "The following registry-proxy dependencies have no "
-                        "content_hash in the lockfile. Run 'apm install "
-                        "--update' to populate hashes for tamper detection.",
+                        f"content_hash in the lockfile. Run '{lockfile_refresh_command(scope)}' "
+                        "to populate hashes for tamper detection.",
                         package="lockfile",
                     )
                     for dep in missing[:10]:

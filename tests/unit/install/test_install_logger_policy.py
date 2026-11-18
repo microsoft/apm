@@ -14,9 +14,10 @@ import re
 from unittest.mock import call, patch  # noqa: F401
 from urllib.parse import urlsplit
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.policy.models import PolicyRemedy
 from apm_cli.utils.diagnostics import (
     _CATEGORY_ORDER,
     CATEGORY_POLICY,
@@ -264,6 +265,7 @@ class TestPolicyViolationBlockNextStep:
             reason="denied by pattern: acme/*",
             severity="block",
             source="org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
         )
         mock_error.assert_called_once()
         # Secondary dim line should mention apm.yml and --no-policy
@@ -671,11 +673,78 @@ class TestPolicyReasonHelpers:
         assert "org admin" in msg
 
     def test_reason_blocked(self):
-        msg = InstallLogger._policy_reason_blocked("acme/evil-pkg", "acme/.github/apm-policy.yml")
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/evil-pkg", "acme/.github/apm-policy.yml", remedy=PolicyRemedy.REMOVE
+        )
         assert "acme/evil-pkg" in msg
         assert "acme/.github/apm-policy.yml" in msg
         assert "--no-policy" in msg
         assert "apm.yml" in msg
+
+    def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "evil-srv",
+            "org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
+            declared_by="acme/parent-pkg",
+        )
+        assert "remove `acme/parent-pkg` (it brings in `evil-srv`) from apm.yml" in msg
+
+    def test_reason_blocked_cites_rule_as_category(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "github.com/evilcorp/bad-pkg",
+            "org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
+            rule="dependency-denylist",
+        )
+        assert msg.startswith("Blocked by org policy at org:acme/.github (dependency-denylist) --")
+        assert "remove `github.com/evilcorp/bad-pkg` from apm.yml" in msg
+        assert "remove `dependency-denylist`" not in msg
+
+    def test_reason_blocked_required_package_says_add(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/std", "org:acme/.github", remedy=PolicyRemedy.ADD
+        )
+        assert "add `acme/std` to apm.yml" in msg
+        assert "remove" not in msg
+
+    def test_reason_blocked_pin_says_pin(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/std", "org:acme/.github", remedy=PolicyRemedy.PIN
+        )
+        assert "pin `acme/std` to a semver range, tag, or SHA in apm.yml" in msg
+        assert "remove" not in msg
+
+    @pytest.mark.parametrize("remedy", [None, "delete", "bogus"])
+    def test_reason_blocked_unknown_remedy_never_defaults_to_remove(self, remedy):
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/evil-pkg", "org:acme/.github", remedy=remedy, declared_by="acme/parent"
+        )
+        assert "remove" not in msg
+        assert "apm.yml" not in msg
+        assert "--no-policy" in msg
+
+    def test_reason_blocked_default_remedy_suggests_no_apm_yml_edit(self):
+        msg = InstallLogger._policy_reason_blocked("acme/evil-pkg", "org:acme/.github")
+        assert "apm.yml" not in msg
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_policy_violation_without_remedy_renders_no_remove(self, _error, mock_echo):
+        InstallLogger().policy_violation(
+            dep_ref="acme/evil", reason="denied", severity="block", source="org:acme/.github"
+        )
+        dim_text = mock_echo.call_args[0][0]
+        assert "remove" not in dim_text
+        assert "apm.yml" not in dim_text
+
+    def test_reason_blocked_without_remedy_suggests_no_apm_yml_edit(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "compilation-target", "org:acme/.github", remedy=None
+        )
+        assert "compilation-target" not in msg
+        assert "apm.yml" not in msg
+        assert "--no-policy" in msg
 
 
 # ── _render_policy_group (via DiagnosticCollector.render_summary) ───

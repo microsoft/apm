@@ -278,14 +278,14 @@ def test_post_pack_catalog_emits_artifacts_and_docs_url() -> None:
             cleaned = token.strip("(),.;'\"")
             if "://" not in cleaned:
                 continue
-            if "publish-to-a-marketplace" in urlparse(cleaned).path:
+            if "installing-from-marketplaces" in urlparse(cleaned).path:
                 docs_urls.append(cleaned)
     assert len(docs_urls) == 1, f"expected exactly one docs URL, got {docs_urls!r}"
     parsed = urlparse(docs_urls[0])
     assert parsed.scheme == "https"
     assert parsed.hostname == "microsoft.github.io"
-    assert parsed.path == "/apm/producer/publish-to-a-marketplace/"
-    assert parsed.fragment == "consume-from-any-assistant"
+    assert parsed.path == "/apm/consumer/installing-from-marketplaces/"
+    assert parsed.fragment == "install-patterns"
 
 
 def test_post_pack_catalog_suppressed_in_dry_run() -> None:

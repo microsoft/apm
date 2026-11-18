@@ -56,8 +56,7 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 | `--trust-transitive-mcp` | off | Trust self-defined MCP servers declared by transitive packages for this run, as with `apm install`. Servers recorded in `apm.lock.yaml` are not trusted again without it. |
 | `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
-
-`apm update` has no `--legacy-skill-paths` flag and ignores `APM_LEGACY_SKILL_PATHS`: refreshed skills deploy to the converged `.agents/skills/` root. Use [`apm deps update --legacy-skill-paths`](../deps/#apm-deps-update) to keep per-client skill paths ([#3841](https://github.com/microsoft/apm/issues/3841)).
+| `--legacy-skill-paths` | off | Keep refreshed skills in per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Pass it when the project was installed with `apm install --legacy-skill-paths`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 ## Examples
 

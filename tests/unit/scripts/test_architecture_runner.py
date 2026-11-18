@@ -666,6 +666,7 @@ install-deployment-plugin-bin-eligibility
 install-deployment-policy-disable-switch-owner
 install-deployment-policy-mcp-transport-projection
 install-deployment-policy-remote-origin-owner
+install-deployment-policy-violation-subjects
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state

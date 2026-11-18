@@ -44,6 +44,8 @@ Flags
   for multiple targets. The generated command help lists every accepted
   value. Overrides ``apm.yml targets:``, the saved config target, and
   auto-detection.
+* ``--legacy-skill-paths`` -- keep per-client skill paths instead of
+  ``.agents/skills/`` (env fallback: ``APM_LEGACY_SKILL_PATHS``).
 
 These flags make ``apm update`` a strict superset of the deprecated
 ``apm deps update`` (issue #1525). ``apm install --update`` remains the
@@ -460,7 +462,10 @@ def _handle_service_only_update(
     "check_only",
     is_flag=True,
     default=False,
-    help="(Deprecated) Forwarded to 'apm self-update --check' when run outside an apm.yml project; rejected inside a project.",
+    help=(
+        "(Deprecated) Forwarded to 'apm self-update --check' (ignored with --global). "
+        "Use 'apm update --dry-run' to preview dependency changes."
+    ),
     hidden=True,
 )
 @click.option(
@@ -473,6 +478,16 @@ def _handle_service_only_update(
         "Comma-separated for multiple: --target claude,cursor. "
         "Highest-priority entry in the resolution chain "
         "(--target > apm.yml targets: > apm config set target ... > auto-detect)."
+    ),
+)
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Env: APM_LEGACY_SKILL_PATHS=1."
     ),
 )
 @trust_transitive_mcp_option
@@ -489,6 +504,7 @@ def update(
     parallel_downloads: int,
     check_only: bool,
     target: str | list[str] | None,
+    legacy_skill_paths: bool,
     trust_transitive_mcp: bool,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
@@ -501,6 +517,7 @@ def update(
         apm update -g                   # Refresh user-scope deps (~/.apm/)
     """
     from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.integration.targets import should_use_legacy_skill_paths
 
     if global_:
         # User scope: operate on $APM_HOME/apm.yml. The cwd manifest walk and
@@ -579,6 +596,7 @@ def update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        legacy_skill_paths=legacy_skill_paths or should_use_legacy_skill_paths(),
         trust_transitive_mcp=trust_transitive_mcp,
     )
 
@@ -594,6 +612,7 @@ def _run_dep_update(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    legacy_skill_paths: bool = False,
     trust_transitive_mcp: bool = False,
 ) -> None:
     """Serialize update with every other mutation of the same workspace."""
@@ -610,6 +629,7 @@ def _run_dep_update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        legacy_skill_paths=legacy_skill_paths,
         trust_transitive_mcp=trust_transitive_mcp,
     )
 
@@ -625,6 +645,7 @@ def _run_dep_update_locked(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    legacy_skill_paths: bool = False,
     trust_transitive_mcp: bool = False,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
@@ -635,8 +656,9 @@ def _run_dep_update_locked(
     against the discovered project root, not the caller's cwd.
 
     ``scope`` selects project vs user deployment (defaults to project).
-    ``packages`` narrows the refresh to the named dependencies; ``force``
-    and ``parallel_downloads`` mirror the install-pipeline flags.
+    ``packages`` narrows the refresh to the named dependencies; ``force``,
+    ``parallel_downloads`` and ``legacy_skill_paths`` mirror the
+    install-pipeline flags.
     """
     import os
 
@@ -843,6 +865,7 @@ def _run_dep_update_locked(
             logger=logger,
             plan_callback=_plan_callback,
             target=target,
+            legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
         )
     except FrozenInstallError as e:

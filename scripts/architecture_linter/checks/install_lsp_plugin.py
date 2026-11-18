@@ -128,7 +128,7 @@ _CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {
     _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
     _APPROVE_COMMAND: ("data = load_manifest(manifest)",),
     _COMMAND_HELPERS: ("return load_manifest(APM_YML_FILENAME)",),
-    _INSTALL_COMMAND: ("data = load_manifest_roundtrip(apm_yml_path) or {}",),
+    _INSTALL_COMMAND: ("data, manifest_host = _load_manifest_for_add(apm_yml_path, logger)",),
     _ADOPT_MANIFEST_EDIT: ("data = load_manifest_roundtrip(path)",),
     _MCP_WRITER: (
         "data = load_manifest_roundtrip(apm_yml_path) or {}",
@@ -139,7 +139,10 @@ _CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {
         "data = load_manifest_roundtrip(manifest_path)",
         "dump_yaml_roundtrip(data, manifest_path)",
     ),
-    _MANIFEST_HELPERS: ("dump_yaml_roundtrip(data, apm_yml_path)",),
+    _MANIFEST_HELPERS: (
+        "data = load_manifest_roundtrip(apm_yml_path) or {}",
+        "dump_yaml_roundtrip(data, apm_yml_path)",
+    ),
     _UNINSTALL_COMMAND: (
         "data = load_manifest_roundtrip(apm_yml_path) or {}",
         "dump_yaml_roundtrip(data, apm_yml_path)",

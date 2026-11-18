@@ -238,7 +238,8 @@ def install_local_bundle(
                 )
             logger.warning(
                 "Bundle has no apm.lock.yaml -- skipping integrity check. "
-                "This bundle was produced by an older APM version."
+                "It was produced by an older APM version or by another tool; "
+                "repack it with 'apm pack' to embed an integrity manifest."
             )
         else:
             errors = verify_bundle_integrity(bundle_info.source_dir, bundle_info.lockfile)

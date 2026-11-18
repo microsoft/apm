@@ -160,6 +160,22 @@ def _sync_integrations_for_manifest(
         return default_outcome, sync_err
 
 
+def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) -> None:
+    """Resolve shorthand against the manifest's ``default_host`` (req-mf-019, #3843).
+
+    Uninstall must parse declarations exactly as ``apm install`` recorded them,
+    so ``apm uninstall acme/x`` finds the ``gitlab.com/acme/x`` lock entry.
+    """
+    from ...models.dependency.manifest_host import manifest_host_scope_for
+
+    try:
+        scope = manifest_host_scope_for(data)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    stack.enter_context(scope)
+
+
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     """Ensure dependency sections exist and return their mutable list views."""
     if "dependencies" not in data:
@@ -480,6 +496,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     staged_local_refreshes = {}
     apm_package = None
     registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
+    host_scope = contextlib.ExitStack()
     try:
         # Check if apm.yml exists
         if not manifest_path.exists():
@@ -511,6 +528,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         except Exception as e:
             logger.error(f"Failed to read {apm_yml_path}: {e}")
             sys.exit(1)
+        _enter_manifest_host_scope(host_scope, data, logger)
 
         # Track whether devDependencies was synthesised so we don't leave
         # an empty section behind for projects that never used --dev.
@@ -989,6 +1007,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.error(f"Error uninstalling packages: {e}")
         sys.exit(1)
     finally:
+        host_scope.close()
         _retire_native_registration(registration_token)
         _cleanup_staged_local_refreshes(staged_local_refreshes, modules_dir)
 

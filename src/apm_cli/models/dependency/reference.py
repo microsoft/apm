@@ -53,6 +53,7 @@ from .identity import (
     normalize_package_repo_url,
     normalize_policy_host,
 )
+from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
 from .object_fields import (
     apply_optional_dependency_fields,
@@ -423,24 +424,25 @@ class DependencyReference(ProviderCoordinateMixin):
             return f"local:{self.anchored_local_path}"
         return self.get_unique_key()
 
-    def _format_reference(self, repo_url: str) -> str:
-        """Format one scheme-free reference from the supplied repository path."""
+    def _format_reference(self, repo_url: str, *, manifest_form: bool = True) -> str:
+        """Format a scheme-free reference; *manifest_form* strips the manifest's host."""
         if self.is_local and self.local_path:
             return self.local_path
 
         host = self.host or default_host()
-        is_default = host.lower() == default_host().lower()
         host_label = f"{host}:{self.port}" if self.port else host
-
-        if is_default and not self.port and not self.artifactory_prefix:
-            result = repo_url
-        elif self.artifactory_prefix:
-            result = f"{host_label}/{self.artifactory_prefix}/{repo_url}"
-        else:
-            result = f"{host_label}/{repo_url}"
-
+        result = repo_url
         if self.is_virtual and self.virtual_path:
             result = f"{result}/{self.virtual_path}"
+
+        if self.artifactory_prefix:
+            result = f"{host_label}/{self.artifactory_prefix}/{result}"
+        elif self.port or not (
+            manifest_host_strips(host, result)
+            if manifest_form
+            else host.lower() == default_host().lower()
+        ):
+            result = f"{host_label}/{result}"
         if self.reference:
             result = f"{result}#{self.reference}"
         return result
@@ -462,10 +464,10 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             str: Canonical dependency string
         """
-        return self._format_reference(self.canonical_repo_url)
+        return self._format_reference(self.canonical_repo_url, manifest_form=False)
 
     def to_display_reference(self) -> str:
-        """Return a portable reference retaining source repository casing."""
+        """Return the apm.yml form (source casing; strips the manifest's default host)."""
         return self._format_reference(self.repo_url)
 
     def get_identity(self) -> str:
@@ -1890,6 +1892,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         cls._reject_shorthand_alias(dependency_str)
         reject_unsupported_ado_server_base_path(dependency_str)
+        dependency_str = qualify_manifest_shorthand(dependency_str)  # req-mf-019
 
         cls.parse_host_qualified_reference(dependency_str)
 

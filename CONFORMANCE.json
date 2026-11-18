@@ -645,8 +645,9 @@
       "keyword": "MUST",
       "section": "4.2.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_shorthand_against_manifest_default_host",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_default_host_field"
       ]
     },
@@ -837,9 +838,13 @@
       "keyword": "MUST",
       "section": "6.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_resolves_relative_to_policy_root"
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_resolves_relative_to_policy_root",
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_fetch_failure_merges_stricter_wins[block-None-block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_fetch_failure_merges_stricter_wins[block-warn-block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_fetch_failure_merges_stricter_wins[warn-block-block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_fetch_failure_merges_stricter_wins[warn-warn-warn]"
       ]
     },
     {

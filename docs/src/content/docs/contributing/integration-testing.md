@@ -678,7 +678,7 @@ Promotion integration tests run on:
 
 ### **Cost Efficiency**
 - Smoke tests use no API credits
-- E2E tests only run on releases (minimizing API usage)
+- E2E tests run in the merge queue and promotion runs, not on every PR push (minimizing API usage)
 - Manual workflow dispatch for test builds without publishing
 
 ### **Platform Coverage**

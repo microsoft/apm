@@ -138,14 +138,13 @@ dependencies:
 Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 
 ```text
-[x] Policy violation: dependency-pinned-constraint
-    4 dependency(ies) use unbounded constraints
-    (hint: pin to a semver range, literal tag, or SHA)
-    - acme/skills: no ref; resolves to default branch
-    - other/lib: unbounded upper; pair with '<X.Y' or use a caret range
-    - third/lib: wildcard '*' matches any version
-    - acme/lib: bare branch 'main' tracks a moving tip
+[x] Policy violation: acme/lib -- bare branch 'main' tracks a moving tip
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/lib` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Policy violation: acme/skills -- no ref; resolves to default branch
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/skills` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 ```
+
+`apm audit --ci` lists the same dependencies under `dependency-pinned-constraint details:`.
 
 A range is classified as the author wrote it: `fourth/lib#^1.2.0` stays `OK` after the install selects `v1.4.0` for it, and `acme/lib#main` stays `FAIL` whatever commit it resolves to. The package name used for `{name}-v{version}` and `{name}--v{version}` tags is the final path segment of a subdirectory dependency, otherwise the repository name. An exact `name@X.Y.Z` or `@scope/name@X.Y.Z` tag (optional `v`, semver prerelease/build allowed, at most one scope segment) counts for any name, because monorepo tags often name the published package rather than the directory. `release@next`, `feature/x@1.2.3`, `name@^1.2.0` and `name@1.x` are not exact releases and still fail. The check judges declared release intent, not immutability: a tag can be moved. Replaying a committed lockfile with `apm install --frozen` installs the locked commit; [`security.integrity.require_hashes`](#integrity-and-drift-enforcement) only requires every locked entry to carry a content hash, so an update can still record a moved tag's new commit.
 

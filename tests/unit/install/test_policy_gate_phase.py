@@ -365,6 +365,38 @@ class TestEnforcementBlock:
         )
 
 
+class TestViolationNamesDependency:
+    """#3835: each violation names the offending dependency, not the check."""
+
+    @patch(_PATCH_DISCOVER)
+    def test_block_violation_names_each_denied_dependency(self, mock_discover):
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        policy = ApmPolicy(
+            enforcement="block",
+            dependencies=DependencyPolicy(deny=("evilcorp/*",)),
+        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy)
+        deps = [
+            DependencyReference.parse("evilcorp/bad-pkg"),
+            DependencyReference.parse("evilcorp/worse-pkg"),
+            DependencyReference.parse("acme/good-pkg"),
+        ]
+        ctx = _make_ctx(deps=deps)
+
+        with pytest.raises(PolicyViolationError):
+            run(ctx)
+
+        calls = [c.kwargs for c in ctx.logger.policy_violation.call_args_list]
+        assert [c["dep_ref"] for c in calls] == [
+            "github.com/evilcorp/bad-pkg",
+            "github.com/evilcorp/worse-pkg",
+        ]
+        assert all(c["reason"] == "denied by pattern: evilcorp/*" for c in calls)
+        assert all(c["remedy"] == "remove" for c in calls)
+        assert all(c["rule"] == "dependency-denylist" for c in calls)
+
+
 class TestEnforcementWarn:
     """enforcement=warn + denied dep -> warn diagnostic, does NOT raise."""
 

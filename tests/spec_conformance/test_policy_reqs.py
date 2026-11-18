@@ -271,6 +271,26 @@ def test_policy_extends_resolves_relative_to_policy_root():
     )
 
 
+@pytest.mark.req("req-pl-006")
+@pytest.mark.parametrize(
+    ("parent", "child", "expected"),
+    [
+        ("block", "warn", "block"),
+        ("block", None, "block"),
+        ("warn", "block", "block"),
+        ("warn", "warn", "warn"),
+    ],
+)
+def test_policy_fetch_failure_merges_stricter_wins(parent, child, expected):
+    from apm_cli.policy.inheritance import merge_policies
+    from apm_cli.policy.schema import ApmPolicy
+
+    assert_spec_contains("Stricter wins (`block` > `warn`; unset is the `warn` default)")
+    child_policy = ApmPolicy() if child is None else ApmPolicy(fetch_failure=child)
+    merged = merge_policies(ApmPolicy(fetch_failure=parent), child_policy)
+    assert merged.fetch_failure == expected
+
+
 @pytest.mark.req("req-pl-007")
 def test_policy_supports_allow_action():
     from apm_cli.policy.parser import load_policy

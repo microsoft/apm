@@ -281,12 +281,30 @@ class TestCaseBScopedInstructions:
 class TestInfoLogMessage:
     """AGENTS.md not generated: INFO message emitted via the CommandLogger."""
 
-    def test_info_message_logged_when_suppression_fires(self, tmp_path: Path):
-        """When dedup suppresses all placements, an INFO-style log is emitted."""
-        # Create .github/instructions/ with a markdown file
-        gh_instr_dir = tmp_path / ".github" / "instructions"
+    @pytest.mark.parametrize(
+        ("target", "rules_dir", "rules_filename", "coverage"),
+        [
+            (
+                "vscode",
+                ".github/instructions",
+                "global.instructions.md",
+                ".github/instructions/ already covers Copilot",
+            ),
+            (
+                "antigravity",
+                ".agents/rules",
+                "global.md",
+                ".agents/rules/ already covers Antigravity",
+            ),
+        ],
+    )
+    def test_info_message_logged_when_suppression_fires(
+        self, tmp_path: Path, target: str, rules_dir: str, rules_filename: str, coverage: str
+    ):
+        """When dedup suppresses all placements, the INFO log names the real rules dir."""
+        gh_instr_dir = tmp_path / rules_dir
         gh_instr_dir.mkdir(parents=True)
-        (gh_instr_dir / "global.instructions.md").write_text(
+        (gh_instr_dir / rules_filename).write_text(
             "---\ndescription: Global\n---\nGlobal guidance.\n",
             encoding="utf-8",
         )
@@ -326,12 +344,12 @@ class TestInfoLogMessage:
                 pass
 
         compiler = AgentsCompiler(str(tmp_path))
-        config = CompilationConfig(target="vscode", dry_run=False)
+        config = CompilationConfig(target=target, dry_run=False)
         result = compiler.compile(config, primitives, logger=_MockLogger())
 
         assert result.success
-        assert any("not generated" in m and "instructions/" in m for m in logged_messages), (
-            "Expected INFO message containing 'not generated' and 'instructions/'.\n"
+        assert any("not generated" in m and coverage in m for m in logged_messages), (
+            f"Expected INFO message containing 'not generated' and {coverage!r}.\n"
             f"Logged messages: {logged_messages}"
         )
 

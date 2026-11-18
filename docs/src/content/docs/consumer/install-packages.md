@@ -216,7 +216,7 @@ apm install --target claude,cursor     # only deploy to these harnesses
 apm install --exclude gemini           # skip gemini MCP/LSP config writes
 apm install --only apm                 # skip MCP server integration this run
 apm install --frozen                   # CI: lockfile-only; fail on drift
-apm install --update                   # resolve current upstream refs
+apm install --update                   # deprecated: use apm update
 apm install --refresh                  # resolve refs and bypass cached content
 apm install --force                    # collision/security override; no ref refresh
 apm install --dev                      # treat positional args as devDependencies

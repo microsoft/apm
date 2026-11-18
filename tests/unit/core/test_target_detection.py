@@ -898,6 +898,12 @@ class TestTargetParamType:
             assert target == "agent-skills"
             assert reason == "apm.yml target"
 
+    @pytest.mark.parametrize("name", sorted(EXPERIMENTAL_TARGETS))
+    def test_explicit_experimental_target_is_honored(self, name, tmp_path):
+        """Experimental targets are not replaced by folder auto-detection (#3842)."""
+        (tmp_path / ".claude").mkdir()
+        assert detect_target(tmp_path, explicit_target=name) == (name, "explicit --target flag")
+
     # -- B2: 'all,agent-skills' is allowed; 'all,claude' still rejected ----
 
     def test_all_combined_with_agent_skills_allowed(self):

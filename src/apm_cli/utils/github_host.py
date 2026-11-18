@@ -3,6 +3,9 @@
 import os
 import re
 import urllib.parse
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 _ADO_SERVER_BASE_PATH_ERROR = (
     "Azure DevOps Server URLs mounted below '/tfs/' are not currently "
@@ -65,6 +68,58 @@ def _is_valid_ado_server_fqdn(hostname: str) -> bool:
 def default_host() -> str:
     """Return the default Git host (can be overridden via GITHUB_HOST env var)."""
     return os.environ.get("GITHUB_HOST", "github.com")
+
+
+# ``default_host:`` of the manifest whose dependency entries are being read or
+# written. Set only through :func:`manifest_default_host_scope`, which callers
+# enter via ``apm_cli.models.dependency.manifest_host.manifest_host_scope_for``.
+_MANIFEST_DEFAULT_HOST: ContextVar[str | None] = ContextVar(
+    "apm_manifest_default_host", default=None
+)
+
+
+def shorthand_default_host() -> str:
+    """Return the host that shorthand ``owner/repo`` dependencies resolve to.
+
+    Precedence: the ``default_host:`` of the manifest being read (only inside
+    :func:`manifest_default_host_scope`) > ``GITHUB_HOST`` > ``github.com``.
+    ``apm_cli.models.dependency.manifest_host`` owns how shorthand is parsed
+    and written under it (OpenAPM req-mf-009 / req-mf-019). Auth and
+    transport decisions keep using :func:`default_host`.
+    """
+    return _MANIFEST_DEFAULT_HOST.get() or default_host()
+
+
+def validate_manifest_default_host(value: object) -> str | None:
+    """Validate an apm.yml ``default_host:`` value; return it lowercased.
+
+    ``None`` means the field is absent. Anything other than a bare hostname
+    (no scheme, port, path, or credentials) raises ``ValueError``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and is_valid_fqdn(value) and "/" not in value:
+        return value.lower()
+    raise ValueError(
+        f"Invalid 'default_host' in apm.yml: expected a bare hostname such as "
+        f"'gitlab.com' (no scheme, port, or path), got {value!r}"
+    )
+
+
+@contextmanager
+def manifest_default_host_scope(host: str | None) -> Iterator[None]:
+    """Resolve shorthand dependencies against a manifest's ``default_host``.
+
+    *host* must already be validated by :func:`validate_manifest_default_host`.
+    ``None`` restores the implementation default (``GITHUB_HOST`` or
+    ``github.com``) so a nested manifest without the field never inherits its
+    parent's value.
+    """
+    token = _MANIFEST_DEFAULT_HOST.set(host)
+    try:
+        yield
+    finally:
+        _MANIFEST_DEFAULT_HOST.reset(token)
 
 
 def is_azure_devops_hostname(hostname: str | None) -> bool:

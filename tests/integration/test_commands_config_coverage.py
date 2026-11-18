@@ -451,7 +451,8 @@ class TestConfigGet:
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
             result = runner.invoke(cli, ["config", "get"])
         assert result.exit_code == 0
-        assert "auto-integrate:" in result.output
+        assert "temp-dir:" in result.output
+        assert "auto-integrate" not in result.output
 
     def test_get_registry_url_requires_flag(self, runner: CliRunner, isolated_config: Path) -> None:
         """apm config get registry.<name>.url exits non-zero when flag is off."""
