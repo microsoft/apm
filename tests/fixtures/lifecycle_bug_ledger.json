@@ -346,6 +346,21 @@
       ]
     },
     {
+      "issue": 3726,
+      "fixed_in": "0.36.1",
+      "summary": "A registry behind a gateway that answers with a same-origin redirect failed install and lock replay, because every redirect was refused instead of following those that stay inside the configured registry.",
+      "failure_modes": ["auth", "routing"],
+      "properties": ["auth.credentials_isolated", "lockfile.frozen_preserves_bytes"],
+      "regression_tests": [
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_install_follows_same_origin_gateway_redirect",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_install_refuses_redirect_outside_configured_registry",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_lock_replay_follows_same_origin_redirect_without_lock_churn",
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_registry_lock_replays_resolved_url_without_churn",
+        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_lookalike_redirect_targets",
+        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_follows_case_only_host_difference"
+      ]
+    },
+    {
       "issue": 3752,
       "fixed_in": "0.36.1",
       "summary": "Azure DevOps installs, validation, lock replay and update ignored the Git credential helper when no ADO_APM_PAT or Azure CLI token was available, although git clone succeeded with the same helper.",
@@ -355,7 +370,8 @@
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_cli_install_uses_credential_helper_without_pat_or_az",
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_manifest_install_frozen_update_outdated_through_credential_helper",
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_user_scope_install_through_credential_helper",
-        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_pat_keeps_precedence_over_credential_helper"
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_pat_keeps_precedence_over_credential_helper",
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_ado_lock_replays_frozen_and_updates_through_credential_helper"
       ]
     },
     {
