@@ -44,6 +44,16 @@ def test_partition_keeps_groups_whole_and_every_node_once() -> None:
         assert list(shard) == [item for item in items if item in shard]
 
 
+def test_composite_group_names_match_xdist_labels() -> None:
+    first = _item("a", pytest.mark.xdist_group("home"), pytest.mark.xdist_group(name="env"))
+    second = _item("b", pytest.mark.xdist_group("env_home"))
+    third = _item("c", pytest.mark.xdist_group("home"), pytest.mark.xdist_group("env"))
+
+    result = ci_sharding.partition([first, second, third, _item("d"), _item("e")], 2)
+
+    assert any(set(_ids(shard)) >= {"a", "b", "c"} for shard in result.shards)
+
+
 def test_modules_stay_whole_unless_too_heavy_for_one_shard() -> None:
     light = [_item(f"tests/test_light_{m}.py::t{i}") for m in range(6) for i in range(5)]
     heavy = [_item(f"tests/test_heavy.py::t{i}") for i in range(40)]
