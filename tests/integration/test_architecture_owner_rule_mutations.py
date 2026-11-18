@@ -3498,6 +3498,18 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
             "        sequence = legacy_value.copy() if legacy_value.anchor.value else legacy_value\n",
             id="migrate-rewrites-anchored-list",
         ),
+        pytest.param(
+            "src/apm_cli/utils/yaml_io.py",
+            "data, Dumper=_NoAliasSafeDumper,",
+            "data, Dumper=yaml.SafeDumper,",
+            id="yaml-writer-emits-anchors",
+        ),
+        pytest.param(
+            "src/apm_cli/utils/yaml_io.py",
+            "    rt.representer.ignore_aliases = lambda _data: True\n",
+            "",
+            id="roundtrip-writer-emits-anchors",
+        ),
     ],
 )
 def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, new: str) -> None:

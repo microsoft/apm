@@ -411,7 +411,11 @@ def read_manifest_target_declaration(
         return None
     if not manifest_path.is_file():
         raise OSError(f"{manifest_path.name} must be a regular, non-symlink file")
-    data = load_manifest(manifest_path)
+    try:
+        data = load_manifest(manifest_path)
+    except UnicodeDecodeError as exc:
+        # Same contract as the bounded YAML loader: undecodable bytes are YAML errors.
+        raise yaml.YAMLError(f"UnicodeDecodeError: {exc}") from exc
     if not isinstance(data, Mapping):
         got = "an empty document" if data is None else str(type(data))
         raise yaml.YAMLError(f"{manifest_path.name} must contain a YAML object, got {got}")

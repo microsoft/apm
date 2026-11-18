@@ -40,6 +40,7 @@ _HOOK_INTEGRATOR = "src/apm_cli/integration/hook_integrator.py"
 _AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
 _MANIFEST_TARGETS = "src/apm_cli/models/manifest_targets.py"
 _TARGET_MIGRATION = "src/apm_cli/models/manifest_target_migration.py"
+_YAML_IO = "src/apm_cli/utils/yaml_io.py"
 # Anchors are refused on read (req-mf-020(b), #3858), so no rewrite may keep one.
 _ANCHOR_REWRITE_TOKENS = (".anchor.value", "_detached_sequence")
 
@@ -117,6 +118,11 @@ _CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {
         "def load_manifest_roundtrip(",
     ),
     _MANIFEST_TARGETS: ("data = load_manifest(manifest_path)",),
+    # Writers never emit the anchors the read owner refuses.
+    _YAML_IO: (
+        "data, Dumper=_NoAliasSafeDumper,",
+        "rt.representer.ignore_aliases = lambda _data: True",
+    ),
     _TARGET_MIGRATION: ("text = read_manifest_text(path)",),
     _AUDIT_COMMAND: ("read_manifest_text(manifest_path)",),
     _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
