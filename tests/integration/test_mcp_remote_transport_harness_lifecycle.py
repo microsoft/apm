@@ -2,9 +2,8 @@
 
 Covers #3736 (registry v0.1 ``remotes[].type`` ignored), #3711 part 2
 (Antigravity needs ``serverUrl`` and cannot use SSE) and the per-harness SSE
-rows of the approved shape table (Copilot, Claude, VS Code, Gemini, Codex).
-The Hermes row lands with #3749, which adds ``hermes`` back to the harness
-tuples below (its expectation is already written). Harnesses outside the changed rows (Cursor, Kiro, OpenCode, Windsurf)
+rows of the approved shape table (Copilot, Claude, VS Code, Gemini, Codex,
+Hermes per #3749). Harnesses outside the changed rows (Cursor, Kiro, OpenCode, Windsurf)
 are regression locks: their v0.36.0 bytes must not move.
 
 Every scenario drives the installed ``apm`` binary against a temp HOME and a
@@ -31,7 +30,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm
 _REGISTRY_NAME = "io.github.apm-fixture/remote-fixture"
 _SHORT_NAME = "remote-fixture"
 _URL = "https://mcp.example.invalid/endpoint"
-_CHANGED = ("vscode", "copilot", "claude", "gemini", "antigravity", "codex")
+_CHANGED = ("vscode", "copilot", "claude", "gemini", "antigravity", "codex", "hermes")
 _UNSUPPORTED_SSE = {"antigravity", "codex"}
 
 
@@ -84,7 +83,7 @@ def _assert_remote_entry(
         if transport == "sse":
             assert entry.get("transport") == "sse", f"hermes: {entry}"
         else:
-            assert entry.get("transport") in (None, "http", "streamable-http"), entry
+            assert "transport" not in entry, f"hermes: {entry}"
     else:  # pragma: no cover - table guard
         raise AssertionError(f"no expectation for {harness}")
 
@@ -138,7 +137,7 @@ def test_legacy_transport_type_sse_still_renders_as_sse(scene: HarnessScene) -> 
         registry_document(_REGISTRY_NAME, _URL, transport_key="transport_type", transport="sse")
     )
     scene.write_manifest([{"name": _REGISTRY_NAME, "registry": registry}], user=False)
-    harnesses = ("copilot", "claude", "gemini", "codex")
+    harnesses = ("copilot", "claude", "gemini", "codex", "hermes")
 
     result = scene.install(",".join(harnesses), user=False)
 
@@ -153,7 +152,7 @@ def test_registry_remote_without_transport_defaults_to_streamable_http(
     """A remote with no transport field keeps today's streamable-http default."""
     registry = scene.start_registry(registry_document(_REGISTRY_NAME, _URL, transport=None))
     scene.write_manifest([{"name": _REGISTRY_NAME, "registry": registry}], user=False)
-    harnesses = ("copilot", "claude", "gemini", "codex")
+    harnesses = ("copilot", "claude", "gemini", "codex", "hermes")
 
     result = scene.install(",".join(harnesses), user=False)
 

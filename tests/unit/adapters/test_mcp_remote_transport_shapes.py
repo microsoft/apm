@@ -106,7 +106,7 @@ _GOLDEN = {
     ("codex", "streamable-http"): {"url": _URL},
     ("codex", "sse"): None,
     ("hermes", "streamable-http"): {"url": _URL},
-    ("hermes", "sse"): {"url": _URL},
+    ("hermes", "sse"): {"transport": "sse", "url": _URL},
     ("opencode", "streamable-http"): {"type": "remote", "url": _URL},
     ("opencode", "sse"): {"type": "remote", "url": _URL},
     ("kiro", "streamable-http"): {"url": _URL},

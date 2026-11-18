@@ -690,7 +690,9 @@ dependencies:
 Remote transport: `http`/`streamable-http` are Streamable HTTP; registry servers
 take it from `remotes[].type` (missing = Streamable HTTP). Native keys per
 harness: Copilot CLI, Claude, VS Code `type: http|sse` + `url`; Gemini `httpUrl`
-(Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`. SSE on
+(Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`; Hermes
+`url`, plus `transport: sse` for SSE (Hermes also keeps stdio `cwd` and extra
+keys such as `timeout` or `auth`). SSE on
 Antigravity or Codex is skipped with one warning, not recorded, exit 0 (also
 under `--frozen`). The next
 install, update or `install --frozen` rewrites APM-written entries left in an
