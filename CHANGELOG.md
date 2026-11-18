@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The MCP retired-shape heal lifecycle test now asserts the 0.37 `mcp.transport.allow` contract (a registry SSE remote outside the allow list is blocked before any write). (#3877)
 - `apm install` policy blocks print one violation per offending dependency or MCP server, naming it, and the hint names what to remove, add or pin (for a transitive MCP server, the direct apm.yml dependency that brings it in, even through deeper chains) instead of telling you to remove the check name from apm.yml (#3865)
 - `apm install <pkg> --dry-run` without an `apm.yml` no longer writes one in project scope; it prints `Would create apm.yml`, as `-g` already did (#3865)
 - Remediation hints name `apm update` instead of the deprecated `apm install --update` (content-hash and licence mismatches on a direct dependency name the targeted `apm update <pkg>`); with `PROXY_REGISTRY_ONLY=1`, `apm update` now re-resolves a lockfile locked to direct VCS sources instead of failing on it; auth errors name the command you ran (#3865)
