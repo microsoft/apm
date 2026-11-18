@@ -28,7 +28,15 @@ from tests.utils.skill_selection_world import (  # noqa: E402
 )
 
 
+def _executable(apm: str) -> str:
+    """Absolutize an explicit path; keep bare command names for PATH lookup."""
+    if "/" in apm or "\\" in apm:
+        return str(Path(apm).resolve())
+    return apm
+
+
 def main(apm: str, version: str) -> None:
+    apm = _executable(apm)
     out_root = Path(__file__).resolve().parent / version
     for scenario in UPGRADE_SCENARIOS:
         with tempfile.TemporaryDirectory(prefix="t4-upgrade-") as tmp:
