@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import click
 
@@ -15,11 +15,18 @@ from apm_cli.agent_plugins.errors import (
     enforce_agent_plugin_deployment_boundary,
 )
 from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+
+# Re-export the pre-deploy security scan so that bare-name call sites inside
+# this module and ``tests/unit/test_install_scanning.py``'s direct import
+# (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
+# working without modification.
+from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
 )
 from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+from apm_cli.install.command_context import InstallContext
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.errors import (
     AuthenticationError,
@@ -31,30 +38,9 @@ from apm_cli.install.errors import (
     install_failure_message,
     log_frozen_install_error,
 )
+from apm_cli.install.finalization import close_install_contexts
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
-from apm_cli.install.lsp.integration import LspPreflight
-from apm_cli.install.manifest_helpers import (
-    _build_prospective_package,
-    _load_manifest_for_add,
-    _merge_packages_into_yml,
-    _prepare_dry_run_manifest_path,
-    _prepare_user_scope_for_install,
-    _report_bootstrap_manifest,
-    bootstrap_manifest_targets,
-)
-from apm_cli.models.dependency.replacement import project_manifest_dependencies
-
-if TYPE_CHECKING:
-    pass
-
-# Re-export the pre-deploy security scan so that bare-name call sites inside
-# this module and ``tests/unit/test_install_scanning.py``'s direct import
-# (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
-# working without modification.
-from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
-from apm_cli.install.command_context import InstallContext
-from apm_cli.install.finalization import close_install_contexts
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan  # noqa: F401
 from apm_cli.install.insecure_policy import (
     InsecureDependencyPolicyError,
@@ -68,6 +54,16 @@ from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
 )
 from apm_cli.install.locking import serialized_lifecycle_unless
+from apm_cli.install.lsp.integration import LspPreflight
+from apm_cli.install.manifest_helpers import (
+    _build_prospective_package,
+    _load_manifest_for_add,
+    _merge_packages_into_yml,
+    _prepare_dry_run_manifest_path,
+    _prepare_user_scope_for_install,
+    _report_bootstrap_manifest,
+    bootstrap_manifest_targets,
+)
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
@@ -127,6 +123,7 @@ from apm_cli.install.validation import (
     _uses_clone_root_probe,
     _validate_package_exists,
 )
+from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
@@ -1380,6 +1377,19 @@ def install(  # noqa: PLR0913
             summary_rendered = True
             return
 
+        # Refuse a --target that apm.yml cannot record before any config,
+        # user-scope or manifest write (#3878).
+        from ..core.scope import get_manifest_path
+
+        manifest_display = (
+            str(get_manifest_path(scope)) if scope is InstallScope.USER else APM_YML_FILENAME
+        )
+        manifest_targets = (
+            bootstrap_manifest_targets(target, manifest_display)
+            if packages and not get_manifest_path(scope).exists()
+            else None
+        )
+
         # Resolve transport selection inputs.
         from ..deps.transport_selection import ProtocolPreference
 
@@ -1406,7 +1416,6 @@ def install(  # noqa: PLR0913
         from ..core.scope import (
             ensure_user_dirs,
             get_apm_dir,
-            get_manifest_path,
             get_modules_dir,
             warn_unsupported_user_scope,
         )
@@ -1423,8 +1432,6 @@ def install(  # noqa: PLR0913
         manifest_path = get_manifest_path(scope)
         manifest_dir = manifest_path.parent  # Dry runs may redirect the manifest to a temp file.
         apm_dir = get_apm_dir(scope)
-        # Display name for messages (short for project scope, full for user scope)
-        manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
         manifest_path, dry_run_manifest_tmp = _prepare_dry_run_manifest_path(
             manifest_path,
             dry_run=dry_run,
@@ -1448,11 +1455,6 @@ def install(  # noqa: PLR0913
 
         # Capture manifest state before this attempt can auto-create apm.yml.
         apm_yml_exists = manifest_path.exists()
-        manifest_targets = (
-            bootstrap_manifest_targets(target, manifest_display)
-            if not apm_yml_exists and packages
-            else None
-        )
         transaction = InstallTransaction(
             manifest_path=manifest_path,
             apm_modules_dir=get_modules_dir(scope),

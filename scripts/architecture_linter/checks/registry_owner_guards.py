@@ -1693,6 +1693,9 @@ def _check_process_interrupt_signals(provider: FactsProvider) -> Iterable[Violat
 
 _MANIFEST_BOOTSTRAP_OWNER = "src/apm_cli/models/manifest_bootstrap.py"
 _MANIFEST_BOOTSTRAP_FUNCTIONS = ("bootstrap_config", "write_minimal_manifest")
+# Historical names kept only as re-exports of the owner; a definition means a
+# second writer has come back.
+_RETIRED_BOOTSTRAP_WRITERS = ("_create_minimal_apm_yml", "_get_bootstrap_config")
 _INSTALL_LAYER = "src/apm_cli/install/"
 _COMMANDS_PACKAGE = "apm_cli.commands"
 
@@ -1711,7 +1714,12 @@ def _imports_commands(path: str, fact: object) -> bool:
     if target == _COMMANDS_PACKAGE or target.startswith(_COMMANDS_PACKAGE + "."):
         return True
     names = getattr(fact, "names", ())
-    return target == "apm_cli" and "commands" in names
+    if target == "apm_cli" and "commands" in names:
+        return True
+    # ``import apm_cli.commands.x`` carries the dotted module in ``names``.
+    return fact.level == 0 and any(
+        name == _COMMANDS_PACKAGE or name.startswith(_COMMANDS_PACKAGE + ".") for name in names
+    )
 
 
 def _check_install_layering(provider: FactsProvider) -> Iterable[Violation]:
@@ -1737,6 +1745,17 @@ def _check_install_layering(provider: FactsProvider) -> Iterable[Violation]:
                     f"{name} must be defined only by {_MANIFEST_BOOTSTRAP_OWNER}",
                 )
             )
+    for name in _RETIRED_BOOTSTRAP_WRITERS:
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                f"{name} is a re-export of {_MANIFEST_BOOTSTRAP_OWNER}; do not redefine it",
+            )
+            for path in sorted(definers)
+        )
     for path in _python_paths(provider, under=_INSTALL_LAYER):
         facts, failures = checked_facts(provider, path, rule_id, require_python=True)
         if failures:

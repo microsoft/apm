@@ -3325,6 +3325,38 @@ def test_policy_target_projection_guard_rejects_raw_selections(
     ("path", "old", "new"),
     [
         pytest.param(
+            "src/apm_cli/install/summary.py",
+            "from apm_cli.utils.themed_console import _rich_blank_line",
+            "import apm_cli.commands._helpers\n"
+            "from apm_cli.utils.themed_console import _rich_blank_line",
+            id="plain-import-of-commands",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            "from ..models.manifest_bootstrap import bootstrap_config as _get_bootstrap_config\n",
+            "def _get_bootstrap_config(*args, **kwargs):\n    return {}\n",
+            id="retired-bootstrap-writer-redefined",
+        ),
+    ],
+)
+def test_install_layering_guard_rejects_bypasses(path: str, old: str, new: str) -> None:
+    """install/** never imports apm_cli.commands, in any import form (#3879)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.install_layering"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
             "src/apm_cli/policy/policy_checks.py",
             "    manifest_decision = EffectiveTargetDecision(",
             '    raw_target = (raw_yml or {}).get("target")\n'

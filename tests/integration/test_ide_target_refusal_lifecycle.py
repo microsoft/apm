@@ -41,13 +41,38 @@ def _project(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     return project, env
 
 
+def _tree(root: Path) -> dict[str, bytes]:
+    # The lifecycle lock (taken before any command body runs) and the network
+    # guard bytecode cache are harness state, not project or manifest state;
+    # skip them.
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != ".apm-lifecycle.lock" and "__pycache__" not in path.parts
+    }
+
+
 @pytest.mark.parametrize(
     "args",
     [
         pytest.param(
             ("install", "--no-policy", "--target", "intellij", "./pkgs/alpha"), id="install"
         ),
+        pytest.param(
+            ("install", "--no-policy", "--target", "claude,intellij", "./pkgs/alpha"),
+            id="install-mixed",
+        ),
+        pytest.param(
+            ("install", "--no-policy", "--dry-run", "--target", "intellij", "./pkgs/alpha"),
+            id="install-dry-run",
+        ),
+        pytest.param(
+            ("install", "-g", "--no-policy", "--target", "intellij", "acme/never-fetched"),
+            id="install-global",
+        ),
         pytest.param(("init", "--yes", "--target", "intellij"), id="init"),
+        pytest.param(("init", "--yes", "--target", "all,intellij"), id="init-mixed"),
+        pytest.param(("init", "fresh", "--yes", "--target", "intellij"), id="init-named"),
     ],
 )
 def test_new_manifest_refuses_an_ide_target(
@@ -55,15 +80,29 @@ def test_new_manifest_refuses_an_ide_target(
 ) -> None:
     project, env = _project(tmp_path)
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    root = tmp_path / "isolated"
+    before = _tree(root)
 
     result = runner.run(args, cwd=project, env=env)
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode == 1, output
     assert _GUIDANCE in output, output
     assert "Nothing was written" in output, output
-    assert not (project / "apm.yml").exists()
-    assert not (project / "apm_modules").exists()
-    assert not (project / ".github").exists()
+    assert _tree(root) == before
+    assert sorted(p.name for p in project.iterdir()) == ["pkgs"]
+
+
+def test_runtime_flag_bootstrap_never_records_an_ide(tmp_path: Path, apm_binary_path: Path) -> None:
+    project, env = _project(tmp_path)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    result = runner.run(
+        ("install", "--no-policy", "--runtime", "intellij", "./pkgs/alpha"), cwd=project, env=env
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = load_yaml(project / "apm.yml")
+    assert "targets" not in manifest
+    assert "intellij" not in (project / "apm.yml").read_text(encoding="utf-8")
 
 
 def test_existing_manifest_is_not_rewritten_for_an_ide_target(

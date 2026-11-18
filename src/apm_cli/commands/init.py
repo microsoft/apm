@@ -304,6 +304,10 @@ def _perform_init(
             )
             sys.exit(1)
 
+        # Refuse a --target that apm.yml cannot record before creating anything.
+        if target_flag is not None:
+            _option_targets_or_exit(target_flag, logger)
+
         # Determine project directory and name
         if project_name:
             project_dir = Path(project_name)
@@ -739,6 +743,17 @@ def _stdin_is_tty() -> bool:
         return False
 
 
+def _option_targets_or_exit(target_flag, logger):
+    """Map ``--target`` through the declaration owner; refuse IDE targets (#3878)."""
+    try:
+        targets = option_target_names(target_flag)
+    except IdeTargetError as exc:
+        logger.error(f"Cannot record --target {exc.token} in {APM_YML_FILENAME}: {exc}")
+        logger.progress("Nothing was written.", symbol="info")
+        sys.exit(1)
+    return targets
+
+
 def _resolve_init_targets(
     project_root: Path,
     *,
@@ -753,12 +768,7 @@ def _resolve_init_targets(
     """
     # Case 1: --target flag provided -- wins unconditionally
     if target_flag is not None:
-        try:
-            targets = option_target_names(target_flag)
-        except IdeTargetError as exc:
-            logger.error(f"Cannot record --target {exc.token} in {APM_YML_FILENAME}: {exc}")
-            logger.progress("Nothing was written.", symbol="info")
-            sys.exit(1)
+        targets = _option_targets_or_exit(target_flag, logger)
         if not targets:
             return None
         logger.progress(f"Targets set: {', '.join(targets)} (via --target flag)", symbol="info")
