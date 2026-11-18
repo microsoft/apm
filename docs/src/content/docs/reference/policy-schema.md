@@ -285,9 +285,11 @@ closed. APM never applies the weaker subset that happened to resolve.
 
 ### Merge rules
 
-Every field tightens as the policy chain descends: a child can add
-restrictions but never remove a parent's. A child `[]` on a `deny` or
-`require` list adds nothing and does not clear the inherited entries.
+A child can add restrictions but never remove a parent's. A child `[]` on a
+`deny` or `require` list adds nothing and does not clear the inherited
+entries. One field widens instead: `unmanaged_files.exclude` entries are
+unioned, so a child can exclude more paths from the parent's
+unmanaged-files check.
 
 | Field family                | Merge rule                                                                       |
 |-----------------------------|----------------------------------------------------------------------------------|

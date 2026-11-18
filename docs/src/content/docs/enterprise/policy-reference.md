@@ -738,12 +738,14 @@ Without `--verbose`, the `Policy:` line is suppressed for `enforcement=warn` and
 
 #### Block: denied dependency aborts the install
 
+The `Blocked by` hint currently names the check, not the dependency ([#3835](https://github.com/microsoft/apm/issues/3835)); act on the dependencies in the violation line.
+
 ```shell
 $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: dependency-denylist -- 1 dependency(ies) match deny list: acme/evil-pkg: denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github -- remove `dependency-denylist` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [x] Install blocked by org policy -- see violations above
 [x] Install failed after 0.3s.
 $ echo $?
@@ -813,7 +815,7 @@ $ apm install acme/evil-pkg
 [>] Installing 1 new package...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: dependency-denylist -- 1 dependency(ies) match deny list: acme/evil-pkg: denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github -- remove `dependency-denylist` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [i] apm.yml restored to its previous state.
 [x] Install blocked by org policy -- see violations above
 $ echo $?
