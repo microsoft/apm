@@ -25,6 +25,7 @@ from apm_cli.models.apm_package import (
 from apm_cli.models.manifest_targets import (
     ManifestTargetDeclaration,
     TargetRewriteError,
+    bootstrap_target_names,
     manifest_target_restriction,
     read_manifest_target_declaration,
     rewrite_target_names,
@@ -273,3 +274,19 @@ def test_both_spellings_resolve_vscode_to_copilot_for_dependency_intersection(tm
     assert canonical_package_target_config(APMPackage.from_apm_yml(manifest)) == {
         "targets": ["claude", "copilot"]
     }
+
+
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [([], ()), (["claude"], ("claude",)), (["claude", "copilot"], ("claude", "copilot"))],
+)
+def test_bootstrap_target_names_spells_readable_targets(names, expected):
+    """#3870: a new manifest records only tokens the reader accepts."""
+    assert bootstrap_target_names(names) == expected
+
+
+@pytest.mark.parametrize("names", [["intellij"], ["claude", "intellij"]])
+def test_bootstrap_target_names_refuses_an_unspellable_target(names):
+    with pytest.raises(TargetRewriteError) as excinfo:
+        bootstrap_target_names(names)
+    assert excinfo.value.token == "intellij"

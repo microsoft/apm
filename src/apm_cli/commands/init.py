@@ -420,7 +420,7 @@ def _perform_init(
         if plugin and effective_plugin_mode == "agent":
             _write_and_validate_agent_plugin_scaffold(project_root, config)
         else:
-            _create_minimal_apm_yml(config, plugin=plugin, verify=True)
+            _create_minimal_apm_yml(config, plugin=plugin)
             if plugin:
                 _create_plugin_json(config, mode=effective_plugin_mode)
 
@@ -576,7 +576,7 @@ def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) 
     with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
         staged_root = Path(stage)
         staged_manifest = staged_root / APM_YML_FILENAME
-        _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest, verify=True)
+        _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest)
         _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
         (staged_root / "mcp.json").write_text(
             json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
@@ -773,7 +773,7 @@ def _resolve_init_targets(
             detail = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
             message = (
                 f"Cannot carry the targets of the existing {APM_YML_FILENAME} into the new "
-                f"one: {detail.strip().removeprefix('[x] ')}"
+                f"one: {detail.strip()}"
             )
             if yes or not is_tty:
                 logger.error(message)

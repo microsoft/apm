@@ -669,7 +669,7 @@ def _create_plugin_json(config, mode: str = "agent", target_path: Path | None = 
     output_path.write_text(json.dumps(plugin_data, indent=2) + "\n", encoding="utf-8")
 
 
-def _create_minimal_apm_yml(config, plugin=False, target_path=None, *, verify=False):
+def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     """Create minimal apm.yml file with auto-detected metadata.
 
     Args:
@@ -678,13 +678,14 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None, *, verify=Fa
             Optional 'target' key: CSV string of targets to pin.
         plugin: if True, include a devDependencies section.
         target_path: explicit file path to write (defaults to cwd/apm.yml).
-        verify: parse the rendered manifest back through the manifest target
-            declaration owner and refuse to write one APM would reject. ``apm init``
-            sets it because a re-init rewrites an existing manifest's targets.
+
+    The rendered manifest is parsed back through the manifest target
+    declaration owner first, so no scaffold or bootstrap writes a manifest
+    APM would then reject.
 
     Raises:
-        TargetRewriteError: *verify* is set and APM would reject the
-            rendered manifest; nothing is written.
+        TargetRewriteError: APM would reject the rendered manifest; nothing
+            is written.
     """
     # Create minimal apm.yml structure
     apm_yml_data = {
@@ -752,10 +753,9 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None, *, verify=Fa
         )
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 
-    if verify:
-        from ..models.manifest_targets import verify_rewritten_manifest
+    from ..models.manifest_targets import verify_rewritten_manifest
 
-        verify_rewritten_manifest(out_file, content)
+    verify_rewritten_manifest(out_file, content)
     out_file.write_text(content, encoding="utf-8")
 
 

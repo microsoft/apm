@@ -3421,21 +3421,21 @@ def test_policy_target_projection_guard_rejects_raw_selections(
         ),
         pytest.param(
             "src/apm_cli/commands/_helpers.py",
-            "        verify_rewritten_manifest(out_file, content)\n",
-            "        pass\n",
+            "    verify_rewritten_manifest(out_file, content)\n",
+            "    pass\n",
             id="scaffold-writes-unverified-rewrite",
         ),
         pytest.param(
-            "src/apm_cli/commands/init.py",
-            "_create_minimal_apm_yml(config, plugin=plugin, verify=True)",
-            "_create_minimal_apm_yml(config, plugin=plugin)",
-            id="init-skips-rewrite-verification",
+            "src/apm_cli/install/mcp/command.py",
+            'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
+            'config["targets"] = list(supported_runtimes)',
+            id="user-manifest-bootstrap-writes-raw-runtimes",
         ),
         pytest.param(
-            "src/apm_cli/commands/init.py",
-            "target_path=staged_manifest, verify=True)",
-            "target_path=staged_manifest)",
-            id="plugin-init-skips-rewrite-verification",
+            "src/apm_cli/commands/_helpers.py",
+            "    verify_rewritten_manifest(out_file, content)\n",
+            "    if False:\n        verify_rewritten_manifest(out_file, content)\n",
+            id="scaffold-verification-made-optional",
         ),
         pytest.param(
             "src/apm_cli/models/manifest_target_migration.py",
@@ -3537,6 +3537,43 @@ def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, ne
     mutated = source.replace(old, new)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-consumer-manifest-rewrite"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/core/errors.py",
+            '        "No harness detected\\n"\n',
+            '        "[x] No harness detected\\n"\n',
+            id="renderer-embeds-status-symbol",
+        ),
+        pytest.param(
+            "src/apm_cli/core/apm_yml.py",
+            "    \"'targets:' in apm.yml is empty\\n\"\n",
+            "    \"[x] 'targets:' in apm.yml is empty\\n\"\n",
+            id="empty-targets-message-embeds-status-symbol",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/init.py",
+            'f"one: {detail.strip()}"',
+            "f\"one: {detail.strip().removeprefix('[x] ')}\"",
+            id="caller-strips-status-symbol",
+        ),
+    ],
+)
+def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str, new: str) -> None:
+    """Target error messages carry no status symbol; the CLI owner adds it (#3871)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.output_diagnostics"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(

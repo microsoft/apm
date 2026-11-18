@@ -844,12 +844,12 @@ def _handle_mcp_install(  # noqa: PLR0913
             registry_url=resolved_registry_url,
         )
 
-    initial_manifest_config = None
-    if is_user_scope(scope) and not mcp_manifest_path.exists():
-        project_name = _resolve_bootstrap_project_name(Path.home().name)
-        initial_manifest_config = _get_bootstrap_config(project_name)
-        if target is not None or runtime is not None:
-            initial_manifest_config["targets"] = supported_runtimes
+    if is_user_scope(scope):
+        from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap
+
+        initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes, target, runtime)
+    else:
+        initial_manifest_config = None
     retry_args = []
     if mcp_version:
         retry_args.extend(("--mcp-version", mcp_version))

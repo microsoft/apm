@@ -175,7 +175,13 @@ class TestManifestlessSkillBundleResolution:
         try:
             with pytest.raises(DownloadedPackageError) as error:
                 resolver._try_load_dependency_package(ref)
-            assert "; ".join(validation.errors) in str(error.value)
+            # #3871: staged paths are shown relative to the package, one period.
+            expected = APMDependencyResolver._package_relative_detail(
+                "; ".join(validation.errors), candidate
+            ).rstrip(".")
+            assert expected in str(error.value)
+            assert str(candidate) not in str(error.value)
+            assert ".. " not in str(error.value)
             hint = (
                 "existing installation remains active"
                 if existing
@@ -1234,3 +1240,21 @@ class TestTryLoadDependencyPackageForceRecheck:
 
         assert len(call_log) == 1
         assert result is not None
+
+
+def test_downloaded_package_error_names_package_paths_and_ends_once(tmp_path):
+    """#3871: no staging path and no doubled period in dependency errors."""
+    candidate = tmp_path / "apm_modules" / ".apm-resolution-staging" / "abc" / "replacements" / "x"
+    candidate.mkdir(parents=True)
+    detail = (
+        f"{candidate / 'apm.yml'} uses the YAML anchor '&v' on line 2. Write it out, then retry."
+    )
+    with pytest.raises(DownloadedPackageError) as error:
+        APMDependencyResolver._raise_downloaded_package_error(
+            candidate, DependencyReference.parse("owner/repo"), detail, False
+        )
+    assert str(error.value) == (
+        "Downloaded dependency 'owner/repo' is invalid: apm.yml uses the YAML anchor '&v' "
+        "on line 2. Write it out, then retry. The downloaded candidate was not activated; "
+        "fix the cause and retry the install."
+    )

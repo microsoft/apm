@@ -192,10 +192,11 @@ Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. 
 
 See also: [`apm targets` reference](../../reference/cli/targets/)
 
-### `[x] Unknown target '<value>'`
+### `Unknown target '<value>'`
 
 ```
-[x] Unknown target '<value>'
+Error: Unknown target '<value>'
+
 Valid targets: claude, copilot, cursor, ...
 ```
 

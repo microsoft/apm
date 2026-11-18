@@ -1,5 +1,6 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
+import contextlib
 import inspect
 import logging
 import os
@@ -1704,13 +1705,32 @@ class APMDependencyResolver:
         detail: str,
         had_existing_install: bool,
     ) -> NoReturn:
-        """Raise a specific fail-closed error for newly downloaded candidates."""
+        """Raise a specific fail-closed error for newly downloaded candidates.
+
+        Paths inside the staged candidate are shown relative to the package,
+        so the error names the dependency and its in-package path rather than
+        APM's private staging directory.
+        """
         if downloaded_candidate is None:
             raise ValueError(detail)
+        detail = APMDependencyResolver._package_relative_detail(detail, downloaded_candidate)
         raise DownloadedPackageError(
             f"Downloaded dependency '{dep_ref.get_display_name()}' is invalid: "
-            f"{detail}. {APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
+            f"{detail.rstrip().rstrip('.')}. "
+            f"{APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
         )
+
+    @staticmethod
+    def _package_relative_detail(detail: str, candidate: Path) -> str:
+        """Rewrite paths under the staged *candidate* as package-relative paths."""
+        roots = {str(candidate)}
+        with contextlib.suppress(OSError):
+            roots.add(str(candidate.resolve()))
+        for root in sorted(roots, key=len, reverse=True):
+            for separator in {os.sep, "/"}:
+                detail = detail.replace(root + separator, "")
+            detail = detail.replace(root, "the package root")
+        return detail
 
     @staticmethod
     def _replacement_failure_hint(had_existing_install: bool) -> str:

@@ -121,8 +121,15 @@ def test_dependency_manifest_anchor_is_refused_before_any_write(
     result = runner.run(("install", "--no-policy"), cwd=project, env=env)
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode != 0, output
-    assert "./pkgs/alpha" in output and "YAML anchor '&v' on line 2" in output, output
-    assert "must not use YAML anchors" in output and "Traceback" not in output, output
+    # #3871: names the dependency and its in-package path, one period, no staging path.
+    assert (
+        "Downloaded dependency './pkgs/alpha' is invalid: apm.yml uses the YAML anchor "
+        "'&v' on line 2. apm.yml must not use YAML anchors (&name) or aliases (*name). "
+        "Write the value out in full wherever it is used, then retry. The downloaded "
+        "candidate was not activated; fix the cause and retry the install."
+    ) in output, output
+    assert ".apm-resolution-staging" not in output and "retry.." not in output, output
+    assert "Traceback" not in output, output
     assert not (project / ".github" / "instructions" / "alpha.instructions.md").exists()
     assert {key: value for key, value in _snapshot(project).items() if key in before} == before
 

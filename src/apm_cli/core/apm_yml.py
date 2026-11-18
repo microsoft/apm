@@ -36,7 +36,7 @@ CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
 _legacy_all_warned: bool = False
 _LEGACY_ALL_TARGET_NAME = "all"
 _EMPTY_TARGETS_MESSAGE = (
-    "[x] 'targets:' in apm.yml is empty\n"
+    "'targets:' in apm.yml is empty\n"
     "\n"
     "The targets list must contain at least one target.\n"
     "\n"

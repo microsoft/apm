@@ -1511,7 +1511,7 @@ class MCPIntegrator:
                     "Skipping all MCP config writes -- apm.yml 'targets' field is invalid.",
                     symbol="error",
                 )
-                _rich_error(str(exc), symbol="")
+                _rich_error(str(exc), symbol="error")
                 _log.debug(
                     "manifest target declaration invalid; failing closed (no MCP writes)",
                     exc_info=True,
@@ -1590,7 +1590,7 @@ class MCPIntegrator:
                 "Skipping all MCP config writes -- could not resolve active targets.",
                 symbol="error",
             )
-            _rich_error(str(exc), symbol="")
+            _rich_error(str(exc), symbol="error")
             _log.debug(
                 "resolve_targets failed; failing closed (no MCP writes)",
                 exc_info=True,
