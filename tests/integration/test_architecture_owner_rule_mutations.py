@@ -1535,10 +1535,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="transport-platform-authenticated-egress",
         rule_id="transport-platform-authenticated-egress",
-        path="src/apm_cli/deps/download_strategies.py",
-        old="self._host._resilient_get(raw_url, headers=raw_headers, timeout=30)",
-        new="requests.get(raw_url, headers=raw_headers, timeout=30)",
-        intent="A GitHub file download opens raw HTTP egress outside the owners and inventory.",
+        path="src/apm_cli/marketplace/builder.py",
+        old="resp = origin_bounded_request(",
+        new="resp = urllib.request.urlopen(",
+        intent="Credentialed marketplace metadata fetches return to urllib, outside the owners.",
     ),
     MutationCase(
         guard_id="transport-platform-authenticated-egress-credential-headers",
