@@ -839,6 +839,10 @@ class InstallLogger(CommandLogger):
         reason: str,
         severity: str,
         source: str | None = None,
+        *,
+        remedy: str | None = "remove",
+        declared_by: str | None = None,
+        rule: str | None = None,
     ):
         """Record a policy violation for a dependency.
 
@@ -855,6 +859,12 @@ class InstallLogger(CommandLogger):
             source: Optional policy source (used for block-mode next-step
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
+            remedy: apm.yml edit the hint suggests: ``"remove"``,
+                ``"add"``, ``"pin"``, or ``None`` for no apm.yml edit.
+            declared_by: Dependency that brings in a transitive MCP
+                server; the hint names it instead of *dep_ref*.
+            rule: Policy check (category) that fired, named in the hint
+                so the user can find the policy field.
         """
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
@@ -874,7 +884,10 @@ class InstallLogger(CommandLogger):
             _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
             if source:
                 _rich_echo(
-                    f"  {self._policy_reason_blocked(dep_ref, source)}",
+                    "  "
+                    + self._policy_reason_blocked(
+                        dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
+                    ),
                     color="dim",
                 )
 
@@ -916,11 +929,29 @@ class InstallLogger(CommandLogger):
         return f"Policy at {source} is malformed -- contact your org admin to fix the policy file"
 
     @staticmethod
-    def _policy_reason_blocked(dep_ref: str, source: str) -> str:
+    def _policy_reason_blocked(
+        dep_ref: str,
+        source: str,
+        *,
+        remedy: str | None = "remove",
+        declared_by: str | None = None,
+        rule: str | None = None,
+    ) -> str:
         """Actionable reason for a blocked dependency."""
+        if remedy == "add":
+            edit = f"add `{dep_ref}` to apm.yml, "
+        elif remedy == "pin":
+            edit = f"pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, "
+        elif remedy is None:
+            edit = ""
+        elif declared_by:
+            edit = f"remove `{declared_by}` (it brings in `{dep_ref}`) from apm.yml, "
+        else:
+            edit = f"remove `{dep_ref}` from apm.yml, "
+        rule_part = f" ({rule})" if rule and rule != dep_ref else ""
         return (
-            f"Blocked by org policy at {source} "
-            f"-- remove `{dep_ref}` from apm.yml, contact admin to update policy, "
+            f"Blocked by org policy at {source}{rule_part} "
+            f"-- {edit}contact admin to update policy, "
             "or use `--no-policy` for one-off bypass"
         )
 

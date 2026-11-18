@@ -73,6 +73,14 @@ def test_gen_statement_md_lists_repository_case_rules():
     assert "Local paths, marketplace identities, and every other host remain case-sensitive" in md
 
 
+def test_gen_statement_declares_implementation_default_host():
+    """req-mf-019: the implementation-default host MUST be documented."""
+    _run_gen()
+    md = CONFORMANCE_MD.read_text(encoding="ascii")
+    assert "## Default host" in md
+    assert "`GITHUB_HOST` environment variable, or `github.com`" in md
+
+
 def test_gen_statement_publishes_user_scope_disclosure():
     """req-tg-014 locations and capability contract stay generated."""
     _run_gen()

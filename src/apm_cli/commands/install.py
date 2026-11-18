@@ -37,6 +37,7 @@ from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
 from apm_cli.install.lsp.integration import LspPreflight
 from apm_cli.install.manifest_helpers import (
+    _load_manifest_for_add,
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
     _prepare_user_scope_for_install,
@@ -609,51 +610,51 @@ def _validate_and_add_packages_to_apm_yml(
 
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
 
-    # Read current apm.yml
-    try:
-        from ..models.manifest_io import load_manifest_roundtrip
-
-        data = load_manifest_roundtrip(apm_yml_path) or {}
-    except Exception as e:
-        (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
+    data, manifest_host = _load_manifest_for_add(apm_yml_path, logger)
 
     from ..install.registry_wiring import get_effective_default_registry
 
     _default_registry_for_cli = get_effective_default_registry(data, create_config=create_config)
 
-    dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
-    cross_section = borrow_cross_section_declarations(packages, current_deps, other_deps, dev=dev)
-    existing_identities = _check_package_conflicts(current_deps)
+    # Shorthand packages and existing entries resolve against this manifest's
+    # ``default_host:``, and new entries strip only that host (req-mf-019).
+    from ..utils.github_host import manifest_default_host_scope
 
-    # Validate and canonicalize all package references
-    updated_packages = []
-    (
-        valid_outcomes,
-        invalid_outcomes,
-        validated_packages,
-        _marketplace_provenance,
-        _apm_yml_entries,
-        dependencies_changed,
-    ) = _resolve_package_references(
-        packages,
-        current_deps,
-        existing_identities,
-        auth_resolver=auth_resolver,
-        logger=logger,
-        scope=scope,
-        allow_insecure=allow_insecure,
-        skill_subset=skill_subset,
-        skill_subset_from_cli=skill_subset_from_cli,
-        default_registry=_default_registry_for_cli,
-        dry_run=dry_run,
-        updated_packages_out=updated_packages,
-        protocol_pref=protocol_pref,
-        allow_protocol_fallback=allow_protocol_fallback,
-    )
-    dependencies_changed |= settle_cross_section_declarations(
-        cross_section, current_deps, other_deps, dry_run=dry_run, logger=logger
-    )
+    with manifest_default_host_scope(manifest_host):
+        dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
+        cross_section = borrow_cross_section_declarations(
+            packages, current_deps, other_deps, dev=dev
+        )
+        existing_identities = _check_package_conflicts(current_deps)
+
+        # Validate and canonicalize all package references
+        updated_packages = []
+        (
+            valid_outcomes,
+            invalid_outcomes,
+            validated_packages,
+            _marketplace_provenance,
+            _apm_yml_entries,
+            dependencies_changed,
+        ) = _resolve_package_references(
+            packages,
+            current_deps,
+            existing_identities,
+            auth_resolver=auth_resolver,
+            logger=logger,
+            scope=scope,
+            allow_insecure=allow_insecure,
+            skill_subset=skill_subset,
+            skill_subset_from_cli=skill_subset_from_cli,
+            default_registry=_default_registry_for_cli,
+            dry_run=dry_run,
+            updated_packages_out=updated_packages,
+            protocol_pref=protocol_pref,
+            allow_protocol_fallback=allow_protocol_fallback,
+        )
+        dependencies_changed |= settle_cross_section_declarations(
+            cross_section, current_deps, other_deps, dry_run=dry_run, logger=logger
+        )
 
     prospective_package = None
     if dry_run and valid_outcomes:
@@ -1206,7 +1207,7 @@ def install(  # noqa: PLR0913
         apm install org/pkg1#1.0.0              # Add package to apm.yml and install
         apm install --exclude codex             # Install for all except Codex CLI
         apm install --only=apm                  # Install only APM packages
-        apm install --update                    # Update dependencies to latest Git refs
+        apm update                              # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would change
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
         apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)
@@ -1487,7 +1488,6 @@ def install(  # noqa: PLR0913
         manifest_path, dry_run_manifest_tmp = _prepare_dry_run_manifest_path(
             manifest_path,
             dry_run=dry_run,
-            user_scope=scope is InstallScope.USER,
             has_packages=bool(packages),
         )
 
@@ -1535,7 +1535,6 @@ def install(  # noqa: PLR0913
                 manifest_display=manifest_display,
                 manifest_targets=manifest_targets,
                 dry_run=dry_run,
-                user_scope=scope is InstallScope.USER,
             )
 
         if not apm_yml_exists and not packages:

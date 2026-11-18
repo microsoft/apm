@@ -47,6 +47,30 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
 # ── Result data classes ───────────────────────────────────────────
 
 
+REMEDY_REMOVE = "remove"
+REMEDY_ADD = "add"
+REMEDY_PIN = "pin"
+
+
+@dataclass(frozen=True)
+class PolicySubject:
+    """One offending dependency or MCP server named by a policy check.
+
+    ``remedy`` selects the apm.yml edit the install hint suggests:
+    ``"remove"`` (the subject is declared and must go), ``"add"`` (a
+    required subject is missing), ``"pin"`` (the declared ref must be
+    bounded), or ``None`` (no apm.yml edit applies;
+    ``reason`` carries the remediation). ``declared_by`` names the
+    dependency that brings in a transitive MCP server, so the hint points
+    at the apm.yml entry the user can actually remove.
+    """
+
+    ref: str
+    reason: str
+    remedy: str | None = REMEDY_REMOVE
+    declared_by: str | None = None
+
+
 @dataclass
 class CheckResult:
     """Result of a single CI check."""
@@ -57,6 +81,25 @@ class CheckResult:
     details: list[str] = field(default_factory=list)  # individual violations
     coverage: tuple[CoverageEntry, ...] = ()
     content_findings: tuple[ScanFinding, ...] = ()
+    # Structured per-dependency / per-MCP-server violations. Not serialized:
+    # ``details`` stays the report contract for ``apm audit``.
+    subjects: tuple[PolicySubject, ...] = ()
+
+    def violation_subjects(self) -> tuple[PolicySubject, ...]:
+        """Return one :class:`PolicySubject` per violation to report.
+
+        The single owner for turning a check into per-subject violation
+        lines (install gate and install preflight). Checks that name
+        dependencies or MCP servers populate ``subjects``; any other check
+        yields one entry keyed by the check name (its category) with no
+        apm.yml edit suggested.
+        """
+        if self.subjects:
+            return self.subjects
+        reason = self.message
+        if self.details:
+            reason = f"{self.message}: {', '.join(self.details[:5])}"
+        return (PolicySubject(ref=self.name, reason=reason, remedy=None),)
 
 
 @dataclass

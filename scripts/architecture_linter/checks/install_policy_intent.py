@@ -42,6 +42,10 @@ from scripts.architecture_linter.checks.install_policy_mcp_transport import (
     RULE_POLICY_MCP_TRANSPORT,
     check_policy_mcp_transport_projection,
 )
+from scripts.architecture_linter.checks.install_policy_violation_subjects import (
+    RULE_POLICY_VIOLATION_SUBJECTS,
+    check_policy_violation_subjects,
+)
 from scripts.architecture_linter.checks.install_policy_plugin_and_approval import (
     RULE_APPROVAL_OUTCOME,
     RULE_AUDIT_POLICY_DISCOVERY,
@@ -126,6 +130,16 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "Policy mcp.transport.allow judges canonical effective transports from the owner."
         ),
         check=check_policy_mcp_transport_projection,
+    ),
+    Rule(
+        id=RULE_POLICY_VIOLATION_SUBJECTS,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_VIOLATION_SUBJECTS,),
+        description=(
+            "Install policy violations name their subject via policy/install_preflight.py"
+            "::emit_check_violations."
+        ),
+        check=check_policy_violation_subjects,
     ),
     Rule(
         id=RULE_POLICY_DISABLE_SWITCH,

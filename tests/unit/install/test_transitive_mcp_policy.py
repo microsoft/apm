@@ -169,6 +169,34 @@ class TestTransitiveMCPBlock:
                 _, kwargs = c
                 assert kwargs.get("severity") == "block"
 
+    def test_transitive_block_hint_names_declaring_dependency(self):
+        """#3835: the violation names the server and the hint points at the
+        dependency that brings it in, not at the server or the check."""
+        from dataclasses import replace
+
+        policy = _load_mcp_policy()
+        fetch = _make_fetch_result(policy=policy)
+        dep = replace(
+            _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio"),
+            resolved_by="acme/parent-pkg",
+        )
+
+        logger = _make_logger()
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
+            with pytest.raises(PolicyBlockError):
+                run_policy_preflight(
+                    project_root=Path("/fake/project"),
+                    mcp_deps=[dep],
+                    no_policy=False,
+                    logger=logger,
+                    dry_run=False,
+                )
+        calls = [c.kwargs for c in mock_violation.call_args_list]
+        assert calls
+        for kwargs in calls:
+            assert kwargs["dep_ref"] == "io.github.untrusted/evil-transitive"
+            assert kwargs["declared_by"] == "acme/parent-pkg"
+
 
 # -- Test: transitive MCP denied under warn -> warning + proceed ------
 

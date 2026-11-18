@@ -18,6 +18,10 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 
 Repository-coordinate segments are case-insensitive for `github.com`, GitHub Enterprise Cloud hosts ending in `.ghe.com`, the literal GitHub Enterprise Server host selected by `GITHUB_HOST`, and registry-sourced dependencies (including registry prefixes). Local paths, marketplace identities, and every other host remain case-sensitive. Policy matching and repository identity use the same rule (req-rs-016 clause 3; req-pl-018).
 
+## Default host
+
+When an `apm.yml` omits `default_host:`, APM's implementation-default host is the `GITHUB_HOST` environment variable, or `github.com` when it is unset. When `default_host:` is set, shorthand `owner/repo` dependencies in that manifest resolve against it, and canonical normalisation strips only that host when writing entries into the manifest; every other host keeps its FQDN. Each manifest (the root and every dependency's own `apm.yml`) uses its own value (req-mf-009, req-mf-019).
+
 ## Optional deployed-prompt audit
 
 APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020), subject to the pending Section 9.3 amendment process, not adopted-spec approval. APM's own Consumer deployment implementation supplies the definitions: project and user scopes follow TargetProfile deployment roots and PrimitiveMapping formats, including shared native hook settings via native_hook_config. The target-by-target locations, supported formats, prompt applicability and exclusions are published in docs/src/content/docs/reference/cli/audit.md. ContentScanner checks hidden or suspicious Unicode code points that may conceal instructions, not semantic prompt-injection detection; a clean result is not a guarantee that prompt text is safe. App SQLite state and unrelated transcripts are excluded. Detection does not grant execution, ownership or remediation authority.
@@ -91,7 +95,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-mf-016](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-016) | MUST | 4.3.5 | consumer | skipped | 1 | - |
 | [req-mf-017](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-017) | MUST | 4.7 | producer | active | 1 | - |
 | [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 1 | - |
-| [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 1 | - |
+| [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 2 | - |
 | [req-mf-020](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-020) | MUST | 4.1 | consumer | active | 1 | - |
 | [req-mf-021](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-021) | MUST | 4.8 | producer | active | 1 | - |
 | [req-mf-022](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-022) | MUST | 4.3.2 | consumer | active | 2 | - |
@@ -104,7 +108,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-pl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-003) | MUST | 6.4 | governance | active | 1 | - |
 | [req-pl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-004) | MUST | 6.4 | governance | active | 1 | - |
 | [req-pl-005](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-005) | MUST | 6.5 | governance | active | 1 | - |
-| [req-pl-006](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-006) | MUST | 6.4 | governance | active | 1 | - |
+| [req-pl-006](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-006) | MUST | 6.4 | governance | active | 5 | - |
 | [req-pl-007](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-007) | MUST | 6.3.1 | governance | active | 1 | - |
 | [req-pl-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-008) | MUST | 6.3.1 | governance | active | 1 | - |
 | [req-pl-009](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-009) | MUST | 6.6 | governance | active | 1 | - |

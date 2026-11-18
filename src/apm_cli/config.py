@@ -134,7 +134,10 @@ def set_default_client(client_type):
 
 
 def get_auto_integrate() -> bool:
-    """Get the auto-integrate setting.
+    """Get the deprecated auto-integrate setting.
+
+    Deprecated: no command reads this value. Kept only so
+    ``apm config get auto-integrate`` keeps working (#3839).
 
     Returns:
         bool: Whether auto-integration is enabled (default: True).
@@ -143,7 +146,7 @@ def get_auto_integrate() -> bool:
 
 
 def set_auto_integrate(enabled: bool) -> None:
-    """Set the auto-integrate setting.
+    """Set the deprecated auto-integrate setting (stored, but has no effect).
 
     Args:
         enabled: Whether to enable auto-integration.

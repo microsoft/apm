@@ -83,10 +83,19 @@ def _get_config_getters():
     }
 
 
+# Keys still accepted by get/set so existing scripts keep working, but no
+# longer advertised. Each maps to the warning shown when it is used.
+_DEPRECATED_CONFIG_KEYS = {
+    "auto-integrate": (
+        "'auto-integrate' is deprecated and has no effect: no command reads it. "
+        "It will be removed in a future release."
+    ),
+}
+
+
 # Single registry of user-facing config keys: (name, experimental flag, unsettable).
 # Messages derive the valid-key list from it; tests pin it to the dispatch below.
 _CONFIG_KEYS: tuple[tuple[str, str | None, bool], ...] = (
-    ("auto-integrate", None, False),
     ("target", None, True),
     ("self-update.channel", None, True),
     ("self-update.install-dir", None, True),
@@ -127,7 +136,6 @@ def _show_all_user_config(logger: CommandLogger) -> None:
     """Print all user-settable configuration keys with effective values."""
     from ..config import (
         get_allow_protocol_fallback,
-        get_auto_integrate,
         get_github_auth_first,
         get_install_target,
         get_mcp_registry_url,
@@ -138,7 +146,6 @@ def _show_all_user_config(logger: CommandLogger) -> None:
     )
 
     logger.progress("APM Configuration:")
-    click.echo(f"  auto-integrate: {str(get_auto_integrate()).lower()}")
     temp_dir = get_temp_dir()
     click.echo(
         f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
@@ -384,8 +391,8 @@ def set(key, value):  # noqa: F811
     """Set a configuration value.
 
     Examples:
-        apm config set auto-integrate false
-        apm config set auto-integrate true
+        apm config set target copilot
+        apm config set prefer-ssh true
     """
     from ..config import get_temp_dir, set_temp_dir
 
@@ -539,8 +546,9 @@ def set(key, value):  # noqa: F811
             configured_url = get_mcp_registry_url()
             logger.success(f"MCP registry URL set to: {configured_url}")
             if configured_url and configured_url.startswith("http://"):
-                logger.info(
-                    "Set MCP_REGISTRY_ALLOW_HTTP=1 when using this trusted plaintext endpoint."
+                logger.warning(
+                    "This endpoint uses plaintext HTTP; registry traffic is not encrypted. "
+                    "Use only a trusted network or switch to https://."
                 )
         except ValueError as exc:
             logger.error(str(exc))
@@ -580,6 +588,8 @@ def set(key, value):  # noqa: F811
     setter, label = config_entry
     setter(enabled)
     logger.success(f"{label} set to {'true' if enabled else 'false'}")
+    if key in _DEPRECATED_CONFIG_KEYS:
+        logger.warning(_DEPRECATED_CONFIG_KEYS[key])
 
     # Warn when persisting allow-protocol-fallback=true in a CI environment where
     # $HOME is often shared across jobs -- the persisted value will affect all
@@ -603,7 +613,7 @@ def get(key):
     """Get a configuration value or show all configuration.
 
     Examples:
-        apm config get auto-integrate
+        apm config get target
         apm config get
     """
     from ..config import get_temp_dir
@@ -730,10 +740,12 @@ def get(key):
             click.echo(f"{key}: {str(value).lower()}")
         else:
             click.echo(f"{key}: {value}")
+        if key in _DEPRECATED_CONFIG_KEYS:
+            logger.warning(_DEPRECATED_CONFIG_KEYS[key])
     else:
         # Show all user-settable keys with their effective values (including
         # defaults).  Iterating raw config keys would hide settings that
-        # have not been written yet (e.g. auto_integrate on a fresh install).
+        # have not been written yet (e.g. temp-dir on a fresh install).
         _show_all_user_config(logger)
 
 

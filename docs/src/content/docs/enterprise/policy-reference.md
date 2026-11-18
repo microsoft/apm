@@ -738,14 +738,14 @@ Without `--verbose`, the `Policy:` line is suppressed for `enforcement=warn` and
 
 #### Block: denied dependency aborts the install
 
-The `Blocked by` hint currently names the check, not the dependency ([#3835](https://github.com/microsoft/apm/issues/3835)); act on the dependencies in the violation line.
+Each offending dependency gets its own violation line and `Blocked by` hint:
 
 ```shell
 $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] Policy violation: dependency-denylist -- 1 dependency(ies) match deny list: acme/evil-pkg: denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github -- remove `dependency-denylist` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
+  Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [x] Install blocked by org policy -- see violations above
 [x] Install failed after 0.3s.
 $ echo $?
@@ -796,11 +796,11 @@ Preview output is capped at five lines; overflow collapses into a single tail li
 $ apm install --dry-run
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[!] Would be blocked by policy: acme/evil-pkg -- acme/evil-pkg: denied by pattern: acme/*
-[!] Would be blocked by policy: acme/banned -- acme/banned: denied by pattern: acme/*
-[!] Would be blocked by policy: acme/old -- acme/old: denied by pattern: acme/*
-[!] Would be blocked by policy: acme/legacy -- acme/legacy: denied by pattern: acme/*
-[!] Would be blocked by policy: acme/tools -- acme/tools: denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/evil-pkg -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/banned -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/old -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/legacy -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/tools -- denied by pattern: acme/*
 [!] ... and 2 more would be blocked by policy. Run `apm audit` for full report.
 [i] Dry run mode - showing what would change:
 ```
@@ -814,8 +814,8 @@ $ apm install acme/evil-pkg
 [*] Updated apm.yml with 1 new package(s)
 [>] Installing 1 new package...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] Policy violation: dependency-denylist -- 1 dependency(ies) match deny list: acme/evil-pkg: denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github -- remove `dependency-denylist` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
+  Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [i] apm.yml restored to its previous state.
 [x] Install blocked by org policy -- see violations above
 $ echo $?
@@ -835,7 +835,7 @@ $ apm install --trust-transitive-mcp
 [i] Trusting self-defined MCP server 'sketchy-mcp' from transitive package 'sketchy' (--trust-transitive-mcp)
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: sketchy-mcp -- transport 'streamable-http' not in allowed [stdio]
-  Blocked by org policy at org:contoso/.github -- remove `sketchy-mcp` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (mcp-transport) -- remove `sketchy` (it brings in `sketchy-mcp`) from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
   [x] 1 dependency blocked by org policy
     +- sketchy-mcp -- transport 'streamable-http' not in allowed [stdio]
@@ -1010,17 +1010,17 @@ Each row maps a `PolicyFetchResult.outcome` to its exit impact, severity, the me
 
 When `enforcement=block`, any of the following exit `1` and abort before integration. When `enforcement=warn`, they render in the post-install summary under the `Policy` category and exit `0`.
 
+Install prints one `Policy violation: <subject> -- <reason>` line per offending dependency or MCP server. Dependencies are named by their host-qualified identity (`github.com/<owner>/<repo>`). The `Blocked by` hint cites the check in parentheses and says what to change in `apm.yml`: remove the dependency, add a required one, pin an unbounded ref, or, for a transitive MCP server, remove the dependency that brings it in. A check with no dependency to name, such as `compilation-target`, uses the check name as the subject. `apm audit --ci` groups the same findings by check.
+
 | Class | Origin | Primary message | Remediation |
 |-------|--------|-----------------|-------------|
-| `denylist` | `dependencies.deny` match | `Policy violation: dependency-denylist -- <n> dependency(ies) match deny list: <dep>: denied by pattern: <pattern>` | Remove the dep from `apm.yml`, request an org-policy update, or `--no-policy` for one-off local debugging. |
-| `allowlist` | Dep not in non-empty `dependencies.allow` | `Policy violation: dependency-allowlist -- <n> dependency(ies) not in allow list: <dep>: not in allowed sources` | Add the dep to the org allowlist or switch to an approved package. |
-| `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: required-packages -- <n> required package(s) missing from manifest: <dep>` (pin mismatch: `Policy violation: required-package-version -- <n> version mismatch(es): <dep>: expected ref '<X>', got '<Y>'`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
-| `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: mcp-transport -- <n> MCP transport violation(s): <server>: transport '<t>' not in allowed [<list>]` (or `<server>: effective transport unknown (<reason>); ...`) | Switch the server to an allowed transport, pick one with `transport:` in `apm.yml` when the server offers several, make sure the MCP registry is reachable, or request `mcp.transport.allow` updates. |
+| `denylist` | `dependencies.deny` match | `Policy violation: <dep> -- denied by pattern: <pattern>` | Remove the dep from `apm.yml`, request an org-policy update, or `--no-policy` for one-off local debugging. |
+| `allowlist` | Dep not in non-empty `dependencies.allow` | `Policy violation: <dep> -- not in allowed sources` | Add the dep to the org allowlist or switch to an approved package. |
+| `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <dep> -- required by org policy but not declared` (pin mismatch: `Policy violation: <dep> -- expected ref '<X>', got '<Y>'`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
+| `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <server> -- transport '<t>' not in allowed [<list>]` (or `<server> -- effective transport unknown (<reason>); ...`) | Switch the server to an allowed transport, pick one with `transport:` in `apm.yml` when the server offers several, make sure the MCP registry is reachable, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: compilation-target -- Target(s) ['<t>'] not in allowed list ['<allowed>']: ...` (or `Enforced target '<t>' not present in [...]: ...`) | Re-run with `--target <allowed>`, or update `targets:` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |
-| `pinned-constraint` | `require_pinned_constraint: true` and a dep declares an unbounded ref | `Policy violation: dependency-pinned-constraint -- <n> dependency(ies) use unbounded constraints (hint: pin to a semver range, literal tag, or SHA): <dep>: <reason>` | Pin each listed dep to a semver range with an upper bound (`^1.2.3`, `>=1.0,<2.0`), a literal tag (`v1.5.3`), or a 40-char SHA. Roll out under `enforcement: warn` first to size the fleet impact. |
-| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | Per-server `Policy violation: <server> -- <reason>`, then `MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` | Remove or replace the dependency that brings in the server, or request an org policy update. `--trust-transitive-mcp` does not bypass policy. |
-
-Until [#3835](https://github.com/microsoft/apm/issues/3835) is fixed, the `Blocked by` hint names the check rather than the dependency; act on the dependencies listed in the violation line.
+| `pinned-constraint` | `require_pinned_constraint: true` and a dep declares an unbounded ref | `Policy violation: <dep> -- <reason>` | Pin each listed dep to a semver range with an upper bound (`^1.2.3`, `>=1.0,<2.0`), a literal tag (`v1.5.3`), or a 40-char SHA. Roll out under `enforcement: warn` first to size the fleet impact. |
+| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | Per-server `Policy violation: <server> -- <reason>`, with a hint naming the dependency that brings the server in, then `MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` | Remove or replace the dependency that brings in the server, or request an org policy update. `--trust-transitive-mcp` does not bypass policy. |
 
 All violation messages above flow through `InstallLogger.policy_violation`; under `block` they print inline as `[x]` errors and exit `1`. Use `apm audit --ci --format json` for the same set of findings in machine-readable form.
 

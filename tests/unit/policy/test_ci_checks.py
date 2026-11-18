@@ -213,7 +213,7 @@ class TestRefConsistency:
         result = _check_ref_consistency(manifest, lock)
 
         assert not result.passed
-        assert "run 'apm install --update'" in result.message
+        assert "run 'apm update'" in result.message
         assert result.details == [
             "owner/repo: manifest commit "
             f"'{manifest_commit}' != lockfile resolved_commit '{'b' * 40}'"
@@ -350,7 +350,7 @@ class TestRefConsistency:
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_ref_consistency(manifest, lock)
         assert not result.passed
-        assert "run 'apm install --update'" in result.message
+        assert "run 'apm update'" in result.message
         assert any("^2.0.0" in d for d in result.details)
 
     def test_pass_marketplace_dependency_with_literal_branch_ref(self, tmp_path):
@@ -460,7 +460,7 @@ class TestRefConsistency:
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_ref_consistency(manifest, lock)
         assert not result.passed
-        assert "run 'apm install --update'" in result.message
+        assert "run 'apm update'" in result.message
         assert any(
             "manifest ref 'feature-branch' != lockfile ref 'main'" in d for d in result.details
         )
@@ -1485,7 +1485,7 @@ class TestExternalBeforeInternalCheckOrdering:
     Regression guard for the #2292 -> source-identity failure: a
     source-identity lockfile tamper (attacker rewrites a dependency's
     host/repo_url) trips BOTH checks, but their remedies diverge --
-    ref-consistency says ``apm install --update`` (re-resolve from the
+    ref-consistency says ``apm update`` (re-resolve from the
     trusted manifest, restoring the legitimate source) while
     deployment-ledger-owners says ``apm prune`` (reconcile ownership
     toward the CURRENT/tampered lockfile, which would entrench the
@@ -1534,11 +1534,11 @@ class TestExternalBeforeInternalCheckOrdering:
         result = run_baseline_checks(tmp_path, fail_fast=True)
         assert not result.passed
         # Fail-fast must report the external-boundary cause with the safe
-        # ``apm install --update`` remedy, never the ledger-owner cause
+        # ``apm update`` remedy, never the ledger-owner cause
         # (whose ``apm prune`` remedy would entrench the attacker source).
         assert len(result.failed_checks) == 1
         assert result.failed_checks[0].name == "ref-consistency"
-        assert "apm install --update" in result.failed_checks[0].message
+        assert "apm update" in result.failed_checks[0].message
 
     def test_ref_consistency_precedes_deployment_ledger_owners(self, tmp_path):
         self._write_source_identity_tamper(tmp_path)

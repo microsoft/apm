@@ -43,6 +43,11 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+Bare `owner/repo` shorthand resolves against the manifest's top-level
+`default_host:` (bare hostname, e.g. `default_host: gitlab.com`), else
+`GITHUB_HOST`, else `github.com`. Each manifest uses its own value, and
+`apm install PKG` writes entries on that host as shorthand.
+
 GitHub and package-registry owner/repository identifiers are normalized to
 lowercase only for comparison, lock keys, and cache identity. The first
 declaration selects the repository display spelling retained in `apm.yml`,
@@ -937,7 +942,7 @@ upstream instead of using a persistent bare-cache ref as current-state evidence.
 `--frozen` checks declared refs, full commit pins, host providers and HTTP/HTTPS
 transport against the lock, including transport changes under an unchanged
 semver range. It does not check whether an upstream branch moved. Review an
-intentional declaration change and run `apm install --update` to refresh the lock.
+intentional declaration change and run `apm update` to refresh the lock.
 
 For local `.agent.md`, `.instructions.md`, and `.prompt.md` dependencies, the
 locked content hash covers the ordinary materialized package, including its

@@ -1112,8 +1112,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # breaking release.
     _rich_warning(
         "'apm deps update' is deprecated; use 'apm update' instead. "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
-        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
+        "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
+        "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
+        "interactive plan, --dry-run, and --yes.",
         symbol="warning",
     )
 

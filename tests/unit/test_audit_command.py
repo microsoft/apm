@@ -82,7 +82,7 @@ def lockfile_project(tmp_path):
         lockfile_version: '1'
         generated_at: '2025-01-01T00:00:00Z'
         dependencies:
-          - repo_url: https://github.com/test/test-pkg
+          - repo_url: test/test-pkg
             resolved_ref: main
             resolved_commit: abc123
             deployed_files:
@@ -311,18 +311,30 @@ class TestLockfileMode:
         result = runner.invoke(audit, [])
         assert result.exit_code == 1
 
-    def test_package_filter(self, runner, lockfile_project, monkeypatch):
+    @pytest.mark.parametrize(
+        "package",
+        [
+            "test/test-pkg",
+            "https://github.com/test/test-pkg",
+            "github.com/test/test-pkg",
+            "test/test-pkg#main",
+        ],
+    )
+    def test_package_filter_normalizes_install_forms(
+        self, runner, lockfile_project, monkeypatch, package
+    ):
+        """#3840: install forms resolve to the lockfile key, as uninstall does."""
         monkeypatch.chdir(lockfile_project)
-        # Filter by repo URL (the lockfile key)
-        result = runner.invoke(audit, ["https://github.com/test/test-pkg"])
+        result = runner.invoke(audit, [package])
         # Should still find the warning in guide.md
         assert result.exit_code == 2
 
-    def test_package_filter_not_found(self, runner, lockfile_project, monkeypatch):
+    def test_package_filter_not_found_fails(self, runner, lockfile_project, monkeypatch):
+        """#3840: an unknown package exits non-zero so a CI typo cannot pass."""
         monkeypatch.chdir(lockfile_project)
-        result = runner.invoke(audit, ["nonexistent-pkg"])
-        assert result.exit_code == 0
-        assert "not found" in result.output.lower()
+        result = runner.invoke(audit, ["test/typo-pkg"])
+        assert result.exit_code == 1
+        assert "not installed" in result.output
 
     def test_dir_entries_scanned_recursively(
         self,

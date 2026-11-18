@@ -677,6 +677,33 @@ class TestPolicyReasonHelpers:
         assert "--no-policy" in msg
         assert "apm.yml" in msg
 
+    def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "evil-srv", "org:acme/.github", declared_by="acme/parent-pkg"
+        )
+        assert "remove `acme/parent-pkg` (it brings in `evil-srv`) from apm.yml" in msg
+
+    def test_reason_blocked_cites_rule_as_category(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "github.com/evilcorp/bad-pkg", "org:acme/.github", rule="dependency-denylist"
+        )
+        assert msg.startswith("Blocked by org policy at org:acme/.github (dependency-denylist) --")
+        assert "remove `github.com/evilcorp/bad-pkg` from apm.yml" in msg
+        assert "remove `dependency-denylist`" not in msg
+
+    def test_reason_blocked_required_package_says_add(self):
+        msg = InstallLogger._policy_reason_blocked("acme/std", "org:acme/.github", remedy="add")
+        assert "add `acme/std` to apm.yml" in msg
+        assert "remove" not in msg
+
+    def test_reason_blocked_without_remedy_suggests_no_apm_yml_edit(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "compilation-target", "org:acme/.github", remedy=None
+        )
+        assert "compilation-target" not in msg
+        assert "apm.yml" not in msg
+        assert "--no-policy" in msg
+
 
 # ── _render_policy_group (via DiagnosticCollector.render_summary) ───
 

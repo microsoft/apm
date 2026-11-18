@@ -65,7 +65,6 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `auto-integrate` | boolean | `true` | Has no effect. APM stores and reports the value, but no command reads it: `apm compile` and `apm install` behave the same whether it is `true` or `false` ([#3839](https://github.com/microsoft/apm/issues/3839)). |
 | `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
 | `self-update.install-dir` | path | unset | Optional launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
@@ -81,6 +80,10 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 | `registry.<name>.url` | URL | unset | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `$APM_HOME/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
+
+### Deprecated keys
+
+`auto-integrate` has no effect: no command reads it. `apm config get` and `apm config set` still accept it, so existing scripts keep working, but print a deprecation warning. It is not listed in the config summary and will be removed in a future release.
 
 ### Resolution order
 
@@ -264,7 +267,7 @@ See [External scanners](../../../integrations/external-scanners/).
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
+Internal JSON keys use snake_case (`install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 
 ## Related
 

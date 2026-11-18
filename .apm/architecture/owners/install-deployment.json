@@ -284,6 +284,13 @@
       "guards": ["install-deployment-policy-mcp-transport-projection"]
     },
     {
+      "id": "policy-violation-subjects",
+      "decision": "Projection of a failed install policy check into per-dependency (or per-MCP-server) violation lines and their remediation hints; the check name is only the category",
+      "owner": "policy/models.py (CheckResult.violation_subjects, PolicySubject) reported only through policy/install_preflight.py (emit_check_violations)",
+      "selectors": ["src/apm_cli/policy/install_preflight.py"],
+      "guards": ["install-deployment-policy-violation-subjects"]
+    },
+    {
       "id": "skills-root-derivation",
       "decision": "Target skills-root derivation",
       "owner": "integration/targets.py (TargetProfile.skills_rel_root, TargetProfile.skills_deploy_path)",

@@ -8,10 +8,10 @@ to a registry. It is a directory (or archive -- `.zip` by default, `.tar.gz` via
 `--archive-format tar.gz`) containing a
 `plugin.json`, your primitive folders, and an embedded `apm.lock.yaml` that
 pins every file by SHA-256. Build it with one command from a project that has
-`apm.yml`. Run `apm install` first: the embedded `apm.lock.yaml` is built
-from the project's lockfile, and without one the default format packs no
-lockfile ([#3846](https://github.com/microsoft/apm/issues/3846)) while
-`--format agent-plugin` fails:
+`apm.yml`. Run `apm install` first when you have dependencies: their content is
+packed from the project's lockfile. A project with only local primitives and
+no lockfile still gets an embedded `apm.lock.yaml` in the default format;
+`--format agent-plugin` requires the lockfile:
 
 ```bash
 apm pack
@@ -40,7 +40,7 @@ build/<your-package>-<version>/
 +-- hooks.json         # first-party hook configuration, when present
 +-- .claude-plugin/
 |   +-- plugin.json    # native Claude hook discovery, when hooks are present
-+-- apm.lock.yaml      # embedded when the project has a lockfile: pins every file by SHA-256
++-- apm.lock.yaml      # always embedded: pins every file by SHA-256
 ```
 
 The success line tells you exactly what to share:
@@ -48,8 +48,8 @@ The success line tells you exactly what to share:
 ```
 $ apm pack
 [*] Packed 7 file(s) -> build/my-pkg-1.0.0
-[i] Claude plugin bundle ready -- contains plugin.json plus plugin-native
-    directories and an embedded apm.lock.yaml.
+[i] Claude plugin bundle ready -- contains plugin.json, plugin-native
+    directories, and an embedded apm.lock.yaml for integrity verification.
 [i] Share with: apm install build/my-pkg-1.0.0
 ```
 
@@ -166,11 +166,10 @@ The manifest is the source of truth. Tampering after pack time is detected
 before any file lands in the project. You do not configure this -- it runs on
 every `apm install <bundle>` that carries the manifest.
 
-If the project had no `apm.lock.yaml` when you packed in the default format,
-the bundle has no manifest: `apm install <bundle>` skips the integrity check
-with a warning, or fails when policy sets
-`security.integrity.require_hashes: true`. Run `apm install` before
-`apm pack` so the bundle carries hashes.
+Bundles produced by older APM versions (or by other tools) may have no
+manifest: `apm install <bundle>` then skips the integrity check with a
+warning, or fails when policy sets `security.integrity.require_hashes: true`.
+Repack them with `apm pack` so they carry hashes.
 
 ## Distribution paths
 

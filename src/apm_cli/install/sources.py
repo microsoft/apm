@@ -44,6 +44,7 @@ from apm_cli.install.source_helpers import (
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
+    supply_chain_mismatch_hint,
 )
 from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
@@ -898,8 +899,7 @@ class FreshDependencySource(DependencySource):
                             f"Content hash mismatch for {dep_key}: "
                             f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
                             "The downloaded content differs from the lockfile record. "
-                            "This may indicate a supply-chain attack. Use "
-                            "'apm install --update' to accept new content and update the lockfile."
+                            + supply_chain_mismatch_hint(ctx.scope)
                         )
             ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
 

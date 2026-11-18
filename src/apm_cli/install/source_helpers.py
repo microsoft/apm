@@ -11,6 +11,34 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import APMPackage, PackageType
 
 
+def lockfile_refresh_command(scope: Any) -> str:
+    """Return the command that re-resolves dependencies and re-pins the lockfile."""
+    from apm_cli.core.scope import InstallScope
+
+    return "apm update -g" if scope is InstallScope.USER else "apm update"
+
+
+def supply_chain_mismatch_hint(scope: Any) -> str:
+    """Explain a lockfile content mismatch and name the command that re-pins it."""
+    return (
+        "This may indicate a supply-chain attack. Use "
+        f"'{lockfile_refresh_command(scope)}' to accept new content and update the lockfile."
+    )
+
+
+def ref_update_operation_label() -> str:
+    """Name the invoked ref-updating command (``update``, ``install --update``, ...)."""
+    import click
+
+    click_ctx = click.get_current_context(silent=True)
+    if click_ctx is None:
+        return "update"
+    _, _, subcommand = click_ctx.command_path.partition(" ")
+    if subcommand == "install":
+        return "install --update"
+    return subcommand or "update"
+
+
 def locked_parent_identity(ctx: InstallContext, node: DependencyNode | None) -> str | None:
     """Use exact original parent keys in the replacement-enabled lock contract."""
     from apm_cli.deps.lockfile import lockfile_parent_identity
@@ -161,8 +189,7 @@ def ensure_carried_licenses_match(
     raise DirectDependencyError(
         f"Licence file mismatch for {dep_key}: the licence files carried "
         "from the repository differ from the lockfile record. "
-        "This may indicate a supply-chain attack. Use "
-        "'apm install --update' to accept new content and update the lockfile."
+        + supply_chain_mismatch_hint(ctx.scope)
     )
 
 

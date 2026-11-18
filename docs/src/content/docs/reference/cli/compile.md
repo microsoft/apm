@@ -92,11 +92,11 @@ and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
 Every accepted project target is also accepted by `compile`. `grok-build`
-produces `AGENTS.md`. Targets without root-context output, including
-`agent-skills` and `grok-bot`, are successful no-ops. The experimental
-`grok-cloud`, `openclaw`, `copilot-app`, and `copilot-cowork` targets have no
-root-context output either, but `--target` with one of them currently falls
-back to auto-detection ([#3842](https://github.com/microsoft/apm/issues/3842)); see [Output layout per target](#output-layout-per-target).
+produces `AGENTS.md`. Targets without root-context output (`agent-skills`,
+`grok-bot`, and the experimental `grok-cloud`, `openclaw`, `copilot-app`, and
+`copilot-cowork`) are successful no-ops that write nothing. An experimental
+target whose flag is off also prints the `apm experimental enable` hint. See
+[Output layout per target](#output-layout-per-target).
 `antigravity`, `hermes`, and `grok-bot` are explicit-only, while `intellij`
 is MCP-only.
 None is included in `all`.
@@ -385,7 +385,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
 | `grok-bot` | none |
-| `grok-cloud`, `openclaw`, `copilot-app`, `copilot-cowork` | None intended. Currently falls back to auto-detection: the detected harness's root files, or `AGENTS.md` with no other signal. |
+| `grok-cloud`, `openclaw`, `copilot-app`, `copilot-cowork` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first

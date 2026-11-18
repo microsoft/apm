@@ -67,6 +67,7 @@ from apm_cli.core.errors import (
     NoHarnessError,
     UnknownTargetError,
 )
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,
@@ -228,10 +229,26 @@ def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
     assert parse_targets_field({"targets": targets}) == targets
 
 
-def test_manifest_targets_from_target_option_keeps_stable_hermes_only():
+def test_manifest_targets_from_target_option_drops_experimental_targets():
     assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) == [
-        "hermes"
+        "antigravity",
+        "hermes",
     ]
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    sorted(
+        (alias, capability.name)
+        for capability in TARGET_CAPABILITIES.values()
+        for alias in capability.aliases
+    ),
+)
+def test_manifest_targets_from_target_option_canonicalizes_every_alias(alias, canonical):
+    """Every catalog alias persists exactly like its canonical spelling (#3842)."""
+    persisted = manifest_targets_from_target_option(alias)
+    assert persisted == manifest_targets_from_target_option(canonical)
+    assert persisted is None or alias not in persisted
 
 
 def test_manifest_targets_from_target_option_preserves_grok_build():

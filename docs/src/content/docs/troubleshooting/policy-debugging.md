@@ -15,22 +15,21 @@ This page walks the diagnosis end to end.
 ## 1. Read the failure
 
 You usually meet a policy block in `apm install` first. It names the
-policy source, the check that fired, and the offending dependencies:
+policy source and prints one violation per offending dependency:
 
 ```text
 [!] Policy: org:acme-corp/.github -- enforcement=block
-[x] Policy violation: dependency-allowlist -- 1 dependency(ies) not in allow list: github.com/contoso/agent-skills: not in allowed sources
-  Blocked by org policy at org:acme-corp/.github -- remove `dependency-allowlist` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Policy violation: github.com/contoso/agent-skills -- not in allowed sources
+  Blocked by org policy at org:acme-corp/.github (dependency-allowlist) -- remove `github.com/contoso/agent-skills` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [x] Install blocked by org policy -- see violations above
 ```
 
 `apm install` exits `1` and writes nothing; a package you were adding is
-removed from `apm.yml` again. Until [#3835](https://github.com/microsoft/apm/issues/3835) is fixed, the
-`Blocked by` hint names the check, not the dependency: act on the
-dependencies listed in the violation line.
+removed from `apm.yml` again.
 
-`apm audit --ci` reports the same check as a failed row in its check
-table, then lists the offending entries:
+`apm audit --ci` reports the check that fired (here
+`dependency-allowlist`) as a failed `[x]` row in its check table, then
+lists the offending entries:
 
 ```text
   dependency-allowlist details:
@@ -41,8 +40,8 @@ table, then lists the offending entries:
 
 Three things to extract before doing anything else:
 
-- **Check name** (`dependency-allowlist`) -- pin it; you will reuse it in
-  the next steps.
+- **Check name** (`dependency-allowlist`, in parentheses in the
+  `Blocked by` hint) -- pin it; you will reuse it in the next steps.
 - **Enforcement** -- `enforcement=block` fails the command. Under `warn`,
   `apm install` continues and lists the finding under `policy warning`
   in its summary.

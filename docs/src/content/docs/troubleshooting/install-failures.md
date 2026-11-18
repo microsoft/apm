@@ -197,10 +197,10 @@ and lockfiles invalid for other reasons keep their existing behavior.
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
 
 ```bash
-apm install --update
+apm update
 ```
 
-This is the only flag that will move pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
+This is the only command that will move pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
 
 ### Detecting drift in CI
 

@@ -45,7 +45,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `--format text\|json\|yaml` | `text` | Select discovery report format. Used with `--discover`. |
 | `--apply`, `--write` | off | After discovery, create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Requires consent unless `--yes` is set. |
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
-| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
+| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name: 1-64 lowercase letters, digits, dots, or hyphens; must start and end with a letter or digit, with no `..` or `--`. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
 | `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and the explicit-only `hermes` and `grok-bot`; `all` expands the default stable set. |
 | `--name` | directory name | Project name written to `apm.yml` for in-place init. Same rules as `PROJECT_NAME`. Ignored, with a warning, when `PROJECT_NAME` is given. |
@@ -62,9 +62,10 @@ They cannot be combined with `--discover`.
 Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
 
-`init` writes only manifest-safe stable targets. For example, `--target agents`,
-`--target vscode`, and the MCP-only `--target intellij` persist the canonical
-`copilot` identifier, while `--target all` expands to the default stable set.
+`init` writes only manifest-safe stable targets, canonicalizing aliases first.
+For example, `--target agents`, `--target vscode`, and the MCP-only
+`--target intellij` persist `copilot`, `--target agy` persists `antigravity`,
+and `--target all` expands to the default stable set.
 Experimental selectors such as `grok-cloud` are accepted by the shared CLI
 target parser but are not persisted in `apm.yml`; enable them, then select them
 with `apm install --target grok-cloud`.

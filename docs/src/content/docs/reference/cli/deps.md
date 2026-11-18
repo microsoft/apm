@@ -127,7 +127,7 @@ Exit codes: `0` on success, `1` when the package is not installed or the query m
 ### `apm deps update`
 
 :::caution[Deprecated]
-`apm deps update` is deprecated in favor of [`apm update`](../update/), which supports `-g/--global`, `[PACKAGES...]`, `--force`, `--parallel-downloads`, and `--target`, plus an interactive plan, `--dry-run`, and `--yes`. `apm update` does not yet accept `--legacy-skill-paths` or read `APM_LEGACY_SKILL_PATHS`, so it redeploys skills to `.agents/skills/`; keep using `apm deps update --legacy-skill-paths` for per-client skill layouts. `apm deps update` keeps working for one release and is removed in the next breaking release.
+`apm deps update` is deprecated in favor of [`apm update`](../update/), which supports `-g/--global`, `[PACKAGES...]`, `--force`, `--parallel-downloads`, `--target`, and `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS`), plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
 :::
 
 Re-resolve git references for installed dependencies (direct and transitive), download updated content, re-integrate primitives, and regenerate `apm.lock.yaml`.
@@ -147,7 +147,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 | `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `agents`, `agy`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `vscode`, `windsurf`. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
 | `-g, --global` | Update user-scope dependencies under `$APM_HOME` (default `~/.apm`). |
-| `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. |
+| `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 `apm deps update` runs the install pipeline and is gated by org `apm-policy.yml`. There is no `--no-policy` flag; the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session.
 

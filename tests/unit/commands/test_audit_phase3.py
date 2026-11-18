@@ -497,7 +497,7 @@ class TestAuditContentScanBranches:
                             _audit_content_scan(cfg, None, None, strip=False, dry_run=False)
         assert exc_info.value.code == 1
 
-    def test_package_not_found_warning_and_exit(self, tmp_path: Path) -> None:
+    def test_package_not_installed_errors_and_exits_one(self, tmp_path: Path) -> None:
         logger = _make_logger()
         lock_file = tmp_path / "apm.lock.yaml"
         lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
@@ -516,8 +516,9 @@ class TestAuditContentScanBranches:
                 with patch("apm_cli.commands.audit.scan_project_result") as mock_scan:
                     mock_scan.return_value = FileScanResult({}, frozenset())
                     _audit_content_scan(cfg, "owner/repo", None, strip=False, dry_run=False)
-        assert exc_info.value.code == 0
-        logger.warning.assert_called()
+        assert exc_info.value.code == 1
+        logger.error.assert_called()
+        mock_scan.assert_not_called()
 
     def test_dry_run_without_strip_warns(self, tmp_path: Path) -> None:
         logger = _make_logger()

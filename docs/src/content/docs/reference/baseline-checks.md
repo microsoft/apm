@@ -85,7 +85,7 @@ the [policy schema](../policy-schema/).
   Audit reads this evidence without fetching today's catalog or changing the
   manifest, lockfile, or deployment. An unavailable catalog does not invalidate
   an otherwise valid installed dependency.
-- **Remediation.** Run the command the check message names: `apm install --update`
+- **Remediation.** Run the command the check message names: `apm update`
   when the lockfile already holds a resolution that must be refreshed or re-keyed
   (the source-identity rewrite and commit-pin mismatch cases), or plain `apm install`
   for a first resolution -- so the lockfile re-resolves to the manifest, then commit
@@ -94,7 +94,7 @@ the [policy schema](../policy-schema/).
   identity check is evaluated ahead of the internal ledger-owner check on purpose.
   A source-identity tamper (a rewritten dependency `host`/`repo_url` in the lockfile)
   trips both, but only `ref-consistency` points at the safe fix -- re-resolving from
-  the trusted manifest via `apm install --update`. The ledger-owner remedy (`apm prune`)
+  the trusted manifest via `apm update`. The ledger-owner remedy (`apm prune`)
   reconciles ownership toward the *current* lockfile, so it must never be the surfaced
   cause when the manifest and lockfile disagree about a dependency's identity.
 

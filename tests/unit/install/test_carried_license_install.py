@@ -41,6 +41,7 @@ def _ctx(tmp_path: Path, **overrides) -> SimpleNamespace:
         "update_refs": False,
         "expected_hash_change_deps": set(),
         "apm_modules_dir": tmp_path / "apm_modules",
+        "scope": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -89,8 +90,9 @@ def test_carried_mismatch_with_lock_fails_closed(tmp_path: Path) -> None:
     forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
     ctx = _ctx(tmp_path, package_carried_licenses={"k": records})
 
-    with pytest.raises(DirectDependencyError, match="Licence file mismatch"):
+    with pytest.raises(DirectDependencyError, match="Licence file mismatch") as exc_info:
         ensure_carried_licenses_match(ctx, "k", package, SimpleNamespace(carried_licenses=forged))
+    assert "Use 'apm update' to accept new content" in str(exc_info.value)
     assert not package.exists()
 
 

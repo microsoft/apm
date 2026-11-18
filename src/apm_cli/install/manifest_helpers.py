@@ -11,6 +11,28 @@ from apm_cli.constants import APM_YML_FILENAME
 from apm_cli.core.command_logger import InstallLogger
 
 
+def _load_manifest_for_add(apm_yml_path: Path, logger=None) -> tuple[dict, str | None]:
+    """Read apm.yml round-trip and return it with its validated ``default_host``.
+
+    OpenAPM req-mf-019: the manifest's ``default_host:`` selects the host that
+    shorthand entries resolve against and that canonical writes strip (#3843).
+    Exits 1 with an error when the manifest is unreadable or the host invalid.
+    """
+    from apm_cli.models.manifest_io import load_manifest_roundtrip
+    from apm_cli.utils.github_host import validate_manifest_default_host
+
+    try:
+        data = load_manifest_roundtrip(apm_yml_path) or {}
+    except Exception as e:
+        (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        sys.exit(1)
+    try:
+        return data, validate_manifest_default_host(data.get("default_host"))
+    except ValueError as e:
+        (logger or InstallLogger()).error(str(e))
+        sys.exit(1)
+
+
 def _merge_packages_into_yml(
     validated_packages,
     apm_yml_entries,
@@ -48,11 +70,10 @@ def _prepare_dry_run_manifest_path(
     manifest_path: Path,
     *,
     dry_run: bool,
-    user_scope: bool,
     has_packages: bool,
 ) -> tuple[Path, tempfile.TemporaryDirectory | None]:
-    """Redirect an absent user manifest to temporary storage during previews."""
-    if not (dry_run and user_scope and has_packages and not manifest_path.exists()):
+    """Redirect an absent manifest to temporary storage during previews."""
+    if not (dry_run and has_packages and not manifest_path.exists()):
         return manifest_path, None
 
     temp_dir = tempfile.TemporaryDirectory(prefix="apm-dry-run-")
@@ -85,17 +106,16 @@ def _report_bootstrap_manifest(
     manifest_display: str,
     manifest_targets: list[str],
     dry_run: bool,
-    user_scope: bool,
 ) -> None:
     """Render bootstrap messages with dry-run-safe wording."""
-    if dry_run and user_scope:
+    if dry_run:
         logger.progress(f"Dry run: Would create {manifest_display}")
     else:
         logger.success(f"Created {manifest_display}")
     if not manifest_targets:
         return
     target_list = ", ".join(manifest_targets)
-    if dry_run and user_scope:
+    if dry_run:
         logger.progress(f"Dry run: Would set targets: {target_list} (in {manifest_display})")
         return
     logger.progress(f"Targets set: {target_list} (persisted to {manifest_display})")

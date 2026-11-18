@@ -458,7 +458,7 @@ For GitHub and GHES, APM sends repository API requests with `Authorization: toke
 
 | Package source | Host | Auth behavior | Fallback |
 |---|---|---|---|
-| Bare shorthand | `default_host()` | Host-class-specific chain above | Depends on classified host |
+| Bare shorthand | manifest `default_host:`, else `GITHUB_HOST`, else `github.com` | Host-class-specific chain above | Depends on classified host |
 | `github.com/org/repo` | github.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
 | `contoso.ghe.com/org/repo` | *.ghe.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
 | GHES via `GITHUB_HOST` | ghes.company.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Unauth for public repos |

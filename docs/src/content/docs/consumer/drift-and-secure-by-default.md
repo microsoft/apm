@@ -47,14 +47,13 @@ aborts:
 [x] Content hash mismatch for owner/repo: expected sha256:abc..., got sha256:def...
     The downloaded content differs from the lockfile record.
     This may indicate a supply-chain attack.
-    Use 'apm install --update' to accept new content and update the
-    lockfile.
+    Use 'apm update' to accept new content and update the lockfile.
 ```
 
 Exit code is non-zero and the partially-downloaded directory is
 removed before APM exits. Source: `src/apm_cli/install/sources.py`.
 
-The opt-in escape hatch is `apm install --update`, which re-resolves
+The opt-in escape hatch is `apm update`, which re-resolves
 refs and accepts new content into the lockfile. Use it when you
 intentionally bumped a dependency upstream and expect the hash to
 change.
@@ -161,7 +160,7 @@ For the full flag set, see [CLI audit](../../reference/cli/audit/).
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| `Content hash mismatch` on install | Lockfile-pinned content no longer matches what the source serves | Investigate upstream; if intended, run `apm install --update` |
+| `Content hash mismatch` on install | Lockfile-pinned content no longer matches what the source serves | Investigate upstream; if intended, run `apm update` |
 | `cache pin mismatch` from `apm audit` | The cache holds content from a different `resolved_commit` than the lockfile records | `apm install` to repopulate the cache, then re-audit |
 | `unintegrated` drift | Source committed without re-running install | `apm install`, then commit the regenerated `apm.lock.yaml` |
 | `modified` drift | Hand-edit to a generated file | Revert, or move the change into the corresponding `.apm/` source; for a remote dependency's files, run `apm export-patch` to send the edit upstream |

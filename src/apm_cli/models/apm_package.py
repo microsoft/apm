@@ -487,6 +487,9 @@ class APMPackage:
     registries: dict[str, str] | None = None
     # Value of ``registries.default:`` -- routes unscoped deps to this registry.
     default_registry: str | None = None
+    # Value of ``default_host:`` -- the host shorthand dependencies in this
+    # manifest resolve against (OpenAPM req-mf-019). None when omitted.
+    default_host: str | None = None
     manifest_contract: str = "working-draft"
 
     # Top-level ``allowExecutables:`` block -- per-package approval for
@@ -595,6 +598,39 @@ class APMPackage:
         return parsed
 
     @classmethod
+    def _parse_dependency_sections(cls, data: dict, source_manifest: Path) -> tuple:
+        """Parse ``dependencies`` and ``devDependencies`` from manifest data."""
+        dependencies = None
+        raw_deps = data.get("dependencies")
+        if raw_deps is not None:
+            if not isinstance(raw_deps, dict):
+                raise ValueError(
+                    f"Invalid 'dependencies' in {source_manifest}: expected a mapping "
+                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_deps).__name__}. "
+                    "Use the structured format:\n"
+                    "  dependencies:\n"
+                    "    apm:\n"
+                    "      - owner/repo"
+                )
+            dependencies = cls._parse_dependency_dict(raw_deps, label="")
+
+        # Parse devDependencies (same structure as dependencies)
+        dev_dependencies = None
+        raw_dev_deps = data.get("devDependencies")
+        if raw_dev_deps is not None:
+            if not isinstance(raw_dev_deps, dict):
+                raise ValueError(
+                    f"Invalid 'devDependencies' in {source_manifest}: expected a mapping "
+                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_dev_deps).__name__}. "
+                    "Use the structured format:\n"
+                    "  devDependencies:\n"
+                    "    apm:\n"
+                    "      - owner/repo"
+                )
+            dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
+        return dependencies, dev_dependencies
+
+    @classmethod
     def from_mapping(
         cls,
         manifest_data: Mapping[str, Any],
@@ -668,35 +704,17 @@ class APMPackage:
             create_config=create_config,
         )
 
-        # Parse dependencies
-        dependencies = None
-        raw_deps = data.get("dependencies")
-        if raw_deps is not None:
-            if not isinstance(raw_deps, dict):
-                raise ValueError(
-                    f"Invalid 'dependencies' in {source_manifest}: expected a mapping "
-                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_deps).__name__}. "
-                    "Use the structured format:\n"
-                    "  dependencies:\n"
-                    "    apm:\n"
-                    "      - owner/repo"
-                )
-            dependencies = cls._parse_dependency_dict(raw_deps, label="")
+        # ``default_host:`` (OpenAPM req-mf-019): shorthand dependencies in
+        # this manifest resolve against it instead of the implementation
+        # default (GITHUB_HOST or github.com).
+        from ..utils.github_host import (
+            manifest_default_host_scope,
+            validate_manifest_default_host,
+        )
 
-        # Parse devDependencies (same structure as dependencies)
-        dev_dependencies = None
-        raw_dev_deps = data.get("devDependencies")
-        if raw_dev_deps is not None:
-            if not isinstance(raw_dev_deps, dict):
-                raise ValueError(
-                    f"Invalid 'devDependencies' in {source_manifest}: expected a mapping "
-                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_dev_deps).__name__}. "
-                    "Use the structured format:\n"
-                    "  devDependencies:\n"
-                    "    apm:\n"
-                    "      - owner/repo"
-                )
-            dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
+        manifest_default_host = validate_manifest_default_host(data.get("default_host"))
+        with manifest_default_host_scope(manifest_default_host):
+            dependencies, dev_dependencies = cls._parse_dependency_sections(data, source_manifest)
 
         # Merge user/policy registry URLs and config.json default routing.
         from ..deps.registry.config_loader import resolve_effective_registries
@@ -822,6 +840,7 @@ class APMPackage:
             includes=includes,
             registries=registries,
             default_registry=default_registry,
+            default_host=manifest_default_host,
             manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
             extensions=extensions,

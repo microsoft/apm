@@ -1199,7 +1199,7 @@ def _render_doctor_table(logger, checks):
 def search(expression, limit, verbose):
     """Search for plugins in a specific marketplace.
 
-    Use QUERY@MARKETPLACE format, e.g.:  apm marketplace search security@skills
+    Use QUERY@MARKETPLACE format, e.g.:  apm search security@skills
     """
     logger = CommandLogger("marketplace-search", verbose=verbose)
     try:
@@ -1209,7 +1209,7 @@ def search(expression, limit, verbose):
         if "@" not in expression:
             logger.error(
                 f"Invalid format: '{expression}'. "
-                "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
+                "Use QUERY@MARKETPLACE, e.g.: apm search security@skills"
             )
             sys.exit(1)
 
@@ -1217,7 +1217,7 @@ def search(expression, limit, verbose):
         if not query or not marketplace_name:
             logger.error(
                 "Both QUERY and MARKETPLACE are required. "
-                "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
+                "Use QUERY@MARKETPLACE, e.g.: apm search security@skills"
             )
             sys.exit(1)
 

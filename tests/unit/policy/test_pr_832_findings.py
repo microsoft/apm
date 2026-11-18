@@ -8,8 +8,8 @@ Covers:
   from either the gate phase or the preflight helper (smoke).
 - #5: dry-run path falls back to ``check.name`` when ``CheckResult.details``
   is empty, so a failed check is never silently omitted.
-- #6: ``_extract_dep_ref`` honours the ``"{ref}: {reason}"`` contract
-  with a defensive fallback to ``check.name`` for malformed details.
+- #6: ``CheckResult.violation_subjects`` returns structured subjects and
+  falls back to one ``check.name`` entry for subject-less checks.
 - #7: the policy cache path is asserted to live inside ``apm_modules``;
   a symlinked ``apm_modules`` pointing outside the project is rejected.
 - #8: ``discover_policy_with_chain`` no longer accepts ``no_policy``.
@@ -33,10 +33,9 @@ from apm_cli.policy.discovery import (
 )
 from apm_cli.policy.install_preflight import (
     PolicyBlockError,
-    _extract_dep_ref,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CheckResult, CIAuditResult
+from apm_cli.policy.models import CheckResult, CIAuditResult, PolicySubject
 from apm_cli.policy.outcome_routing import route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
 
@@ -230,23 +229,24 @@ class TestDryRunEmptyDetailsFallback:
 # ──────────────────────────────────────────────────────────────────────
 
 
-class TestExtractDepRefContract:
-    def test_standard_ref_colon_reason(self):
-        # Standard policy_checks output: "{ref}: {reason}"
-        assert (
-            _extract_dep_ref("acme/server: not in allow list", "dependency-allowlist")
-            == "acme/server"
+class TestViolationSubjectsContract:
+    def test_structured_subjects_are_returned_verbatim(self):
+        subject = PolicySubject("acme/server", "not in allow list")
+        check = CheckResult(
+            name="dependency-allowlist",
+            passed=False,
+            message="1 dependency(ies) not in allow list",
+            details=["acme/server: not in allow list"],
+            subjects=(subject,),
         )
+        assert check.violation_subjects() == (subject,)
 
-    def test_empty_detail_falls_back_to_check_name(self):
-        assert _extract_dep_ref("", "dependency-denylist") == "dependency-denylist"
-
-    def test_no_colon_returns_stripped_detail(self):
-        assert _extract_dep_ref("  some weird detail  ", "rule-x") == "some weird detail"
-
-    def test_colon_only_falls_back_to_check_name(self):
-        # Pathological: ":foo" -> head is empty -> fallback
-        assert _extract_dep_ref(":foo", "rule-x") == "rule-x"
+    def test_subject_less_check_falls_back_to_check_name(self):
+        check = CheckResult(name="rule-x", passed=False, message="boom", details=["a", "b"])
+        (subject,) = check.violation_subjects()
+        assert subject.ref == "rule-x"
+        assert subject.reason == "boom: a, b"
+        assert subject.remedy is None
 
 
 # ──────────────────────────────────────────────────────────────────────
