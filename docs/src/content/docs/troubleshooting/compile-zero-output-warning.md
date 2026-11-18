@@ -45,18 +45,17 @@ find .apm -name '*.instructions.md' -o -name '*.prompt.md' -o \
          -name '*.agent.md' -o -name 'SKILL.md'
 ```
 
-### 3. Confirm the includes filter is not excluding everything
+### 3. Confirm `compilation.exclude` is not skipping everything
 
-If `apm.yml` declares an `includes:` filter on a dependency, only matching primitives are integrated. A typo or overly narrow glob can silently drop the entire package contribution.
+`apm compile` skips every directory that matches a `compilation.exclude` glob in `apm.yml`. An overly broad pattern can drop every instruction, and compile then reports zero output.
 
 ```yaml
-dependencies:
-  apm:
-    - name: org/security-pack
-      includes: [skills]   # prompts and instructions are excluded
+compilation:
+  exclude:
+    - ".apm/**"   # skips all local instructions
 ```
 
-See [manifest schema](../../reference/manifest-schema/) for the full include/exclude semantics.
+Narrow or remove the pattern. See [manifest schema](../../reference/manifest-schema/#6-compilation).
 
 ### 4. Confirm the target supports the primitive types you ship
 

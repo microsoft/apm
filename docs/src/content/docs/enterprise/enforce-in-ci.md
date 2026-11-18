@@ -60,6 +60,7 @@ on:
       - 'apm.lock.yaml'
       - '.apm/**'
       - '.github/**'
+      - '.agents/**'
       - '.claude/**'
       - '.cursor/**'
 

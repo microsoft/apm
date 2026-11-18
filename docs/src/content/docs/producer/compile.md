@@ -145,13 +145,13 @@ Per target, with the rules shape on disk after `apm install && apm compile`
 
 | Target | Root context file | Per-rule output | Compile required? |
 |---|---|---|---|
-| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
-| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
-| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
+| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | Optional -- `apm install` deploys the per-rule files Copilot reads natively; compile deduplicates with them (see [below](#copilot-deduplication)) |
+| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Optional -- `apm install` deploys Claude rules; compile deduplicates with them (see [below](#claude-code-deduplication)) |
+| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/<name>.instructions.md` | Optional -- `apm install` deploys Grok rules; compile also folds them into `AGENTS.md` |
 | `cursor` | `AGENTS.md` | `.cursor/rules/<name>.mdc` | Optional -- `apm install` deploys the `.mdc` rules (an instruction without `applyTo` has no `globs`/`alwaysApply`, so Cursor may skip it) |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
-| `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
+| `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Optional -- `apm install` deploys Antigravity rules; compile deduplicates `AGENTS.md` with them |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | `AGENTS.md` | `.windsurf/rules/<name>.md` | Optional -- `apm install` deploys Windsurf rules |
 | `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Optional -- `apm install` deploys Kiro steering |

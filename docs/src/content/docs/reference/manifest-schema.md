@@ -67,6 +67,8 @@ policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 replace:       <list<ReplacementRule>>    # candidate; explicit selector required
 marketplaces:  <list<MarketplaceEntry>>   # user manifest only; see 3.14
+executables:   <ExecutablesConfig>       # OPTIONAL; local executable trust, see apm approve
+lifecycle:     <LifecycleConfig>         # OPTIONAL; lifecycle scripts
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
 ```
 
@@ -229,6 +231,8 @@ MCP-only and experimental `--target` values such as `intellij` and
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
 | `agent-skills` | Deploys Agent Skills under `.agents/skills/`. |
+| `hermes` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`. Explicit-only; see [hermes](../targets-matrix/#hermes). |
+| `grok-bot` | Deploys skills to `agent-data/workflows/`. Explicit-only; see [grok-bot](../targets-matrix/#grok-bot). |
 
 :::tip[Deterministic committed output]
 Teams that commit the files `apm compile` generates face a consistency problem:
@@ -363,7 +367,7 @@ The `registries:` field and registry-routed APM dependency forms require `apm ex
 |---|---|
 | **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
 | **Required** | OPTIONAL |
-| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../../guides/registries/#user-level-config). |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../../guides/registries/#precedence-chains). |
 
 ```yaml
 registries:
@@ -374,7 +378,7 @@ registries:
 
 | Sub-key | Type | Required | Constraint | Semantic |
 |---|---|---|---|---|
-| `<name>` | `RegistryEntry` | at least one when block is non-empty | Name uses lowercase letters, digits, `-`, `.` | Registered registry. |
+| `<name>` | `RegistryEntry` | at least one when block is non-empty | Non-empty string. Use letters, digits, `.`, `_` and `-` so `apm config set registry.<name>.*` can address it | Registered registry. |
 | `<name>.url` | `string` | REQUIRED per entry | MUST start with `https://` or `http://`; no trailing slash required | Base URL the client appends `/v1/...` paths to. |
 | `default` | `string` | OPTIONAL | MUST name one of the configured entries | When set, plain string-shorthand APM deps and object-form deps without an explicit `registry:` key route through this registry. Project value wins over `registry.<name>.default` in `~/.apm/config.json`. |
 
@@ -595,7 +599,7 @@ Remote dependency (git URL plus sub-path):
   alias: acme-sec
 ```
 
-`ref:` accepts either a literal git ref (`main`, `v2.0`, a 40-char commit SHA) or a **semver range** (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). When `ref:` is a semver range, APM resolves it against the remote's tags at install time, matching against `v{version}` and `{name}--v{version}` patterns (with `{version}` as a bare-tag fallback) and selecting the highest tag that satisfies the range.
+`ref:` accepts either a literal git ref (`main`, `v2.0`, a 40-char commit SHA) or a **semver range** (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). When `ref:` is a semver range, APM resolves it against the remote's tags at install time, matching against `v{version}`, `{name}--v{version}` and `{name}-v{version}` patterns (with `{version}` as a bare-tag fallback) and selecting the highest tag that satisfies the range.
 
 The lockfile records the original `constraint`, the `resolved_tag`, the resolved `version`, the `resolved_commit`, and a `resolved_at` timestamp so subsequent installs replay the same tag deterministically -- only `apm install --update` or a manifest change re-resolves. When no remote tag satisfies the range, APM surfaces `NoMatchingTagError` with the inspected patterns.
 
@@ -917,7 +921,7 @@ dependencies:
 `apm install` writes LSP server configs to detected runtime targets. Claude
 Code uses the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json` at project scope or
-`~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
+`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
 project scope or `~/.copilot/lsp-config.json` at user scope. OpenCode uses the
 `lsp` key of `opencode.json` or `~/.config/opencode/opencode.json`; it skips
 `socket` servers and does not write `startupTimeout`, `shutdownTimeout`,
@@ -1060,7 +1064,10 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `version` | `string` | OPTIONAL (override) | inherited | Override of top-level `version`. Validated as semver. |
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
 | `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
-| `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Output path for the generated marketplace JSON. |
+| `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Shorthand for `claude.output`; the `claude` block wins when both are set. |
+| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses with a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
+| `claude` / `codex` / `copilot` | `{output: string}` | OPTIONAL | `.claude-plugin/marketplace.json` / `.agents/plugins/marketplace.json` / `.github/plugin/marketplace.json` | Per-format output path. Wins over `outputs.<name>.path`. |
+| `versioning` | `{strategy: enum}` | OPTIONAL | `lockstep` | `lockstep`, `tag_pattern`, or `per_package`. See [Versioning strategies](../../producer/versioning-strategies/). |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |
 | `build` | `Build` | OPTIONAL | `tagPattern: "v{version}"` | Build configuration for resolving package refs. See Section 7.4. |
 | `packages` | `list<Package>` | OPTIONAL | `[]` | Packages exposed in the marketplace. See Section 7.5. |

@@ -45,13 +45,13 @@ The registry's **base URL** is vendor-defined — for example, `https://registry
 
 ### 1.2 Identity
 
-`{owner}/{repo}` in path segments matches `DependencyReference.get_identity()` for GitHub-origin packages. For non-GitHub origins, identity is **percent-encoded** (each `/` in the identity becomes `%2F`):
+`{owner}/{repo}` is the package identity at the registry (the `id:` of a registry dependency). The last `/`-separated part of the identity is `{repo}`; everything before it, including any host, is `{owner}`. The client percent-encodes each parameter, so a `/` inside `{owner}` becomes `%2F` and the path always carries exactly two identity segments:
 
-| Origin | Identity | Path segment |
+| Origin | Identity | Path segments |
 |---|---|---|
-| GitHub | `acme/web-skills` | `acme/web-skills` (two segments) |
-| GitLab | `gitlab.com/acme/web-skills` | `gitlab.com%2Facme%2Fweb-skills` (one encoded segment) |
-| Azure DevOps | `dev.azure.com/org/proj/repo` | `dev.azure.com%2Forg%2Fproj%2Frepo` (one encoded segment) |
+| GitHub | `acme/web-skills` | `acme/web-skills` |
+| GitLab | `gitlab.com/acme/web-skills` | `gitlab.com%2Facme/web-skills` |
+| Azure DevOps | `dev.azure.com/org/proj/repo` | `dev.azure.com%2Forg%2Fproj/repo` |
 
 Servers MUST decode percent-encoded path segments before lookup.
 

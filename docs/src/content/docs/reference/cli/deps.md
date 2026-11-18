@@ -115,7 +115,7 @@ apm deps why PACKAGE [OPTIONS]
 
 | Argument | Description |
 |---|---|
-| `PACKAGE` | The installed package to explain. Accepts the same identifier styles as `apm deps info`: unique key (`owner_repo`), repo URL (`https://github.com/owner/repo`), `owner/repo`, or bare basename when unambiguous. |
+| `PACKAGE` | The installed package to explain. Accepts the lockfile key (`owner/repo`, or `host/owner/repo` for non-GitHub hosts) or the bare repo name when unambiguous. URLs are not normalized. |
 
 | Option | Description |
 |---|---|
@@ -127,7 +127,7 @@ Exit codes: `0` on success, `1` when the package is not installed or the query m
 ### `apm deps update`
 
 :::caution[Deprecated]
-`apm deps update` is deprecated in favor of [`apm update`](../update/), which is now a strict superset: it supports `-g/--global`, `[PACKAGES...]`, `--force`, and `--parallel-downloads`, plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
+`apm deps update` is deprecated in favor of [`apm update`](../update/), which supports `-g/--global`, `[PACKAGES...]`, `--force`, `--parallel-downloads`, and `--target`, plus an interactive plan, `--dry-run`, and `--yes`. `apm update` does not yet accept `--legacy-skill-paths` or read `APM_LEGACY_SKILL_PATHS`, so it redeploys skills to `.agents/skills/`; keep using `apm deps update --legacy-skill-paths` for per-client skill layouts. `apm deps update` keeps working for one release and is removed in the next breaking release.
 :::
 
 Re-resolve git references for installed dependencies (direct and transitive), download updated content, re-integrate primitives, and regenerate `apm.lock.yaml`.

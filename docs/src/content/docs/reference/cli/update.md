@@ -57,6 +57,8 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 | `--trust-transitive-mcp` | off | Trust self-defined MCP servers declared by transitive packages for this run, as with `apm install`. Servers recorded in `apm.lock.yaml` are not trusted again without it. |
 | `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
 
+`apm update` has no `--legacy-skill-paths` flag and ignores `APM_LEGACY_SKILL_PATHS`: refreshed skills deploy to the converged `.agents/skills/` root. Use [`apm deps update --legacy-skill-paths`](../deps/#apm-deps-update) to keep per-client skill paths ([#3841](https://github.com/microsoft/apm/issues/3841)).
+
 ## Examples
 
 Preview what would change, without prompting or writing:

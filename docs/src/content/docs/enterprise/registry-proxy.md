@@ -94,10 +94,9 @@ proxy-routed dependency. On replay, an entry pinned to a direct VCS
 host aborts the install:
 
 ```text
-ERROR: PROXY_REGISTRY_ONLY=1 but the following lockfile entries are
-locked to direct VCS hosts and would bypass the proxy:
-  - acme/security-baseline (host: github.com)
-Run 'apm install --update' to re-resolve through the proxy.
+[x] PROXY_REGISTRY_ONLY is set but the lockfile contains dependencies locked to direct VCS sources:
+[x]   - acme/security-baseline (host: github.com)
+[x] Re-run with 'apm install --update' to re-resolve through the registry, or unset PROXY_REGISTRY_ONLY.
 ```
 
 `apm install --update` re-resolves through the active proxy and
@@ -332,7 +331,7 @@ and `apm cache clean`.
 | `Cannot resolve the range '<constraint>' for '<dep>' in registry-only mode` | A semver range needs a tag listing; APM does not list versions through the proxy; see [Version enumeration and semver ranges](#version-enumeration-and-semver-ranges) | Pin the exact upstream tag (`#v1.4.0`) and commit `apm.lock.yaml`, install from a registry that implements the APM Registry HTTP API, or unset `PROXY_REGISTRY_ONLY` |
 | `Cannot list versions for '<dep>' in registry-only mode` | `apm view <pkg> versions` needs a tag listing, which APM does not fetch through the proxy | Unset `PROXY_REGISTRY_ONLY` to list versions; pin the exact upstream tag to install |
 | `apm outdated` shows git deps as `unknown` with `PROXY_REGISTRY_ONLY=1` | Ref enumeration is suppressed rather than querying the upstream host | Expected; check for updates with the mode unset |
-| `ERROR: ... locked to direct VCS hosts` | Lockfile predates the proxy | `apm install --update` |
+| `PROXY_REGISTRY_ONLY is set but the lockfile contains dependencies locked to direct VCS sources` | Lockfile predates the proxy | `apm install --update` |
 | HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN` | Verify the token has read on the upstream repo path |
 | `git clone` hangs through the proxy | `HTTPS_PROXY` not set in the env that runs `git` | Export it in the shell that invokes `apm install`; CI secrets often miss this |
 | `TLS verification failed` | Corporate proxy CA is not trusted by the OS store | Install the CA into the OS trust store, or set additive `APM_EXTRA_CA_BUNDLE` to retain public trust. Use `REQUESTS_CA_BUNDLE` only for intentional full replacement; see [SSL / TLS issues](../../troubleshooting/ssl-issues/) |

@@ -319,8 +319,8 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 | Code | Meaning |
 |---|---|
 | `0` | Success. Requested artifacts written, planned with `--dry-run`, or validated without writes by `--check-clean`. |
-| `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
-| `2` | `apm.yml` schema validation error. |
+| `1` | Build or runtime error: invalid or unparseable `apm.yml` (including marketplace config and `target:` / `targets:` conflicts), network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
+| `2` | Usage error: unknown option or conflicting flags (for example two bundle format selectors, or `--archive-format` without `--archive`). |
 | `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
 | `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file), or remote Claude metadata could not be fetched to certify the comparison. |
 | `5` | `--strict-metadata` failed: remote marketplace metadata was unavailable, so APM did not write the artifact. |

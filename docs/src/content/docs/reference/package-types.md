@@ -194,10 +194,10 @@ limit which active harnesses receive a dependency's target-scoped
 primitives.
 
 **Validation rules:**
-- Frontmatter `name` field (if present) must match the directory name.
+- Frontmatter `name` field (if present) should match the directory name (warning if not; APM deploys under the directory name).
 - Frontmatter `description` should be present (warning if absent).
-- All frontmatter values must be ASCII-only.
-- Directory names must pass path-traversal checks.
+- Frontmatter values should be ASCII-only (warning if not).
+- Directory names must pass path-traversal checks (error).
 
 **When to choose:** you maintain a curated collection of independent skills
 in one repository (e.g. all Azure skills, all Firebase skills). Consumers

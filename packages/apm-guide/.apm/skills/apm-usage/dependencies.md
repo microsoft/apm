@@ -732,7 +732,7 @@ OpenCode 2 layout), APM writes there instead: `false` becomes
 `disabled: true`, `true` or omission writes no field, and other values warn
 and leave the file unchanged. Set `codemode: false` as an extra field to
 bypass Code Mode. See the
-[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp----listmcpdependency)
 for the dependency contract and
 [OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
 for format selection.
@@ -862,7 +862,7 @@ New named refs may need a Git lookup to establish equivalence.
 | Tag | `owner/repo#v1.0.0` | Production -- release tag; the lockfile pins the commit |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
-| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |
+| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; for a full 40-character SHA pin, `apm update` moves it to the commit of the latest stable annotated semver tag and appends `# <tag>` (no eligible tag keeps the SHA; short SHAs are never moved) |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
 
