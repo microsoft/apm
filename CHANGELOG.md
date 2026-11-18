@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `require_pinned_constraint` accepts exact package release tags such as `shadcn@4.12.0` and `@upstash/context7-mcp@4.4.4` (npm workspaces and Changesets monorepos) as pinned; dist-tags, ranges and partial versions after `@` still fail. -- by @MohammedAlkindi (#3775)
 - `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)
 - With `PROXY_REGISTRY_ONLY=1`, the semver-range error and the registry proxy guide no longer claim the proxy has no listing; they explain that APM fetches exact versions only and name the two supported routes: exact pins with lockfile replay, or a registry implementing the APM Registry HTTP API. (#3777)
-- `apm init --target intellij` and `apm install <pkg> --target intellij` without an `apm.yml` no longer record `intellij`, which is an IDE rather than a target: like the global `--mcp` bootstrap, they now stop before writing anything and say to use `copilot` for GitHub Copilot in JetBrains IDEs. `--target intellij` still deploys JetBrains MCP config when `apm.yml` already exists (#PRNUM)
+- `apm init --target intellij` and `apm install <pkg> --target intellij` without an `apm.yml` no longer record `intellij`, which is an IDE rather than a target: like the global `--mcp` bootstrap, they now stop before writing anything and say to use `copilot` for GitHub Copilot in JetBrains IDEs. `--target intellij` still deploys JetBrains MCP config when `apm.yml` already exists (#3882)
 
 ## [0.36.1] - 2026-11-18
 
