@@ -999,6 +999,8 @@ def test_targets_admits_preserved_vscode_and_rejects_agents(tmp_path: Path) -> N
     resolve_effective_package_targets(
         [KNOWN_TARGETS["copilot"]], None, migrated, diagnostics, "owner/legacy"
     )
+    # Proves only that `targets: [vscode]` is accepted without a diagnostic; narrowing to the
+    # copilot profile is asserted by test_targets_vscode_narrows_like_copilot (strict xfail, #3861).
     assert diagnostics.error_count == 0
 
     with pytest.raises(TargetResolutionError, match="agents"):
