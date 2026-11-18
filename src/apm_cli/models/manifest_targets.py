@@ -177,7 +177,12 @@ class ManifestTargetDeclaration:
         if "targets" in data:
             # Also rejects a manifest that declares both keys.
             parsed = parse_targets_field(data)
-            return (list(parsed) or None), tuple(parsed)
+            # ``selection`` keeps ``vscode`` for its MCP destination; the
+            # canonical view resolves it to ``copilot`` like ``target:`` does.
+            return (list(parsed) or None), tuple(
+                name if name == _LEGACY_ALL_TARGET else normalize_target_name(name)
+                for name in parsed
+            )
         value = parse_target_field(data.get("target"), source_path=self.source_path)
         values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
         return value, tuple(

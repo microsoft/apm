@@ -253,3 +253,31 @@ def test_dependency_manifest_with_target_does_not_warn(
     assert "deprecated 'target:' key" not in result.stdout + result.stderr
     assert "compilation.target" not in result.stdout + result.stderr
     assert (scenario.project / ".claude" / "rules" / "style.md").is_file()
+
+
+def test_migrated_dependency_manifest_keeps_its_consumers_deploys(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _Scenario(tmp_path, apm_binary_path, "targets: [copilot]")
+    package = scenario.project / "packages" / "fixture"
+    (package / "apm.yml").write_text(
+        "name: fixture\nversion: 1.0.0\ntarget: vscode\n", encoding="utf-8"
+    )
+    scenario.install()
+    legacy = scenario.deployed()
+    assert any(name.startswith("project/.github/instructions/") for name in legacy)
+    scenario.reset_deployment()
+
+    migrate = scenario.runner.run(("manifest", "migrate", "--yes"), cwd=package, env=scenario.env)
+    assert migrate.returncode == 0, migrate.stdout + migrate.stderr
+    assert "targets: [vscode]" in (package / "apm.yml").read_text(encoding="utf-8").splitlines()
+    migrated_install = scenario.install()
+
+    assert "do not overlap" not in migrated_install.stdout + migrated_install.stderr
+    # The lock and the vendored copy carry the dependency's migrated manifest;
+    # every file deployed for the consumer must stay byte-identical.
+    source_owned = {"project/apm.lock.yaml", "project/apm_modules/_local/fixture/apm.yml"}
+    migrated = scenario.deployed()
+    assert {k: v for k, v in migrated.items() if k not in source_owned} == {
+        k: v for k, v in legacy.items() if k not in source_owned
+    }
