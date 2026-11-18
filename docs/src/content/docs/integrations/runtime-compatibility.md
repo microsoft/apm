@@ -325,9 +325,7 @@ APM's runtime system consists of three main components:
 
 1. **Create Runtime Adapter** - Extend `RuntimeAdapter` in `src/apm_cli/runtime/your_runtime.py`
 2. **Create Setup Script** - Add installation script in `scripts/runtime/setup-your-runtime.sh`
-3. **Register Runtime** - Add entry to `supported_runtimes` in `RuntimeManager`
-4. **Update CLI** - Add runtime to command choices in `cli.py`
-5. **Update Factory** - Add runtime to `RuntimeFactory`
+3. **Register Runtime** - Add a `RuntimeDescriptor` to `RUNTIME_DESCRIPTORS` in `src/apm_cli/runtime/registry.py`; `RuntimeManager`, the CLI runtime choices, and `RuntimeFactory` all read from it
 
 ### Best Practices
 
