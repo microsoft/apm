@@ -105,8 +105,11 @@ def _assert_healed(scene: HarnessScene, *, user: bool, claims: bool = True) -> N
             assert "antigravity" not in scene.claimed_runtimes(name, user=user), name
     # Stale APM-owned SSE entries are removed once SSE is unsupported there.
     assert not {"heal-sse", "heal-registry"} & antigravity.keys(), antigravity
-    # The Hermes row (transport: sse, cwd) lands with #3749, which restores
-    # its assertions here.
+    for name, url in (("heal-sse", _SSE), ("heal-registry", _REGISTRY_SSE)):
+        entry = _entry(scene, "hermes", name, user=user)
+        assert (entry.get("url"), entry.get("transport")) == (url, "sse"), (name, entry)
+    assert "transport" not in _entry(scene, "hermes", "heal-streamable", user=user)
+    assert _entry(scene, "hermes", "heal-stdio", user=user).get("cwd") == "/srv/heal-fixture"
 
 
 def _snapshot(scene: HarnessScene, *, user: bool) -> dict[str, bytes | None]:
@@ -189,9 +192,14 @@ def test_foreign_entry_in_a_retired_shape_is_never_taken_over(scene: HarnessScen
         document = json.loads(path.read_text(encoding="utf-8"))
         document[key]["heal-foreign"] = entry
         path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    # Exactly what APM 0.36 would have written for Hermes, but never recorded.
+    hermes_path = scene.config_path("hermes", user=False)
+    hermes_document = yaml.safe_load(hermes_path.read_text(encoding="utf-8"))
+    hermes_document["mcp_servers"]["heal-foreign"] = {"url": foreign_url, "enabled": True}
+    hermes_path.write_text(yaml.safe_dump(hermes_document), encoding="utf-8")
     foreign = {
-        "copilot": _entry(scene, "copilot", "heal-foreign", user=False),
-        "claude": _entry(scene, "claude", "heal-foreign", user=False),
+        harness: _entry(scene, harness, "heal-foreign", user=False)
+        for harness in ("copilot", "claude", "hermes")
     }
 
     result = scene.run(*_command("install", user=False))
@@ -360,6 +368,46 @@ def test_healed_entries_are_cleaned_when_their_declaration_is_removed(
         servers = scene.servers(harness, user=user)
         assert not {"heal-sse", "heal-registry", _REGISTRY_NAME} & servers.keys(), harness
         assert "heal-http" in servers, harness
+    audit = _audit(scene, user=user)
+    assert audit.returncode == 0, describe(audit)
+
+
+@pytest.mark.parametrize("user", [False, True], ids=["project", "user"])
+def test_frozen_heal_keeps_ownership_of_fingerprinted_registry_entries(
+    scene: HarnessScene, user: bool
+) -> None:
+    """A --frozen heal keeps the old fingerprint; later commands still own the entry."""
+    _seed(scene, "v0.36.0", user=user)
+    owners = set(_targets(user)) - {"antigravity"}
+    assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
+    scene.ok(*_command("install-frozen", user=user))
+    healed = scene.native_bytes(_targets(user), user=user)
+    mtimes = {
+        harness: scene.config_path(harness, user=user).stat().st_mtime_ns
+        for harness in _targets(user)
+    }
+    # A second --frozen run sees the healed entries as APM's own and writes nothing.
+    scene.ok(*_command("install-frozen", user=user))
+    assert scene.native_bytes(_targets(user), user=user) == healed
+    for harness, mtime in mtimes.items():
+        assert scene.config_path(harness, user=user).stat().st_mtime_ns == mtime, harness
+
+    scene.ok(*_command("install", user=user))
+    assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
+    scene.ok(*_command("update", user=user))
+    assert owners <= scene.claimed_runtimes(_REGISTRY_NAME, user=user)
+    _assert_healed(scene, user=user)
+
+    path = scene.manifest_root(user) / "apm.yml"
+    manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+    manifest["dependencies"]["mcp"] = [
+        item for item in manifest["dependencies"]["mcp"] if item.get("name") != _REGISTRY_NAME
+    ]
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    scene.ok(*_command("install", user=user))
+    for harness in _targets(user):
+        servers = scene.servers(harness, user=user)
+        assert not {"heal-registry", _REGISTRY_NAME} & servers.keys(), (harness, servers)
     audit = _audit(scene, user=user)
     assert audit.returncode == 0, describe(audit)
 

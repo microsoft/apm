@@ -2683,6 +2683,23 @@ def test_frozen_native_service_boundary_guards(path: str, old: str, new: str) ->
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_remote_shape_guard_rejects_retired_rows_without_native_comparison() -> None:
+    """A row with retired shapes cannot heal on an adapter that skips native comparison."""
+    path = "src/apm_cli/adapters/client/hermes.py"
+    old = "    supports_user_scope: bool = True\n"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, old + "    compares_native_connections: bool = False\n", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "mutation_writes.mcp_remote_shape_table"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and "compares_native_connections" in violation.message
+        for violation in report.violations
+    )
+
+
 def test_ref_freshness_guard_rejects_unconditional_cache_publication() -> None:
     """A checkout must not promote a lock pin into a fresh named observation."""
     path = "src/apm_cli/deps/github_downloader.py"

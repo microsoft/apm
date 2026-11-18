@@ -415,6 +415,7 @@ def _install_registry_group(  # noqa: PLR0913
                     )
                     if rt in protected_clients:
                         client = protected_clients[rt]
+                        stale_receipts: set[str] = set()
                         state = compare_native_mcp_connection(
                             client,
                             dep,
@@ -428,6 +429,7 @@ def _install_registry_group(  # noqa: PLR0913
                             declaration_changed=is_update,
                             env_overrides=shared_env_vars,
                             runtime_vars=shared_runtime_vars,
+                            stale_receipts=stale_receipts,
                         )
                         if state in {
                             NativeMcpConnectionState.MATCHING_FOREIGN,
@@ -462,6 +464,7 @@ def _install_registry_group(  # noqa: PLR0913
                                     client,
                                     dep,
                                     requested_info=server_info_cache.get(dep),
+                                    replace=dep in stale_receipts,
                                 )
                             logger.verbose_detail(f"{dep} already matches {rt}; no write")
                             continue

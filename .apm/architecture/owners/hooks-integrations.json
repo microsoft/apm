@@ -99,7 +99,7 @@
     },
     {
       "id": "mcp-remote-shape-table",
-      "decision": "Per-harness remote MCP output shape (URL key, transport discriminator, unsupported transports and retired APM renders), one evidence-backed row per registered runtime, plus the warn-skip-unclaimed disposition for unsupported transports",
+      "decision": "Per-harness remote MCP output shape (URL key, transport discriminator, unsupported transports and retired APM renders), one evidence-backed row per registered runtime, plus the warn-skip-unclaimed disposition for unsupported transports; an adapter whose row retires earlier shapes keeps native comparison on so those APM writes heal",
       "owner": "adapters/client/_remote_shapes.py (REMOTE_SHAPES, remote_shape_of, skip_unsupported_remote)",
       "selectors": ["src/apm_cli/adapters/client/_remote_shapes.py"],
       "guards": ["hooks-integrations-mcp-remote-shape-table"]
