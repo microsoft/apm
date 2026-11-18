@@ -1142,3 +1142,48 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
             )
 
         mock_warn.assert_not_called()
+
+
+class TestPairedNameFilterPerSkillsRoot:
+    """#3763: each skills root receives only the skills paired with its targets."""
+
+    @staticmethod
+    def _pairing():
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        return merge_edge_pairings(
+            [(["alpha"], ["claude"]), (["gamma"], ["copilot"]), (["delta"], ["cursor"])]
+        )
+
+    def test_targets_sharing_a_root_receive_the_union_of_their_skills(self, tmp_path):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        targets = [KNOWN_TARGETS[name] for name in ("claude", "copilot", "cursor")]
+        roots = SkillIntegrator._skill_root_target_names(
+            targets, lambda target: tmp_path / target.skills_rel_root
+        )
+        shared = roots[(tmp_path / ".agents" / "skills").resolve()]
+        assert set(shared) == {"copilot", "cursor"}
+
+        tokens = SkillIntegrator._paired_name_filter(None, self._pairing(), shared)
+        assert {"gamma", "delta"} <= set(tokens)
+        assert "alpha" not in tokens
+
+    def test_unselected_root_gets_nothing_and_no_pairing_keeps_the_filter(self):
+        assert SkillIntegrator._paired_name_filter(None, self._pairing(), ("gemini",)) == (
+            frozenset()
+        )
+        base = {"alpha", "gamma"}
+        assert SkillIntegrator._paired_name_filter(base, None, ("claude",)) is base
+
+    def test_paired_filter_narrows_but_never_widens_the_source_plan(self):
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        pairing = merge_edge_pairings([(None, ["claude"]), (["alpha"], ["copilot"])])
+        assert SkillIntegrator._paired_name_filter({"alpha", "gamma"}, pairing, ("claude",)) == {
+            "alpha",
+            "gamma",
+        }
+        assert SkillIntegrator._paired_name_filter({"gamma"}, pairing, ("copilot",)) == (
+            frozenset()
+        )

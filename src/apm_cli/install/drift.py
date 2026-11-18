@@ -707,6 +707,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             logger=None,
                             scope=None,
                             skill_subset=selection.skill_subset,
+                            skill_pairing=selection.skill_pairing,
                             ctx=None,
                             scratch_root=scratch_root,
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the

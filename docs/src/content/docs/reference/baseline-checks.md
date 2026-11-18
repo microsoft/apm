@@ -137,8 +137,8 @@ the [policy schema](../policy-schema/).
 
 ### `skill-subset-consistency`
 
-- **What it verifies.** That each `skills:` selection in `apm.yml` matches the `skill_subset` recorded in the lockfile, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
-- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset`, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
+- **What it verifies.** That each locked dependency's `skill_subset`, `target_subset` and `subset_pairings` equal the merge of every `skills:`/`targets:` declaration in `apm.yml` and the installed dependency manifests, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
+- **Fails when.** The merged declarations differ from the recorded selection, `subset_pairings` is malformed or disagrees with the flat fields, a declaring manifest cannot be read, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
 - **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
 
 ### `config-consistency`

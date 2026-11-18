@@ -557,10 +557,13 @@ list `targets: []` is rejected at parse time -- omit the key to mean
 "all".
 
 When several manifests declare the same dependency (your `apm.yml` and one or
-more parent packages), APM installs it once with the union of their `skills:`
-and of their `targets:`. A declaration that omits the field selects everything.
-Order of declaration does not matter. If the declarations use different
-`alias:` values, the shallowest declaration wins and APM prints a warning.
+more parent packages), APM installs it once. Each declaration's `skills:` reach
+only that declaration's `targets:`: a skill deploys to a harness only when one
+declaration selects both, and a declaration that omits a field selects
+everything on it. Order of declaration does not matter. `apm.lock.yaml` records
+the unions as `skill_subset` and `target_subset`, plus `subset_pairings` when
+needed. If the declarations use different `alias:` values, the shallowest
+declaration wins and APM prints a warning.
 
 ```yaml
 - git: my-team/review-hooks

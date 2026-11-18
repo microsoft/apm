@@ -2,8 +2,9 @@
 
 Covers #3735: a package reached through several edges that select different
 skills, targets or aliases kept only the first edge's selection. The approved
-0.36.1 T4 design is the oracle: per-field union across declaring edges, "all" absorbs,
-order-independent; uninstall shrinks to the surviving union and keeps the
+0.36.1 T4 design is the oracle: union across declaring edges, "all" absorbs,
+order-independent, refined by #3763 (OpenAPM req-rs-018) to exact per-edge
+skills x targets pairing; uninstall shrinks to the surviving union and keeps the
 locked union when reachability evidence is incomplete; audit recomputes the
 expected selection for every locked dependency; alias divergence keeps the
 deterministic shallowest/declaration-order winner and warns.
@@ -171,6 +172,120 @@ def test_parents_restricting_different_targets_populate_both_harness_roots(
         assert skill_dirs(project / _PROJECT_SKILLS) == sorted(_SKILLS)
         assert locked(project, bundle).get("target_subset") == ["claude", "copilot"]
         _assert_audit_green(world, project, env, "l5-audit")
+
+
+@pytest.mark.parametrize("a_first", [True, False], ids=["a-first", "b-first"])
+def test_divergent_skills_and_targets_pair_per_declaration(
+    tmp_path: Path, apm_binary_path: Path, a_first: bool
+) -> None:
+    """#3763 (req-rs-018): alpha deploys only for claude and gamma only for copilot.
+
+    The exact pairing is locked byte-identically in either declaration order;
+    audit, frozen replay and uninstall shrink read it through the same owner.
+    """
+    world = _world(tmp_path, apm_binary_path)
+    bundle, a, b = _diamond(
+        world,
+        {"skills": ["alpha"], "targets": ["claude"]},
+        {"skills": ["gamma"], "targets": ["copilot"]},
+    )
+    harnesses = ("claude", "copilot")
+    project = world.project(
+        "consumer", dependencies=[a, b] if a_first else [b, a], targets=harnesses
+    )
+    mirror = world.project("mirror", dependencies=[b, a] if a_first else [a, b], targets=harnesses)
+    with world.serve() as env:
+        for root in (project, mirror):
+            world.run(INSTALL, cwd=root, env=env, scenario_id=f"pair-install-{root.name}")
+            assert skill_dirs(root / _CLAUDE_SKILLS) == ["alpha"]
+            assert skill_dirs(root / _PROJECT_SKILLS) == ["gamma"]
+            entry = locked(root, bundle)
+            assert entry["skill_subset"] == ["alpha", "gamma"]
+            assert entry["target_subset"] == ["claude", "copilot"]
+            assert entry["subset_pairings"] == [
+                {"skills": ["alpha"], "targets": ["claude"]},
+                {"skills": ["gamma"], "targets": ["copilot"]},
+            ]
+            _assert_audit_green(world, root, env, f"pair-audit-{root.name}")
+        assert lock_path(project).read_bytes() == lock_path(mirror).read_bytes()
+
+        before = lock_path(project).read_bytes()
+        world.run((*INSTALL, "--frozen"), cwd=project, env=env, scenario_id="pair-frozen")
+        assert lock_path(project).read_bytes() == before
+
+        world.run(("uninstall", a), cwd=project, env=env, scenario_id="pair-uninstall-a")
+        assert skill_dirs(project / _CLAUDE_SKILLS) == []
+        assert skill_dirs(project / _PROJECT_SKILLS) == ["gamma"]
+        entry = locked(project, bundle)
+        assert entry["skill_subset"] == ["gamma"]
+        assert entry["target_subset"] == ["copilot"]
+        assert "subset_pairings" not in entry
+        _assert_audit_green(world, project, env, "pair-audit-after-a")
+
+
+def test_unrestricted_skills_on_one_harness_do_not_cross_to_the_other(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3763: "all skills" absorbs only on the declaration's own harness."""
+    world = _world(tmp_path, apm_binary_path)
+    bundle, a, b = _diamond(
+        world, {"skills": ["alpha"], "targets": ["claude"]}, {"targets": ["copilot"]}
+    )
+    project = world.project("consumer", dependencies=[a, b], targets=("claude", "copilot"))
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="absorb-install")
+        assert skill_dirs(project / _CLAUDE_SKILLS) == ["alpha"]
+        assert skill_dirs(project / _PROJECT_SKILLS) == sorted(_SKILLS)
+        entry = locked(project, bundle)
+        assert not entry.get("skill_subset")
+        assert entry["subset_pairings"] == [
+            {"skills": ["alpha"], "targets": ["claude"]},
+            {"targets": ["copilot"]},
+        ]
+        _assert_audit_green(world, project, env, "absorb-audit")
+
+
+def test_frozen_install_rejects_a_cross_product_lock_before_deploying(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """D6 for #3763: a 0.36.1 lock (flat unions, no pairing) fails --frozen and audit.
+
+    That lock encodes the skills x targets cross-product, a different plan
+    from the exact pairing, so frozen refuses before deploying anything and
+    a plain install converges.
+    """
+    world = _world(tmp_path, apm_binary_path)
+    bundle, a, b = _diamond(
+        world,
+        {"skills": ["alpha"], "targets": ["claude"]},
+        {"skills": ["gamma"], "targets": ["copilot"]},
+    )
+    project = world.project("consumer", dependencies=[a, b], targets=("claude", "copilot"))
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="old-install")
+        old_lock = load_yaml(lock_path(project))
+        for entry in old_lock["dependencies"]:
+            if entry["repo_url"] == bundle:
+                entry.pop("subset_pairings")
+        dump_yaml(old_lock, lock_path(project))
+        narrowed = lock_path(project).read_bytes()
+
+        result = world.run(
+            (*INSTALL, "--frozen"), cwd=project, env=env, expect=None, scenario_id="old-frozen"
+        )
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, output[-3000:]
+        assert f"selection for {bundle} changed" in output, output[-3000:]
+        assert lock_path(project).read_bytes() == narrowed
+        assert skill_dirs(project / _CLAUDE_SKILLS) == ["alpha"]
+
+        audit = world.run(AUDIT_CI, cwd=project, env=env, expect=None, scenario_id="old-audit")
+        assert audit.returncode != 0
+        assert "skill-subset-consistency" in audit_failures(audit)
+
+        world.run(INSTALL, cwd=project, env=env, scenario_id="old-converge")
+        assert locked(project, bundle)["subset_pairings"]
+        world.run((*INSTALL, "--frozen"), cwd=project, env=env, scenario_id="old-frozen-ok")
 
 
 def test_divergent_aliases_keep_the_declaration_order_winner_and_warn(

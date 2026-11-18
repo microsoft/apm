@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- When several manifests narrow the same dependency with different `skills:` and `targets:`, each skill now deploys only to the harnesses its own declaration selected, instead of every selected skill reaching every selected harness; for example `alpha` for Claude and `gamma` for Copilot no longer cross over. `apm.lock.yaml` records the exact pairing in a new optional `subset_pairings` field (only when needed, so other lockfiles are unchanged), and `apm audit`, `apm uninstall` and `--frozen` read it; OpenAPM proposes this as `req-rs-018`. Upgrade note: a lockfile written by an earlier APM for such a diamond fails `apm install --frozen` with "selection for <dep> changed" until you run `apm install` once and commit `apm.lock.yaml`. (#3769)
+
 ## [0.36.1] - 2026-11-18
 
 ### Changed

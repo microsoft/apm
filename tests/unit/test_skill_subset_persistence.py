@@ -1040,3 +1040,75 @@ class TestResolvePackageReferencesPreservesRegistryForm:
         assert any(
             isinstance(dep, dict) and dep.get("id") == "testorg/demo-pkg" for dep in current_deps
         )
+
+
+# ---------------------------------------------------------------------------
+# Unit: --skill overlay on an exact skills x targets pairing (#3763)
+# ---------------------------------------------------------------------------
+
+
+class TestCliOverlayKeepsExactPairing:
+    """The CLI overlay is one more edge over the dependency's targets (req-rs-018)."""
+
+    @staticmethod
+    def _pairing():
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        return merge_edge_pairings([(["alpha"], ["claude"]), (["gamma"], ["copilot"])])
+
+    def _dep(self):
+        from types import SimpleNamespace
+
+        pairing = self._pairing()
+        return SimpleNamespace(
+            skill_subset=list(pairing.skill_subset),
+            target_subset=list(pairing.target_subset),
+            subset_pairings=pairing,
+        )
+
+    def test_deploy_overlay_adds_skill_to_every_selected_target_only(self):
+        from types import SimpleNamespace
+
+        from apm_cli.install.package_resolution import effective_dependency_selection
+
+        ctx = SimpleNamespace(skill_subset=("delta",), skill_subset_from_cli=True)
+        selection = effective_dependency_selection(self._dep(), ctx)
+        assert selection.skill_subset == ("alpha", "delta", "gamma")
+        assert selection.skill_pairing.skills_for_target("claude") == ("alpha", "delta")
+        assert selection.skill_pairing.skills_for_target("copilot") == ("delta", "gamma")
+        assert not selection.skill_pairing.selects_target("cursor")
+
+    def test_star_overlay_drops_pairing_and_deploys_all(self):
+        from types import SimpleNamespace
+
+        from apm_cli.install.package_resolution import effective_dependency_selection
+
+        ctx = SimpleNamespace(skill_subset=(), skill_subset_from_cli=True)
+        selection = effective_dependency_selection(self._dep(), ctx)
+        assert selection.skill_subset is None
+        assert selection.skill_pairing is None
+
+    def test_lockfile_overlay_records_the_same_widened_pairing(self):
+        from types import SimpleNamespace
+
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.install.phases.lockfile import LockfileBuilder
+
+        pairing = self._pairing()
+        entry = LockedDependency(
+            repo_url="owner/bundle",
+            package_type="skill_bundle",
+            skill_subset=list(pairing.skill_subset),
+            target_subset=list(pairing.target_subset),
+            subset_pairings=pairing.to_lock_records(),
+        )
+        lockfile = LockFile(dependencies={entry.get_unique_key(): entry})
+        ctx = SimpleNamespace(skill_subset=("delta",), skill_subset_from_cli=True)
+        LockfileBuilder(ctx)._attach_skill_subset_override(lockfile)
+
+        assert entry.skill_subset == ["alpha", "delta", "gamma"]
+        assert entry.selection() == pairing.with_edge(["delta"], ["claude", "copilot"])
+        assert entry.subset_pairings == [
+            {"skills": ["alpha", "delta"], "targets": ["claude"]},
+            {"skills": ["delta", "gamma"], "targets": ["copilot"]},
+        ]

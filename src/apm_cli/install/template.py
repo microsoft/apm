@@ -519,6 +519,7 @@ def _integrate_materialization(
             logger=logger,
             scope=ctx.scope,
             skill_subset=selection.skill_subset,
+            skill_pairing=selection.skill_pairing,
             dep_target_subset=selection.target_subset,
             ctx=ctx,
             allow_executables=effective_allow_map(ctx),

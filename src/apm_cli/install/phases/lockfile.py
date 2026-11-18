@@ -400,10 +400,21 @@ class LockfileBuilder:
             if locked_dep.package_type == "skill_bundle":
                 # Record what was deployed: the same owner the deploy used (#3760).
                 merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
+                try:
+                    pairing = locked_dep.selection()
+                except ValueError:
+                    pairing = None
                 # merged is never None here: the guard above returns for
                 # --skill '*' (empty ctx.skill_subset), so a real named
                 # subset always survives the union.
                 locked_dep.skill_subset = list(merged) if merged else []
+                if pairing is not None and not pairing.is_product:
+                    # The CLI overlay is one more edge over the entry's targets
+                    # (req-rs-018), as effective_dependency_selection deploys it.
+                    pairing = pairing.with_edge(self.ctx.skill_subset, locked_dep.target_subset)
+                    locked_dep.subset_pairings = pairing.to_lock_records()
+                else:
+                    locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():

@@ -209,6 +209,13 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `skills` | OPTIONAL | Select deployed skills, not a repo slice; use `path` for a subdirectory. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
+When several manifests declare the same dependency, each `skills:` list reaches
+only the `targets:` of its own declaration (omitted = all). Example: one parent
+asks for `alpha` on `claude`, another for `gamma` on `copilot`; `alpha` deploys
+only for Claude and `gamma` only for Copilot, in any declaration order.
+`apm.lock.yaml` records this as `subset_pairings`, and `--frozen` fails if the
+pairing changed.
+
 Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
 source identity or local `../sibling` source anchors. After upgrading an older
 aliased install, run `apm install` and review the updated lockfile; use the
