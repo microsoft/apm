@@ -199,6 +199,7 @@ def run_service_integrations(
             prepared=prepared_mcp,
             active_package_keys=active_package_keys,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
+            pre_install_lock=existing_lock,
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

@@ -1159,6 +1159,7 @@ class MCPIntegrator:
         native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
         logger: CommandLogger | None = None,
         fail_on_write_error: bool = False,
+        apm_version: str | None = None,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -1179,6 +1180,8 @@ class MCPIntegrator:
             logger: Optional command logger for actionable creation failures.
             fail_on_write_error: Raise a required-integration error on any
                          persistence failure.
+            apm_version: Keyword-only. When provided, recorded as the lock's
+                         ``apm_version`` instead of the one on disk.
 
         Raises:
             LockfileFormatError: If the existing lockfile is malformed.
@@ -1224,6 +1227,10 @@ class MCPIntegrator:
                 )
             if mcp_config_provenance is not None:
                 lockfile.mcp_config_provenance = mcp_config_provenance
+            if apm_version is not None:
+                # A partial install keeps the version that still describes
+                # pending retired-destination claims.
+                lockfile.apm_version = apm_version
             # Invariant: provenance only carries entries that still have a live
             # config. Prune dangling keys unconditionally so a caller that
             # rewrites mcp_configs without an explicit provenance argument (e.g.
@@ -1235,8 +1242,10 @@ class MCPIntegrator:
                     for name, pkg in lockfile.mcp_config_provenance.items()
                     if name in lockfile.mcp_configs
                 }
-            if existing_lockfile is not None and lockfile.is_semantically_equivalent(
-                existing_lockfile
+            if (
+                existing_lockfile is not None
+                and lockfile.is_semantically_equivalent(existing_lockfile)
+                and lockfile.apm_version == existing_lockfile.apm_version
             ):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return

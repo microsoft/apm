@@ -221,28 +221,57 @@ def take_retired_ownership(
 ) -> dict[str, set[str]]:
     """Split the ownership that names entries in retired destinations off *target_servers*.
 
-    ``copilot`` stays (its claims now mean ``.mcp.json``; the copy is the
-    heal's view of ``.github/mcp.json``). ``vscode`` is removed outright: its
-    only destination is retired, so no cleanup may reach ``.vscode/mcp.json``
-    except the proof-checked heal. A name whose recorded ``copilot``
-    fingerprint already matches its ``.mcp.json`` entry was moved by an
-    earlier install and is settled, so the heal never revisits it. An
-    unsettled name's ``copilot`` fingerprint describes its ``.github/mcp.json``
-    entry, so it is dropped from *live_hashes* (the heal keeps its snapshot as
-    proof) and the ``.mcp.json`` comparison does not read that entry as edited.
+    Retired claims prove writes to the retired files, never to ``.mcp.json``:
+    ``vscode`` is removed outright, and an unsettled ``copilot`` name loses its
+    live claim and its fingerprint (dropped from *live_hashes*; the heal keeps
+    its own snapshot as proof). The install then owns that name's ``.mcp.json``
+    entry only by writing it or through a Claude peer claim, so a user-authored
+    root entry is never adopted. A ``copilot`` name whose recorded fingerprint
+    already matches its ``.mcp.json`` entry was moved by an earlier install: it
+    is settled, keeps its claim, and the heal never revisits it.
     """
+    copilot = target_servers.get("copilot")
     settled = _settled_in_root_mcp_json(
         native_hashes.get("copilot", {}), project_root, stored_configs or {}
     )
     retired = {
-        destination.runtime: set(target_servers.get(destination.runtime, ())) - settled
-        for destination in RETIRED_PROJECT_MCP_DESTINATIONS
-        if target_servers.get(destination.runtime)
+        "copilot": set(copilot or ()) - settled,
+        "vscode": set(target_servers.pop("vscode", None) or ()),
     }
-    target_servers.pop("vscode", None)
-    for name in retired.get("copilot", ()):
+    if copilot and retired["copilot"]:
+        target_servers["copilot"] = type(copilot)(
+            name for name in copilot if name not in retired["copilot"]
+        )
+    for name in retired["copilot"]:
         (live_hashes or {}).get("copilot", {}).pop(name, None)
     return {runtime: names for runtime, names in retired.items() if names}
+
+
+def restore_pending_retired_claims(
+    retired: Mapping[str, set[str]],
+    healed: Mapping[str, set[str]],
+    *,
+    target_servers: dict[str, set[str]],
+    native_hashes: dict[str, dict[str, str]],
+    retired_hashes: Mapping[str, Mapping[str, str]],
+) -> bool:
+    """Put back the retired claims a partial install did not heal.
+
+    They keep their retired-file fingerprints, so the next install still proves
+    and heals them. Returns whether any claim stays pending.
+    """
+    pending = False
+    for runtime, names in retired.items():
+        left = set(names) - set(healed.get(runtime, ()))
+        if not left:
+            continue
+        pending = True
+        target_servers.setdefault(runtime, set()).update(left)
+        recorded = retired_hashes.get(runtime, {})
+        for name in left:
+            if name in recorded:
+                native_hashes.setdefault(runtime, {})[name] = recorded[name]
+    return pending
 
 
 def _settled_in_root_mcp_json(

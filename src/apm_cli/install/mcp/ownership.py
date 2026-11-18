@@ -243,6 +243,14 @@ def compare_native_mcp_connection(
                         native, baseline=expected, requested=requested
                     )
                 matches_baseline = client.matches_managed_server_config(comparison, expected)
+                if not matches_baseline and native_hash is not None and isinstance(native, dict):
+                    # The entry is exactly what APM recorded writing; its render
+                    # moved since (a re-pointed skill launcher), so update it.
+                    matches_baseline = (
+                        mcp_native_hash(client.managed_server_config(native)) == native_hash
+                    )
+                    if matches_baseline:
+                        comparison = native
                 if matches_baseline and managed_fields is not None:
                     managed_fields.update(expected)
             elif native_hash is not None and isinstance(native, dict):

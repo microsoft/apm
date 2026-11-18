@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
+from .ownership import names_owned_by_active_peers
 from .registry import registry_env_override
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
@@ -406,16 +407,25 @@ def run_mcp_install(  # noqa: PLR0913
                         fail_on_write_error=True,
                     )
                     for previous_target, retired in retired_targets.items():
-                        MCPIntegrator.remove_stale(
+                        # An entry in a shared file (.mcp.json) stays while the
+                        # newly selected peer owns it; only the claim retires.
+                        removable = retired - names_owned_by_active_peers(
+                            previous_target,
                             retired,
-                            runtime=previous_target,
-                            project_root=apm_dir,
+                            requested_target_servers,
                             user_scope=user_scope,
-                            scope=scope,
-                            fail_on_write_error=True,
-                            stored_configs=old_configs,
-                            native_hashes=old_native_hashes,
                         )
+                        if removable:
+                            MCPIntegrator.remove_stale(
+                                removable,
+                                runtime=previous_target,
+                                project_root=apm_dir,
+                                user_scope=user_scope,
+                                scope=scope,
+                                fail_on_write_error=True,
+                                stored_configs=old_configs,
+                                native_hashes=old_native_hashes,
+                            )
                         merged_target_servers[previous_target].difference_update(retired)
                 MCPIntegrator.update_lockfile(
                     merged_names,

@@ -3721,6 +3721,24 @@ def test_credential_report_guard_rejects_side_doors(path: str, old: str, new: st
             'import builtins\n\n_LEGACY = ".github/mcp.json"\n',
             id="second-module-names-retired-destination",
         ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "    heal_basis = pre_install_lock if pre_install_lock is not None else previous_lock\n",
+            "    heal_basis = previous_lock\n",
+            id="heal-gate-reads-the-stamped-lock",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "            pre_install_lock=existing_lock,\n",
+            "",
+            id="install-drops-the-pre-install-lock",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/update.py",
+            "            pre_install_lock=existing_lock,\n",
+            "",
+            id="update-drops-the-pre-install-lock",
+        ),
     ],
 )
 def test_copilot_project_mcp_destination_guard_rejects_mutations(

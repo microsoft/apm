@@ -446,3 +446,86 @@ def test_user_scope_copilot_keeps_its_global_config(tmp_path: Path, apm_binary_p
     config = json.loads((home / ".copilot" / "mcp-config.json").read_text(encoding="utf-8"))
     assert "echo" in config["mcpServers"]
     assert not (project.root / ".mcp.json").exists()
+
+
+def test_direct_mcp_retarget_keeps_the_entry_the_new_runtime_owns(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Retargeting `install --mcp` from claude to copilot retires only claude's claim."""
+    project = _Project(tmp_path, apm_binary_path)
+    (project.root / ".claude").mkdir()
+    project.manifest()
+    entry = {"type": "stdio", "command": "echo", "args": []}
+
+    project.install("--mcp", "echo", "--target", "claude", "--", "echo")
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": entry}
+
+    project.install("--mcp", "echo", "--target", "copilot", "--", "echo")
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": entry}
+    assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+
+
+def _seed_036_lock(project: _Project, servers: list[dict], target_servers: dict) -> None:
+    configs = {server["name"]: server for server in servers}
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.36.1",
+            "dependencies": [],
+            "mcp_servers": sorted(configs),
+            "mcp_configs": configs,
+            "mcp_target_servers": target_servers,
+        },
+        project.root / "apm.lock.yaml",
+    )
+
+
+def test_legacy_copilot_claim_never_adopts_a_user_root_entry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A 0.36 copilot claim proves a .github/mcp.json write, not ownership of .mcp.json."""
+    project = _Project(tmp_path, apm_binary_path)
+    user_root = {"type": "stdio", "command": "echo", "args": []}
+    project.write_json(".mcp.json", {"mcpServers": {"echo": user_root}})
+    legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
+    project.write_json(".github/mcp.json", {"mcpServers": {"echo": legacy}})
+    project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
+    _seed_036_lock(project, [_ECHO], {"copilot": ["echo"]})
+
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
+    assert "echo" in project.read_json(".github/mcp.json")["mcpServers"]
+
+    # Dropping the dependency removes only APM's retired entry, never the user's.
+    project.manifest(targets=["copilot"])
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
+    assert project.read_json(".github/mcp.json")["mcpServers"] == {}
+
+
+def test_partial_install_keeps_unhealed_retired_claims_for_the_retry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A connection conflict after some root writes never strands retired APM entries."""
+    project = _Project(tmp_path, apm_binary_path)
+    servers = [{**_ECHO, "name": "vs-a"}, {**_ECHO, "name": "vs-b"}]
+    managed = {"type": "stdio", "command": "echo", "args": []}
+    project.write_json(
+        ".vscode/mcp.json", {"servers": {"vs-a": managed, "vs-b": managed}, "inputs": []}
+    )
+    project.write_json(".mcp.json", {"mcpServers": {"vs-b": _USER_ROOT}})
+    project.manifest(targets=["copilot"], dependencies={"mcp": servers})
+    _seed_036_lock(project, servers, {"vscode": ["vs-a", "vs-b"]})
+
+    failed = project.apm("install", "--no-policy")
+    assert failed.returncode != 0, failed.stdout + failed.stderr
+    assert set(project.read_json(".vscode/mcp.json")["servers"]) == {"vs-b"}
+    assert project.lock()["mcp_target_servers"]["vscode"] == ["vs-b"]
+    assert project.lock()["apm_version"] == "0.36.1"
+
+    # The user resolves the conflict; the retry moves the rest and heals it.
+    project.write_json(".mcp.json", {"mcpServers": {"vs-a": managed}})
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"] == {"vs-a": managed, "vs-b": managed}
+    assert not (project.root / ".vscode/mcp.json").exists()
+    assert "vscode" not in project.lock()["mcp_target_servers"]

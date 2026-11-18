@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -230,6 +231,7 @@ def run_mcp_integration(  # noqa: PLR0913
     prepared: PreparedMcpIntegration | None = None,
     active_package_keys: frozenset[str] | None = None,
     executable_context: tuple[dict | None, bool] = (None, False),
+    pre_install_lock: "LockFile | None" = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -265,6 +267,10 @@ def run_mcp_integration(  # noqa: PLR0913
         verbose: Show detailed installation information.
         explicit_target: Explicit target selected by CLI or manifest.
         scope: Optional InstallScope for user/project filtering.
+        pre_install_lock: The lockfile as it was before this install. The
+            package phase may already have rewritten *lock_path* with the
+            running version, so retired-destination heal eligibility is read
+            from this snapshot.
 
     Returns:
         Tuple of ``(mcp_count, mcp_apm_config)``. ``mcp_apm_config`` is the
@@ -285,6 +291,7 @@ def run_mcp_integration(  # noqa: PLR0913
         healable_names,
         lock_predates_root_mcp_json,
         report_retired_mcp_heal,
+        restore_pending_retired_claims,
         take_retired_ownership,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -347,6 +354,7 @@ def run_mcp_integration(  # noqa: PLR0913
 
     # Entries APM <= 0.36 wrote to the retired project MCP destinations heal
     # out after this install has written their .mcp.json replacements.
+    heal_basis = pre_install_lock if pre_install_lock is not None else previous_lock
     retired_owned = (
         take_retired_ownership(
             old_mcp_target_servers,
@@ -358,21 +366,42 @@ def run_mcp_integration(  # noqa: PLR0913
         if should_install
         and not user_scope
         and old_mcp_target_servers
-        and previous_lock is not None
-        and lock_predates_root_mcp_json(previous_lock.apm_version)
+        and heal_basis is not None
+        and lock_predates_root_mcp_json(heal_basis.apm_version)
         else {}
     )
 
-    def _heal_retired(declared: builtins.set, copilot_claims: builtins.set | None) -> None:
+    def _heal_retired(
+        declared: builtins.set, copilot_claims: builtins.set | None
+    ) -> dict[str, builtins.set]:
         if not retired_owned:
-            return
+            return {}
+        healable = healable_names(retired_owned, declared=declared, copilot_claims=copilot_claims)
         heal = heal_retired_project_mcp_destinations(
-            healable_names(retired_owned, declared=declared, copilot_claims=copilot_claims),
+            healable,
             stored_configs=old_mcp_configs,
             native_hashes=old_native_hashes,
             project_root=project_root,
         )
         report_retired_mcp_heal(heal, logger)
+        return healable
+
+    def _keep_unhealed(healed: dict[str, builtins.set], claims: dict, hashes: dict) -> dict:
+        """Restore the retired claims this run did not heal; return the lock-version pin.
+
+        They keep their retired fingerprints and the pre-0.37 lock version, so
+        the next install still proves and heals them.
+        """
+        pending = restore_pending_retired_claims(
+            retired_owned,
+            healed,
+            target_servers=claims,
+            native_hashes=hashes,
+            retired_hashes=old_native_hashes,
+        )
+        if pending and heal_basis is not None and heal_basis.apm_version:
+            return {"apm_version": heal_basis.apm_version}
+        return {}
 
     if should_install and mcp_deps:
         from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
@@ -440,6 +469,12 @@ def run_mcp_integration(  # noqa: PLR0913
             new_mcp_servers |= old_mcp_servers
             new_mcp_configs = {**old_mcp_configs, **new_mcp_configs}
             new_mcp_provenance = {**old_mcp_provenance, **new_mcp_provenance}
+            # Heal only what this run replaced; the retry heals the rest.
+            healed = _heal_retired(
+                builtins.set(new_mcp_servers),
+                builtins.set(managed_target_servers.get("copilot", ())),
+            )
+            version_pin = _keep_unhealed(healed, managed_target_servers, native_hashes)
             MCPIntegrator.update_lockfile(
                 new_mcp_servers,
                 lock_path,
@@ -449,13 +484,15 @@ def run_mcp_integration(  # noqa: PLR0913
                 native_hashes=native_hashes,
                 logger=logger,
                 fail_on_write_error=True,
+                **version_pin,
             )
             raise conflict
 
-        _heal_retired(
+        healed = _heal_retired(
             builtins.set(new_mcp_servers),
             managed_target_servers.get("copilot") if "copilot" in managed_target_servers else None,
         )
+        version_pin = _keep_unhealed(healed, managed_target_servers, native_hashes)
         from apm_cli.install.mcp.ownership import names_owned_by_active_peers
 
         for removed_target in sorted(
@@ -522,6 +559,7 @@ def run_mcp_integration(  # noqa: PLR0913
             native_hashes=native_hashes,
             logger=logger,
             fail_on_write_error=True,
+            **version_pin,
         )
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers

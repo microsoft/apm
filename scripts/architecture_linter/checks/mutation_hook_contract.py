@@ -59,6 +59,9 @@ _COPILOT_PROJECT_OWNER = "src/apm_cli/adapters/client/copilot_project.py"
 _RETIRED_MCP_OWNER = "src/apm_cli/install/mcp/retired_destinations.py"
 _CLIENT_FACTORY = "src/apm_cli/factory.py"
 _MCP_OWNERSHIP = "src/apm_cli/install/mcp/ownership.py"
+_MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
+_SERVICE_INTEGRATION = "src/apm_cli/install/service_integration.py"
+_UPDATE_COMMAND = "src/apm_cli/commands/update.py"
 
 
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator.py"
@@ -313,13 +316,24 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
     The project destination decision (#3866): ``ClientFactory`` routes project
     ``copilot`` to ``CopilotProjectClientAdapter``, which writes workspace-root
     ``.mcp.json`` shared with Claude Code (``SHARED_PROJECT_MCP_DESTINATIONS``);
-    only the retired-destination heal names ``.github/mcp.json``.
+    only the retired-destination heal names ``.github/mcp.json``. Heal
+    eligibility reads the pre-install lock, because the package phase may
+    already have rewritten the lock with the running version.
     """
     rule_id = "mutation_writes.copilot_cli_mcp_paths"
     facts_by_path, failures = _read_required(
         provider,
         rule_id,
-        (_COPILOT_OWNER, _MCP_INTEGRATOR, _COPILOT_PROJECT_OWNER, _CLIENT_FACTORY, _MCP_OWNERSHIP),
+        (
+            _COPILOT_OWNER,
+            _MCP_INTEGRATOR,
+            _COPILOT_PROJECT_OWNER,
+            _CLIENT_FACTORY,
+            _MCP_OWNERSHIP,
+            _MCP_INTEGRATION,
+            _SERVICE_INTEGRATION,
+            _UPDATE_COMMAND,
+        ),
     )
     findings: list[Violation] = list(failures)
     if not failures:
@@ -353,6 +367,26 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
                 _MCP_OWNERSHIP,
                 'frozenset({"claude", "copilot"})',
                 "Claude Code and Copilot must share ownership of .mcp.json entries",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "heal_basis = pre_install_lock if pre_install_lock is not None else previous_lock",
+                "retired-destination heal eligibility must read the pre-install lock",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "and lock_predates_root_mcp_json(heal_basis.apm_version)",
+                "retired-destination heal eligibility must read the pre-install lock",
+            ),
+            (
+                _SERVICE_INTEGRATION,
+                "pre_install_lock=existing_lock,",
+                "install must pass the pre-install lock to the MCP heal",
+            ),
+            (
+                _UPDATE_COMMAND,
+                "pre_install_lock=existing_lock,",
+                "update must pass the pre-install lock to the MCP heal",
             ),
         ):
             findings.extend(

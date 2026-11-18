@@ -24,7 +24,9 @@ servers are never overwritten (the shared ownership rules in
 :mod:`apm_cli.install.mcp.ownership`). The one place the two harnesses can
 disagree is a self-defined launcher under ``.agents/skills/``: Claude Code
 deploys skills to ``.claude/skills/``, so when that copy exists the Claude path
-wins for both targets and the two renders stay identical.
+wins for both targets. Both adapters resolve it through
+``ClaudeClientAdapter._rewrite_self_defined_skill_command``, so the two renders
+stay identical.
 
 ``.github/mcp.json`` (APM <= 0.36 ``copilot``) and ``.vscode/mcp.json`` (the
 removed ``vscode`` target) are retired destinations; APM-managed entries there
@@ -77,16 +79,6 @@ class CopilotProjectClientAdapter(ClaudeClientAdapter):
 
     def _project_mcp_path(self) -> Path:
         return self.project_root / PROJECT_MCP_JSON
-
-    def _rewrite_self_defined_skill_command(self, command: str) -> str:
-        """Point a converged skill launcher at Claude's copy only when it exists."""
-        if not isinstance(command, str) or not command.startswith(self._CONVERGED_SKILL_PREFIX):
-            return command
-        rest = command[len(self._CONVERGED_SKILL_PREFIX) :]
-        skill = rest.split("/", 1)[0]
-        if skill and (self.project_root / self._CLAUDE_SKILL_PREFIX / skill).is_dir():
-            return self._CLAUDE_SKILL_PREFIX + rest
-        return command
 
     def legacy_managed_renders(
         self,

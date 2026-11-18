@@ -10,7 +10,9 @@ import pytest
 from apm_cli.adapters.client.copilot_project import CopilotProjectClientAdapter
 from apm_cli.factory import ClientFactory
 from apm_cli.install.mcp.ownership import (
+    NativeMcpConnectionState,
     claim_shared_destination,
+    compare_native_mcp_connection,
     inherit_shared_destination_claims,
     mcp_native_hash,
     names_owned_by_active_peers,
@@ -19,8 +21,11 @@ from apm_cli.install.mcp.retired_destinations import (
     heal_retired_project_mcp_destinations,
     healable_names,
     lock_predates_root_mcp_json,
+    restore_pending_retired_claims,
     take_retired_ownership,
 )
+from apm_cli.integration.mcp_integrator import MCPIntegrator
+from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 
 _ECHO = {"name": "echo", "registry": False, "transport": "stdio", "command": "echo"}
@@ -59,11 +64,46 @@ def test_copilot_and_claude_render_one_identical_entry(tmp_path: Path) -> None:
 def test_skill_launcher_uses_claude_copy_only_when_it_exists(
     tmp_path: Path, claude_copy: bool, expected: str
 ) -> None:
+    """Claude and Copilot resolve one launcher, so their shared entry renders identically."""
     if claude_copy:
         (tmp_path / ".claude/skills/tool").mkdir(parents=True)
-    adapter = CopilotProjectClientAdapter(project_root=tmp_path)
+    launcher = {**_ECHO, "command": ".agents/skills/tool/run.sh"}
+    renders = [
+        ClientFactory.create_client(runtime, project_root=tmp_path).render_server_config(
+            MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(launcher))
+        )
+        for runtime in ("claude", "copilot")
+    ]
 
-    assert adapter._rewrite_self_defined_skill_command(".agents/skills/tool/run.sh") == expected
+    assert renders[0] == renders[1]
+    assert renders[0]["command"] == expected
+
+
+def test_receipt_proves_an_entry_whose_launcher_moved(tmp_path: Path) -> None:
+    """Adding Claude's skill copy re-points the launcher; APM's own entry updates."""
+    launcher = {**_ECHO, "command": ".agents/skills/tool/run.sh"}
+    written = {"type": "stdio", "command": ".agents/skills/tool/run.sh", "args": []}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"echo": written}})
+    (tmp_path / ".claude/skills/tool").mkdir(parents=True)
+    client = CopilotProjectClientAdapter(project_root=tmp_path)
+    info = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(launcher))
+
+    def state(native_hash: str) -> NativeMcpConnectionState:
+        return compare_native_mcp_connection(
+            client,
+            "echo",
+            requested_info=info,
+            stored_config=launcher,
+            managed=True,
+            native_hash=native_hash,
+            declaration_changed=False,
+        )
+
+    assert state(mcp_native_hash(client.managed_server_config(written))) is (
+        NativeMcpConnectionState.UPDATE_MANAGED
+    )
+    # Without a matching receipt the moved entry is still not APM's to touch.
+    assert state("sha256:other") is NativeMcpConnectionState.CONFLICT
 
 
 def test_peer_claim_is_adopted_and_refreshed_after_a_peer_write() -> None:
@@ -160,14 +200,25 @@ def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
     }
 
 
-def test_vscode_ownership_never_reaches_unproven_cleanup(tmp_path: Path) -> None:
-    """The retired vscode runtime is split off before install; only the heal sees it."""
-    owned = {"copilot": {"a"}, "vscode": {"b"}, "claude": {"c"}}
+def test_retired_claims_never_become_root_ownership(tmp_path: Path) -> None:
+    """Retired claims prove writes to the retired files only; only the heal sees them.
 
-    retired = take_retired_ownership(owned, native_hashes={}, project_root=tmp_path)
+    A legacy copilot claim kept as .mcp.json ownership would let the install
+    adopt, overwrite or delete a user-authored root entry of the same name.
+    """
+    owned = {"copilot": {"a"}, "vscode": {"b"}, "claude": {"c"}}
+    live = {"copilot": {"a": "sha256:github"}}
+
+    retired = take_retired_ownership(
+        owned,
+        native_hashes={"copilot": {"a": "sha256:github"}},
+        project_root=tmp_path,
+        live_hashes=live,
+    )
 
     assert retired == {"copilot": {"a"}, "vscode": {"b"}}
-    assert owned == {"copilot": {"a"}, "claude": {"c"}}
+    assert owned == {"copilot": set(), "claude": {"c"}}
+    assert live == {"copilot": {}}
 
 
 def test_names_already_moved_to_root_mcp_json_are_settled(tmp_path: Path) -> None:
@@ -181,6 +232,50 @@ def test_names_already_moved_to_root_mcp_json_are_settled(tmp_path: Path) -> Non
     )
 
     assert retired == {"copilot": {"edited", "pending"}}
+
+
+def test_vscode_claims_are_retired_even_when_copilot_settled(tmp_path: Path) -> None:
+    """Settling refers to copilot's .mcp.json entry; a vscode claim names .vscode/mcp.json."""
+    entry = {"type": "stdio", "command": "echo", "args": []}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"moved": entry}})
+    owned = {"copilot": {"moved"}, "vscode": {"moved"}}
+
+    retired = take_retired_ownership(
+        owned,
+        native_hashes={"copilot": {"moved": mcp_native_hash(entry)}},
+        project_root=tmp_path,
+    )
+
+    assert retired == {"vscode": {"moved"}}
+    assert owned == {"copilot": {"moved"}}
+
+
+def test_unhealed_retired_claims_are_restored_with_retired_fingerprints() -> None:
+    """A partial install keeps what it did not heal, so the retry still proves it."""
+    claims = {"copilot": {"written"}}
+    hashes = {"copilot": {"written": "sha256:root"}}
+
+    pending = restore_pending_retired_claims(
+        {"copilot": {"written", "failed"}, "vscode": {"written", "failed"}},
+        {"copilot": {"written"}, "vscode": {"written"}},
+        target_servers=claims,
+        native_hashes=hashes,
+        retired_hashes={"copilot": {"failed": "sha256:gh"}, "vscode": {"failed": "sha256:vs"}},
+    )
+
+    assert pending
+    assert claims == {"copilot": {"written", "failed"}, "vscode": {"failed"}}
+    assert hashes == {
+        "copilot": {"written": "sha256:root", "failed": "sha256:gh"},
+        "vscode": {"failed": "sha256:vs"},
+    }
+    assert not restore_pending_retired_claims(
+        {"vscode": {"a"}},
+        {"vscode": {"a"}},
+        target_servers={},
+        native_hashes={},
+        retired_hashes={},
+    )
 
 
 def test_registry_name_settles_under_its_native_key(tmp_path: Path) -> None:
@@ -279,3 +374,62 @@ def test_root_mcp_json_is_not_a_target_detection_signal(tmp_path: Path) -> None:
 
     _write(tmp_path / ".github/mcp.json", {"mcpServers": {}})
     assert [signal.target for signal in detect_signals(tmp_path)] == ["copilot"]
+
+
+@pytest.mark.parametrize("snapshot", [True, False], ids=["pre-install-snapshot", "stamped-only"])
+def test_heal_eligibility_reads_the_pre_install_lock(tmp_path: Path, snapshot: bool) -> None:
+    """The package phase may stamp the lock with 0.37 before MCP runs; the heal still runs."""
+    from unittest.mock import MagicMock, patch
+
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.mcp import run_mcp_integration
+
+    _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT}})
+    stamped = LockFile(apm_version="0.37.0")
+    stamped.mcp_servers = ["echo"]
+    stamped.mcp_configs = {"echo": _ECHO}
+    DeploymentLedgerCodec.replace_mcp_target_servers(stamped, {"copilot": ["echo"]})
+    lock_path = tmp_path / "apm.lock.yaml"
+    stamped.write(lock_path)
+    package = MagicMock(scripts=None, targets=None, target=None, allow_executables=None)
+    package.package_path = tmp_path
+    dep = MCPDependency.from_dict(_ECHO)
+    package.get_all_mcp_dependencies.return_value = [dep]
+
+    def install(*_args, managed_target_servers, **_kwargs):
+        managed_target_servers.setdefault("copilot", set()).add("echo")
+        return 1
+
+    with (
+        patch("apm_cli.integration.mcp_integrator.MCPIntegrator") as integrator,
+        patch(
+            "apm_cli.install.mcp.retired_destinations.heal_retired_project_mcp_destinations"
+        ) as heal,
+    ):
+        integrator.deduplicate.side_effect = lambda deps: deps
+        integrator.install.side_effect = install
+        integrator.get_server_names.return_value = {"echo"}
+        heal.return_value = MagicMock(removed={}, kept={}, deleted_files=[])
+        run_mcp_integration(
+            apm_package=package,
+            mcp_deps=[dep],
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=lock_path,
+            old_mcp_servers={"echo"},
+            old_mcp_configs={"echo": _ECHO},
+            old_mcp_provenance={},
+            old_mcp_target_servers={"copilot": ["echo"]},
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=InstallLogger(verbose=False),
+            no_policy=True,
+            pre_install_lock=LockFile(apm_version="0.36.1") if snapshot else None,
+        )
+
+    if snapshot:
+        assert heal.call_args.args[0] == {"copilot": {"echo"}}
+    else:
+        heal.assert_not_called()
