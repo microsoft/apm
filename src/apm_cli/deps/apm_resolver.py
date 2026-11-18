@@ -1732,8 +1732,11 @@ class APMDependencyResolver:
         detail = APMDependencyResolver._package_relative_detail(detail, downloaded_candidate)
         # The hint below carries the one "retry"; drop the manifest owner's own.
         detail = _TRAILING_RETRY.sub("", detail.rstrip()).rstrip(".")
+        label = f"'{dep_ref.get_display_name()}'"
+        if dep_ref.replacement is not None:
+            label += f" (replacement for '{dep_ref.replacement.original.get_display_name()}')"
         raise DownloadedPackageError(
-            f"Downloaded dependency '{dep_ref.get_display_name()}' is invalid: "
+            f"Downloaded dependency {label} is invalid: "
             f"{detail}. "
             f"{APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
         )
