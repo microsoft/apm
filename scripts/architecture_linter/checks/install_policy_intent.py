@@ -42,10 +42,6 @@ from scripts.architecture_linter.checks.install_policy_mcp_transport import (
     RULE_POLICY_MCP_TRANSPORT,
     check_policy_mcp_transport_projection,
 )
-from scripts.architecture_linter.checks.install_policy_violation_subjects import (
-    RULE_POLICY_VIOLATION_SUBJECTS,
-    check_policy_violation_subjects,
-)
 from scripts.architecture_linter.checks.install_policy_plugin_and_approval import (
     RULE_APPROVAL_OUTCOME,
     RULE_AUDIT_POLICY_DISCOVERY,
@@ -74,6 +70,10 @@ from scripts.architecture_linter.checks.install_policy_skill_and_lock import (
     check_marketplace_mutation_lock,
     check_skill_subset_tokens,
     check_update_plan_ref_annotation,
+)
+from scripts.architecture_linter.checks.install_policy_violation_subjects import (
+    RULE_POLICY_VIOLATION_SUBJECTS,
+    check_policy_violation_subjects,
 )
 from scripts.architecture_linter.models import Rule
 

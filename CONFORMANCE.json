@@ -1493,8 +1493,8 @@
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[\\n]",
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/bad name]",
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0 ]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0]",
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0^{}]",
-        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[output4]",
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_retains_missing_release",
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_selects_highest_stable_tag_deterministically",
         "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_wraps_transport_parse_failure"

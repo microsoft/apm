@@ -115,7 +115,9 @@ def check_consumer_manifest_rewrite(provider: FactsProvider) -> tuple[Violation,
             _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
             _APPROVE_COMMAND: ("data = load_manifest(manifest)",),
             _COMMAND_HELPERS: ("return load_manifest(APM_YML_FILENAME)",),
-            _INSTALL_COMMAND: ("data, manifest_host = _load_manifest_for_add(apm_yml_path, logger)",),
+            _INSTALL_COMMAND: (
+                "data, manifest_host = _load_manifest_for_add(apm_yml_path, logger)",
+            ),
             _ADOPT_MANIFEST_EDIT: ("data = load_manifest_roundtrip(path)",),
             _MCP_WRITER: (
                 "data = load_manifest_roundtrip(apm_yml_path) or {}",
