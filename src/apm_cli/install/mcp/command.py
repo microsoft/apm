@@ -90,7 +90,10 @@ def user_manifest_bootstrap_config(
             else f"target '{exc.token}' has no 'targets:' equivalent, so later "
             "'apm install -g' runs could not read the new manifest."
         )
-        raise click.UsageError(
+        # An IDE is a refused value, not a usage mistake: exit 1 like every
+        # other apm.yml writer (#3878).
+        error = click.ClickException if isinstance(exc, IdeTargetError) else click.UsageError
+        raise error(
             f"Cannot create {label} for {flag} {rendered}: {reason} Nothing was written. "
             f"Create {label} with just 'name:' and 'version:', then rerun; {flag} "
             f"{rendered} will apply to that install only."

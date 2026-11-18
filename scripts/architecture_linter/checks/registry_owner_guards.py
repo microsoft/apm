@@ -453,12 +453,15 @@ _TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
         "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
         "targets = option_target_names(target_flag)",
     ),
-    "src/apm_cli/install/manifest_helpers.py": ("return option_target_names(target)",),
+    "src/apm_cli/install/manifest_helpers.py": (
+        "return option_target_names(target)",
+        "return bootstrap_manifest_targets(target, manifest_display)",
+    ),
     "src/apm_cli/install/mcp/command.py": (
         'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
     ),
     "src/apm_cli/commands/install.py": (
-        "bootstrap_manifest_targets(target, manifest_display)",
+        "manifest_targets = preflight_bootstrap_targets(",
         "from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap",
         "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes,",
     ),

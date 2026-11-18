@@ -62,7 +62,7 @@ from apm_cli.install.manifest_helpers import (
     _prepare_dry_run_manifest_path,
     _prepare_user_scope_for_install,
     _report_bootstrap_manifest,
-    bootstrap_manifest_targets,
+    preflight_bootstrap_targets,
 )
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
@@ -1202,6 +1202,10 @@ def install(  # noqa: PLR0913
         InstallService.reject_missing_frozen_root(frozen, root)
     except FrozenInstallError as exc:
         raise click.ClickException(str(exc)) from exc
+    # Refuse a --target apm.yml cannot record before any write (#3878).
+    manifest_targets = preflight_bootstrap_targets(
+        packages, target, mcp_name=mcp_name, global_=global_
+    )
     _source_root = Path.cwd()
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
@@ -1377,19 +1381,6 @@ def install(  # noqa: PLR0913
             summary_rendered = True
             return
 
-        # Refuse a --target that apm.yml cannot record before any config,
-        # user-scope or manifest write (#3878).
-        from ..core.scope import get_manifest_path
-
-        manifest_display = (
-            str(get_manifest_path(scope)) if scope is InstallScope.USER else APM_YML_FILENAME
-        )
-        manifest_targets = (
-            bootstrap_manifest_targets(target, manifest_display)
-            if packages and not get_manifest_path(scope).exists()
-            else None
-        )
-
         # Resolve transport selection inputs.
         from ..deps.transport_selection import ProtocolPreference
 
@@ -1416,6 +1407,7 @@ def install(  # noqa: PLR0913
         from ..core.scope import (
             ensure_user_dirs,
             get_apm_dir,
+            get_manifest_path,
             get_modules_dir,
             warn_unsupported_user_scope,
         )
@@ -1432,6 +1424,8 @@ def install(  # noqa: PLR0913
         manifest_path = get_manifest_path(scope)
         manifest_dir = manifest_path.parent  # Dry runs may redirect the manifest to a temp file.
         apm_dir = get_apm_dir(scope)
+        # Display name for messages (short for project scope, full for user scope)
+        manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
         manifest_path, dry_run_manifest_tmp = _prepare_dry_run_manifest_path(
             manifest_path,
             dry_run=dry_run,

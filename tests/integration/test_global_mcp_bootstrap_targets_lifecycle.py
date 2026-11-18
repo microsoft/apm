@@ -47,7 +47,7 @@ def test_bootstrap_refuses_a_target_with_no_targets_spelling(
 
     result = runner.run(_mcp_install(target, flag), cwd=work, env=env)
     output = " ".join((result.stdout + result.stderr).split())
-    assert result.returncode != 0, output
+    assert result.returncode == 1, output
     # #3878: an IDE is refused with guidance on every apm.yml-writing path.
     assert (
         f"for {flag} {target}: 'intellij' is an IDE, not a target, so apm.yml cannot "

@@ -70,6 +70,10 @@ def _tree(root: Path) -> dict[str, bytes]:
             ("install", "-g", "--no-policy", "--target", "intellij", "acme/never-fetched"),
             id="install-global",
         ),
+        pytest.param(
+            ("install", "--no-policy", "--root", "out", "--target", "intellij", "./pkgs/alpha"),
+            id="install-root",
+        ),
         pytest.param(("init", "--yes", "--target", "intellij"), id="init"),
         pytest.param(("init", "--yes", "--target", "all,intellij"), id="init-mixed"),
         pytest.param(("init", "fresh", "--yes", "--target", "intellij"), id="init-named"),
