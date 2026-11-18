@@ -24,11 +24,10 @@ nice-to-have, not a requirement.
 Compile is **recommended for every other target** (`claude`,
 `cursor`, `codex`, `gemini`, `grok-build`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
-(`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
-folder that compile generates. Kiro receives `.kiro/steering/` files;
-its `AGENTS.md` output remains the cross-harness fallback. Without
-compile, your instructions are on disk but the harness will not pick
-them up.
+(`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) that compile generates. Codex,
+Gemini, and OpenCode have no per-file rules, so without compile they will
+not pick up your instructions; the others also read the rules folder
+`apm install` deploys (for example `.claude/rules/` or `.kiro/steering/`).
 :::
 
 ```bash
@@ -36,17 +35,22 @@ apm compile
 ```
 
 Concretely, that command rolls your `instructions/*.instructions.md`
-(see [Instructions](../author-primitives/instructions-and-agents/#1-instructions))
-into the native rules surface each target expects:
+(see [Instructions](../author-primitives/instructions-and-agents/#instructions))
+into the root context files each target expects:
 
 - `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
   Grok Build, OpenCode, and Windsurf read it directly; Kiro primarily uses the
-  `.kiro/steering/` files that compile also emits.
+  `.kiro/steering/` files that `apm install` deploys.
 - `CLAUDE.md` -- Claude Code's root context file.
 - `GEMINI.md` -- Gemini CLI's root context file.
-- per-harness rules trees that mirror each instruction's
-  `applyTo:` glob: `.github/instructions/`, `.claude/rules/`,
-  `.cursor/rules/*.mdc`, `.windsurf/rules/`, `.kiro/steering/`.
+
+With the default `distributed` strategy, compile can also write scoped
+`AGENTS.md` (and `CLAUDE.md`) files in subdirectories, so review the whole
+generated tree.
+
+Per-harness rules trees (`.github/instructions/`, `.claude/rules/`,
+`.cursor/rules/*.mdc`, `.windsurf/rules/`, `.kiro/steering/`) are written
+by `apm install`, not compile; compile reads some of them to deduplicate.
 
 Other primitive types -- prompts, skills, agents, hooks,
 commands -- are NOT compiled by this command. They are deployed by
@@ -136,20 +140,21 @@ every machine. Full rules and the per-target output map live in
 
 ## Where instructions land
 
-Per target, with the rules shape on disk after compile:
+Per target, with the rules shape on disk after `apm install && apm compile`
+(per-rule files come from `apm install`; compile writes the root context file):
 
 | Target | Root context file | Per-rule output | Compile required? |
 |---|---|---|---|
 | `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
 | `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
 | `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
-| `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
+| `cursor` | `AGENTS.md` | `.cursor/rules/<name>.mdc` | Optional -- `apm install` deploys the `.mdc` rules (an instruction without `applyTo` has no `globs`/`alwaysApply`, so Cursor may skip it) |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
 | `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
-| `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
-| `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Yes -- compiled to Kiro steering |
+| `windsurf` | `AGENTS.md` | `.windsurf/rules/<name>.md` | Optional -- `apm install` deploys Windsurf rules |
+| `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Optional -- `apm install` deploys Kiro steering |
 
 ## compile vs install
 
@@ -207,9 +212,9 @@ apm compile --target copilot --force-instructions
 When `.claude/rules/` is already populated with instructions,
 `apm compile --target claude` automatically omits the instructions
 section from `CLAUDE.md` to avoid duplicate content in Claude Code's
-context window. The directory can be populated by either
-`apm install --target claude` or by an earlier `apm compile --target claude`
-run -- both write per-file instruction rules into `.claude/rules/`.
+context window. The directory is populated by
+`apm install --target claude`, which writes per-file instruction rules
+into `.claude/rules/`.
 `CLAUDE.md` is still generated when it carries a constitution or
 dependency `@import` paths. If `.claude/rules/` is later removed,
 re-running `apm compile` restores the instructions section to
@@ -231,7 +236,7 @@ both copies), pass `--force-instructions` (alias: `--no-dedup`):
 apm compile --target claude --force-instructions
 ```
 
-This flag affects both the Claude and Copilot deduplication paths (see
+This flag affects the Claude, Copilot, and Antigravity deduplication paths (see
 [Copilot deduplication](#copilot-deduplication)).
 :::
 
@@ -322,6 +327,8 @@ root-context targets:
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
+- `~/.gemini/antigravity-cli/AGENTS.md`, `~/.grok/AGENTS.md`, `~/.hermes/AGENTS.md`,
+  `~/.kiro/AGENTS.md`, and `~/.codeium/windsurf/AGENTS.md`
 
 OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
 retains explicit sections for `applyTo` instructions as well.

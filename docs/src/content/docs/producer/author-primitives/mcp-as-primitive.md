@@ -88,8 +88,9 @@ The full mapping (file path, scope, JSON/TOML schema) is in
 You do not need to know it to author -- APM handles the per-target
 translation.
 
-The consumer can run `apm mcp list` to confirm the server landed in
-each runtime they care about.
+The consumer can open those config files to confirm the server landed in
+each runtime they care about (`apm mcp list` browses the registry, not
+installed servers).
 
 ## Secrets: never commit, always indirect
 
