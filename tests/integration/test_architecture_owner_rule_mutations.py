@@ -3734,6 +3734,24 @@ def test_credential_report_guard_rejects_side_doors(path: str, old: str, new: st
             id="install-drops-the-pre-install-lock",
         ),
         pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "    retired = split_mcp_claims(\n",
+            "    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            id="bundle-reads-retired-claims-as-live",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "                    retired = split_mcp_claims(\n",
+            "                    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            id="install-mcp-reads-retired-claims-as-live",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    retired = split_mcp_claims(\n",
+            "    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            id="uninstall-reads-retired-claims-as-live",
+        ),
+        pytest.param(
             "src/apm_cli/commands/update.py",
             "            pre_install_lock=existing_lock,\n",
             "",

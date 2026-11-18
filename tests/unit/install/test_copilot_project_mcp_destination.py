@@ -22,7 +22,7 @@ from apm_cli.install.mcp.retired_destinations import (
     healable_names,
     lock_predates_root_mcp_json,
     restore_pending_retired_claims,
-    take_retired_ownership,
+    split_mcp_claims,
 )
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import MCPDependency
@@ -200,6 +200,12 @@ def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
     }
 
 
+def _split(owned: dict, hashes: dict, root: Path, version: str = "0.36.1", **kwargs):
+    return split_mcp_claims(
+        owned, hashes, apm_version=version, project_root=root, user_scope=False, **kwargs
+    )
+
+
 def test_retired_claims_never_become_root_ownership(tmp_path: Path) -> None:
     """Retired claims prove writes to the retired files only; only the heal sees them.
 
@@ -207,18 +213,25 @@ def test_retired_claims_never_become_root_ownership(tmp_path: Path) -> None:
     adopt, overwrite or delete a user-authored root entry of the same name.
     """
     owned = {"copilot": {"a"}, "vscode": {"b"}, "claude": {"c"}}
-    live = {"copilot": {"a": "sha256:github"}}
+    live = {"copilot": {"a": "sha256:github"}, "vscode": {"b": "sha256:vscode"}}
 
-    retired = take_retired_ownership(
-        owned,
-        native_hashes={"copilot": {"a": "sha256:github"}},
-        project_root=tmp_path,
-        live_hashes=live,
-    )
+    retired = _split(owned, live, tmp_path)
 
-    assert retired == {"copilot": {"a"}, "vscode": {"b"}}
+    assert retired.names == {"copilot": {"a"}, "vscode": {"b"}}
+    assert retired.hashes == {"copilot": {"a": "sha256:github"}, "vscode": {"b": "sha256:vscode"}}
     assert owned == {"copilot": set(), "claude": {"c"}}
     assert live == {"copilot": {}}
+
+
+def test_user_scope_claims_are_never_split(tmp_path: Path) -> None:
+    owned = {"copilot": {"a"}}
+
+    retired = split_mcp_claims(
+        owned, {}, apm_version="0.36.1", project_root=tmp_path, user_scope=True
+    )
+
+    assert retired.names == {}
+    assert owned == {"copilot": {"a"}}
 
 
 def test_names_already_moved_to_root_mcp_json_are_settled(tmp_path: Path) -> None:
@@ -227,11 +240,9 @@ def test_names_already_moved_to_root_mcp_json_are_settled(tmp_path: Path) -> Non
     _write(tmp_path / ".mcp.json", {"mcpServers": {"moved": entry, "edited": {"command": "x"}}})
     hashes = {"copilot": {"moved": mcp_native_hash(entry), "edited": mcp_native_hash(entry)}}
 
-    retired = take_retired_ownership(
-        {"copilot": {"moved", "edited", "pending"}}, native_hashes=hashes, project_root=tmp_path
-    )
+    retired = _split({"copilot": {"moved", "edited", "pending"}}, hashes, tmp_path)
 
-    assert retired == {"copilot": {"edited", "pending"}}
+    assert retired.names == {"copilot": {"edited", "pending"}}
 
 
 def test_vscode_claims_are_retired_even_when_copilot_settled(tmp_path: Path) -> None:
@@ -240,42 +251,10 @@ def test_vscode_claims_are_retired_even_when_copilot_settled(tmp_path: Path) -> 
     _write(tmp_path / ".mcp.json", {"mcpServers": {"moved": entry}})
     owned = {"copilot": {"moved"}, "vscode": {"moved"}}
 
-    retired = take_retired_ownership(
-        owned,
-        native_hashes={"copilot": {"moved": mcp_native_hash(entry)}},
-        project_root=tmp_path,
-    )
+    retired = _split(owned, {"copilot": {"moved": mcp_native_hash(entry)}}, tmp_path)
 
-    assert retired == {"vscode": {"moved"}}
+    assert retired.names == {"vscode": {"moved"}}
     assert owned == {"copilot": {"moved"}}
-
-
-def test_unhealed_retired_claims_are_restored_with_retired_fingerprints() -> None:
-    """A partial install keeps what it did not heal, so the retry still proves it."""
-    claims = {"copilot": {"written"}}
-    hashes = {"copilot": {"written": "sha256:root"}}
-
-    pending = restore_pending_retired_claims(
-        {"copilot": {"written", "failed"}, "vscode": {"written", "failed"}},
-        {"copilot": {"written"}, "vscode": {"written"}},
-        target_servers=claims,
-        native_hashes=hashes,
-        retired_hashes={"copilot": {"failed": "sha256:gh"}, "vscode": {"failed": "sha256:vs"}},
-    )
-
-    assert pending
-    assert claims == {"copilot": {"written", "failed"}, "vscode": {"failed"}}
-    assert hashes == {
-        "copilot": {"written": "sha256:root", "failed": "sha256:gh"},
-        "vscode": {"failed": "sha256:vs"},
-    }
-    assert not restore_pending_retired_claims(
-        {"vscode": {"a"}},
-        {"vscode": {"a"}},
-        target_servers={},
-        native_hashes={},
-        retired_hashes={},
-    )
 
 
 def test_registry_name_settles_under_its_native_key(tmp_path: Path) -> None:
@@ -284,14 +263,48 @@ def test_registry_name_settles_under_its_native_key(tmp_path: Path) -> None:
     _write(tmp_path / ".mcp.json", {"mcpServers": {"registry-lifecycle": entry}})
     name = "com.example/registry-lifecycle"
 
-    retired = take_retired_ownership(
+    retired = _split(
         {"copilot": {name}},
-        native_hashes={"copilot": {name: mcp_native_hash(entry)}},
-        project_root=tmp_path,
+        {"copilot": {name: mcp_native_hash(entry)}},
+        tmp_path,
         stored_configs={name: {"name": name, "registry": "https://registry.example"}},
     )
 
-    assert retired == {}
+    assert retired.names == {}
+
+
+def test_unhealed_claims_round_trip_under_copilot_by_fingerprint(tmp_path: Path) -> None:
+    """A lock never records vscode; a kept claim's fingerprint names its retired file.
+
+    Only an entry APM provably wrote is kept, so a user-edited retired entry
+    never becomes a claim, and a newer lock reads each kept claim back as
+    retired (never as .mcp.json ownership).
+    """
+    vscode_entry = {"type": "stdio", "command": "echo", "args": []}
+    _write(
+        tmp_path / ".github/mcp.json",
+        {"mcpServers": {"gh": _LEGACY_COPILOT, "gh-edited": {**_LEGACY_COPILOT, "args": ["x"]}}},
+    )
+    _write(tmp_path / ".vscode/mcp.json", {"servers": {"vs": vscode_entry}})
+    configs = {name: {**_ECHO, "name": name} for name in ("gh", "gh-edited", "vs", "done")}
+    retired = _split({"copilot": {"gh", "gh-edited", "done"}, "vscode": {"vs"}}, {}, tmp_path)
+    claims: dict[str, set[str]] = {"copilot": {"done"}}
+    hashes: dict[str, dict[str, str]] = {"copilot": {"done": "sha256:root"}}
+
+    restore_pending_retired_claims(
+        retired,
+        {"copilot": {"done"}},
+        target_servers=claims,
+        native_hashes=hashes,
+        project_root=tmp_path,
+        stored_configs=configs,
+    )
+
+    assert claims == {"copilot": {"done", "gh", "vs"}}
+    assert set(hashes["copilot"]) == {"done", "gh", "vs"}
+    again = _split(claims, hashes, tmp_path, version="0.37.0", stored_configs=configs)
+    assert again.names == {"copilot": {"gh"}, "vscode": {"vs"}}
+    assert claims == {"copilot": {"done"}}
 
 
 def test_retired_entries_move_only_after_their_replacement_is_owned() -> None:
@@ -433,3 +446,66 @@ def test_heal_eligibility_reads_the_pre_install_lock(tmp_path: Path, snapshot: b
         assert heal.call_args.args[0] == {"copilot": {"echo"}}
     else:
         heal.assert_not_called()
+
+
+@pytest.mark.parametrize("version", ["0.36.1", "0.37.0"], ids=["raw-0.36-lock", "kept-claim"])
+def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
+    tmp_path: Path, version: str
+) -> None:
+    """A retired copilot claim names .github/mcp.json, never the user's .mcp.json entry."""
+    from apm_cli.commands.uninstall.engine import _cleanup_stale_mcp
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    user_root = {"type": "stdio", "command": "echo", "args": []}
+    _write(tmp_path / ".mcp.json", {"mcpServers": {"echo": user_root}})
+    _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT}})
+    dump_yaml({"name": "app", "version": "1.0.0"}, tmp_path / "apm.yml")
+    from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+    legacy = CopilotClientAdapter(project_root=tmp_path, user_scope=False)
+    github_hash = mcp_native_hash(legacy.managed_server_config(_LEGACY_COPILOT))
+    lock = LockFile(apm_version=version)
+    lock.mcp_servers = ["echo"]
+    lock.mcp_configs = {"echo": _ECHO}
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock, {"copilot": ["echo"]}, native_hashes={"copilot": {"echo": github_hash}}
+    )
+
+    _cleanup_stale_mcp(
+        APMPackage.from_apm_yml(tmp_path / "apm.yml"),
+        lock,
+        tmp_path / "apm.lock.yaml",
+        {"echo"},
+        modules_dir=tmp_path / "apm_modules",
+        project_root=tmp_path,
+        persist=False,
+    )
+
+    assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"] == {"echo": user_root}
+    assert json.loads((tmp_path / ".github/mcp.json").read_text())["mcpServers"] == {}
+    assert not lock.mcp_target_servers
+
+
+def test_bundle_retarget_keeps_the_entry_the_new_runtime_owns(tmp_path: Path) -> None:
+    """A bundle moving from claude to copilot retires only claude's claim."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.mcp.integration import run_owned_mcp_integration
+
+    (tmp_path / ".claude").mkdir()
+    lock_path = tmp_path / "apm.lock.yaml"
+    dep = MCPDependency.from_dict(_ECHO)
+    for targets in (["claude"], ["copilot"]):
+        run_owned_mcp_integration(
+            dependencies=[dep],
+            owner="b",
+            lock_path=lock_path,
+            project_root=tmp_path,
+            user_scope=False,
+            target_runtimes=targets,
+        )
+
+    assert "echo" in json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
+    assert LockFile.read(lock_path).mcp_target_servers.get("copilot") == ["echo"]

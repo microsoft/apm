@@ -26,6 +26,14 @@ from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
 from .ownership import names_owned_by_active_peers
 from .registry import registry_env_override
+from .retired_destinations import (
+    RetiredMcpClaims,
+    heal_retired_project_mcp_destinations,
+    healable_names,
+    report_retired_mcp_heal,
+    restore_pending_retired_claims,
+    split_mcp_claims,
+)
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
 
@@ -325,6 +333,7 @@ def run_mcp_install(  # noqa: PLR0913
                 from ...core.scope import InstallScope
 
                 user_scope = scope is InstallScope.USER
+                retired = RetiredMcpClaims({}, {})
                 if _existing_lock:
                     from .ownership import resolve_mcp_target_servers
 
@@ -335,6 +344,16 @@ def run_mcp_install(  # noqa: PLR0913
                         stored_configs=old_configs,
                         project_root=apm_dir,
                         user_scope=user_scope,
+                    )
+                    # Claims naming the retired Copilot MCP files are healed by
+                    # proof, never compared or cleaned as .mcp.json ownership.
+                    retired = split_mcp_claims(
+                        old_target_servers,
+                        native_hashes,
+                        apm_version=_existing_lock.apm_version,
+                        project_root=apm_dir,
+                        user_scope=user_scope,
+                        stored_configs=old_configs,
                     )
                 requested_target_servers = {
                     target_name: server_names & {mcp_name}
@@ -388,6 +407,31 @@ def run_mcp_install(  # noqa: PLR0913
                 for target_name, server_names in requested_target_servers.items():
                     merged_target_servers.setdefault(target_name, set()).discard(mcp_name)
                     merged_target_servers.setdefault(target_name, set()).update(server_names)
+                if retired.names:
+                    healed = healable_names(
+                        {runtime: names & {mcp_name} for runtime, names in retired.names.items()},
+                        declared={mcp_name},
+                        copilot_claims=requested_target_servers.get("copilot")
+                        if "copilot" in requested_target_servers
+                        else None,
+                    )
+                    report_retired_mcp_heal(
+                        heal_retired_project_mcp_destinations(
+                            healed,
+                            stored_configs=old_configs,
+                            native_hashes=retired.hashes,
+                            project_root=apm_dir,
+                        ),
+                        logger,
+                    )
+                    restore_pending_retired_claims(
+                        retired,
+                        healed,
+                        target_servers=merged_target_servers,
+                        native_hashes=native_hashes,
+                        project_root=apm_dir,
+                        stored_configs=old_configs,
+                    )
                 retired_targets = {
                     previous_target: {mcp_name}
                     for previous_target, server_names in old_target_servers.items()

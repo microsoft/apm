@@ -1589,6 +1589,27 @@ def _cleanup_stale_mcp(
         project_root=project_root,
         user_scope=user_scope,
     )
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    from ...install.mcp.retired_destinations import (
+        heal_retired_project_mcp_destinations,
+        restore_pending_retired_claims,
+        split_mcp_claims,
+    )
+
+    # Claims that name the retired Copilot MCP files are never live .mcp.json
+    # ownership: a stale one is healed by proof, the rest are carried forward.
+    deploy_root = Path(project_root) if project_root is not None else Path.cwd()
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+    retired = split_mcp_claims(
+        target_servers,
+        native_hashes,
+        apm_version=lockfile.apm_version,
+        project_root=deploy_root,
+        user_scope=user_scope,
+        stored_configs=lockfile.mcp_configs,
+    )
+    stale_retired = {runtime: names & stale_servers for runtime, names in retired.names.items()}
     retained_unowned: set[str] = set()
     if stale_servers:
         _remove_stale_mcp_from_recorded_targets(
@@ -1599,13 +1620,34 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
-        owned_servers = {server for servers in target_servers.values() for server in servers}
+        heal_retired_project_mcp_destinations(
+            stale_retired,
+            stored_configs=lockfile.mcp_configs,
+            native_hashes=retired.hashes,
+            project_root=deploy_root,
+        )
+        owned_servers = {
+            server
+            for claims in (*target_servers.values(), *retired.names.values())
+            for server in claims
+        }
         retained_unowned = stale_servers - owned_servers
-    contracted_target_servers = {
-        runtime: sorted(servers.intersection(new_mcp_servers))
+    contracted_claims = {
+        runtime: servers.intersection(new_mcp_servers)
         for runtime, servers in target_servers.items()
-        if servers.intersection(new_mcp_servers)
     }
+    restore_pending_retired_claims(
+        retired,
+        stale_retired,
+        target_servers=contracted_claims,
+        native_hashes=native_hashes,
+        project_root=deploy_root,
+        stored_configs=lockfile.mcp_configs,
+    )
+    contracted_target_servers = {
+        runtime: sorted(servers) for runtime, servers in contracted_claims.items() if servers
+    }
+    contracted_hashes = native_hashes if retired.names else None
     surviving_mcp_servers = new_mcp_servers | retained_unowned
     surviving_configs = {
         name: config for name, config in view.configs.items() if name in surviving_mcp_servers
@@ -1620,15 +1662,15 @@ def _cleanup_stale_mcp(
             mcp_configs=surviving_configs,
             mcp_config_provenance=surviving_provenance,
             mcp_target_servers=contracted_target_servers,
+            native_hashes=contracted_hashes,
         )
         return
 
     lockfile.mcp_servers = sorted(surviving_mcp_servers)
     lockfile.mcp_configs = surviving_configs
     lockfile.mcp_config_provenance = surviving_provenance
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         contracted_target_servers,
+        native_hashes=contracted_hashes,
     )

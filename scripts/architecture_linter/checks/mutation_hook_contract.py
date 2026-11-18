@@ -62,6 +62,8 @@ _MCP_OWNERSHIP = "src/apm_cli/install/mcp/ownership.py"
 _MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
 _SERVICE_INTEGRATION = "src/apm_cli/install/service_integration.py"
 _UPDATE_COMMAND = "src/apm_cli/commands/update.py"
+_MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
+_UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 
 
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator.py"
@@ -318,7 +320,10 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
     ``.mcp.json`` shared with Claude Code (``SHARED_PROJECT_MCP_DESTINATIONS``);
     only the retired-destination heal names ``.github/mcp.json``. Heal
     eligibility reads the pre-install lock, because the package phase may
-    already have rewritten the lock with the running version.
+    already have rewritten the lock with the running version. Every reader of
+    lock MCP claims (install, ``install --mcp``, bundles, uninstall and prune)
+    splits retired-file claims off through ``split_mcp_claims`` first, so no
+    retired claim acts as live ``.mcp.json`` ownership.
     """
     rule_id = "mutation_writes.copilot_cli_mcp_paths"
     facts_by_path, failures = _read_required(
@@ -333,6 +338,8 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
             _MCP_INTEGRATION,
             _SERVICE_INTEGRATION,
             _UPDATE_COMMAND,
+            _MCP_COMMAND,
+            _UNINSTALL_ENGINE,
         ),
     )
     findings: list[Violation] = list(failures)
@@ -375,8 +382,28 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
             ),
             (
                 _MCP_INTEGRATION,
-                "and lock_predates_root_mcp_json(heal_basis.apm_version)",
+                "            apm_version=heal_basis.apm_version,",
                 "retired-destination heal eligibility must read the pre-install lock",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "        split_mcp_claims(\n            old_mcp_target_servers,",
+                "install must split retired MCP claims off before acting on them",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "    retired = split_mcp_claims(\n        previous_targets,",
+                "bundle MCP reconciliation must split retired MCP claims off first",
+            ),
+            (
+                _MCP_COMMAND,
+                "retired = split_mcp_claims(",
+                "install --mcp must split retired MCP claims off before acting on them",
+            ),
+            (
+                _UNINSTALL_ENGINE,
+                "retired = split_mcp_claims(",
+                "uninstall and prune must split retired MCP claims off before cleanup",
             ),
             (
                 _SERVICE_INTEGRATION,

@@ -480,8 +480,9 @@ def _seed_036_lock(project: _Project, servers: list[dict], target_servers: dict)
     )
 
 
+@pytest.mark.parametrize("first", ["install", "install-mcp"])
 def test_legacy_copilot_claim_never_adopts_a_user_root_entry(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, first: str
 ) -> None:
     """A 0.36 copilot claim proves a .github/mcp.json write, not ownership of .mcp.json."""
     project = _Project(tmp_path, apm_binary_path)
@@ -492,7 +493,9 @@ def test_legacy_copilot_claim_never_adopts_a_user_root_entry(
     project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
     _seed_036_lock(project, [_ECHO], {"copilot": ["echo"]})
 
-    project.install()
+    project.install(
+        *(["--mcp", "echo", "--target", "copilot", "--", "echo"] if first == "install-mcp" else [])
+    )
     assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
     assert "echo" in project.read_json(".github/mcp.json")["mcpServers"]
 
@@ -520,8 +523,7 @@ def test_partial_install_keeps_unhealed_retired_claims_for_the_retry(
     failed = project.apm("install", "--no-policy")
     assert failed.returncode != 0, failed.stdout + failed.stderr
     assert set(project.read_json(".vscode/mcp.json")["servers"]) == {"vs-b"}
-    assert project.lock()["mcp_target_servers"]["vscode"] == ["vs-b"]
-    assert project.lock()["apm_version"] == "0.36.1"
+    assert "vscode" not in project.lock()["mcp_target_servers"]
 
     # The user resolves the conflict; the retry moves the rest and heals it.
     project.write_json(".mcp.json", {"mcpServers": {"vs-a": managed}})
