@@ -899,7 +899,7 @@ registered from another host or a local path.
 
 ```bash
 # 1. Initialize a package project
-apm init my-package --plugin
+apm plugin init my-package
 
 # 2. Add primitives to .apm/ subdirectories
 #    (instructions, agents, prompts, skills, etc.)
@@ -994,9 +994,9 @@ Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 - The user wants to convert an ad-hoc list of plugins into a proper index.
 
 `apm marketplace init` appends a `marketplace:` block to the project's
-`apm.yml` and creates `.claude-plugin/`. It does NOT scaffold a standalone
-`marketplace.yml`. Use `apm init --marketplace` when starting a brand-new
-project that will publish its own marketplace.
+`apm.yml`, scaffolding `apm.yml` if it is missing. It does NOT scaffold a
+standalone `marketplace.yml`. `apm init --marketplace` is deprecated; use
+`apm marketplace init` for a brand-new marketplace project too.
 
 ### apm.yml `marketplace:` block
 
