@@ -357,7 +357,7 @@ A **fully-featured v1 server** SHOULD additionally implement:
 - Conditional `GET` (`If-None-Match`) returning `304`
 - Per-version `size_bytes` field
 
-Clients MUST NOT crash on missing optional fields; they MUST parse `versions[]` even with no `published_at`.
+Clients MUST NOT crash on missing optional fields; they MUST parse `versions[]` entries that omit `size_bytes`.
 
 ---
 
@@ -452,7 +452,7 @@ A conformance test suite for server implementers SHOULD exercise:
 ### 9.4 Validation
 
 1. `PUT` with a tarball missing `apm.yml` → `422` with appropriate error message.
-2. `PUT` with `apm.yml.version` ≠ URL version → `422`.
+2. `PUT` with `apm.yml.version` ≠ URL version → `422` when the server enforces manifest/version lockstep (section 6, rule 5).
 3. `PUT` with absolute paths in tar → `422`.
 4. `PUT` with symlink in zip → `422`.
 

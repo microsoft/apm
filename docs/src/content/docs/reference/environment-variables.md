@@ -31,7 +31,7 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, all classified as ADO-class. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
 | `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Deprecated alias of `PROXY_REGISTRY_TOKEN`; sent only to the `PROXY_REGISTRY_URL` (or `ARTIFACTORY_BASE_URL`) origin; ignored with a warning when no proxy URL is set. |
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
-| `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
+| `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | `60` | Integer-like string, clamped to 1-180; invalid values are ignored. |
 
 ## Transport and credential order
 
@@ -39,9 +39,9 @@ Controls how APM clones packages and enumerates refs on Git hosts: `APM_GIT_PROT
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
-| `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
-| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github-auth-first` in `~/.apm/config.json`, then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
+| `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https` (`http` is accepted as an alias for `https`). | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer_ssh` in `~/.apm/config.json` (set with `apm config set prefer-ssh`) → git `insteadOf` rules → HTTPS. |
+| `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow_protocol_fallback` in `~/.apm/config.json` (set with `apm config set allow-protocol-fallback`) → `false`. |
+| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github_auth_first` in `~/.apm/config.json` (set with `apm config set github-auth-first`), then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 
 ## TLS trust
 
@@ -68,7 +68,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token for `PROXY_REGISTRY_URL`. | unset | Required for authenticated proxies. |
-| `PROXY_REGISTRY_ALLOW_HTTP` | Allow `http://` for `PROXY_REGISTRY_URL` (development only). | unset | Mirrors the MCP registry's HTTP opt-in. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to silence the plaintext-token warning when `PROXY_REGISTRY_TOKEN` is sent to an `http://` `PROXY_REGISTRY_URL`. | unset | `http://` proxy URLs are accepted without it; use only for a trusted internal proxy. |
 | `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any download not served by the proxy. | unset | Air-gapped deployments. |
 | `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is normalized to uppercase with non-alphanumerics replaced by `_`. |
 | `APM_REGISTRY_USER_<NAME>` / `APM_REGISTRY_PASS_<NAME>` | Basic-auth credentials for configured package registry `<NAME>`. | unset | Used when a bearer token is not supplied. |
@@ -205,6 +205,15 @@ experimental flag.
 | `APM_PROGRESS` | Force the install TUI on or off: `always`/`on`/`1`/`true`/`yes` to force on; `never`/`quiet`/`off`/`0`/`false`/`no` to force off; `auto` (default) lets APM decide based on `CI`, `TERM`, and TTY. | `auto` | The CLI sets `APM_PROGRESS=quiet` when `--quiet` is passed. |
 | `CI` | Standard CI marker. When truthy (`1`/`true`/`yes`), APM disables the install TUI and adjusts a few interactive defaults. | unset | Read; never written. |
 | `TERM` | Standard terminal type. `""` or `dumb` disables the install TUI. | OS-provided | Read; never written. |
+
+## Documented elsewhere
+
+These variables are documented with the command that reads them.
+
+| Variable | Read by | See |
+|---|---|---|
+| `GITHUB_URL`, `APM_REPO`, `VERSION`, `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, `APM_NO_DIRECT_FALLBACK` | Installer scripts and `apm self-update` | [Installation](../../getting-started/installation/#installer-options), [`apm self-update`](../cli/self-update/#enterprise-bootstrap-mirrors) |
+| `SOURCE_DATE_EPOCH` | `apm lock export` (default SBOM timestamp) and `apm pack --format agent-plugin` (`packed_at`) | [`apm lock`](../cli/lock/#export-sbom-inventory) |
 
 ## Experimental and internal
 

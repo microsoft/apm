@@ -133,7 +133,8 @@ them. Detection priority:
 
 1. `--target <slug>` flag (highest).
 2. The `targets:` field in `apm.yml`.
-3. Auto-detect from the
+3. The saved default from `apm config set target`.
+4. Auto-detect from the
    [documented filesystem signals](../../reference/cli/targets/#detection-signals).
 
 With no signal, install exits with a target-selection error.
@@ -187,10 +188,11 @@ contract.
 :::
 
 Transitive **APM** packages flow through automatically. Transitive
-**MCP servers** are gated: if a deep dependency declares a new MCP
-server, install pauses and asks you to re-declare it in your
-top-level `apm.yml`. Use `--trust-transitive-mcp` to skip this in
-trusted environments. See
+**MCP servers** are gated: if a deep dependency declares a self-defined
+MCP server, a custom registry, or a configuration overlay, install skips
+it with a warning asking you to re-declare it in your top-level
+`apm.yml`. Use `--trust-transitive-mcp` to skip this in trusted
+environments. See
 [Drift and secure-by-default](../drift-and-secure-by-default/) for
 the rationale.
 
@@ -211,7 +213,7 @@ runnable scripts your manifest exposes (see
 ```bash
 apm install --dry-run                  # preview locally known dependencies
 apm install --target claude,cursor     # only deploy to these harnesses
-apm install --exclude gemini           # deploy to all targets except gemini
+apm install --exclude gemini           # skip gemini MCP/LSP config writes
 apm install --only apm                 # skip MCP server integration this run
 apm install --frozen                   # CI: lockfile-only; fail on drift
 apm install --update                   # resolve current upstream refs

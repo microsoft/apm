@@ -199,7 +199,7 @@ dependencies:
 ```
 
 Registry-routed deps must include a version selector. Semver versions and
-ranges (`1.0.0`, `^1.2.3`, `~2.0`, `>=1.0 <2.0`) use range matching
+ranges (`1.0.0`, `^1.2.3`, `~2.0.0`, `>=1.0.0 <2.0.0`) use range matching
 against the registry catalogue. Non-semver selectors (`stable`, `latest`,
 `v1.4.2`, a branch name, or any opaque string) are matched exactly against
 the registry's published version list. A missing version selector (no
@@ -275,7 +275,7 @@ There is no one-time migration prompt. Existing Git shorthand deps begin routing
 
 ## 4. What gets recorded in the lockfile
 
-Registry-sourced dependencies add four fields to their lockfile entry: `source: registry`, `version`, `resolved_url`, and `resolved_hash` (sha256 of the archive bytes). The lockfile is promoted to `lockfile_version: "2"` when any dep is registry-sourced OR carries git-source semver resolution fields (`constraint`, `resolved_tag`, or `resolved_at` -- issue #1488). Projects that use neither feature keep `lockfile_version: "1"` forever, even on a newer client.
+Registry-sourced dependencies add four fields to their lockfile entry: `source: registry`, `version`, `resolved_url`, and `resolved_hash` (sha256 of the archive bytes). The lockfile is promoted to `lockfile_version: "2"` when any dep is registry-sourced OR carries git-source semver resolution fields (`constraint`, `resolved_tag`, or `resolved_at` -- issue #1488). Root replacement rules promote it to `lockfile_version: "3"`. Projects that use none of these features keep `lockfile_version: "1"`, even on a newer client.
 
 ```yaml
 dependencies:
@@ -287,7 +287,7 @@ dependencies:
     depth: 1
     package_type: apm_package
     deployed_files:
-      - .github/skills/foo/SKILL.md
+      - .agents/skills/foo/SKILL.md
 ```
 
 `resolved_url` is the trust anchor for re-installs -- APM re-fetches from the URL stored in the lockfile, not from the registry name, and re-verifies bytes against `resolved_hash`. A hash mismatch aborts the install before extraction. See [Lockfile spec](../../reference/lockfile-spec/) for full field semantics.
@@ -387,7 +387,7 @@ For the full governance narrative -- rollout sequencing, audit, drift, and CI ga
 ### What this does not yet provide
 
 - **Package signing.** Registry packages are not cryptographically signed. The `resolved_hash` detects corruption or tampering after download, but does not verify publisher identity.
-- **SBOM generation.** APM does not produce SLSA provenance attestations or SPDX/CycloneDX bills of materials from registry packages. The lockfile (`apm.lock.yaml`) records the resolved version and hash and is suitable for internal audit, but is not a standards-format SBOM.
+- **SBOM attestation.** APM does not produce SLSA provenance attestations. [`apm lock export`](../../reference/cli/lock/#export-sbom-inventory) writes a CycloneDX or SPDX inventory from the lockfile, but it is an inventory, not a signed attestation.
 - **SHA-256 algorithm agility.** The hash floor is SHA-256. No upgrade path to SHA-384/512 is currently implemented.
 
 Do not represent this feature as "supply-chain secure," "tamper-proof," or "SLSA-compliant" in compliance documentation or vendor assessments.
