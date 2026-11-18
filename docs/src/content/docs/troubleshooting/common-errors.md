@@ -47,6 +47,19 @@ Fix: delete the `&name` marker and replace each `*name` with a copy of the value
 
 See also: [Manifest schema](../../reference/manifest-schema/)
 
+### `'intellij' is an IDE, not a target, so apm.yml cannot record it`
+
+```
+[x] 'intellij' is an IDE, not a target, so apm.yml cannot record it. Use '--target copilot' for GitHub Copilot in JetBrains IDEs; once apm.yml exists, '--target intellij' writes JetBrains MCP config.
+[i] Nothing was written.
+```
+
+Cause: a command that creates or rewrites `apm.yml` (`apm init --target`, or `apm install <pkg> --target` / `apm install -g --mcp NAME --target` with no manifest yet) was given `intellij`. `intellij` selects JetBrains Copilot's user-scope MCP config; it is not a `targets:` value, so APM stops before writing anything.
+
+Fix: use `--target copilot` for GitHub Copilot in JetBrains IDEs. To also write JetBrains MCP config, create `apm.yml` first (`apm init`), then run `apm install --mcp NAME --target intellij`.
+
+See also: [`apm install`](../../reference/cli/install/)
+
 ### `lockfile not found at <path>; run 'apm install' to generate it`
 
 ```

@@ -362,6 +362,64 @@ def rewrite_target_names(declaration: ManifestTargetDeclaration) -> tuple[str, .
     return targets
 
 
+# IDEs are clients of a target, not targets: none can be recorded under
+# ``targets:`` (#3878). ``--target intellij`` still configures JetBrains
+# Copilot's MCP file for one install; it is never written to apm.yml.
+_IDE_TARGETS: frozenset[str] = frozenset({"intellij"})
+
+
+class IdeTargetError(TargetRewriteError):
+    """An IDE (``intellij``) was selected where apm.yml would record targets."""
+
+
+def _refuse_ide_targets(names: Iterable[str]) -> None:
+    for name in names:
+        for token in str(name).split(","):
+            token = token.strip().lower()
+            if token in _IDE_TARGETS:
+                raise IdeTargetError(
+                    f"'{token}' is an IDE, not a target, so apm.yml cannot record it. "
+                    "Use '--target copilot' for GitHub Copilot in JetBrains IDEs; "
+                    "once apm.yml exists, '--target intellij' writes JetBrains MCP config.",
+                    token=token,
+                )
+
+
+def option_target_names(target: str | list[str] | None) -> list[str] | None:
+    """Return the ``targets:`` a new apm.yml records for a ``--target`` value.
+
+    The one place that turns an install/init ``--target`` value into manifest
+    tokens (#3878): ``all`` expands to what install deploys, runtime spellings
+    fold to their primitive profile, and tokens with no manifest spelling
+    are left out. ``None`` keeps auto-detection.
+
+    Raises:
+        IdeTargetError: An IDE (``intellij``) was selected; apm.yml never
+            records one (``.token`` names it).
+    """
+    if target is None:
+        return None
+    _refuse_ide_targets([target] if isinstance(target, str) else target)
+
+    from ..core.apm_yml import CANONICAL_TARGETS
+    from ..core.target_catalog import expand_all, get_target_capability
+
+    raw_targets = [target] if isinstance(target, str) else list(target)
+    seen: set[str] = set()
+    manifest_targets: list[str] = []
+    for raw_target in raw_targets:
+        expanded = expand_all("install") if raw_target == "all" else [str(raw_target)]
+        for item in expanded:
+            capability = get_target_capability(item)
+            canonical = (
+                capability.primitive_profile if item in capability.runtimes else capability.name
+            )
+            if canonical in CANONICAL_TARGETS and canonical not in seen:
+                seen.add(canonical)
+                manifest_targets.append(canonical)
+    return sorted(manifest_targets) if manifest_targets else None
+
+
 def bootstrap_target_names(names: Iterable[str]) -> tuple[str, ...]:
     """Return the ``targets:`` a new manifest records for explicitly selected targets.
 
@@ -369,12 +427,14 @@ def bootstrap_target_names(names: Iterable[str]) -> tuple[str, ...]:
     manifest never records a token the manifest reader rejects.
 
     Raises:
+        IdeTargetError: An IDE (``intellij``) was selected.
         TargetRewriteError: A selected target has no ``targets:`` spelling
             (``.token`` names it).
     """
     selected = list(names)
     if not selected:
         return ()
+    _refuse_ide_targets(selected)
     return rewrite_target_names(ManifestTargetDeclaration.from_mapping({"target": selected})) or ()
 
 

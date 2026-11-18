@@ -22,8 +22,8 @@
     {
       "id": "orphan-package-selection",
       "decision": "Declaration-aware selection of orphaned installed packages",
-      "owner": "commands/_helpers.py (_find_orphaned_packages)",
-      "selectors": ["src/apm_cli/commands/_helpers.py"],
+      "owner": "install/orphans.py (find_orphaned_packages, build_expected_install_paths, collect_orphan_candidates), re-exported by commands/_helpers.py and commands/uninstall/engine.py",
+      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py"],
       "guards": ["install-deployment-orphan-selection"]
     },
     {

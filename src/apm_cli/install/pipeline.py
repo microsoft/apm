@@ -827,9 +827,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         # Update .gitignore only for project-scoped installs, not in lockfile_only mode.
         if scope == InstallScope.PROJECT and not lockfile_only:
-            from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
+            from apm_cli.install.helpers.gitignore import update_gitignore_for_apm_modules
 
-            _update_gitignore_for_apm_modules(logger=logger)
+            update_gitignore_for_apm_modules(logger=logger)
         elif verbose and logger is not None and not lockfile_only:
             logger.verbose_detail("Skipping .gitignore update (global scope install).")
 

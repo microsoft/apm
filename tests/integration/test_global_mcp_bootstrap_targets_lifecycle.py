@@ -47,8 +47,13 @@ def test_bootstrap_refuses_a_target_with_no_targets_spelling(
 
     result = runner.run(_mcp_install(target, flag), cwd=work, env=env)
     output = " ".join((result.stdout + result.stderr).split())
-    assert result.returncode != 0, output
-    assert f"for {flag} {target}: target 'intellij' has no 'targets:' equivalent" in output
+    assert result.returncode == 1, output
+    # #3878: an IDE is refused with guidance on every apm.yml-writing path.
+    assert (
+        f"for {flag} {target}: 'intellij' is an IDE, not a target, so apm.yml cannot "
+        "record it. Use '--target copilot' for GitHub Copilot in JetBrains IDEs; "
+        "once apm.yml exists, '--target intellij' writes JetBrains MCP config."
+    ) in output, output
     assert "Nothing was written" in output, output
     assert f"{flag} {target} will apply to that install only" in output, output
     assert "Traceback" not in output, output

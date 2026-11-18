@@ -471,29 +471,6 @@ TARGET_ALIASES: dict[str, str] = {
 }
 
 
-def manifest_targets_from_target_option(target: str | list[str] | None) -> list[str] | None:
-    """Return manifest-safe targets for an install-time ``--target`` value."""
-    if target is None:
-        return None
-
-    from apm_cli.core.apm_yml import CANONICAL_TARGETS
-
-    raw_targets = [target] if isinstance(target, str) else list(target)
-    seen: set[str] = set()
-    manifest_targets: list[str] = []
-    for raw_target in raw_targets:
-        expanded = expand_all("install") if raw_target == "all" else [str(raw_target)]
-        for item in expanded:
-            capability = get_target_capability(item)
-            canonical = (
-                capability.primitive_profile if item in capability.runtimes else capability.name
-            )
-            if canonical in CANONICAL_TARGETS and canonical not in seen:
-                seen.add(canonical)
-                manifest_targets.append(canonical)
-    return sorted(manifest_targets) if manifest_targets else None
-
-
 def normalize_target_list(
     value: str | list[str] | None,
 ) -> list[str] | None:

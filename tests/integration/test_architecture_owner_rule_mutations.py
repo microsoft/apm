@@ -1570,6 +1570,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="LSP user config re-reads COPILOT_HOME outside the user-root owner.",
     ),
     MutationCase(
+        guard_id="registry-delegation-install-layering",
+        rule_id="registry_delegation.install_layering",
+        path="src/apm_cli/install/summary.py",
+        old="from apm_cli.utils.themed_console import _rich_blank_line",
+        new="from apm_cli.commands._helpers import _rich_blank_line",
+        intent="The install summary imports the commands layer again.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-install-target-selection",
         rule_id="registry_delegation.install_target_selection",
         path="src/apm_cli/install/pipeline.py",
@@ -3317,6 +3325,38 @@ def test_policy_target_projection_guard_rejects_raw_selections(
     ("path", "old", "new"),
     [
         pytest.param(
+            "src/apm_cli/install/summary.py",
+            "from apm_cli.utils.themed_console import _rich_blank_line",
+            "import apm_cli.commands._helpers\n"
+            "from apm_cli.utils.themed_console import _rich_blank_line",
+            id="plain-import-of-commands",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            "from ..models.manifest_bootstrap import bootstrap_config as _get_bootstrap_config\n",
+            "def _get_bootstrap_config(*args, **kwargs):\n    return {}\n",
+            id="retired-bootstrap-writer-redefined",
+        ),
+    ],
+)
+def test_install_layering_guard_rejects_bypasses(path: str, old: str, new: str) -> None:
+    """install/** never imports apm_cli.commands, in any import form (#3879)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "registry_delegation.install_layering"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
             "src/apm_cli/policy/policy_checks.py",
             "    manifest_decision = EffectiveTargetDecision(",
             '    raw_target = (raw_yml or {}).get("target")\n'
@@ -3344,7 +3384,7 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             id="unknown-exemption-concept",
         ),
         pytest.param(
-            "src/apm_cli/commands/_helpers.py",
+            "src/apm_cli/models/manifest_bootstrap.py",
             '        apm_yml_data["targets"] = list(config["targets"])\n',
             '        apm_yml_data["targets"] = list(config["targets"])\n'
             "        leaked = package.targets\n",
@@ -3420,7 +3460,7 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             id="authored-names-outside-rewrite-owner",
         ),
         pytest.param(
-            "src/apm_cli/commands/_helpers.py",
+            "src/apm_cli/models/manifest_bootstrap.py",
             "    verify_rewritten_manifest(out_file, content)\n",
             "    pass\n",
             id="scaffold-writes-unverified-rewrite",
@@ -3432,13 +3472,39 @@ def test_policy_target_projection_guard_rejects_raw_selections(
             id="user-manifest-bootstrap-writes-raw-runtimes",
         ),
         pytest.param(
+            "src/apm_cli/commands/init.py",
+            "targets = option_target_names(target_flag)",
+            "targets = list(target_flag or []) or None",
+            id="init-target-flag-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/manifest_helpers.py",
+            "return option_target_names(target)",
+            "return [target] if isinstance(target, str) else target",
+            id="package-bootstrap-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_targets.py",
+            "    _refuse_ide_targets(selected)\n",
+            "",
+            id="mcp-bootstrap-records-ide",
+        ),
+        pytest.param(
+            "src/apm_cli/core/target_detection.py",
+            "def normalize_target_list(",
+            "def manifest_targets_from_target_option(target):\n"
+            "    return target\n\n\n"
+            "def normalize_target_list(",
+            id="second-target-option-authority-returns",
+        ),
+        pytest.param(
             "src/apm_cli/commands/install.py",
             "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes, target, runtime)",
             'initial_manifest_config = {"name": "me", "targets": supported_runtimes}',
             id="install-command-bypasses-bootstrap-owner",
         ),
         pytest.param(
-            "src/apm_cli/commands/_helpers.py",
+            "src/apm_cli/models/manifest_bootstrap.py",
             "    verify_rewritten_manifest(out_file, content)\n",
             "    if False:\n        verify_rewritten_manifest(out_file, content)\n",
             id="scaffold-verification-made-optional",

@@ -240,6 +240,19 @@ class TestResolveInitTargets:
         )
         assert result == ["copilot"]
 
+    def test_ide_target_flag_is_refused_before_writing(self, tmp_path):
+        """#3878: --target intellij is never recorded (not even as copilot)."""
+        from apm_cli.commands.init import _resolve_init_targets
+
+        logger = self._make_logger()
+        with pytest.raises(SystemExit) as excinfo:
+            _resolve_init_targets(
+                tmp_path, target_flag="intellij", yes=True, apm_yml_exists=False, logger=logger
+            )
+        assert excinfo.value.code == 1
+        assert "'intellij' is an IDE, not a target" in logger.error.call_args.args[0]
+        assert not (tmp_path / "apm.yml").exists()
+
     def test_target_flag_list_wins(self, tmp_path):
         from apm_cli.commands.init import _resolve_init_targets
 
@@ -483,7 +496,7 @@ class TestInteractiveProjectSetup:
             patch("click.prompt", side_effect=["my-project", "1.0.0", "A test project", "Author"]),
             patch("apm_cli.commands._helpers._auto_detect_author", return_value="TestAuthor"),
             patch(
-                "apm_cli.commands._helpers._auto_detect_description",
+                "apm_cli.models.manifest_bootstrap.auto_detect_description",
                 return_value="Auto desc",
             ),
             patch("apm_cli.commands._helpers._validate_project_name", return_value=True),

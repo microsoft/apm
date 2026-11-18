@@ -146,3 +146,53 @@ def _report_bootstrap_manifest(
         logger.progress(f"Dry run: Would set targets: {target_list} (in {manifest_display})")
         return
     logger.progress(f"Targets set: {target_list} (persisted to {manifest_display})")
+
+
+def preflight_bootstrap_targets(
+    packages: tuple[str, ...],
+    target: str | list[str] | None,
+    *,
+    mcp_name: str | None,
+    global_: bool,
+) -> list[str] | None:
+    """``targets:`` for the manifest ``apm install <pkg>`` will bootstrap, or None.
+
+    Runs before ``--root`` is created, user-scope directories are prepared,
+    config is written or the workspace lock is taken, so a refused
+    ``--target`` leaves nothing behind (#3878). ``--mcp`` installs and local
+    bundles never bootstrap this manifest and are left to their own paths.
+    """
+    from apm_cli.agent_plugins.errors import AgentPluginError
+    from apm_cli.bundle.local_bundle import detect_local_bundle
+    from apm_cli.core.scope import InstallScope, get_manifest_path
+
+    if not packages or mcp_name:
+        return None
+    scope = InstallScope.USER if global_ else InstallScope.PROJECT
+    manifest_path = get_manifest_path(scope)
+    if manifest_path.exists():
+        return None
+    if len(packages) == 1 and (probe := Path(packages[0])).exists():
+        try:
+            if detect_local_bundle(probe) is not None:
+                return None
+        except (AgentPluginError, OSError, ValueError):
+            return None  # The local-bundle path reports it.
+    manifest_display = str(manifest_path) if global_ else APM_YML_FILENAME
+    return bootstrap_manifest_targets(target, manifest_display)
+
+
+def bootstrap_manifest_targets(
+    target: str | list[str] | None, manifest_display: str
+) -> list[str] | None:
+    """Spell the ``targets:`` a bootstrapped manifest records, or refuse (#3878)."""
+    import click
+
+    from apm_cli.models.manifest_targets import IdeTargetError, option_target_names
+
+    try:
+        return option_target_names(target)
+    except IdeTargetError as exc:
+        raise click.ClickException(
+            f"Cannot create {manifest_display} for --target {exc.token}: {exc} Nothing was written."
+        ) from None

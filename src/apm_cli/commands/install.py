@@ -2,13 +2,11 @@
 
 import builtins
 import contextlib
-import dataclasses
 import os
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import click
 
@@ -17,11 +15,18 @@ from apm_cli.agent_plugins.errors import (
     enforce_agent_plugin_deployment_boundary,
 )
 from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+
+# Re-export the pre-deploy security scan so that bare-name call sites inside
+# this module and ``tests/unit/test_install_scanning.py``'s direct import
+# (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
+# working without modification.
+from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
 )
 from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+from apm_cli.install.command_context import InstallContext
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.errors import (
     AuthenticationError,
@@ -33,29 +38,9 @@ from apm_cli.install.errors import (
     install_failure_message,
     log_frozen_install_error,
 )
+from apm_cli.install.finalization import close_install_contexts
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
-from apm_cli.install.lsp.integration import LspPreflight
-from apm_cli.install.manifest_helpers import (
-    _build_prospective_package,
-    _load_manifest_for_add,
-    _merge_packages_into_yml,
-    _prepare_dry_run_manifest_path,
-    _prepare_user_scope_for_install,
-    _report_bootstrap_manifest,
-)
-from apm_cli.models.dependency.replacement import project_manifest_dependencies
-
-if TYPE_CHECKING:
-    from apm_cli.core.target_detection import EffectiveTargetDecision
-    from apm_cli.install.plan import UpdatePlan
-
-# Re-export the pre-deploy security scan so that bare-name call sites inside
-# this module and ``tests/unit/test_install_scanning.py``'s direct import
-# (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
-# working without modification.
-from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
-from apm_cli.install.finalization import close_install_contexts
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan  # noqa: F401
 from apm_cli.install.insecure_policy import (
     InsecureDependencyPolicyError,
@@ -69,6 +54,16 @@ from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
 )
 from apm_cli.install.locking import serialized_lifecycle_unless
+from apm_cli.install.lsp.integration import LspPreflight
+from apm_cli.install.manifest_helpers import (
+    _build_prospective_package,
+    _load_manifest_for_add,
+    _merge_packages_into_yml,
+    _prepare_dry_run_manifest_path,
+    _prepare_user_scope_for_install,
+    _report_bootstrap_manifest,
+    preflight_bootstrap_targets,
+)
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
@@ -128,6 +123,7 @@ from apm_cli.install.validation import (
     _uses_clone_root_probe,
     _validate_package_exists,
 )
+from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
@@ -141,7 +137,7 @@ from ..core.project_name import (
     resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
 )
 from ..core.target_catalog import target_all_exclusion_help, target_help_fragment
-from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
+from ..core.target_detection import TargetParamType
 from ..install.mcp.args import parse_env_pairs as _parse_mcp_env_pairs
 from ..install.mcp.args import parse_header_pairs as _parse_mcp_header_pairs
 
@@ -176,61 +172,6 @@ from ._helpers import (
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
-
-# ---------------------------------------------------------------------------
-# InstallContext -- parameter bundle for the APM install pipeline
-# ---------------------------------------------------------------------------
-
-
-@dataclasses.dataclass
-class InstallContext:
-    """Bundles install command state to reduce function signatures.
-
-    Created by :func:`install` after argument parsing and scope resolution,
-    then threaded through :func:`_install_apm_packages` and
-    :func:`_post_install_summary` to avoid long parameter lists.
-    """
-
-    scope: Any  # InstallScope
-    manifest_path: "Path"
-    manifest_display: str
-    apm_dir: "Path"
-    project_root: "Path"
-    logger: Any  # InstallLogger
-    auth_resolver: Any  # AuthResolver
-    verbose: bool
-    force: bool
-    dry_run: bool
-    update: bool
-    dev: bool
-    runtime: str | None
-    exclude: str | None
-    target: str | None
-    parallel_downloads: int
-    allow_insecure: bool
-    allow_insecure_hosts: tuple
-    protocol_pref: Any  # ProtocolPreference
-    allow_protocol_fallback: bool
-    trust_transitive_mcp: bool
-    no_policy: bool
-    install_mode: Any  # InstallMode
-    packages: tuple  # Original Click packages
-    transaction: Any = None  # InstallTransaction; default preserves direct-call compatibility
-    refresh: bool = False
-    only_packages: builtins.list | None = None
-    legacy_skill_paths: bool = False
-    frozen: bool = False
-    plan_callback: "Callable[[UpdatePlan], bool] | None" = None
-    skill_subset: "builtins.tuple[str, ...] | None" = None
-    skill_subset_from_cli: bool = False
-    audit_override: str | None = None
-    install_result: InstallResult | None = None
-    target_decision: "EffectiveTargetDecision | None" = None
-    trust_bin: bool | None = None
-    exec_allow_map: builtins.dict[str, builtins.dict[str, bool]] | None = None
-    exec_allow_resolved: bool = False
-    create_config: bool = True
-
 
 # APM Dependencies (conditional import for graceful degradation)
 APM_DEPS_AVAILABLE = False
@@ -1261,6 +1202,10 @@ def install(  # noqa: PLR0913
         InstallService.reject_missing_frozen_root(frozen, root)
     except FrozenInstallError as exc:
         raise click.ClickException(str(exc)) from exc
+    # Refuse a --target apm.yml cannot record before any write (#3878).
+    manifest_targets = preflight_bootstrap_targets(
+        packages, target, mcp_name=mcp_name, global_=global_
+    )
     _source_root = Path.cwd()
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
@@ -1522,9 +1467,9 @@ def install(  # noqa: PLR0913
                     f'Using default project name "{project_name}" because '
                     f"derived name {derived_project_name!a} is invalid"
                 )
-            config = _get_bootstrap_config(project_name)
-            if manifest_targets := manifest_targets_from_target_option(target):
-                config["targets"] = manifest_targets
+            config = _get_bootstrap_config(project_name) | (
+                {"targets": manifest_targets} if manifest_targets else {}
+            )
             _create_minimal_apm_yml(config, target_path=manifest_path)
             _report_bootstrap_manifest(
                 logger=logger,

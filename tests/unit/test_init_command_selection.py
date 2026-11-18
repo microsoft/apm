@@ -402,7 +402,7 @@ class TestInteractiveProjectSetup:
             patch("click.prompt", side_effect=["my-project", "1.0.0", "A test project", "Author"]),
             patch("apm_cli.commands._helpers._auto_detect_author", return_value="TestAuthor"),
             patch(
-                "apm_cli.commands._helpers._auto_detect_description",
+                "apm_cli.models.manifest_bootstrap.auto_detect_description",
                 return_value="Auto desc",
             ),
             patch("apm_cli.commands._helpers._validate_project_name", return_value=True),
@@ -427,7 +427,7 @@ class TestInteractiveProjectSetup:
             patch("click.echo") as echo,
             patch("apm_cli.commands._helpers._auto_detect_author", return_value="TestAuthor"),
             patch(
-                "apm_cli.commands._helpers._auto_detect_description",
+                "apm_cli.models.manifest_bootstrap.auto_detect_description",
                 return_value="Auto desc",
             ),
         ):

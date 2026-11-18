@@ -23,10 +23,12 @@ from apm_cli.models.apm_package import (
     package_target_selection,
 )
 from apm_cli.models.manifest_targets import (
+    IdeTargetError,
     ManifestTargetDeclaration,
     TargetRewriteError,
     bootstrap_target_names,
     manifest_target_restriction,
+    option_target_names,
     read_manifest_target_declaration,
     rewrite_target_names,
     verify_rewritten_manifest,
@@ -290,3 +292,24 @@ def test_bootstrap_target_names_refuses_an_unspellable_target(names):
     with pytest.raises(TargetRewriteError) as excinfo:
         bootstrap_target_names(names)
     assert excinfo.value.token == "intellij"
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["intellij", "INTELLIJ", ["claude", "intellij"], ["all", "intellij"], "claude,intellij"],
+)
+def test_option_target_names_refuses_an_ide(target):
+    """#3878: apm.yml never records an IDE, and never records copilot in its place."""
+    with pytest.raises(IdeTargetError) as excinfo:
+        option_target_names(target)
+    assert excinfo.value.token == "intellij"
+    assert str(excinfo.value) == (
+        "'intellij' is an IDE, not a target, so apm.yml cannot record it. "
+        "Use '--target copilot' for GitHub Copilot in JetBrains IDEs; "
+        "once apm.yml exists, '--target intellij' writes JetBrains MCP config."
+    )
+
+
+def test_bootstrap_target_names_refuses_an_ide_with_guidance():
+    with pytest.raises(IdeTargetError, match="is an IDE, not a target"):
+        bootstrap_target_names(["claude", "intellij"])

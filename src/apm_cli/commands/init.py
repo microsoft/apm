@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+from functools import wraps
 from pathlib import Path
 
 import click
@@ -19,11 +20,10 @@ from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
     detect_signals,
-    manifest_targets_from_target_option,
 )
 from ..install.locking import serialized_lifecycle_unless
 from ..models.manifest_io import InvalidManifestError
-from ..models.manifest_targets import rewrite_target_names
+from ..models.manifest_targets import IdeTargetError, option_target_names, rewrite_target_names
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -81,6 +81,38 @@ def _invalid_project_name_message(name: str) -> str:
     )
 
 
+def _refuse_ide_target_first(source):
+    """Refuse an IDE ``--target`` before the lifecycle lock is taken (#3878).
+
+    Applied outside the lifecycle decorator so a refused ``apm init`` or
+    ``apm plugin init`` creates no lock, project directory or manifest.
+    """
+
+    def decorate(run):
+        @wraps(run)
+        def wrapped(*args, **kwargs):
+            target_flag = kwargs.get("target_flag")
+            if target_flag is not None:
+                logger = CommandLogger(source, verbose=kwargs.get("verbose", False))
+                _option_targets_or_exit(target_flag, logger)
+            return run(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
+
+
+def _option_targets_or_exit(target_flag, logger):
+    """Map ``--target`` through the declaration owner; refuse IDE targets (#3878)."""
+    try:
+        targets = option_target_names(target_flag)
+    except IdeTargetError as exc:
+        logger.error(f"Cannot record --target {exc.token} in {APM_YML_FILENAME}: {exc}")
+        logger.progress("Nothing was written.", symbol="info")
+        sys.exit(1)
+    return targets
+
+
 @click.command(help="Initialize a new APM project")
 @click.option(
     "--discover",
@@ -125,6 +157,7 @@ def _invalid_project_name_message(name: str) -> str:
 @click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
+@_refuse_ide_target_first("init")
 @serialized_lifecycle_unless("discover_flag")
 def init(
     ctx: click.Context,
@@ -304,6 +337,10 @@ def _perform_init(
                 "Provide a version such as '1.0.0', or omit --version to use the default."
             )
             sys.exit(1)
+
+        # Refuse a --target that apm.yml cannot record before creating anything.
+        if target_flag is not None:
+            _option_targets_or_exit(target_flag, logger)
 
         # Determine project directory and name
         if project_name:
@@ -754,7 +791,7 @@ def _resolve_init_targets(
     """
     # Case 1: --target flag provided -- wins unconditionally
     if target_flag is not None:
-        targets = manifest_targets_from_target_option(target_flag)
+        targets = _option_targets_or_exit(target_flag, logger)
         if not targets:
             return None
         logger.progress(f"Targets set: {', '.join(targets)} (via --target flag)", symbol="info")

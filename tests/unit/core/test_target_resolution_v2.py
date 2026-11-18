@@ -71,9 +71,9 @@ from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,
-    manifest_targets_from_target_option,
     resolve_targets,
 )
+from apm_cli.models.manifest_targets import option_target_names
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -212,16 +212,16 @@ def test_resolution_autodetect_multi_signals_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_manifest_targets_from_target_option_none_preserves_autodetect():
-    assert manifest_targets_from_target_option(None) is None
+def test_option_target_names_none_preserves_autodetect():
+    assert option_target_names(None) is None
 
 
-def test_manifest_targets_from_target_option_aliases_to_manifest_names():
-    assert manifest_targets_from_target_option(["claude", "vscode"]) == ["claude", "copilot"]
+def test_option_target_names_aliases_to_manifest_names():
+    assert option_target_names(["claude", "vscode"]) == ["claude", "copilot"]
 
 
-def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
-    targets = manifest_targets_from_target_option("all")
+def test_option_target_names_all_expands_to_manifest_names():
+    targets = option_target_names("all")
     assert targets is not None
     assert "all" not in targets
     assert "vscode" not in targets
@@ -229,8 +229,8 @@ def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
     assert parse_targets_field({"targets": targets}) == targets
 
 
-def test_manifest_targets_from_target_option_drops_experimental_targets():
-    assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) == [
+def test_option_target_names_drops_experimental_targets():
+    assert option_target_names(["openclaw", "hermes", "grok-cloud", "agy"]) == [
         "antigravity",
         "hermes",
     ]
@@ -244,15 +244,15 @@ def test_manifest_targets_from_target_option_drops_experimental_targets():
         for alias in capability.aliases
     ),
 )
-def test_manifest_targets_from_target_option_canonicalizes_every_alias(alias, canonical):
+def test_option_target_names_canonicalizes_every_alias(alias, canonical):
     """Every catalog alias persists exactly like its canonical spelling (#3842)."""
-    persisted = manifest_targets_from_target_option(alias)
-    assert persisted == manifest_targets_from_target_option(canonical)
+    persisted = option_target_names(alias)
+    assert persisted == option_target_names(canonical)
     assert persisted is None or alias not in persisted
 
 
-def test_manifest_targets_from_target_option_preserves_grok_build():
-    assert manifest_targets_from_target_option(["grok-build"]) == ["grok-build"]
+def test_option_target_names_preserves_grok_build():
+    assert option_target_names(["grok-build"]) == ["grok-build"]
     assert parse_targets_field({"targets": ["grok-build"]}) == ["grok-build"]
 
 
