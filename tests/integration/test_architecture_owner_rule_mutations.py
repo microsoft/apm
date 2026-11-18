@@ -117,10 +117,10 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
         pytest.param(
             "src/apm_cli/install/template.py",
             "dep_target_subset=selection.target_subset,\n            ctx=ctx,\n"
-            "            allow_executables=_effective_allow(ctx),\n"
+            "            allow_executables=effective_allow_map(ctx),\n"
             "            trust_bin=ctx.trust_bin,",
             "dep_target_subset=dependency.target_subset,\n            ctx=ctx,\n"
-            "            allow_executables=_effective_allow(ctx),\n"
+            "            allow_executables=effective_allow_map(ctx),\n"
             "            trust_bin=ctx.trust_bin,",
             id="preflight-local-target-subset",
         ),
