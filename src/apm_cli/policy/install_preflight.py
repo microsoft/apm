@@ -13,6 +13,7 @@ rather than duplicate it.  The gate phase adds pipeline-specific wiring
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
@@ -59,6 +60,7 @@ def run_policy_preflight(
     project_root: Path,
     apm_deps=None,
     mcp_deps=None,
+    mcp_brought_in_by: Mapping[str, str] | None = None,
     no_policy: bool = False,
     logger,
     dry_run: bool = False,
@@ -78,6 +80,10 @@ def run_policy_preflight(
         dep checks.
     mcp_deps:
         Iterable of ``MCPDependency``, or ``None`` to skip MCP checks.
+    mcp_brought_in_by:
+        Transitive MCP server name -> direct apm.yml dependency key that
+        brings it in (``CurrentMcpConfigView.brought_in_by``), so removal
+        hints name an entry the user can remove.
     effective_target:
         ``EffectiveTargetDecision.canonical_targets`` of the resolved target
         selection, for compilation-target policy.
@@ -158,6 +164,7 @@ def run_policy_preflight(
         lockfile=None,
         policy=policy,
         mcp_deps=mcp_deps,
+        mcp_brought_in_by=mcp_brought_in_by,
         effective_target=effective_target,
         effective_target_source=effective_target_source,
         fail_fast=(enforcement == "block"),

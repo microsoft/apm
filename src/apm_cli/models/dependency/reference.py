@@ -17,7 +17,6 @@ from ...utils.github_host import (
     is_visualstudio_legacy_hostname,
     parse_artifactory_path,
     reject_unsupported_ado_server_base_path,
-    shorthand_default_host,
     unsupported_host_error,
     validate_ssh_user,
 )
@@ -54,6 +53,7 @@ from .identity import (
     normalize_package_repo_url,
     normalize_policy_host,
 )
+from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
 from .object_fields import (
     apply_optional_dependency_fields,
@@ -424,24 +424,25 @@ class DependencyReference(ProviderCoordinateMixin):
             return f"local:{self.anchored_local_path}"
         return self.get_unique_key()
 
-    def _format_reference(self, repo_url: str, stripped_host: str | None = None) -> str:
-        """Format a scheme-free reference; *stripped_host* defaults to the manifest's."""
+    def _format_reference(self, repo_url: str, *, manifest_form: bool = True) -> str:
+        """Format a scheme-free reference; *manifest_form* strips the manifest's host."""
         if self.is_local and self.local_path:
             return self.local_path
 
         host = self.host or default_host()
-        is_default = host.lower() == (stripped_host or shorthand_default_host()).lower()
         host_label = f"{host}:{self.port}" if self.port else host
-
-        if is_default and not self.port and not self.artifactory_prefix:
-            result = repo_url
-        elif self.artifactory_prefix:
-            result = f"{host_label}/{self.artifactory_prefix}/{repo_url}"
-        else:
-            result = f"{host_label}/{repo_url}"
-
+        result = repo_url
         if self.is_virtual and self.virtual_path:
             result = f"{result}/{self.virtual_path}"
+
+        if self.artifactory_prefix:
+            result = f"{host_label}/{self.artifactory_prefix}/{result}"
+        elif self.port or not (
+            manifest_host_strips(host, result)
+            if manifest_form
+            else host.lower() == default_host().lower()
+        ):
+            result = f"{host_label}/{result}"
         if self.reference:
             result = f"{result}#{self.reference}"
         return result
@@ -463,7 +464,7 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             str: Canonical dependency string
         """
-        return self._format_reference(self.canonical_repo_url, default_host())
+        return self._format_reference(self.canonical_repo_url, manifest_form=False)
 
     def to_display_reference(self) -> str:
         """Return the apm.yml form (source casing; strips the manifest's default host)."""
@@ -1447,7 +1448,7 @@ class DependencyReference(ProviderCoordinateMixin):
         host = None
         if len(parts) >= 2:
             if not host:
-                host = shorthand_default_host()
+                host = default_host()
             if validated_host and is_azure_devops_hostname(validated_host):
                 if len(parts) < 4:
                     raise ValueError(
@@ -1497,7 +1498,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
             if len(parts) >= 2 and "." not in parts[0]:
                 if not host:
-                    host = shorthand_default_host()
+                    host = default_host()
                 if is_azure_devops_hostname(host) and len(parts) >= 3:
                     user_repo = "/".join(parts[:3])
                 elif host and not is_github_hostname(host) and not is_azure_devops_hostname(host):
@@ -1749,7 +1750,7 @@ class DependencyReference(ProviderCoordinateMixin):
             effective_virtual_path = url_virtual_path
 
         if not host:
-            host = shorthand_default_host()
+            host = default_host()
 
         return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
@@ -1891,6 +1892,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         cls._reject_shorthand_alias(dependency_str)
         reject_unsupported_ado_server_base_path(dependency_str)
+        dependency_str = qualify_manifest_shorthand(dependency_str)  # req-mf-019
 
         cls.parse_host_qualified_reference(dependency_str)
 

@@ -37,6 +37,7 @@ from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
 from apm_cli.install.lsp.integration import LspPreflight
 from apm_cli.install.manifest_helpers import (
+    _build_prospective_package,
     _load_manifest_for_add,
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
@@ -587,6 +588,7 @@ def _validate_and_add_packages_to_apm_yml(
     allow_protocol_fallback: bool | None = None,
     create_config=True,
     manifest_display=None,
+    source_root=None,
 ):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
@@ -658,18 +660,13 @@ def _validate_and_add_packages_to_apm_yml(
 
     prospective_package = None
     if dry_run and valid_outcomes:
-        prospective_dependencies = list(current_deps)
-        prospective_dependencies.extend(
-            _apm_yml_entries.get(package, package) for package in validated_packages
-        )
-        data[dep_section]["apm"] = prospective_dependencies
-        prospective_package = APMPackage.from_mapping(
+        prospective_package = _build_prospective_package(
             data,
-            package_path=apm_yml_path.parent,
-            source_path=apm_yml_path.parent,
+            dep_section,
+            [*current_deps, *(_apm_yml_entries.get(p, p) for p in validated_packages)],
             manifest_path=apm_yml_path,
+            source_root=source_root or apm_yml_path.parent,
             create_config=create_config,
-            warning_handler=None,  # The disk parse emits the manifest diagnostic.
         )
 
     outcome = _ValidationOutcome(
@@ -1482,6 +1479,7 @@ def install(  # noqa: PLR0913
 
         # Scope-aware paths
         manifest_path = get_manifest_path(scope)
+        manifest_dir = manifest_path.parent  # Dry runs may redirect the manifest to a temp file.
         apm_dir = get_apm_dir(scope)
         # Display name for messages (short for project scope, full for user scope)
         manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
@@ -1564,6 +1562,7 @@ def install(  # noqa: PLR0913
                 allow_protocol_fallback=allow_protocol_fallback,
                 create_config=create_user_config,
                 manifest_display=manifest_display,
+                source_root=manifest_dir,
             )
             transaction.record_validation(outcome)
             command_result = transaction.validation_result()

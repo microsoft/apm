@@ -861,8 +861,9 @@ class InstallLogger(CommandLogger):
                 remediation guidance is rendered under the inline error.
             remedy: apm.yml edit the hint suggests: ``"remove"``,
                 ``"add"``, ``"pin"``, or ``None`` for no apm.yml edit.
-            declared_by: Dependency that brings in a transitive MCP
-                server; the hint names it instead of *dep_ref*.
+            declared_by: Direct apm.yml dependency (lock key) that brings
+                in a transitive MCP server; the hint names it instead of
+                *dep_ref*.
             rule: Policy check (category) that fired, named in the hint
                 so the user can find the policy field.
         """

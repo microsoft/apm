@@ -11,6 +11,22 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import APMPackage, PackageType
 
 
+def proxy_only_lock_entries(lockfile: Any, *, update_refs: bool, ctx: Any) -> list:
+    """Return the lock entries a ``PROXY_REGISTRY_ONLY`` run keeps without re-resolving.
+
+    A plain install keeps every entry. A full ref update re-resolves them all.
+    A targeted update (``apm update PKG``) re-resolves only the selected subtree
+    and merges the rest back, so those retained entries still need checking.
+    """
+    entries = list(lockfile.dependencies.values())
+    if not update_refs:
+        return entries
+    if not getattr(ctx, "only_packages", None):
+        return []
+    reresolved = {dep.get_unique_key() for dep in getattr(ctx, "deps_to_install", ()) or ()}
+    return [dep for dep in entries if dep.get_unique_key() not in reresolved]
+
+
 def lockfile_refresh_command(scope: Any) -> str:
     """Return the command that re-resolves dependencies and re-pins the lockfile."""
     from apm_cli.core.scope import InstallScope

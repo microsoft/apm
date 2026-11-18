@@ -315,6 +315,7 @@ def run_mcp_integration(  # noqa: PLR0913
         run_policy_preflight(
             project_root=project_root,
             mcp_deps=mcp_deps,
+            mcp_brought_in_by=(current_view.brought_in_by if current_view is not None else None),
             no_policy=no_policy,
             logger=logger,
             dry_run=False,

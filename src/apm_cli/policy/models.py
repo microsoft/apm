@@ -60,9 +60,10 @@ class PolicySubject:
     ``"remove"`` (the subject is declared and must go), ``"add"`` (a
     required subject is missing), ``"pin"`` (the declared ref must be
     bounded), or ``None`` (no apm.yml edit applies;
-    ``reason`` carries the remediation). ``declared_by`` names the
-    dependency that brings in a transitive MCP server, so the hint points
-    at the apm.yml entry the user can actually remove.
+    ``reason`` carries the remediation). ``declared_by`` is the lock key of
+    the direct apm.yml dependency that brings in a transitive MCP server
+    (never a package display name), so the hint points at an entry the user
+    can actually remove.
     """
 
     ref: str

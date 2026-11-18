@@ -553,6 +553,26 @@ class TestInstallCommandAutoBootstrap:
             assert "./local-package" in result.output
             assert sorted(p.name for p in Path.cwd().iterdir()) == ["local-package"]
 
+    def test_dry_run_without_manifest_resolves_local_paths_from_project(self):
+        """The temp preview manifest must not move local-path resolution (#3836)."""
+        with self._chdir_tmp():
+            for name, deps in (
+                ("local-package", "dependencies:\n  apm:\n    - ../dep2\n"),
+                ("dep2", ""),
+            ):
+                Path(name).mkdir()
+                (Path(name) / "apm.yml").write_text(
+                    f"name: {name}\nversion: 1.0.0\n{deps}", encoding="utf-8"
+                )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "../dep2 -> install" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["dep2", "local-package"]
+
     def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
         """Dry-run renders and counts only the requested positional package."""
         with self._chdir_tmp():

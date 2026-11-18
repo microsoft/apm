@@ -13,7 +13,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from .models import REMEDY_ADD, REMEDY_PIN, CheckResult, CIAuditResult, PolicySubject
+from .models import (
+    REMEDY_ADD,
+    REMEDY_PIN,
+    REMEDY_REMOVE,
+    CheckResult,
+    CIAuditResult,
+    PolicySubject,
+)
 
 _logger = logging.getLogger(__name__)
 FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
@@ -94,19 +101,35 @@ def _subjects_result(
     )
 
 
-def _with_mcp_declarers(checks: list[CheckResult], mcp_deps: list) -> list[CheckResult]:
-    """Name the dependency that brings in each transitive MCP server subject."""
-    declarers = {m.name: m.resolved_by for m in mcp_deps if getattr(m, "resolved_by", None)}
-    if not declarers:
+def _with_mcp_declarers(
+    checks: list[CheckResult],
+    mcp_deps: list,
+    brought_in_by: Mapping[str, str] | None,
+) -> list[CheckResult]:
+    """Point each transitive MCP server's removal hint at an apm.yml entry.
+
+    A transitive server is not in apm.yml, so the hint names the direct
+    dependency that brings it in (*brought_in_by*, keyed by server name).
+    ``resolved_by`` is only the declaring package's display name, never an
+    apm.yml entry, so without a known direct dependency no apm.yml edit is
+    suggested.
+    """
+    root_declared = {m.name for m in mcp_deps if not getattr(m, "resolved_by", None)}
+    transitive = {m.name for m in mcp_deps if getattr(m, "resolved_by", None)} - root_declared
+    if not transitive:
         return checks
+    brought_in_by = brought_in_by or {}
+
+    def _hint(subject: PolicySubject) -> PolicySubject:
+        if subject.ref not in transitive or subject.remedy != REMEDY_REMOVE:
+            return subject
+        declarer = brought_in_by.get(subject.ref)
+        if declarer:
+            return replace(subject, declared_by=declarer)
+        return replace(subject, remedy=None)
+
     return [
-        replace(
-            check,
-            subjects=tuple(
-                replace(subject, declared_by=declarers.get(subject.ref))
-                for subject in check.subjects
-            ),
-        )
+        replace(check, subjects=tuple(_hint(subject) for subject in check.subjects))
         for check in checks
     ]
 
@@ -1315,6 +1338,7 @@ def run_dependency_policy_checks(
     lockfile=None,
     policy: ApmPolicy,
     mcp_deps=None,
+    mcp_brought_in_by: Mapping[str, str] | None = None,
     effective_target: tuple[str, ...] | None = None,
     effective_target_source: str = "effective target",
     fetch_outcome: str | None = None,
@@ -1346,6 +1370,11 @@ def run_dependency_policy_checks(
         Iterable of ``MCPDependency`` objects, or ``None``.  When the
         resolved set includes MCP entries they are checked against
         ``policy.mcp``.
+    mcp_brought_in_by:
+        Transitive MCP server name -> key of the direct apm.yml dependency
+        that brings it in (``CurrentMcpConfigView.brought_in_by``). Removal
+        hints for transitive servers name that entry; servers absent from
+        the map get no apm.yml edit hint.
     effective_target:
         The ``EffectiveTargetDecision.canonical_targets`` projection of the
         resolved target selection, or ``None``. When ``None``
@@ -1472,7 +1501,7 @@ def run_dependency_policy_checks(
             _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
             _check_mcp_self_defined(mcp_list, policy.mcp),
         ]
-        remaining_checks += _with_mcp_declarers(mcp_checks, mcp_list)
+        remaining_checks += _with_mcp_declarers(mcp_checks, mcp_list, mcp_brought_in_by)
     # Target / compilation + manifest tail checks.
     if effective_target is not None:
         remaining_checks.append(

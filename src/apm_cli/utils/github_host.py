@@ -82,9 +82,9 @@ def shorthand_default_host() -> str:
 
     Precedence: the ``default_host:`` of the manifest being read (only inside
     :func:`manifest_default_host_scope`) > ``GITHUB_HOST`` > ``github.com``.
-    Canonical normalisation strips exactly this host and keeps every other
-    host's FQDN (OpenAPM req-mf-009 / req-mf-019). Auth and transport
-    decisions keep using :func:`default_host`.
+    ``apm_cli.models.dependency.manifest_host`` owns how shorthand is parsed
+    and written under it (OpenAPM req-mf-009 / req-mf-019). Auth and
+    transport decisions keep using :func:`default_host`.
     """
     return _MANIFEST_DEFAULT_HOST.get() or default_host()
 

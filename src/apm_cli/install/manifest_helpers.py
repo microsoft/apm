@@ -33,6 +33,33 @@ def _load_manifest_for_add(apm_yml_path: Path, logger=None) -> tuple[dict, str |
         sys.exit(1)
 
 
+def _build_prospective_package(
+    data: dict,
+    dep_section: str,
+    dependencies: list,
+    *,
+    manifest_path: Path,
+    source_root: Path,
+    create_config: bool,
+):
+    """Build the dry-run package as if *dependencies* were written to apm.yml.
+
+    Local paths resolve against *source_root*, the caller's real project (or
+    user) directory, even when the preview manifest lives in a temp file.
+    """
+    from apm_cli.models.apm_package import APMPackage
+
+    data[dep_section]["apm"] = dependencies
+    return APMPackage.from_mapping(
+        data,
+        package_path=source_root,
+        source_path=source_root,
+        manifest_path=manifest_path,
+        create_config=create_config,
+        warning_handler=None,  # The disk parse emits the manifest diagnostic.
+    )
+
+
 def _merge_packages_into_yml(
     validated_packages,
     apm_yml_entries,

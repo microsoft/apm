@@ -65,7 +65,11 @@ from .errors import (
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
-from .source_helpers import lockfile_refresh_command, ref_update_operation_label
+from .source_helpers import (
+    lockfile_refresh_command,
+    proxy_only_lock_entries,
+    ref_update_operation_label,
+)
 from .transaction import InstallTransaction, transactional_pipeline
 
 if TYPE_CHECKING:
@@ -728,10 +732,11 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             # Conflict: registry-only mode requires all locked deps to route
             # through the configured proxy. Deps locked to direct VCS sources
             # (github.com, GHE Cloud, GHES) are incompatible. A ref update
-            # re-resolves through the registry, so it skips the stale entries.
-            if registry_config and registry_config.enforce_only and not update_refs:
+            # re-resolves its selection through the registry; only the
+            # entries it keeps as-is are checked.
+            if registry_config and registry_config.enforce_only:
                 conflicts = registry_config.validate_lockfile_deps(
-                    builtins.list(existing_lockfile.dependencies.values())
+                    proxy_only_lock_entries(existing_lockfile, update_refs=update_refs, ctx=ctx)
                 )
                 if conflicts:
                     _rich_error(

@@ -67,6 +67,11 @@ class CurrentMcpConfigView:
     omissions: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     refusable_names: frozenset[str] = frozenset()
     pending_packages: frozenset[str] = frozenset()
+    # Transitive server name -> lock key of the single direct (apm.yml)
+    # dependency that brings it in. Unlike ``provenance`` (the declaring
+    # package's display name) this is an entry the user can remove; servers
+    # whose chain is ambiguous or unknown are absent.
+    brought_in_by: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def derive(
@@ -90,19 +95,25 @@ class CurrentMcpConfigView:
         """
         project_root = root.package_path or Path.cwd()
         with ExitStack() as scratch:
-            package_deps, problems, fingerprints, omissions, refusable, pending_packages = (
-                _collect_locked_dependencies(
-                    lockfile,
-                    modules_root,
-                    project_root,
-                    scratch=scratch,
-                    trust_transitive_self_defined=trust_transitive_self_defined,
-                    diagnostics=diagnostics,
-                    logger=logger,
-                    include_dependency_mcp=include_dependency_mcp,
-                    allow_pending=allow_pending,
-                    active_package_keys=active_package_keys,
-                )
+            (
+                package_deps,
+                problems,
+                fingerprints,
+                omissions,
+                refusable,
+                pending_packages,
+                brought_in_by,
+            ) = _collect_locked_dependencies(
+                lockfile,
+                modules_root,
+                project_root,
+                scratch=scratch,
+                trust_transitive_self_defined=trust_transitive_self_defined,
+                diagnostics=diagnostics,
+                logger=logger,
+                include_dependency_mcp=include_dependency_mcp,
+                allow_pending=allow_pending,
+                active_package_keys=active_package_keys,
             )
         # Root is the authoring project: both prod and dev MCP are intentionally
         # included here (behaviour introduced in #1780). Transitive package deps
@@ -127,6 +138,11 @@ class CurrentMcpConfigView:
                 name: evidence for name, evidence in omissions.items() if name not in configs
             },
             refusable_names=frozenset(refusable - root_names),
+            brought_in_by={
+                name: key
+                for name, key in brought_in_by.items()
+                if key is not None and name not in root_names
+            },
         )
 
     def omission_evidence(self, lockfile: LockFile) -> dict[str, dict[str, str]]:
@@ -242,6 +258,59 @@ def _admitted_names(lockfile: LockFile) -> set[str]:
         | set(lockfile.mcp_config_provenance)
         | {name for names in lockfile.mcp_target_servers.values() for name in names}
     )
+
+
+class _DirectDependencyIndex:
+    """Trace locked packages through their recorded parents to apm.yml entries.
+
+    ``resolved_by`` holds the parent's lock key (replacement-enabled locks) or
+    its canonical repo URL (legacy locks), so both forms are resolved here.
+    """
+
+    def __init__(self, lockfile: LockFile) -> None:
+        self._lockfile = lockfile
+        self._by_repo_url: dict[str, list[str]] = {}
+        for key, dependency in lockfile.dependencies.items():
+            if key != ".":
+                self._by_repo_url.setdefault(dependency.repo_url, []).append(key)
+        self._memo: dict[str, frozenset[str] | None] = {}
+
+    def _parent_keys(self, identity: str) -> list[str]:
+        if identity in self._lockfile.dependencies:
+            return [identity]
+        if self._lockfile.replacements is not None:
+            parent = self._lockfile.get_dependency(identity)
+            return [parent.get_unique_key()] if parent is not None else []
+        return self._by_repo_url.get(identity, [])
+
+    def roots(self, key: str, visiting: frozenset[str] = frozenset()) -> frozenset[str] | None:
+        """Return the direct dependency keys that bring in *key*, or None if unknown."""
+        if key in self._memo:
+            return self._memo[key]
+        dependency = self._lockfile.dependencies.get(key)
+        if dependency is None or key in visiting:
+            return None
+        visiting = visiting | {key}
+        found: set[str] = set()
+        for parent in dependency.parent_keys:
+            if parent is None:
+                if dependency.depth > 1:
+                    return self._remember(key, None)
+                found.add(key)
+                continue
+            candidates = self._parent_keys(parent)
+            if not candidates:
+                return self._remember(key, None)
+            for candidate in candidates:
+                parent_roots = self.roots(candidate, visiting)
+                if parent_roots is None:
+                    return self._remember(key, None)
+                found |= parent_roots
+        return self._remember(key, frozenset(found) or None)
+
+    def _remember(self, key: str, value: frozenset[str] | None) -> frozenset[str] | None:
+        self._memo[key] = value
+        return value
 
 
 def _declaration_fingerprint(dependency: LockedDependency, declaration: MCPDependency) -> str:
@@ -478,10 +547,15 @@ def _collect_locked_dependencies(
     dict[str, dict[str, str]],
     set[str],
     set[str],
+    dict[str, str | None],
 ]:
-    """Collect MCP declarations from only package manifests named by the lockfile."""
+    """Collect MCP declarations from only package manifests named by the lockfile.
+
+    The last element maps each collected server to the single direct
+    dependency key that brings it in, or None when that is not unique/known.
+    """
     if lockfile is None:
-        return [], [], {}, {}, set(), set()
+        return [], [], {}, {}, set(), set(), {}
 
     collected: list[MCPDependency] = []
     problems: list[McpSourceProblem] = []
@@ -489,6 +563,8 @@ def _collect_locked_dependencies(
     omissions: dict[str, dict[str, str]] = {}
     refusable: set[str] = set()
     pending_packages: set[str] = set()
+    direct_roots: dict[str, set[str] | None] = {}
+    direct_index = _DirectDependencyIndex(lockfile)
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     native_ownership_cache: dict[Path, frozenset[str]] = {}
@@ -682,7 +758,25 @@ def _collect_locked_dependencies(
                     approval_keys=locked_dependency_approval_keys(dependency),
                 )
             )
-    return collected, problems, fingerprints, omissions, refusable, pending_packages
+            roots = direct_index.roots(package_key)
+            known = direct_roots.setdefault(mcp_dependency.name, set())
+            if roots is None or known is None:
+                direct_roots[mcp_dependency.name] = None
+            else:
+                known.update(roots)
+    brought_in_by = {
+        name: next(iter(roots)) if roots is not None and len(roots) == 1 else None
+        for name, roots in direct_roots.items()
+    }
+    return (
+        collected,
+        problems,
+        fingerprints,
+        omissions,
+        refusable,
+        pending_packages,
+        brought_in_by,
+    )
 
 
 def _untrusted_transitive_mcp_message(declarer: str, dependency: MCPDependency) -> str:
@@ -752,7 +846,7 @@ def _collect_transitive_compat(
         )
     project_root = lock_path.parent if lock_path is not None else Path.cwd()
     with ExitStack() as scratch:
-        dependencies, _, _, _, _, _ = _collect_locked_dependencies(
+        dependencies, *_ = _collect_locked_dependencies(
             lockfile,
             modules_root,
             project_root,

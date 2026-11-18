@@ -34,9 +34,18 @@ def _registry_only_config() -> RegistryConfig:
         return RegistryConfig.from_env()
 
 
-def _run_pipeline(tmp_path: Path, errors: list[str], *, update_refs: bool) -> None:
+def _run_pipeline(
+    tmp_path: Path,
+    errors: list[str],
+    *,
+    update_refs: bool,
+    only_packages: list[str] | None = None,
+    retained: str | None = None,
+) -> None:
     lock = LockFile()
     lock.add_dependency(LockedDependency(repo_url="owner/repo", host="github.com"))
+    if retained:
+        lock.add_dependency(LockedDependency(repo_url=retained, host="github.com"))
     lockfile_cls = MagicMock()
     lockfile_cls.read.return_value = lock
 
@@ -82,6 +91,7 @@ def _run_pipeline(tmp_path: Path, errors: list[str], *, update_refs: bool) -> No
         run_install_pipeline(
             pkg,
             update_refs=update_refs,
+            only_packages=only_packages,
             logger=MagicMock(),
             target="claude",
             scope=InstallScope.PROJECT,
@@ -100,6 +110,24 @@ class TestRegistryOnlyLockfileConflict:
     def test_ref_update_re_resolves_instead_of_blocking(self, tmp_path: Path) -> None:
         errors: list[str] = []
         _run_pipeline(tmp_path, errors, update_refs=True)
+        assert not any("direct VCS sources" in msg for msg in errors)
+
+    def test_targeted_update_still_checks_entries_it_keeps(self, tmp_path: Path) -> None:
+        errors: list[str] = []
+        with pytest.raises(InstallFailureAlreadyRendered):
+            _run_pipeline(
+                tmp_path,
+                errors,
+                update_refs=True,
+                only_packages=["owner/repo"],
+                retained="other/kept",
+            )
+        conflicts = [msg for msg in errors if msg.strip().startswith("- ")]
+        assert conflicts == ["  - other/kept (host: github.com)"]
+
+    def test_targeted_update_re_resolves_its_selection(self, tmp_path: Path) -> None:
+        errors: list[str] = []
+        _run_pipeline(tmp_path, errors, update_refs=True, only_packages=["owner/repo"])
         assert not any("direct VCS sources" in msg for msg in errors)
 
 

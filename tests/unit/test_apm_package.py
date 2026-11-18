@@ -618,3 +618,49 @@ class TestManifestDefaultHost:
             # Canonical identity strings stay manifest-independent.
             assert gitlab.to_canonical() == "gitlab.com/acme/x"
             assert github.to_canonical() == "acme/y"
+
+    @pytest.mark.parametrize(
+        ("manifest_host", "qualified", "entry", "identity"),
+        [
+            (
+                "gitlab.com",
+                "gitlab.com/group/sub/repo#v1",
+                "group/sub/repo#v1",
+                ("group/sub/repo", None),
+            ),
+            ("gitlab.com", "gitlab.com/acme/x", "acme/x", ("acme/x", None)),
+            (
+                "gitlab.com",
+                "gitlab.com/acme/x/prompts/a.prompt.md",
+                "acme/x/prompts/a.prompt.md",
+                ("acme/x", "prompts/a.prompt.md"),
+            ),
+            (
+                "gitlab.com",
+                "gitlab.com/my.group/repo",
+                "gitlab.com/my.group/repo",
+                ("my.group/repo", None),
+            ),
+            (
+                "dev.azure.com",
+                "dev.azure.com/org/project/repo",
+                "org/project/repo",
+                ("org/project/repo", None),
+            ),
+            (None, "github.com/acme/y/skills/foo", "acme/y/skills/foo", ("acme/y", "skills/foo")),
+        ],
+    )
+    def test_manifest_entry_round_trips_repository_boundary(
+        self, monkeypatch, manifest_host, qualified, entry, identity
+    ):
+        from apm_cli.utils.github_host import manifest_default_host_scope
+
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        expected_host = manifest_host or "github.com"
+        with manifest_default_host_scope(manifest_host):
+            dep = DependencyReference.parse(qualified)
+            assert dep.to_apm_yml_entry() == entry
+            reparsed = DependencyReference.parse(entry)
+        for ref in (dep, reparsed):
+            assert (ref.host, ref.repo_url, ref.virtual_path) == (expected_host, *identity)
+        assert reparsed.get_identity() == dep.get_identity()

@@ -25,14 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` policy blocks print one violation per offending dependency or MCP server, naming it, and the hint names what to remove, add or pin (for a transitive MCP server, the dependency that brings it in) instead of telling you to remove the check name from apm.yml (#3865)
+- `apm install` policy blocks print one violation per offending dependency or MCP server, naming it, and the hint names what to remove, add or pin (for a transitive MCP server, the direct apm.yml dependency that brings it in, even through deeper chains) instead of telling you to remove the check name from apm.yml (#3865)
 - `apm install <pkg> --dry-run` without an `apm.yml` no longer writes one in project scope; it prints `Would create apm.yml`, as `-g` already did (#3865)
 - Remediation hints name `apm update` instead of the deprecated `apm install --update`; with `PROXY_REGISTRY_ONLY=1`, `apm update` now re-resolves a lockfile locked to direct VCS sources instead of failing on it; auth errors name the command you ran (#3865)
 - `apm update` accepts `--legacy-skill-paths` and honors `APM_LEGACY_SKILL_PATHS`, so a per-client skill layout survives an update (#3865)
 - `apm audit PACKAGE` accepts the same forms as `apm uninstall` (URL, `host/owner/repo`, `owner/repo#ref`) and exits 1 when no installed package matches, so a typo in a CI gate no longer passes (#3865)
 - The `apm audit --ci` table shows `[x]` for failed checks instead of a blank Status cell (#3865)
 - `apm compile --target` with a target that has no compile output (`openclaw`, `copilot-app`, `copilot-cowork`, `grok-cloud`) is a no-op (with the experimental enable hint when the flag is off) instead of auto-detecting and writing CLAUDE.md or AGENTS.md; `apm init` and install bootstrap save canonical names for aliases such as `agy` (#3865)
-- apm.yml `default_host:` is honored: shorthand dependencies in that manifest resolve against it, `apm install PKG` writes entries on that host as shorthand, and invalid values are rejected (OpenAPM req-mf-019) (#3865)
+- apm.yml `default_host:` is honored: shorthand dependencies in that manifest resolve against it, that host's repository rules apply (GitLab subgroups, Azure DevOps `org/project/repo`), `apm install PKG` writes the short form only when it parses back to the same package, `apm uninstall` selects the same entries, and invalid values are rejected (OpenAPM req-mf-019) (#3865)
 - `apm publish --package` keeps the host in the package identity (`gitlab.com/acme/x` publishes as owner `gitlab.com/acme`), matching what `apm install` requests, so packages from different hosts no longer collide (#3865)
 - `apm pack` (default Claude plugin format) always embeds `apm.lock.yaml` with the `pack.bundle_files` integrity manifest, even without a project lockfile, so `apm install <bundle>` verifies it (#3865)
 - CLI messages point to real commands and docs: `apm search` (not `apm marketplace search`), the marketplace install-patterns docs anchor, a plaintext warning for `http://` registry URLs instead of an unneeded `MCP_REGISTRY_ALLOW_HTTP` instruction, correct `apm pack --help` exit codes, `apm update --check` help, and the `.agents/rules/` dedup message for Antigravity (#3865)
