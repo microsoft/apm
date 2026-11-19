@@ -375,10 +375,24 @@ def lock_exec_decisions_stale(
             )
         return trust[0]
 
+    rows = [
+        dep
+        for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
+        if key != "." and dep.exec_status != TRUST_ABSENT
+    ]
+    # A gate on at install recorded a status. With none recorded and the
+    # local layers leaving the gate off, skip the org policy fetch.
+    if not any(dep.exec_status for dep in rows) and not (
+        exec_trust_context_for_project(
+            source_root,
+            policy=None,
+            fallback_allow_executables=fallback_allow_executables,
+            migrate_user_legacy=False,
+        ).gate_enabled
+    ):
+        return False
     with native_registration_scope(targets):
-        for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
-            if key == "." or dep.exec_status == TRUST_ABSENT:
-                continue
+        for dep in rows:
             install_path = dep.to_dependency_ref().get_install_path(modules_dir)
             if not install_path.is_dir():
                 continue
