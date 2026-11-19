@@ -670,6 +670,9 @@ def _resolve_marketplace_packages(
                     symbol="search",
                 )
                 try:
+                    from ...marketplace.catalog_origin import require_locked_catalog_origin
+
+                    require_locked_catalog_origin(marketplace_name, plugin_name, lockfile)
                     resolution = resolve_marketplace_plugin(
                         plugin_name, marketplace_name, auth_resolver=auth_resolver
                     )

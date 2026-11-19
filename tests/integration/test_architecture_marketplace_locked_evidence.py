@@ -107,8 +107,8 @@ def test_marketplace_catalog_origin_routes_through_owners() -> None:
         ),
         (
             "marketplace/catalog_origin.py",
-            "if not same_marketplace_origin(locked_origin, current):",
-            "if locked_origin != current:",
+            "    if not same_marketplace_origin(locked.source_url, current):",
+            "    if locked.source_url != current:",
         ),
         (
             "commands/marketplace/__init__.py",
@@ -150,4 +150,58 @@ def test_marketplace_catalog_origin_guard_requires_check_before_catalog_io() -> 
     report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: moved})
     assert any(
         item.rule_id == ORIGIN_RULE_ID and "before" in item.message for item in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            "commands/install.py",
+            "                    require_locked_catalog_origin("
+            "marketplace_name, plugin_name, existing_lockfile)\n",
+            "",
+        ),
+        (
+            "commands/outdated.py",
+            "        require_locked_row_origin(dep)\n",
+            "        pass\n",
+        ),
+        (
+            "commands/uninstall/engine.py",
+            "                    require_locked_catalog_origin(marketplace_name, plugin_name, lockfile)\n",
+            "",
+        ),
+    ],
+    ids=["cli-install-intercept", "outdated", "uninstall-registry-fallback"],
+)
+def test_every_marketplace_entry_point_requires_the_origin_check(
+    path: str, before: str, after: str
+) -> None:
+    """Dropping the origin check from any registered entry point is a violation (#3959)."""
+    source_path = f"src/apm_cli/{path}"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    assert source.count(before) == 1
+    mutated = source.replace(before, after)
+    ast.parse(mutated)
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: mutated})
+    assert any(
+        item.rule_id == ORIGIN_RULE_ID and item.path == source_path for item in report.violations
+    )
+
+
+def test_an_unregistered_marketplace_resolution_entry_point_is_a_violation() -> None:
+    """A new caller of resolve_marketplace_plugin must be registered with the guard."""
+    source_path = "src/apm_cli/commands/deps/cli.py"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    mutated = (
+        source
+        + "\n\ndef _sneaky(plugin, alias):\n"
+        + "    from apm_cli.marketplace.resolver import resolve_marketplace_plugin\n\n"
+        + "    return resolve_marketplace_plugin(plugin, alias)\n"
+    )
+    ast.parse(mutated)
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: mutated})
+    assert any(
+        item.rule_id == ORIGIN_RULE_ID and "_sneaky" in item.message for item in report.violations
     )

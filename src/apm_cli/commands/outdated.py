@@ -147,6 +147,10 @@ def _find_remote_tip(ref_name, remote_refs):
     return None
 
 
+def _short_ref(ref: str) -> str:
+    return ref[:12] if len(ref) > 12 else ref
+
+
 def _check_marketplace_ref(dep, verbose):
     """Check a marketplace-sourced dep against its marketplace entry.
 
@@ -160,13 +164,28 @@ def _check_marketplace_ref(dep, verbose):
         return None
 
     try:
+        from ..marketplace.catalog_origin import require_locked_row_origin
         from ..marketplace.client import fetch_or_cache
-        from ..marketplace.errors import MarketplaceError
+        from ..marketplace.errors import MarketplaceError, MarketplaceOriginConflictError
         from ..marketplace.registry import get_marketplace_by_name
     except ImportError:
         return None
 
     source_label = f"marketplace: {dep.discovered_via}"
+    # #3959: never compare against a catalog the alias was rebound to.
+    try:
+        require_locked_row_origin(dep)
+    except MarketplaceOriginConflictError as conflict:
+        return OutdatedRow(
+            package=f"{dep.marketplace_plugin_name}@{dep.discovered_via}",
+            current=_short_ref(dep.resolved_ref or dep.resolved_commit or "(none)"),
+            latest="-",
+            status="origin-conflict",
+            source=source_label,
+            error=str(conflict),
+        )
+    except MarketplaceError:
+        pass  # Unregistered alias: handled below with the git fallback.
 
     try:
         source_obj = get_marketplace_by_name(dep.discovered_via)
@@ -561,7 +580,7 @@ def outdated(global_, verbose, parallel_checks):
 
     # Check if everything is up-to-date
     has_outdated = any(row.status == "outdated" for row in rows)
-    has_unknown = any(row.status == "unknown" for row in rows)
+    has_unknown = any(row.status in {"unknown", "origin-conflict"} for row in rows)
     has_outside_constraint = any(row.outside_constraint for row in rows)
 
     has_replacements = any(dep.replacement is not None for dep in checkable)
@@ -611,6 +630,7 @@ def outdated(global_, verbose, parallel_checks):
         table.add_column("Source", style="dim", min_width=20, overflow="fold")
 
         status_styles = {
+            "origin-conflict": "red",
             "up-to-date": "green",
             "outdated": "yellow",
             "unknown": "dim",
@@ -680,6 +700,11 @@ def outdated(global_, verbose, parallel_checks):
             "'apm update' stays within that constraint. Select a newer version explicitly "
             "in apm.yml, then run 'apm install' to take an outside-constraint release."
         )
+    conflicts = [row for row in rows if row.status == "origin-conflict"]
+    for row in conflicts:
+        logger.error(row.error or f"{row.package}: marketplace origin changed")
+    if conflicts:
+        sys.exit(1)
 
 
 def _check_deps_with_progress(
