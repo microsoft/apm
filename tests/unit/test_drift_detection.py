@@ -610,9 +610,11 @@ def test_locked_copy_proof_lets_a_readable_git_head_decide(tmp_path) -> None:
     assert locked_copy_proof(_LockedDep(resolved_commit=_LOCKED), path) is None
 
 
-def test_pin_alone_never_proves_an_unhashed_row_for_deployment(tmp_path) -> None:
+def test_pin_never_proves_bytes_for_deployment(tmp_path) -> None:
     path = _copy(tmp_path, marker=_LOCKED)
     unhashed = _LockedDep(resolved_commit=_LOCKED)
+    hashed = _LockedDep(resolved_commit=_LOCKED, content_hash=_hash_of(tmp_path, "v2"))
 
     assert locked_copy_proof(unhashed, path) == LOCKED_COPY_PIN
     assert locked_copy_proof(unhashed, path, for_deployment=True) is None
+    assert locked_copy_proof(hashed, path, for_deployment=True) == LOCKED_COPY_CONTENT_HASH

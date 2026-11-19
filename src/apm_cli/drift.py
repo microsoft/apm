@@ -372,8 +372,8 @@ def locked_copy_proof(
     its own; otherwise the ``.apm-pin`` marker naming the locked
     ``resolved_commit``, then the recorded ``content_hash`` (rows without a
     commit, or copies without a marker). The marker only catches honest
-    staleness, so *for_deployment* accepts it only for rows whose
-    ``content_hash`` is verified before the bytes are reused.
+    staleness, so it never proves bytes that are about to be deployed:
+    *for_deployment* needs the git HEAD or the verified content hash.
     """
     if locked_dep is None or not package_path.is_dir():
         return None
@@ -388,7 +388,7 @@ def locked_copy_proof(
                 head = None
             if head is not None:
                 return LOCKED_COPY_GIT_HEAD if head == commit else None
-        if not for_deployment or getattr(locked_dep, "content_hash", None):
+        if not for_deployment:
             from apm_cli.install.cache_pin import CachePinError, verify_marker
 
             try:

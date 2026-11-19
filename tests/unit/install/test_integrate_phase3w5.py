@@ -878,7 +878,7 @@ class TestRunIntegrationLoop:
 
 
 # ---------------------------------------------------------------------------
-# Marker-proven copies (#3884): the .apm-pin marker never stands in for bytes
+# Deployment reuse (#3884): the .apm-pin marker never stands in for bytes
 # ---------------------------------------------------------------------------
 
 import pytest  # noqa: E402
@@ -925,8 +925,6 @@ def test_marker_proven_copy_still_needs_verified_bytes(
         _, skip_download, _, _ = integrate._resolve_download_strategy(ctx, ref, installed)
 
     assert skip_download is skip
-    assert heal.call_args.kwargs["lockfile_match"] is hashed
-    # Marker-only proof keeps the v<=0.12.2 branch-drift heal eligible.
-    assert heal.call_args.kwargs["lockfile_match_via_content_hash_only"] is hashed
-    warned = " ".join(str(c.args[0]) for c in ctx.diagnostics.warn.call_args_list)
-    assert ("Content hash mismatch" in warned) is tampered
+    assert heal.call_args.kwargs["lockfile_match"] is skip
+    # A hash-only proof keeps the v<=0.12.2 branch-drift heal eligible.
+    assert heal.call_args.kwargs["lockfile_match_via_content_hash_only"] is skip
