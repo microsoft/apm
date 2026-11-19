@@ -122,3 +122,40 @@ def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
     assert parsed.path == "/repos/microsoft/apm/releases"
     assert parsed.query == "per_page=5"
     assert version == "2.0.0rc1"
+
+
+def test_windows_installer_env_drops_inherited_psmodulepath(monkeypatch):
+    """A PowerShell 7 parent's module path must not leak into the installer host (#3926)."""
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    monkeypatch.setattr(
+        self_update,
+        "external_process_env",
+        lambda: {
+            "PSMODULEPATH": r"C:\Program Files\PowerShell\7\Modules",
+            "PSModulePath": r"C:\Users\me\Documents\PowerShell\Modules",
+            "PATH": r"C:\Windows\System32",
+        },
+    )
+
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
+
+    assert not [key for key in env if key.upper() == "PSMODULEPATH"]
+    assert env["PATH"] == r"C:\Windows\System32"
+
+
+def test_unix_installer_env_keeps_psmodulepath(monkeypatch):
+    """Only the Windows PowerShell installer host needs its own module path."""
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    monkeypatch.setenv("PSModulePath", "/opt/microsoft/powershell/7/Modules")
+
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
+
+    assert env["PSModulePath"] == "/opt/microsoft/powershell/7/Modules"
