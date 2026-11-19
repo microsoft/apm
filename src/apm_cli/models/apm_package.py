@@ -1078,7 +1078,9 @@ class PackageInfo:
     )
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
     root_local_project_root: Path | None = None
-    deployment_package_root: Path | None = None  # Source root in the deployment output frame
+    # Source root in the deployment output frame: live for replayed dependencies
+    # (paired with deployment_frame), scratch for the replayed self-entry.
+    deployment_package_root: Path | None = None
     # (replay output root, live deploy root): audit replay renders links live (#3901)
     deployment_frame: tuple[Path, Path] | None = None
     local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)

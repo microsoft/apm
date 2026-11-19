@@ -22,6 +22,8 @@ def replay_deployment_frame(
     so they match wherever ``apm_modules`` sits relative to the deploy root (an
     absolute ``APM_HOME`` outside ``HOME``, #3901), independent of scratch depth
     or drive. The frame only shapes link text; nothing is written through it.
+    User scope keeps the unresolved scope paths install used: resolving them
+    (as get_workspace_deploy_root does) changes link text under symlinked roots.
     """
     if user_scope:
         scope = InstallScope.USER

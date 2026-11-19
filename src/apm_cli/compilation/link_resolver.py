@@ -46,8 +46,9 @@ class LinkResolutionContext:
     # stay inside this subtree already resolve after copy and should remain
     # portable bundle-local links.
     preserved_source_root: Path | None = None
-    # Source package projected into the deployment output frame. Audit replay
-    # points this at scratch while package_root remains the real source tree.
+    # Source package in the deployment output frame; package_root remains the
+    # real source tree. Audit replay sets the live install path for dependencies
+    # (with deployment_frame) and scratch for the project self-entry (without).
     deployment_package_root: Path | None = None
     # (replay output root, live deploy root). Audit replay writes under the
     # first but renders asset links as if the target lived under the second,

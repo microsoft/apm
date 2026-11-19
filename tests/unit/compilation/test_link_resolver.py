@@ -844,6 +844,33 @@ class TestReplayFrameTranslation:
         assert "(../../../../y/apm/apm_modules/_local/package/MANIFESTO.md)" in installed
         assert render(scratch_root, (scratch_root, live_home)) == installed
 
+    def test_dependency_replay_keeps_link_when_live_frame_has_no_relpath(
+        self, tmp_path, monkeypatch
+    ):
+        """Across drives install leaves the link unrewritten; replay must too (#3901)."""
+        import apm_cli.compilation.link_resolver as link_resolver_module
+
+        source_root = tmp_path / "source_package"
+        source_dir = source_root / ".apm" / "agents"
+        source_dir.mkdir(parents=True)
+        (source_root / "MANIFESTO.md").write_text("# Manifesto", encoding="utf-8")
+        source_file = source_dir / "helper.agent.md"
+        source_file.write_text("placeholder", encoding="utf-8")
+        live_home = tmp_path / "home"
+        scratch_root = tmp_path / "scratch"
+        content = "See [the manifesto](../../MANIFESTO.md)."
+        monkeypatch.setattr(link_resolver_module, "portable_link_relpath", lambda *_: None)
+
+        resolver = UnifiedLinkResolver(scratch_root)
+        resolver.package_root = source_root
+        resolver.deployment_package_root = tmp_path / "apm" / "apm_modules" / "_local" / "pkg"
+        resolver.deployment_frame = (scratch_root, live_home)
+        target_file = scratch_root / ".copilot" / "agents" / "helper.agent.md"
+
+        assert resolver.resolve_links_for_installation(content, source_file, target_file) == (
+            content
+        )
+
     def test_normal_install_self_package_unchanged(self, tmp_path):
         """Sanity: normal install (base_dir == package_root parent) still
         rewrites correctly and the replay-frame branch does not regress it.
