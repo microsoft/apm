@@ -885,7 +885,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     default=None,
     help=f"Target harness(es) to deploy to. Use commas for multiple targets; repeating the flag "
     f"keeps only the last value (use commas instead). {target_help_fragment('install')} "
-    "IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. "
+    "'intellij' writes JetBrains MCP config once apm.yml exists (file primitives use the "
+    "Copilot profile) and is never recorded in apm.yml; record 'copilot' for JetBrains. "
     f"{target_all_exclusion_help()}. Combine explicit-only targets when needed. "
     "Experimental targets require their feature flags. "
     "Target resolution: --runtime/--target > apm.yml targets: > apm config set target ... > "
@@ -1037,7 +1038,9 @@ def _handle_mcp_install(  # noqa: PLR0913
     "--refresh",
     is_flag=True,
     default=False,
-    help="Re-fetch all dependencies from upstream and re-resolve all ref pins. Use 'apm update' for interactive upgrade planning.",
+    help="Re-fetch all dependencies from upstream and re-resolve all ref pins. Marketplaces are "
+    "revalidated; the install fails rather than use stale marketplace data. Use 'apm update' for "
+    "interactive upgrade planning.",
 )
 @click.option(
     "--legacy-skill-paths",

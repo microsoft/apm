@@ -28,7 +28,7 @@ When multiple packages deployed the same file (common for shared harness files s
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--source` | off | After each package name, print the origin of that package on the same line: the OCI image URI, the local path, or the package with its locked ref, tag, or short commit (`owner/repo@ref`). |
-| `--path` | off | After each package name, print the full dependency chain from that package up to the root (same output as `apm deps why`). |
+| `--path` | off | After each package name, print the full dependency chain from `apm.yml` down to that package (same walker as `apm deps why`). |
 
 ## Examples
 

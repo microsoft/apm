@@ -9,7 +9,7 @@ write this file. Your platform or security team did. This page covers
 what that means for your day-to-day work.
 
 APM policy governs what gets installed, not what runs. For the full
-boundary explanation, see [What is APM](/apm/concepts/what-is-apm/#what-apm-is-not).
+boundary explanation, see [What is APM](../../concepts/what-is-apm/#what-apm-is-not).
 
 ## Where the policy lives
 

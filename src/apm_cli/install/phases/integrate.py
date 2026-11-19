@@ -704,6 +704,7 @@ def run(ctx: InstallContext) -> None:
         return
 
     if ctx.frozen and ctx.existing_lockfile is not None:
+        from apm_cli.core.scope import is_user_scope
         from apm_cli.install.service import InstallService
         from apm_cli.install.template import effective_allow_map
         from apm_cli.security.trust import McpAdmission
@@ -718,6 +719,7 @@ def run(ctx: InstallContext) -> None:
             # for materialized packages) is the same one deployment uses.
             admission=McpAdmission.for_project(
                 ctx.project_root,
+                user_scope=is_user_scope(ctx.scope),
                 one_off=ctx.trust_transitive_mcp,
                 trust_context=getattr(effective_allow_map(ctx), "trust_context", None)
                 or getattr(ctx, "exec_trust_ctx", None),

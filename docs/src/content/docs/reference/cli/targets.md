@@ -111,6 +111,9 @@ Notes:
 - A `CLAUDE.md` written as documentation will still activate the
   `claude` target. Pin `targets:` in `apm.yml` to override.
 - A root `.mcp.json` is not a signal: Claude Code and Copilot both read it.
+- `vscode` is a deprecated alias of `copilot` and has no row of its own.
+  `intellij` is an IDE, not a target: APM never records it in `targets:`;
+  use `copilot` for GitHub Copilot in JetBrains IDEs.
 - If no signals are found and `apm.yml` declares no `targets:`,
   `apm targets` prints the full table with every row inactive and an
   info hint to create a harness config or declare `targets:`

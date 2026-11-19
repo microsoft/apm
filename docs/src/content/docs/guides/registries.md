@@ -58,7 +58,7 @@ apm install
 
 On success, `apm.lock.yaml` records `source: registry`, `version`, `resolved_url`, and `resolved_hash` for each registry dep. A `404` usually means the package is not published or the `owner/repo` is wrong.
 
-Registry URLs MUST start with `https://`. Anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Registry names use lowercase letters, digits, `-`, and `.`. Unknown keys under a registry entry are rejected at parse time (typo guard).
+Registry URLs MUST start with `https://`. Anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Prefer lowercase registry names with letters, digits, and `-` (see [names that share an env var](#registry-names-that-sanitize-to-the-same-env-var)). Unknown keys under a registry entry are rejected at parse time (typo guard).
 
 ## 2. Install from a private or self-hosted registry
 
@@ -342,7 +342,7 @@ apm publish --package acme/my-skill --dry-run
 | Option | Description |
 |---|---|
 | `--registry NAME` | Registry name from the `registries:` block. Required when multiple registries are configured. |
-| `--package OWNER/REPO` | Package identity to publish as (required, e.g. `acme/my-skill`). |
+| `--package OWNER/REPO` | Package identity to publish as (required), exactly as consumers write it in `id:`, e.g. `acme/my-skill` or `gitlab.com/acme/my-skill`. A host is part of the identity. |
 | `--zip PATH` | Path to a pre-built flat `.zip` archive. Skips auto-pack. |
 | `--dry-run` | Preview without uploading. |
 | `--verbose` / `-v` | Show detailed output. |

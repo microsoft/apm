@@ -781,8 +781,8 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
         ),
         (
             "src/apm_cli/install/drift.py",
-            "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
-            "gated_allow_map = ReplayExecAllowMap(project_root)",
+            "        project_root, config.policy_provider, user_scope=config.user_scope\n",
+            "        project_root\n",
         ),
         (
             "src/apm_cli/install/audit_replay.py",
@@ -830,8 +830,8 @@ def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, 
     [
         (
             "src/apm_cli/install/template.py",
-            "manifest_path = get_manifest_path(scope)",
-            "manifest_path = project_manifest_path(Path.home())",
+            'manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))',
+            "Path.home()",
         ),
         (
             "src/apm_cli/security/executables.py",
@@ -4303,6 +4303,42 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
     """#3866: lock target names are canonical; a 0.36 lock recording vscode reads as copilot."""
     rule_id = "install-deployment-selection-merge"
     source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "def _sync_integrations_after_uninstall(",
+            "def _survivor_trust(project_root):\n"
+            '    return exec_trust_context_for_project(project_root / "apm.yml", policy=None)\n\n\n'
+            "def _sync_integrations_after_uninstall(",
+            id="unregistered-global-uninstall-caller",
+        ),
+        pytest.param(
+            "src/apm_cli/security/trust.py",
+            "                grants_manifest, policy=None, logger=None, include_user=include_user",
+            '                Path(project_root) / "apm.yml",\n'
+            "                policy=None,\n"
+            "                logger=None,\n"
+            "                include_user=include_user,",
+            id="registered-caller-derives-apm-yml-from-root",
+        ),
+    ],
+)
+def test_trust_owner_guard_rejects_root_derived_callers(path: str, old: str, new: str) -> None:
+    """#3954/#3986: a caller that derives apm.yml from a root cannot reach the trust owner."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)

@@ -63,18 +63,16 @@ def effective_allow_map(ctx) -> dict | None:
     if getattr(ctx, "exec_trust_ctx", None) is not None:
         return getattr(ctx, "exec_allow_map", None)
 
-    from apm_cli.core.scope import get_manifest_path, is_user_scope
+    from apm_cli.core.scope import is_user_scope, manifest_root
     from apm_cli.security.executables import project_manifest_path
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    scope = getattr(ctx, "scope", None)
-    if is_user_scope(scope):
-        # -g: the user manifest lives in APM_HOME, not the home directory (#3954).
-        manifest_path = get_manifest_path(scope)
-    else:
-        manifest_path = project_manifest_path(
-            getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
-        )
+    project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    # The scope owner names the manifest directory (APM_HOME under -g, #3954);
+    # the trust owner reads that apm.yml file.
+    manifest_path = project_manifest_path(
+        manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+    )
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
         manifest_path,

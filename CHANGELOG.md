@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install -g` and global `apm uninstall` now apply the `executables` approvals in `~/.apm/apm.yml` to hooks, MCP servers and LSP servers; they were ignored, so unapproved executables could deploy. (#3986)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
 - `apm install` removes hooks a package deployed earlier once `apm deny` or a removed approval gates them, and names a denied package as denied. (#3944)
@@ -50,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit PACKAGE` accepts `plugin@marketplace` and the `_local/<name>` key from `apm deps list`, selecting offline exactly as `apm uninstall` does. (closes #3953, #3968)
 - Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)
 - `*.ghe.com` marketplaces now refuse bare cross-repo `git-subdir`, `gitlab` and `url` sources too, not only `type: github`. (closes #3937, #3942)
+- `*.ghe.com` marketplaces admit in-marketplace `repository:`/`url:` locators, and bare entries when `GITHUB_HOST` is the marketplace host. (closes #3945, #3952)
 - A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
 - `apm install --frozen` passes on its first run after a lock bump: `apm_modules` copies that no longer match `apm.lock.yaml` are re-downloaded first. (#3900)
 - `apm install` on a fresh clone adopts committed skills after an `apm.yml` ref bump; hand-edited skill files still fail closed. (#3900)

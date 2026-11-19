@@ -128,6 +128,7 @@ dependencies:
     - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
     - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
     - seventh/lib#v1.5.3       # OK: literal tag
+    - ninth/lib#v01.5.3        # FAIL: leading zero is not SemVer (BARE_BRANCH)
     - acme/mono/packages/pkg-a#pkg-a-v1.5.3  # OK: this package's own release tag
     - shadcn/ui#shadcn@4.12.0  # OK: exact package release tag (name@X.Y.Z)
     - acme/mono/packages/pkg-a#pkg-b-v1.5.3  # FAIL: another package's tag (BARE_BRANCH)
@@ -158,7 +159,7 @@ Rules over MCP server references, including transitive ones declared by deep dep
 |--------------------|-----------------------|---------|--------------------------------------------------------------------------------------|
 | `allow`            | list or null          | `null`  | Same null/empty/list semantics as `dependencies.allow`.                              |
 | `deny`             | list                  | `[]`    | Always wins.                                                                         |
-| `transport.allow`  | list or null          | `null`  | Allowed transports: `stdio`, `streamable-http`, `sse` (`http` is an alias of `streamable-http`). Checked against the effective transport APM writes, including registry servers. `null` = no opinion. |
+| `transport.allow`  | list or null          | `null`  | Allowed transports: `stdio`, `streamable-http`, `sse` (`http` is an alias of `streamable-http`). Checked against the effective transport APM writes, including registry servers, by install, update and `apm audit --ci`; a registry server whose transport cannot be resolved is a violation (blocked under `enforcement: block`, a warning under the default `warn`). `null` = no opinion. |
 | `self_defined`     | enum                  | `warn`  | `allow` / `warn` / `deny` -- treatment of MCP servers defined inline in `apm.yml`.   |
 | `trust_transitive` | boolean               | `false` | When `false`, transitive MCP servers must be explicitly allow-listed.                |
 

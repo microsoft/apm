@@ -65,6 +65,28 @@ def test_without_a_provider_replay_discovers_policy(project: Path, discovered: l
     assert discovered == [project]
 
 
+def test_global_replay_reads_the_user_manifest(
+    project: Path, tmp_path: Path, discovered: list[Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3954: audit -g reads grants from APM_HOME/apm.yml; policy stays at the deploy root."""
+    apm_home = tmp_path / "apm-home"
+    apm_home.mkdir()
+    (apm_home / "apm.yml").write_text(
+        "name: u\nversion: 1.0.0\nexecutables:\n  allow:\n    ../userhooky:\n      hooks: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+
+    allow = ReplayExecAllowMap(project, user_scope=True).for_dependency(
+        SimpleNamespace(exec_status="denied")
+    )
+
+    assert allow is not None
+    assert allow.get("../userhooky", {}).get("hooks") is True
+    assert "../hooky" not in allow.trust_context.project_deny
+    assert discovered == [project]
+
+
 def _hook_package(root: Path) -> SimpleNamespace:
     from apm_cli.deps.lockfile import LockedDependency
 
