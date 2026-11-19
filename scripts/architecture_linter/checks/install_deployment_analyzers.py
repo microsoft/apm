@@ -62,6 +62,12 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
 )
+from scripts.architecture_linter.checks.install_locked_copy_validity import (
+    GUARD as _GUARD_LOCKED_COPY_VALIDITY,
+)
+from scripts.architecture_linter.checks.install_locked_copy_validity import (
+    check_locked_copy_validity,
+)
 from scripts.architecture_linter.checks.install_lsp_capability_gate import (
     GUARD_LSP_CAPABILITY_GATE,
     check_lsp_capability_gate,
@@ -136,6 +142,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
         check_bundle_compile_staging,
+    ),
+    _rule(
+        _GUARD_LOCKED_COPY_VALIDITY,
+        "apm_modules copy validity against the lock is owned by drift.locked_copy_proof.",
+        check_locked_copy_validity,
     ),
     _rule(
         _GUARD_SINGLE_FILE,

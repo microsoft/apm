@@ -75,7 +75,11 @@ poisoned `.git/config` cannot subvert it. Source:
 `src/apm_cli/cache/integrity.py`.
 
 Install also drops a small `.apm-pin` marker at each package root
-recording the `resolved_commit` it deployed. `apm audit` re-checks
+recording the `resolved_commit` it deployed. Before resolving
+dependencies, install reuses a package copy in `apm_modules/` only when
+its marker (or, without one, its content hash) matches `apm.lock.yaml`;
+a copy left by an older lock is re-downloaded first, so its outdated
+`apm.yml` never decides transitive selections. `apm audit` re-checks
 this marker before replaying the install, so a teammate who bumped
 `apm.lock.yaml` without re-running `apm install` gets a clear "run
 `apm install` first" error rather than misleading drift findings.

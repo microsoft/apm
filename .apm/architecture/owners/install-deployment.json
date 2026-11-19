@@ -313,6 +313,13 @@
       "owner": "models/manifest_io.py (load_manifest, load_manifest_roundtrip, read_manifest_text) for apm.yml reads: APMPackage.from_apm_yml, read_manifest_target_declaration, apm audit, project executable trust, apm run config and every rewrite; utils/yaml_io.py dump_yaml_roundtrip for install, uninstall, approve/deny and install --mcp rewrites",
       "selectors": ["src/apm_cli/install/mcp/writer.py", "src/apm_cli/models/manifest_io.py"],
       "guards": ["install-deployment-consumer-manifest-rewrite"]
+    },
+    {
+      "id": "locked-copy-validity",
+      "decision": "Whether an existing apm_modules package copy holds its locked commit or content, so resolution, pre-download and integrate reuse only lock-matching copies (#3884)",
+      "owner": "drift.py (locked_copy_proof: git HEAD, then the install/cache_pin.py .apm-pin marker, then the content-hash fallback; locked_copy_is_stale behind should_force_ref_recheck); consumers: deps/apm_resolver.py and install/phases/resolve.py via should_force_ref_recheck, install/phases/download.py, install/phases/integrate.py",
+      "selectors": ["src/apm_cli/install/cache_pin.py", "src/apm_cli/install/phases/_redownload.py"],
+      "guards": ["install-deployment-locked-copy-validity"]
     }
   ]
 }

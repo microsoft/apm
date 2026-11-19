@@ -9,6 +9,7 @@ import pytest
 from apm_cli.deps.apm_resolver import APMDependencyResolver, DownloadedPackageError
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.drift import should_force_ref_recheck
+from apm_cli.install.cache_pin import write_marker
 from apm_cli.install.context import InstallContext
 from apm_cli.install.phases.integrate import _resolve_download_strategy
 from apm_cli.install.phases.resolve import _activate_validated_candidate
@@ -91,6 +92,7 @@ def test_hook_updates_reenter_staged_admission(tmp_path: Path, layout: str) -> N
     (hooks / "lint.json").write_text(_VALID_HOOK, encoding="utf-8")
     ref = DependencyReference(repo_url="acme/hooks", reference="main")
     locked = LockedDependency(repo_url="acme/hooks", resolved_ref="main", resolved_commit="a" * 40)
+    write_marker(tmp_path, "a" * 40)
 
     assert should_force_ref_recheck(ref, locked, update_refs=True, package_path=tmp_path)
     assert not should_force_ref_recheck(ref, locked, update_refs=False, package_path=tmp_path)
