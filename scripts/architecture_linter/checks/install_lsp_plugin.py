@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
+    _lines,
     _present,
     _python_paths,
     _summary,
 )
 from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.groups.common import violation
 from scripts.architecture_linter.models import Violation
 
 GUARD_EXECUTABLE_TRUST = "install-deployment-executable-trust-context"
@@ -47,6 +49,25 @@ _TARGET_REWRITE_PATHS = ("src/apm_cli/commands/init.py", "src/apm_cli/commands/_
 _YAML_IO = "src/apm_cli/utils/yaml_io.py"
 # Anchors are refused on read (req-mf-020(b), #3858), so no rewrite may keep one.
 _ANCHOR_REWRITE_TOKENS = (".anchor.value", "_detached_sequence")
+# The trust owner reads the scope's manifest file it is handed; it never derives
+# one from a root (#3954). Every call site is registered, so a new caller that
+# picks its own root fails closed instead of silently reading the wrong apm.yml.
+_TRUST_OWNER = "exec_trust_context_for_project"
+_TRUST_OWNER_CALLERS = frozenset(
+    {
+        (_INSTALL_TEMPLATE, "effective_allow_map"),
+        ("src/apm_cli/security/trust.py", "resolve"),
+        ("src/apm_cli/security/trust.py", "pins"),
+        (_EXEC_GATE, "_trust_ctx"),
+        (_EXEC_GATE, "lock_exec_decisions_stale"),
+        (_EXEC_GATE, "_resolve"),
+        (_EXECUTABLES, "effective_exec_map_for_project"),
+    }
+)
+_MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")
+# approve/deny select a package by exact name: a partial name could grant or deny
+# execution for another package, so prefix matching on names is refused.
+_APPROVE_LOOSE_MATCH_TOKENS = ("package_name.startswith(",)
 # approve.py must not re-derive a locked row's trust principal (#3710).
 _APPROVE_PARALLEL_TRUST_TOKENS = (
     "approval_identity=locked.",
@@ -107,18 +128,29 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _EXEC_GATE: (
                     "return dependency_approval_key(dep_ref)",
                     "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
-                    "self._map = effective_exec_map_for_project(",
+                    "self._trust_ctx_value = exec_trust_context_for_project(",
                 ),
                 # Audit replay withholds what the install gate withheld, under
-                # the audit's own single policy fetch (#3924).
+                # the audit's own single policy fetch (#3924), and what it would now
+                # withhold after an unreconciled deny (#3958).
                 _DRIFT_REPLAY: (
-                    "allow_executables=gated_allow_map.for_dependency(lock_dep),",
-                    "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
+                    "replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)",
+                    "allow_executables=replay_allow,",
+                    "project_root, config.policy_provider, user_scope=config.user_scope",
                 ),
                 _AUDIT_REPLAY: ("policy_provider=policy_provider,",),
                 _CI_CHECKS: ("policy_provider=policy_provider,",),
                 _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
-                _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
+                _INSTALL_TEMPLATE: (
+                    "trust_ctx = exec_trust_context_for_project(",
+                    "manifest_root(project_root, user_scope=is_user_scope(",
+                ),
+                # McpAdmission reads grants from the scope manifest (#3954, #3986).
+                "src/apm_cli/security/trust.py": (
+                    "grants_manifest = project_manifest_path(manifest_root(project_root, "
+                    "user_scope=user_scope))",
+                ),
+                "src/apm_cli/commands/update.py": ("get_manifest_path(scope),",),
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
                 _MCP_PIPELINE: ("admission = McpAdmission.for_project(",),
                 _MCP_VIEW: ("approval_keys = locked_dependency_approval_keys(dependency)",),
@@ -138,6 +170,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             },
         )
     )
+    findings.extend(_trust_owner_closed_world(provider))
     # A second locked-row trust derivation beside the owner is a split authority.
     facts, failures = _facts_for(provider, _APPROVE_COMMAND, GUARD_EXECUTABLE_TRUST)
     if not failures:
@@ -150,7 +183,80 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             for token in _APPROVE_PARALLEL_TRUST_TOKENS
             if _present(facts, token)
         )
+        findings.extend(
+            _summary(
+                GUARD_EXECUTABLE_TRUST,
+                _APPROVE_COMMAND,
+                f"approve/deny must match package names exactly; remove {token}",
+            )
+            for token in _APPROVE_LOOSE_MATCH_TOKENS
+            if _present(facts, token)
+        )
+        if not _present(facts, "matches more than one installed package"):
+            findings.append(
+                _summary(
+                    GUARD_EXECUTABLE_TRUST,
+                    _APPROVE_COMMAND,
+                    "approve/deny must refuse a name that matches more than one package",
+                )
+            )
     return tuple(findings)
+
+
+def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
+    """Only registered callers reach the trust owner, which never derives apm.yml."""
+    findings: list[Violation] = []
+    facts, failures = _facts_for(provider, _EXECUTABLES, GUARD_EXECUTABLE_TRUST)
+    if failures:
+        return list(failures)
+    owner = [d for d in facts.definitions if d.name == _TRUST_OWNER]
+    if owner:
+        body = _lines(facts)[owner[0].line - 1 : owner[0].end_line]
+        if any(token in line for line in body for token in _MANIFEST_DERIVATION_TOKENS):
+            findings.append(
+                _summary(
+                    GUARD_EXECUTABLE_TRUST,
+                    _EXECUTABLES,
+                    f"{_TRUST_OWNER} must read the manifest path it is given, not derive "
+                    "apm.yml from a root (#3954)",
+                )
+            )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        path_facts, path_failures = _facts_for(provider, path, GUARD_EXECUTABLE_TRUST)
+        if path_failures:
+            continue
+        # A registered caller passes a manifest the scope owner named
+        # (core.scope.get_manifest_path / manifest_root + project_manifest_path);
+        # it never builds apm.yml from a root itself (#3954, #3986).
+        registered = {scope for caller, scope in _TRUST_OWNER_CALLERS if caller == path}
+        lines = _lines(path_facts)
+        for definition in path_facts.definitions:
+            if definition.name not in registered:
+                continue
+            body = lines[definition.line - 1 : definition.end_line]
+            if any(token in line for line in body for token in _MANIFEST_DERIVATION_TOKENS):
+                findings.append(
+                    violation(
+                        GUARD_EXECUTABLE_TRUST,
+                        path,
+                        f"{definition.name} derives apm.yml from a root; pass the manifest "
+                        "the scope owner names (project_manifest_path(manifest_root(...)))",
+                        line=definition.line,
+                    )
+                )
+        findings.extend(
+            violation(
+                GUARD_EXECUTABLE_TRUST,
+                path,
+                f"{call.scope} calls {_TRUST_OWNER} outside the registered callers; pass the "
+                "scope's manifest (core.scope.get_manifest_path) and register the call site",
+                line=call.line,
+            )
+            for call in path_facts.calls
+            if call.qualname.rsplit(".", 1)[-1] == _TRUST_OWNER
+            and (path, call.scope) not in _TRUST_OWNER_CALLERS
+        )
+    return findings
 
 
 _CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {

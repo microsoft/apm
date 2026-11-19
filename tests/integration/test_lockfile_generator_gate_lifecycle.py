@@ -202,6 +202,37 @@ def test_flow_style_and_legacy_lockfiles_are_guarded(tmp_path: Path, apm_binary_
         (project.root / name).unlink()
 
 
+def test_bundle_from_newer_apm_installs_with_a_warning(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A bundle whose embedded lock a newer APM wrote installs, but says so (#3963)."""
+    from tests.integration._dependency_graph_world import NO_POLICY, World
+
+    world = World.create(tmp_path, apm_binary_path)
+    world.publish("tool")
+    world.manifest(["test/tool"])
+    world.apm("install", NO_POLICY)
+    current = re.search(r"(?m)^apm_version: (.*)$", world.lock_bytes().decode()).group(1)
+    major = int(current.split(".", 1)[0])
+    newer = f"{major + 1}.0.0"
+    world.apm("pack")
+    bundle = next(iter(sorted((world.project / "build").iterdir())))
+    embedded = bundle / "apm.lock.yaml"
+    embedded.write_text(
+        re.sub(r"(?m)^apm_version: .*$", f"apm_version: {newer}", embedded.read_text("utf-8")),
+        encoding="utf-8",
+    )
+    world.project = world.isolated.work_root / "consumer"
+    world.project.mkdir()
+    world.manifest([])
+
+    result = world.apm("install", str(bundle), NO_POLICY)
+    output = _output(result)
+    assert f"written by APM {newer}, newer than this APM {current}" in output, output
+    assert "brew upgrade apm" in output
+    assert (world.project / "apm.lock.yaml").exists()
+
+
 def test_dependency_failure_is_not_a_version_refusal(tmp_path: Path, apm_binary_path: Path) -> None:
     """A real dependency failure on a current lockfile never reads as a version refusal."""
     project = _Project(tmp_path, apm_binary_path)
@@ -235,3 +266,67 @@ def test_user_scope_lockfile_is_guarded(tmp_path: Path, apm_binary_path: Path) -
         assert result.returncode == 1, _evidence(result)
         assert f"written by APM {major + 1}.0.0" in _output(result)
     assert user_lock.read_bytes() == before
+
+
+def _with_second_dependency(project: _Project) -> None:
+    """Keep a dependency after the writer under test removes ``../other``."""
+    other = project.isolated.work_root / "other"
+    (other / ".apm" / "instructions").mkdir(parents=True)
+    (other / "apm.yml").write_text("name: other\nversion: 1.0.0\n", encoding="utf-8")
+    (other / ".apm" / "instructions" / "other.instructions.md").write_text(_GUIDE, "utf-8")
+    manifest = project.root / "apm.yml"
+    manifest.write_text(manifest.read_text("utf-8") + "    - path: ../other\n", encoding="utf-8")
+
+
+def _drop_dependency(project: _Project) -> None:
+    manifest = project.root / "apm.yml"
+    manifest.write_text(
+        manifest.read_text("utf-8").replace("    - path: ../other\n", ""), encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "prepare", "args"),
+    [
+        ("uninstall", None, ("uninstall", "../other")),
+        ("prune", _drop_dependency, ("prune",)),
+        ("install-mcp", None, ("install", "--mcp", "foo", "--", "echo", "hi")),
+    ],
+)
+def test_every_lockfile_writer_stamps_the_running_cli(
+    tmp_path: Path, apm_binary_path: Path, label: str, prepare, args: tuple[str, ...]
+) -> None:
+    """A writer that changes an older APM's lockfile records this APM, so older CLIs refuse it."""
+    project = _Project(tmp_path, apm_binary_path)
+    _with_second_dependency(project)
+    project.seed()
+    current = project.stamped()
+    project.stamp("0.1.0")
+    before = project.lock.read_bytes()
+    if prepare is not None:
+        prepare(project)
+
+    result = project.run(*args)
+    assert result.returncode == 0, _evidence(result)
+    assert project.lock.read_bytes() != before, label
+    assert project.stamped() == current, label
+
+
+def test_fresh_bundle_install_stamps_the_running_cli(tmp_path: Path, apm_binary_path: Path) -> None:
+    """``apm install <bundle>`` creates a lockfile that records the APM that wrote it."""
+    from tests.integration._dependency_graph_world import NO_POLICY, World
+
+    world = World.create(tmp_path, apm_binary_path)
+    world.publish("tool")
+    world.manifest(["test/tool"])
+    world.apm("install", NO_POLICY)
+    current = re.search(r"(?m)^apm_version: (.*)$", world.lock_bytes().decode()).group(1)
+    world.apm("pack")
+    bundle = next(iter(sorted((world.project / "build").iterdir())))
+    world.project = world.isolated.work_root / "consumer"
+    world.project.mkdir()
+    world.manifest([])
+
+    world.apm("install", str(bundle), NO_POLICY)
+    stamp = re.search(r"(?m)^apm_version: (.*)$", world.lock_bytes().decode())
+    assert stamp is not None and stamp.group(1) == current

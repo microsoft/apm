@@ -23,3 +23,4 @@ class OutdatedRow:
     source: str = ""
     wanted: str | None = None
     outside_constraint: bool = False
+    error: str | None = None

@@ -297,7 +297,10 @@ class McpAdmission:
             return cls(trust_context, one_off=one_off)
         from apm_cli.core.scope import manifest_root
 
-        grants_root = manifest_root(project_root, user_scope=user_scope)
+        from .executables import project_manifest_path
+
+        # Grants come from the scope's manifest file; policy stays at project_root.
+        grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
         admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
@@ -319,14 +322,14 @@ class McpAdmission:
                     if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
                         admission.policy_unavailable = str(outcome)
             return exec_trust_context_for_project(
-                grants_root, policy=policy, logger=logger, include_user=include_user
+                grants_manifest, policy=policy, logger=logger, include_user=include_user
             )
 
         def pins() -> ExecTrustContext:
             from .executables import exec_trust_context_for_project
 
             return exec_trust_context_for_project(
-                grants_root, policy=None, logger=None, include_user=include_user
+                grants_manifest, policy=None, logger=None, include_user=include_user
             )
 
         admission = cls(resolve, one_off=one_off, pins=pins)

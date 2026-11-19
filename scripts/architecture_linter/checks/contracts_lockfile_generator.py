@@ -4,13 +4,17 @@
 lockfile another APM generated. ``ensure_lockfile_writable`` (and so every
 ``LockFile.write``) enforces it; commands that write, replay or certify the
 lockfile call it at entry; ``LockFile.read`` warns read-only callers.
+
+The gate's only signal is the ``apm_version`` stamp, so ``LockFile.write``
+stamps the running CLI and no other module serialises a lockfile itself (#3962).
 """
 
 from scripts.architecture_linter.facts import FactsProvider
-from scripts.architecture_linter.groups.common import checked_facts, violation
+from scripts.architecture_linter.groups.common import checked_facts, inventory_paths, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 RULE_ID = "contracts-tooling-lockfile-generator-gate"
+STAMP_RULE_ID = "contracts-tooling-lockfile-generator-stamp"
 _OWNER = "src/apm_cli/deps/lockfile_generator.py"
 _LOCKFILE = "src/apm_cli/deps/lockfile.py"
 _ROUTES = (
@@ -24,16 +28,23 @@ _ROUTES = (
     ("src/apm_cli/commands/prune.py", "prune", "require_current_cli"),
     ("src/apm_cli/commands/lock.py", "_run_lock", "require_current_cli"),
     ("src/apm_cli/commands/pack.py", "pack_cmd", "check_current_cli"),
+    ("src/apm_cli/bundle/local_bundle.py", "_read_bundle_lockfile", "warn_if_newer"),
     ("src/apm_cli/commands/audit.py", "audit", "require_current_cli"),
     ("src/apm_cli/commands/deps/cli.py", "update", "require_current_cli"),
 )
+_STAMP_ROUTES = ((_LOCKFILE, "write", "installed_apm_version"),)
+# Bundle packing re-shapes an already stamped project lockfile; it never
+# persists apm.lock.yaml.
+_SERIALIZERS = frozenset({_LOCKFILE, "src/apm_cli/bundle/lockfile_enrichment.py"})
 
 
-def _check(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Require each gate site to call the canonical owner inside its definition."""
+def _route_findings(
+    provider: FactsProvider, rule_id: str, routes: tuple[tuple[str, str, str], ...]
+) -> list[Violation]:
+    """Require each route's function to call its owner inside its definition."""
     findings: list[Violation] = []
-    for path, function, callee in _ROUTES:
-        facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
+    for path, function, callee in routes:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
         if failures:
             findings.extend(failures)
             continue
@@ -43,7 +54,34 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             and definitions[0].line <= call.line <= definitions[0].end_line
             for call in facts.calls
         ):
-            findings.append(violation(RULE_ID, path, f"{function} must call {callee}"))
+            findings.append(violation(rule_id, path, f"{function} must call {callee}"))
+    return findings
+
+
+def _check(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Require each gate site to call the canonical owner inside its definition."""
+    return tuple(_route_findings(provider, RULE_ID, _ROUTES))
+
+
+def _check_stamp(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Require the one lockfile writer to stamp apm_version and nothing to bypass it."""
+    findings = _route_findings(provider, STAMP_RULE_ID, _STAMP_ROUTES)
+    for path in inventory_paths(provider, prefixes=("src/apm_cli/",)):
+        if not path.endswith(".py") or path in _SERIALIZERS:
+            continue
+        facts, failures = checked_facts(provider, path, STAMP_RULE_ID, require_python=True)
+        findings.extend(failures)
+        findings.extend(
+            violation(
+                STAMP_RULE_ID,
+                path,
+                "persist lockfiles through LockFile.write, which stamps apm_version",
+                line=call.line,
+                column=call.column,
+            )
+            for call in facts.calls
+            if call.qualname.rsplit(".", 1)[-1] == "to_yaml"
+        )
     return tuple(findings)
 
 
@@ -54,5 +92,12 @@ RULES = (
         (RULE_ID,),
         "An older APM refuses a newer generator's lockfile through one owner.",
         _check,
+    ),
+    Rule(
+        STAMP_RULE_ID,
+        "contracts_tests",
+        (STAMP_RULE_ID,),
+        "Every lockfile write records the running APM through LockFile.write.",
+        _check_stamp,
     ),
 )

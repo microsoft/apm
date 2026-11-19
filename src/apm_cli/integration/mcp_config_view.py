@@ -323,6 +323,14 @@ class CurrentMcpConfigView:
             if reason in (None, "only-apm") or name in self.configs:
                 continue
             target = self.approval_targets.get(name, "<package>")
+            if reason == REASON_DENIED:
+                # A deny is not a missing approval: name the gate and the deny (#3957).
+                problems[name] = (
+                    "admitted in apm.lock.yaml but the executables gate now parks it "
+                    f"(denied); see 'apm policy explain {target}' for the deny to lift, "
+                    "then re-run 'apm install'"
+                )
+                continue
             problems[name] = (
                 f"admitted in apm.lock.yaml but not approved in apm.yml ({reason}); "
                 f"run 'apm approve {target}' and re-run 'apm install'"

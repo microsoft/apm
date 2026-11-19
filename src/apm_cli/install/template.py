@@ -63,13 +63,19 @@ def effective_allow_map(ctx) -> dict | None:
     if getattr(ctx, "exec_trust_ctx", None) is not None:
         return getattr(ctx, "exec_allow_map", None)
 
-    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     from apm_cli.core.scope import is_user_scope, manifest_root
+    from apm_cli.security.executables import project_manifest_path
 
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    # The scope owner names the manifest directory (APM_HOME under -g, #3954);
+    # the trust owner reads that apm.yml file.
+    manifest_path = project_manifest_path(
+        manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+    )
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
-        manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))),
+        manifest_path,
         policy=policy,
         fallback_allow_executables=project_allow,
         logger=getattr(ctx, "logger", None),
@@ -273,6 +279,9 @@ def preflight_agent_plugin_dry_run(
         targets = getattr(ctx, "targets", None)
     with native_registration_scope(targets):
         for dependency in dependencies:
+            if dependency.is_marketplace:
+                # Not resolved by the offline preview: nothing materialized to inspect.
+                continue
             if dependency.is_local and dependency.local_path:
                 package_path = Path(dependency.local_path).expanduser()
                 if not package_path.is_absolute():

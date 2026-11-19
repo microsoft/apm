@@ -72,6 +72,11 @@ version: 1.0.0
 description: agent plugin fixture
 dependencies:
   apm: []
+  mcp:
+    - name: safe
+      registry: false
+      transport: stdio
+      command: tool
 """,
     )
     _write_minimal_lockfile(root)

@@ -19,6 +19,7 @@ _ROUTES = (
     ("src/apm_cli/drift.py", "locked_marketplace_row", "lockfile.get_dependency"),
     ("src/apm_cli/drift.py", "locked_marketplace_row", "marketplace_ref_mismatch"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_marketplace_row"),
+    ("src/apm_cli/install/dry_run_plan.py", "_resolved_key", "locked_marketplace_row"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_dep.to_edge_reference"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "_owns_locked_servers"),
     ("src/apm_cli/drift.py", "_owns_locked_servers", "package_lsp_owner"),
@@ -30,7 +31,8 @@ _ROUTES = (
         "mcp_package_owner",
     ),
     ("src/apm_cli/integration/mcp_config_view.py", "_collect_unlocked_compat", "mcp_package_owner"),
-    ("src/apm_cli/deps/reachability.py", "_locked_marketplace_form", "locked.to_edge_reference"),
+    ("src/apm_cli/deps/reachability.py", "locked_marketplace_form", "locked.to_edge_reference"),
+    ("src/apm_cli/install/orphans.py", "build_expected_install_paths", "locked_marketplace_form"),
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_replay"),
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "frozen_marketplace_refusal"),
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "build_tag_regex"),
@@ -63,6 +65,11 @@ _ORIGIN_ROUTES = (
     (
         "src/apm_cli/marketplace/catalog_origin.py",
         "require_locked_catalog_origin",
+        "require_locked_row_origin",
+    ),
+    (
+        "src/apm_cli/marketplace/catalog_origin.py",
+        "require_locked_row_origin",
         "same_marketplace_origin",
     ),
     (
@@ -83,12 +90,43 @@ _ORIGIN_ROUTES = (
     ),
     ("src/apm_cli/marketplace/reconcile.py", "_apply", "registrations_sharing_origin"),
 )
-_ORIGIN_BEFORE_CATALOG = (
-    "src/apm_cli/deps/apm_resolver.py",
-    "_resolve_marketplace_dep",
-    "require_locked_catalog_origin",
-    "resolve_marketplace_plugin",
+# Every marketplace resolution entry point (#3959): (path, function, origin
+# check, first catalog call). The origin check must run before the catalog is
+# reached, so a rebound alias fails closed on every path, not only update.
+_ORIGIN_ENTRY_POINTS = (
+    (
+        "src/apm_cli/deps/apm_resolver.py",
+        "_resolve_marketplace_dep",
+        "require_locked_catalog_origin",
+        "resolve_marketplace_plugin",
+    ),
+    (
+        "src/apm_cli/commands/install.py",
+        "_resolve_package_references",
+        "require_locked_catalog_origin",
+        "resolve_marketplace_plugin",
+    ),
+    (
+        "src/apm_cli/commands/uninstall/engine.py",
+        "_resolve_marketplace_packages",
+        "require_locked_row_origin",
+        "resolve_marketplace_plugin",
+    ),
+    (
+        "src/apm_cli/commands/outdated.py",
+        "_check_marketplace_ref",
+        "require_locked_row_origin",
+        "fetch_or_cache",
+    ),
 )
+# Call sites that resolve a plugin without any lock association.
+_ORIGIN_EXEMPT_ENTRY_POINTS = {
+    (
+        "src/apm_cli/commands/view.py",
+        "_display_marketplace_plugin",
+    ): "read-only display of what the alias names now; never reads or writes apm.lock.yaml",
+}
+_RESOLUTION_CALLEE = "resolve_marketplace_plugin"
 
 
 def _call_lines(provider: FactsProvider, path: str, function: str, callee: str, rule_id: str):
@@ -123,17 +161,42 @@ def _check_routes(
 def _check_origin(provider: FactsProvider) -> tuple[Violation, ...]:
     """Lock origin evidence and alias checks route through the catalog-origin owners."""
     findings = _check_routes(provider, ORIGIN_RULE_ID, _ORIGIN_ROUTES)
-    path, function, guard, catalog = _ORIGIN_BEFORE_CATALOG
-    _failures, guard_lines = _call_lines(provider, path, function, guard, ORIGIN_RULE_ID)
-    _failures, catalog_lines = _call_lines(provider, path, function, catalog, ORIGIN_RULE_ID)
-    if guard_lines and catalog_lines and min(guard_lines) > min(catalog_lines):
-        findings.append(
-            violation(
-                ORIGIN_RULE_ID,
-                path,
-                f"{function} must call {guard} before {catalog} reaches the catalog",
+    registered = {(path, function) for path, function, _g, _c in _ORIGIN_ENTRY_POINTS}
+    for path, function, guard, catalog in _ORIGIN_ENTRY_POINTS:
+        failures, guard_lines = _call_lines(provider, path, function, guard, ORIGIN_RULE_ID)
+        _failures, catalog_lines = _call_lines(provider, path, function, catalog, ORIGIN_RULE_ID)
+        if failures:
+            findings.extend(failures)
+        elif not catalog_lines:
+            findings.append(
+                violation(ORIGIN_RULE_ID, path, f"entry point {function} no longer calls {catalog}")
             )
-        )
+        elif not guard_lines or min(guard_lines) > min(catalog_lines):
+            findings.append(
+                violation(
+                    ORIGIN_RULE_ID,
+                    path,
+                    f"{function} must call {guard} before {catalog} reaches the catalog",
+                )
+            )
+    for path in provider.inventory:
+        if not (path.startswith("src/apm_cli/") and path.endswith(".py")):
+            continue
+        facts = provider.file_facts(path)
+        for call in getattr(facts, "calls", ()):
+            if call.qualname.rsplit(".", 1)[-1] != _RESOLUTION_CALLEE:
+                continue
+            site = (path, call.scope)
+            if site not in registered and site not in _ORIGIN_EXEMPT_ENTRY_POINTS:
+                findings.append(
+                    violation(
+                        ORIGIN_RULE_ID,
+                        path,
+                        f"{call.scope} resolves a marketplace plugin outside the registered "
+                        "origin-checked entry points (#3959)",
+                        line=call.line,
+                    )
+                )
     return tuple(findings)
 
 

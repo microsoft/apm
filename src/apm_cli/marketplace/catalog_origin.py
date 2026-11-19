@@ -20,7 +20,7 @@ from .source_identity import (
 )
 
 if TYPE_CHECKING:
-    from ..deps.lockfile import LockFile
+    from ..deps.lockfile import LockedDependency, LockFile
     from .models import MarketplaceSource
 
 
@@ -45,20 +45,33 @@ def require_locked_catalog_origin(
     """
     if lockfile is None:
         return
-    locked_origins = [
-        dep.source_url
-        for dep in lockfile.marketplace_rows(marketplace_name, plugin_name)
-        if dep.source_url
-    ]
-    if not locked_origins:
+    for dep in lockfile.marketplace_rows(marketplace_name, plugin_name):
+        require_locked_row_origin(dep, marketplace_name=marketplace_name)
+
+
+def require_locked_row_origin(locked: LockedDependency, *, marketplace_name: str = "") -> None:
+    """Refuse one lock row whose alias now names a different catalog (#3959).
+
+    For consumers that already hold the row, such as ``apm outdated``. A row
+    without ``source_url`` or marketplace provenance is accepted.
+
+    Raises:
+        MarketplaceOriginConflictError: The alias's registered origin differs
+            from the row's ``source_url``.
+        MarketplaceNotFoundError: The alias is not registered.
+    """
+    alias = marketplace_name or locked.discovered_via or ""
+    if not (locked.source_url and alias and locked.marketplace_plugin_name):
         return
-    source = get_marketplace_by_name(marketplace_name)
+    source = get_marketplace_by_name(alias)
     current = marketplace_origin(source)
-    for locked_origin in locked_origins:
-        if not same_marketplace_origin(locked_origin, current):
-            raise MarketplaceOriginConflictError(
-                marketplace_name, plugin_name, locked_origin, current or source.display_source
-            )
+    if not same_marketplace_origin(locked.source_url, current):
+        raise MarketplaceOriginConflictError(
+            alias,
+            locked.marketplace_plugin_name,
+            locked.source_url,
+            current or source.display_source,
+        )
 
 
 def registrations_sharing_origin(

@@ -62,6 +62,8 @@ def prepare_mcp_integration(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.trust import McpAdmission
 
+    # McpAdmission reads grants from the scope's manifest (APM_HOME/apm.yml
+    # under -g, #3954) and discovers policy from the deploy root.
     project = project_root or apm_package.package_path or Path.cwd()
     allow_map, _resolved = executable_context
     admission = McpAdmission.for_project(
@@ -157,6 +159,8 @@ def run_owned_mcp_integration(
         for name, provenance in lockfile.mcp_config_provenance.items()
         if provenance == owner_token
     }
+    if not dependencies and not old_owned:
+        return 0
     new_names = _OwnedMCPIntegrator.get_server_names(dependencies)
     conflicts = {
         name

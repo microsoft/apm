@@ -126,16 +126,17 @@ class DeclaredSelections:
 _WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...]]
 
 
-def _locked_marketplace_form(
+def locked_marketplace_form(
     ref: DependencyReference,
     lockfile: LockFile,
-    marketplace_index: dict,
+    marketplace_index: dict | None = None,
 ) -> DependencyReference:
     """Return the locked coordinates a marketplace declaration resolved to.
 
-    The walk is offline, so it cannot ask the marketplace again; the lockfile's
-    discovery association names the package install materialized. The edge's
-    own selection and alias are kept.
+    Offline walks (reachability, ``apm prune``) cannot ask the marketplace
+    again; the lockfile's discovery association names the package install
+    materialized. The edge's own selection and alias are kept. With no
+    locked row the declaration is returned unchanged.
     """
     locked = lockfile.get_dependency(ref.get_unique_key(), marketplace_index=marketplace_index)
     if locked is None:
@@ -276,7 +277,7 @@ def compute_forward_reachable_keys(
     while queue or dev_queue:
         ref, anchor, parent_repo_url, is_dev, chain = (queue or dev_queue).popleft()
         if ref.is_marketplace:
-            ref = _locked_marketplace_form(ref, lockfile, marketplace_index)
+            ref = locked_marketplace_form(ref, lockfile, marketplace_index)
         try:
             ref = replacement_index.bind(
                 ref,

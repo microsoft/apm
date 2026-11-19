@@ -117,7 +117,7 @@ def plan_native_codex_plugin(
     record_native_exec_status(ctx, dependency_key, package_info, tuple(sorted(types)))
     if any(not approvals.get(kind, False) for kind in types):
         raise CodexNativeError(
-            "Codex native bundle contains executables not approved in allowExecutables. "
+            "Codex native bundle contains executables not approved in executables.allow. "
             f"Review and approve '{dependency_key}' before retrying; "
             "APM will not drop native resources to bypass approval."
         )
