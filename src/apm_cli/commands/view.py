@@ -266,15 +266,20 @@ def _display_marketplace_plugin(
 
     # Resolve canonical reference for display
     resolved_display = None
+    # The hint names what install would do: an entry install refuses (#1326)
+    # is shown as refused, never as installable (A6, #3967).
+    install_hint = f"Install: apm install {plugin.name}@{marketplace_name}"
     try:
+        from ..marketplace.dependency_confusion import admit_marketplace_resolution
+        from ..marketplace.errors import DependencyConfusionError
         from ..marketplace.resolver import resolve_marketplace_plugin
 
-        canonical_str, _resolved = resolve_marketplace_plugin(
-            plugin_name,
-            marketplace_name,
-            plugin,
-        )
-        resolved_display = canonical_str
+        resolution = resolve_marketplace_plugin(plugin_name, marketplace_name)
+        resolved_display = resolution.canonical
+        try:
+            admit_marketplace_resolution(resolution)
+        except DependencyConfusionError as refusal:
+            install_hint = f"Install: refused -- {refusal}"
     except Exception:
         pass
 
@@ -316,7 +321,7 @@ def _display_marketplace_plugin(
             )
         )
         click.echo("")
-        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+        click.echo(f"  {install_hint}")
 
     except ImportError:
         # Plain-text fallback
@@ -333,7 +338,7 @@ def _display_marketplace_plugin(
         if plugin.tags:
             click.echo(f"  Tags:        {', '.join(plugin.tags)}")
         click.echo("")
-        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+        click.echo(f"  {install_hint}")
 
 
 def _display_registry_versions(
