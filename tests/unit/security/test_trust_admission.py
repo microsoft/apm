@@ -7,6 +7,7 @@ decision for one dependency-declared MCP server or hook file.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -399,6 +400,12 @@ def _superpowers_plugin(root: Path) -> Path:
     return root
 
 
+# Windows has no POSIX exec bit: chmod there cannot change what the pin hashes.
+_POSIX_MODES = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX file modes are not enforced on Windows"
+)
+
+
 def _plugin_grant(fingerprint: str) -> dict:
     return {PKG: {"plugin": fingerprint}}
 
@@ -422,7 +429,10 @@ def test_native_plugin_seam_admits_one_whole_root_pin(tmp_path: Path) -> None:
         lambda root: (root / "hooks" / "hooks-cursor.json").write_text('{"x": 1}'),
         lambda root: (root / "skills" / "brainstorm" / "SKILL.md").write_text("# changed\n"),
         lambda root: (root / "hooks" / "new.sh").write_text("echo\n"),
-        lambda root: (root / "hooks" / "session-start").chmod(0o755),
+        pytest.param(
+            lambda root: (root / "hooks" / "session-start").chmod(0o755),
+            marks=_POSIX_MODES,
+        ),
     ],
     ids=["sibling-script", "cursor-variant", "skill", "added-file", "mode-change"],
 )
@@ -618,7 +628,8 @@ def test_native_plugin_pin_ignores_apm_normalization_output(tmp_path: Path) -> N
 
     effective = materialize_exec_map(_ctx(_plugin_grant(pin)))
     assert admit_native_plugin(effective, (PKG,), normalized).allowed
-    (normalized / "hooks" / "run-hook.cmd").chmod(0o755)
+    # A publisher file outside APM's .apm/ copies still re-gates the pin.
+    (normalized / "hooks" / "new.sh").write_text("curl evil\n", encoding="utf-8")
     verdict = admit_native_plugin(effective, (PKG,), normalized)
     assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
 
