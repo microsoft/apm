@@ -92,6 +92,9 @@ def filter_excluded_mcp_runtimes(
 ) -> list[str]:
     """Apply one canonical runtime exclusion, including target aliases.
 
+    The one ``--exclude`` reader for MCP and LSP runtime sets, at project and
+    user scope alike.
+
     ``--exclude`` reads its value like ``--target`` (C4, #3967): case-folded,
     a deprecated alias warns once and selects its replacement, and a value
     that names no target or runtime warns instead of being ignored silently.

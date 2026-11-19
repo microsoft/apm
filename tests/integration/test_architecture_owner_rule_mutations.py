@@ -4559,12 +4559,25 @@ def test_lockfile_refusal_guard_keeps_one_renderer(path: str, old: str, new: str
             "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
             id="project-exclusion-keeps-a-second-set",
         ),
+        pytest.param(
+            "src/apm_cli/integration/lsp_integrator.py",
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            "            candidates = [target for target in candidates if target != exclude]\n",
+            id="lsp-exclusion-filters-the-raw-spelling",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/lsp_integrator.py",
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            "            exclusions = {exclude}\n"
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            id="lsp-exclusion-keeps-a-second-set",
+        ),
     ],
 )
-def test_mcp_exclusion_guard_routes_project_scope_through_the_normalizer(
+def test_exclusion_guard_routes_mcp_and_lsp_through_the_normalizer(
     path: str, old: str, new: str
 ) -> None:
-    """C4 (#3967): project ``--exclude`` reads through the one runtime normalizer."""
+    """C4 (#3967): MCP and LSP ``--exclude`` read through the one runtime normalizer."""
     rule_id = "mutation_writes.mcp_target_selection"
     source = _source(path)
     assert source.count(old) == 1
