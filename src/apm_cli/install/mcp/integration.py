@@ -131,6 +131,8 @@ def run_owned_mcp_integration(
         for name, provenance in lockfile.mcp_config_provenance.items()
         if provenance == owner_token
     }
+    if not dependencies and not old_owned:
+        return 0
     new_names = _OwnedMCPIntegrator.get_server_names(dependencies)
     conflicts = {
         name
