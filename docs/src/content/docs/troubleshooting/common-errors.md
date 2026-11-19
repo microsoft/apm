@@ -233,7 +233,7 @@ refused (dependency-confusion risk #1326): bare `repo: acme/tool` on enterprise 
   - 'github.com/acme/tool' (declared cross-host dep on public github.com)
 ```
 
-Cause: a plugin on a `*.ghe.com` marketplace declares a bare cross-repo `repo:`, which would otherwise resolve to public `github.com`. APM refuses it whenever it resolves the entry through the marketplace (CLI argument, `apm.yml` entry, transitive dependency, `apm update`), before downloading or probing the plugin repository.
+Cause: a plugin on a `*.ghe.com` marketplace declares a bare cross-repo `repo:`, which would otherwise resolve to public `github.com`. APM refuses it whenever it resolves the entry through the marketplace (CLI argument, `apm.yml` entry, transitive dependency, `apm update`), before downloading or probing the plugin repository. Rows replayed from `apm.lock.yaml` skip this check; `apm update` re-resolves them through it.
 
 Fix: the marketplace maintainer host-qualifies `repo:` in `marketplace.json` as the message shows.
 

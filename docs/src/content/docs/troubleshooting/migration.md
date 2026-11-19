@@ -180,7 +180,7 @@ Discovery: `apm targets` lists every supported target on the current binary.
 - Replace singular `target:` with the `targets:` value its warning prints, delete `compilation.target`, and replace the deprecated `vscode` target with `copilot`. See [Common errors](../common-errors/).
 - Copilot project MCP servers move to root `.mcp.json`, which Claude Code also reads (it ignores Copilot `tools` allow-lists). `apm install` moves the entries APM wrote to `.github/mcp.json` or `.vscode/mcp.json` and keeps entries you edited; review static `env:` values, then commit.
 - With `default_host:` set, shorthand dependencies resolve against it; write `github.com/owner/repo` for GitHub packages.
-- If several manifests narrow one dependency with different `skills:` or `targets:`, `apm install --frozen` fails until you run `apm install` and commit `apm.lock.yaml`.
+- If several manifests narrow one dependency with different `skills:` or `targets:` and an older APM recorded a pairing that differs from what 0.37 resolves, `apm install --frozen` fails until you run `apm install` once and commit `apm.lock.yaml`.
 
 ## 6. Default registry adoption (Git → registry routing)
 

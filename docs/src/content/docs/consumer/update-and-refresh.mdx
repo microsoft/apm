@@ -98,11 +98,13 @@ Use `apm install --refresh` when you need both current upstream refs and a
 content re-download. It re-resolves mutable refs and bypasses cached package
 content; `apm update` may reuse content already cached at the fresh SHA.
 
-`apm update`, `apm install --refresh` and `apm marketplace update` also
-revalidate the marketplaces behind `name` + `marketplace` dependencies (and
-`plugin@marketplace` arguments), so a plugin the publisher removed or re-pinned
-is seen at once. If a marketplace cannot be verified, the command fails and
-changes nothing. A plain `apm install` (or `--frozen`) replays locked
+`apm update` and `apm install --refresh` also revalidate the marketplaces
+behind `name` + `marketplace` dependencies (and `plugin@marketplace`
+arguments), so a plugin the publisher removed or re-pinned is seen at once. If
+a marketplace cannot be verified, the command fails and changes nothing.
+`apm marketplace update` refreshes the registered marketplace caches only; it
+keeps the caches that refreshed and exits `1` naming the ones that failed. A
+plain `apm install` (or `--frozen`) replays locked
 marketplace dependencies from `apm.lock.yaml` without contacting the
 marketplace; only new or changed entries read its cache (refreshed hourly), as
 does a package whose MCP or LSP servers come from its marketplace entry when
