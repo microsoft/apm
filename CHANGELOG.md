@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` no longer prints a `.github-private` warning when your org has no policy (or keeps it in `.github`); the private-repo hint now appears only with `--verbose`, in `apm policy status`, and in the error under `policy.fetch_failure_default: block`. (#3783)
 - With `PROXY_REGISTRY_ONLY=1`, the semver-range error and the registry proxy guide no longer claim the proxy has no listing; they explain that APM fetches exact versions only and name the two supported routes: exact pins with lockfile replay, or a registry implementing the APM Registry HTTP API. (#3777)
 - `apm init --target intellij` and `apm install <pkg> --target intellij` without an `apm.yml` no longer record `intellij`, which is an IDE rather than a target: like the global `--mcp` bootstrap, they now stop before writing anything and say to use `copilot` for GitHub Copilot in JetBrains IDEs. `--target intellij` still deploys JetBrains MCP config when `apm.yml` already exists (#3882)
+- Upgrading to root `.mcp.json` after `--only apm`, a failed install or `--frozen` no longer strands or disowns APM's MCP entries. (#3899)
 - Policy blocks name each offending dependency or MCP server and what to remove, add or pin. (#3865)
 - `apm install <pkg> --dry-run` without `apm.yml` no longer creates one. (#3865)
 - Hints name `apm update` instead of `apm install --update`, and `apm update` works under `PROXY_REGISTRY_ONLY=1` with VCS-locked lockfiles. (#3865)

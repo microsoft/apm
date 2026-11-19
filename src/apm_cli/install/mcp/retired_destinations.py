@@ -26,7 +26,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +98,20 @@ def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
     except InvalidVersion:
         return False
     return tuple(release[:2]) < _FIRST_ROOT_MCP_JSON_RELEASE
+
+
+def lock_holds_untranslated_mcp_claims(
+    apm_version: str | None, target_servers: Mapping[str, Any]
+) -> bool:
+    """Whether a lock still records ``copilot``/``vscode`` claims in their pre-0.37 meaning.
+
+    Its ``apm_version`` is the only record of that meaning, so a writer that
+    carries these claims forward keeps it; the MCP phase stamps the running
+    version once :func:`split_mcp_claims` has translated them.
+    """
+    return lock_predates_root_mcp_json(apm_version) and any(
+        target_servers.get(runtime) for runtime in ("copilot", "vscode")
+    )
 
 
 @dataclass
@@ -288,6 +302,9 @@ class RetiredMcpClaims:
 
     names: dict[str, set[str]]
     hashes: dict[str, dict[str, str]]
+    # Names a ``--frozen`` install already moved: no retired file holds them,
+    # so their root entry may be APM's own unrecorded write.
+    moved_unrecorded: set[str] = field(default_factory=set)
 
 
 def split_mcp_claims(
@@ -350,10 +367,19 @@ def split_mcp_claims(
         copilot_names - kept - _settled_in_root_mcp_json(live, project_root, stored_configs)
     )
     moved = set(kept)
+    moved_unrecorded: set[str] = set()
     if lock_predates_root_mcp_json(apm_version):
         names["copilot"] |= candidates
         hashes["copilot"].update({name: live[name] for name in candidates if name in live})
         moved |= candidates
+        # The heal never deletes .github/mcp.json, so a copilot claim counts as
+        # moved only while that file is still there.
+        github_kept = (project_root / _RETIRED_PATHS["copilot"]).is_file()
+        moved_unrecorded = _absent_from_retired_files(
+            (candidates if github_kept else set()) | vscode,
+            project_root=project_root,
+            stored_configs=stored_configs,
+        )
     if copilot and moved:
         target_servers["copilot"] = type(copilot)(name for name in copilot if name not in moved)
         for name in moved:
@@ -361,7 +387,77 @@ def split_mcp_claims(
     return RetiredMcpClaims(
         {runtime: claimed for runtime, claimed in names.items() if claimed},
         {runtime: proof for runtime, proof in hashes.items() if proof},
+        moved_unrecorded,
     )
+
+
+def moved_root_entry_fingerprints(
+    names: set[str], *, project_root: Path, stored_configs: Mapping[str, Any]
+) -> dict[str, str]:
+    """Fingerprints of the ``.mcp.json`` entries a ``--frozen`` install moved for *names*.
+
+    For moved, no longer declared self-defined servers
+    (:attr:`RetiredMcpClaims.moved_unrecorded`): an entry identical, by JSON
+    type and value, to APM's render of the locked declaration is APM's write,
+    so it is removed like any proven stale entry. Registry entries cannot be
+    re-rendered from the lock and stay where they are.
+    """
+    if not names:
+        return {}
+    from apm_cli.adapters.client.copilot_project import CopilotProjectClientAdapter
+    from apm_cli.install.mcp.ownership import _native_config_key, mcp_native_hash
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.utils.path_security import has_symlink_component
+
+    client = CopilotProjectClientAdapter(project_root=project_root)
+    path = Path(client.get_config_path())
+    if has_symlink_component(project_root, path) or not path.is_file():
+        return {}
+    servers = client.get_current_config().get(client.mcp_servers_key) or {}
+    proven: dict[str, str] = {}
+    for name in sorted(names):
+        stored = stored_configs.get(name)
+        if not isinstance(stored, dict) or stored.get("registry") is not False:
+            continue
+        entry = servers.get(_native_config_key(client, name, stored_config=stored))
+        if not isinstance(entry, dict):
+            continue
+        try:
+            render = client.render_server_config(
+                MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
+            )
+        except (TypeError, ValueError):
+            continue
+        comparable = client.managed_server_config(entry)
+        if client.json_identical(comparable, render):
+            proven[name] = mcp_native_hash(comparable)
+    return proven
+
+
+def _absent_from_retired_files(
+    names: set[str], *, project_root: Path, stored_configs: Mapping[str, Any]
+) -> set[str]:
+    """The *names* neither retired file holds (an unreadable file holds them all)."""
+    from apm_cli.utils.path_security import has_symlink_component
+
+    absent = set(names)
+    for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
+        path = project_root / destination.relative_path
+        if not absent or not (path.exists() or path.is_symlink()):
+            continue
+        found = (
+            None
+            if has_symlink_component(project_root, path)
+            else _read_retired(destination, project_root)
+        )
+        if found is None:
+            return set()
+        servers = found[3]
+        absent = {
+            name for name in absent if _retired_key(name, stored_configs.get(name), servers) is None
+        }
+    return absent
 
 
 def restore_pending_retired_claims(

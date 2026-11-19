@@ -107,6 +107,7 @@ class TestRunMcpIntegrationInstallBranch:
             native_hashes={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -333,6 +334,29 @@ class TestRunMcpIntegrationInstallBranch:
 class TestRunMcpIntegrationEmptyDepsBranch:
     """``should_install=True`` and ``mcp_deps`` empty."""
 
+    @pytest.mark.parametrize(("version", "stamped"), [("0.35.0", True), ("0.37.0", False)])
+    @patch(_PATCH_TARGET)
+    def test_no_deps_stamps_a_lock_whose_claims_it_translated(
+        self, mock_mcp, tmp_path, version, stamped
+    ):
+        from apm_cli.deps.lockfile import LockFile
+
+        mock_mcp.get_server_names.return_value = set()
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[],
+                project_root=tmp_path,
+                old_mcp_servers={"orphan"},
+                old_mcp_configs={"orphan": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"orphan"}},
+                pre_install_lock=LockFile(
+                    apm_version=version, mcp_target_servers={"copilot": ["orphan"]}
+                ),
+            )
+        )
+
+        assert mock_mcp.update_lockfile.call_args.kwargs["stamp_version"] is stamped
+
     @patch(_PATCH_TARGET)
     def test_no_deps_no_old_servers_is_a_noop(self, mock_mcp):
         run_mcp_integration(**_base_kwargs(mcp_deps=[]))
@@ -365,6 +389,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             mcp_config_provenance={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
 
     @patch(_PATCH_TARGET)
