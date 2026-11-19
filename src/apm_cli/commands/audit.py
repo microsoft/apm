@@ -1011,10 +1011,19 @@ def _require_installed_package_key(
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
-    with host_scope:
-        key = select_installed_lock_key(package, manifest, lockfile)
-    if key is not None:
-        return key
+    try:
+        with host_scope:
+            selection = select_installed_lock_key(package, manifest, lockfile)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    if selection is not None:
+        if selection.installed_via:
+            logger.warning(
+                f"'{package}' is not installed from that marketplace; auditing "
+                f"{selection.key}, installed via {selection.installed_via}."
+            )
+        return selection.key
     logger.error(
         f"Package '{package}' is not installed: no matching dependency in apm.lock.yaml. "
         "Run 'apm deps list' to see installed packages."

@@ -13,6 +13,7 @@ from apm_cli.commands.audit import (
     _scan_single_file,
     audit,
 )
+from apm_cli.commands.uninstall.cli import uninstall as uninstall_command
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.security.content_scanner import ContentScanner
 
@@ -369,78 +370,134 @@ class TestLockfileMode:
         assert "not installed" in result.output
 
     @staticmethod
-    def _uninstall_form_project(tmp_path, declarations, locked):
-        """Write apm.yml, apm.lock.yaml and one deployed file owned by *locked*."""
-        from apm_cli.deps.lockfile import LockFile
+    def _uninstall_form_project(tmp_path, declarations, dev_declarations=()):
+        """Lock example-plugin@company and _local/hooky clean, two sibling decoys dirty.
+
+        Auditing a target exits 0 only when its own clean file alone is scanned;
+        selecting or scanning a decoy finds the hidden character and exits 2.
+        """
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
         from apm_cli.utils.yaml_io import dump_yaml
 
-        dump_yaml(
-            {"name": "project", "version": "1.0.0", "dependencies": {"apm": declarations}},
-            tmp_path / "apm.yml",
+        def plugin(name):
+            return LockedDependency(
+                repo_url="team/catalog",
+                host="git.example.com",
+                virtual_path=f"plugins/{name}",
+                is_virtual=True,
+                resolved_commit="a" * 40,
+                discovered_via="company",
+                marketplace_plugin_name=name,
+            )
+
+        def local(name):
+            return LockedDependency(
+                repo_url=f"_local/{name}", source="local", local_path=f"./pkgs/{name}"
+            )
+
+        rows = (
+            (plugin("example-plugin"), "Clean\n"),
+            (plugin("decoy-plugin"), "Hidden\u200b\n"),
+            (local("hooky"), "Clean\n"),
+            (local("decoy"), "Hidden\u200b\n"),
         )
-        locked.deployed_files = [".github/prompts/x.md"]
-        LockFile(dependencies={locked.get_unique_key(): locked}).write(tmp_path / "apm.lock.yaml")
         (tmp_path / ".github" / "prompts").mkdir(parents=True)
-        (tmp_path / ".github" / "prompts" / "x.md").write_text("Hidden\u200b\n", encoding="utf-8")
+        dependencies = {}
+        for index, (locked, content) in enumerate(rows):
+            deployed = f".github/prompts/f{index}.md"
+            locked.deployed_files = [deployed]
+            (tmp_path / deployed).write_text(content, encoding="utf-8")
+            dependencies[locked.get_unique_key()] = locked
+        LockFile(dependencies=dependencies).write(tmp_path / "apm.lock.yaml")
+        manifest = {"name": "project", "version": "1.0.0", "dependencies": {"apm": declarations}}
+        if dev_declarations:
+            manifest["devDependencies"] = {"apm": list(dev_declarations)}
+        dump_yaml(manifest, tmp_path / "apm.yml")
+
+    _OBJECT_FORMS = (
+        {"name": "example-plugin", "marketplace": "company"},
+        {"name": "decoy-plugin", "marketplace": "company"},
+        "./pkgs/hooky",
+        "./pkgs/decoy",
+    )
+    _STRING_FORMS = (
+        "git.example.com/team/catalog/plugins/example-plugin",
+        "git.example.com/team/catalog/plugins/decoy-plugin",
+        "./pkgs/hooky",
+        "./pkgs/decoy",
+    )
 
     @pytest.mark.parametrize(
-        ("declaration", "package"),
+        ("declarations", "package", "exit_code"),
         [
-            ({"name": "example-plugin", "marketplace": "company"}, "example-plugin@company"),
-            ({"name": "example-plugin", "marketplace": "company"}, "Example-Plugin@COMPANY"),
-            ("git.example.com/team/catalog/plugins/example-plugin", "example-plugin@company"),
+            (_OBJECT_FORMS, "example-plugin@company", 0),
+            (_OBJECT_FORMS, "Example-Plugin@COMPANY", 0),
+            (_OBJECT_FORMS, "decoy-plugin@company", 2),
+            (_STRING_FORMS, "example-plugin@company", 0),
+            (_STRING_FORMS, "decoy-plugin@company", 2),
+            (_OBJECT_FORMS, "_local/hooky", 0),
+            (_OBJECT_FORMS, "./pkgs/hooky", 0),
+            (_OBJECT_FORMS, "_local/decoy", 2),
+            (_OBJECT_FORMS, "other-plugin@company", 1),
+            (_OBJECT_FORMS, "example-plugin@elsewhere", 1),
+            (_OBJECT_FORMS, "_local/other", 1),
         ],
     )
-    def test_package_filter_accepts_uninstall_marketplace_form(
-        self, runner, tmp_path, monkeypatch, declaration, package
+    def test_package_filter_selects_uninstall_forms_offline(
+        self, runner, tmp_path, monkeypatch, declarations, package, exit_code
     ):
-        """#3953: ``plugin@marketplace`` selects the locked plugin offline, as uninstall does."""
-        from apm_cli.deps.lockfile import LockedDependency
-
-        locked = LockedDependency(
-            repo_url="team/catalog",
-            host="git.example.com",
-            virtual_path="plugins/example-plugin",
-            is_virtual=True,
-            resolved_commit="a" * 40,
-            discovered_via="company",
-            marketplace_plugin_name="example-plugin",
-        )
-        self._uninstall_form_project(tmp_path, [declaration], locked)
+        """#3953: audit selects exactly the package ``apm uninstall`` would, offline."""
+        self._uninstall_form_project(tmp_path, list(declarations))
         monkeypatch.chdir(tmp_path)
 
-        with patch(
-            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
-            side_effect=AssertionError("audit PACKAGE must stay offline"),
-        ):
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as registry:
             result = runner.invoke(audit, [package])
-            unknown = runner.invoke(audit, ["other-plugin@company"])
+            uninstall = runner.invoke(uninstall_command, [package, "--dry-run"])
 
-        assert result.exit_code == 2, result.output
-        assert "not installed" not in result.output
-        assert unknown.exit_code == 1, unknown.output
-        assert "not installed" in unknown.output
+        registry.assert_not_called()
+        assert result.exit_code == exit_code, result.output
+        assert ("not installed" in result.output) == (exit_code == 1)
+        assert uninstall.exit_code == (1 if exit_code == 1 else 0), uninstall.output
 
-    @pytest.mark.parametrize("package", ["_local/hooky", "./pkgs/hooky"])
-    def test_package_filter_accepts_deps_list_local_key(
-        self, runner, tmp_path, monkeypatch, package
-    ):
-        """#3953: the ``_local/<name>`` key ``apm deps list`` prints selects the local package."""
-        from apm_cli.deps.lockfile import LockedDependency
-
-        locked = LockedDependency(
-            repo_url="_local/hooky", source="local", local_path="./pkgs/hooky"
-        )
-        self._uninstall_form_project(tmp_path, ["./pkgs/hooky"], locked)
+    def test_package_filter_rejects_invalid_marketplace_ref(self, runner, tmp_path, monkeypatch):
+        """#3953: an invalid ``plugin@marketplace#ref`` fails with the parser's message."""
+        self._uninstall_form_project(tmp_path, list(self._OBJECT_FORMS))
         monkeypatch.chdir(tmp_path)
 
-        result = runner.invoke(audit, [package])
-        unknown = runner.invoke(audit, ["_local/other"])
+        result = runner.invoke(audit, ["example-plugin@company#^1.0"])
 
-        assert result.exit_code == 2, result.output
-        assert "not installed" not in result.output
-        assert unknown.exit_code == 1, unknown.output
-        assert "not installed" in unknown.output
+        assert result.exit_code == 1, result.output
+        assert isinstance(result.exception, SystemExit)
+        assert "Semver ranges are not supported" in " ".join(result.output.split())
+
+    def test_package_filter_names_marketplace_provenance_mismatch(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """#3953: a plugin found under another marketplace is audited, and audit says so."""
+        self._uninstall_form_project(tmp_path, list(self._STRING_FORMS))
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(audit, ["example-plugin@elsewhere"])
+        uninstall = runner.invoke(uninstall_command, ["example-plugin@elsewhere", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert "installed via company" in " ".join(result.output.split())
+        assert uninstall.exit_code == 0, uninstall.output
+
+    def test_package_filter_selects_dev_dependency_like_uninstall(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """#3953: ``devDependencies`` entries are candidates for audit as for uninstall."""
+        self._uninstall_form_project(
+            tmp_path, [], dev_declarations=[{"name": "example-plugin", "marketplace": "company"}]
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(audit, ["example-plugin@company"])
+        uninstall = runner.invoke(uninstall_command, ["example-plugin@company", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert uninstall.exit_code == 0, uninstall.output
 
     def test_dir_entries_scanned_recursively(
         self,

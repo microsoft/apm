@@ -872,15 +872,30 @@ def _validate_uninstall_packages(
     return packages_to_remove, packages_not_found
 
 
-class _SilentSelectionLogger:
-    """Drop uninstall-worded selection diagnostics for a read-only caller."""
+class _DiscardSelectionLogger:
+    """Drop uninstall-worded selection diagnostics; read-only callers word their own."""
 
-    def __getattr__(self, _name: str):
-        return lambda *_args, **_kwargs: None
+    verbose = False
+
+    def error(self, *_args, **_kwargs) -> None:
+        return None
+
+    def warning(self, *_args, **_kwargs) -> None:
+        return None
+
+    def progress(self, *_args, **_kwargs) -> None:
+        return None
+
+    def verbose_detail(self, *_args, **_kwargs) -> None:
+        return None
 
 
-def _manifest_dependency_entries(manifest: object) -> list:
-    """Return the ``dependencies.apm`` and ``devDependencies.apm`` entries, read-only."""
+def manifest_dependency_entries(manifest: object) -> list:
+    """Return every ``dependencies.apm`` then ``devDependencies.apm`` entry of *manifest*.
+
+    The one candidate list both ``apm uninstall`` and read-only selection hand
+    to :func:`_validate_uninstall_packages`, so they always agree (#3953).
+    """
     entries: list = []
     if not isinstance(manifest, dict):
         return entries
@@ -892,10 +907,24 @@ def _manifest_dependency_entries(manifest: object) -> list:
     return entries
 
 
+@dataclass(frozen=True)
+class InstalledLockSelection:
+    """The lock row a read-only identifier selects.
+
+    ``installed_via`` names the marketplace the row was installed from when a
+    ``plugin@marketplace`` identifier matched it through uninstall's
+    provenance-mismatch fallback, so the caller can say so instead of
+    auditing a different marketplace's plugin silently.
+    """
+
+    key: str
+    installed_via: str | None = None
+
+
 def select_installed_lock_key(
     package: str, manifest: object, lockfile: "LockFile | None"
-) -> str | None:
-    """Return the ``apm.lock.yaml`` key of the installed package *package* names (#3953).
+) -> InstalledLockSelection | None:
+    """Select the ``apm.lock.yaml`` row the installed package *package* names (#3953).
 
     Read-only commands such as ``apm audit PACKAGE`` select through the uninstall
     selector, so every identifier ``apm uninstall`` accepts (``owner/repo``, a
@@ -906,21 +935,28 @@ def select_installed_lock_key(
     transitive package apm.yml does not declare. Callers enter the manifest's
     ``default_host`` scope first. Returns ``None`` when nothing installed matches.
     """
+    from ...marketplace.resolver import parse_marketplace_ref
+
     installed = lockfile.dependencies if lockfile is not None else {}
     if package in installed:
-        return package
+        return InstalledLockSelection(key=package)
     selected, _refused = _validate_uninstall_packages(
         [package],
-        _manifest_dependency_entries(manifest),
-        _SilentSelectionLogger(),
+        manifest_dependency_entries(manifest),
+        _DiscardSelectionLogger(),
         lockfile,
         dry_run=True,
         log_matches=False,
     )
     for candidate in [*selected, package]:
         key = _removed_lock_key(candidate, lockfile)
-        if key in installed:
-            return key
+        if key not in installed:
+            continue
+        parsed = parse_marketplace_ref(package)
+        via = installed[key].discovered_via
+        if parsed is not None and via and via.casefold() != parsed[1].casefold():
+            return InstalledLockSelection(key=key, installed_via=via)
+        return InstalledLockSelection(key=key)
     return None
 
 

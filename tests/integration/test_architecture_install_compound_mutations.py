@@ -932,8 +932,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         UNINSTALL_RULE,
         "src/apm_cli/commands/audit.py",
         _replace(
-            "        key = select_installed_lock_key(package, manifest, lockfile)",
-            "        key = None",
+            "        selection = select_installed_lock_key(package, manifest, lockfile)",
+            "        selection = None",
         ),
     ),
     CompoundMutation(
@@ -952,6 +952,15 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         _replace(
             "    selected, _refused = _validate_uninstall_packages(",
             "    selected, _refused = _validate_uninstall_packages_disabled(",
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-shared-candidates",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "    return had_dev_section, prod_deps, dev_deps, manifest_dependency_entries(data)",
+            "    return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]",
         ),
     ),
     *(

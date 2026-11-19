@@ -143,6 +143,7 @@ _UNINSTALL_ROUTES = (
     # #3953: read-only package selection reuses the uninstall selector.
     ("select_installed_lock_key", "_validate_uninstall_packages", 1),
     ("select_installed_lock_key", "_removed_lock_key", 1),
+    ("select_installed_lock_key", "manifest_dependency_entries", 1),
 )
 
 
@@ -150,7 +151,14 @@ def _uninstall_route_findings(engine, cli, rule_id: str) -> list[Violation]:
     findings: list[Violation] = []
     for facts, path, routes in (
         (engine, _UNINSTALL_ENGINE, _UNINSTALL_ROUTES),
-        (cli, _UNINSTALL_CLI, (("uninstall", "_removed_lock_key", 1),)),
+        (
+            cli,
+            _UNINSTALL_CLI,
+            (
+                ("uninstall", "_removed_lock_key", 1),
+                ("_prepare_dependency_sections", "manifest_dependency_entries", 1),
+            ),
+        ),
     ):
         for scope, callee, minimum in routes:
             calls = [c for c in facts.calls if c.qualname == callee and c.scope == scope]
