@@ -102,8 +102,17 @@ def mcp_definition_fingerprint(
 
 
 def hook_item_key(package_path: Path, hook_file: Path) -> str:
-    """Return the package-relative POSIX key that names one hook file."""
-    return hook_file.resolve().relative_to(package_path.resolve()).as_posix()
+    """Return the publisher-relative POSIX key that names one hook file.
+
+    A normalized ``.apm/hooks/`` byte copy is named by the publisher file it
+    copies, so ``apm approve`` on the source tree and install on APM's
+    normalized cache agree on the key (#3290).
+    """
+    from apm_cli.deps.plugin_parser import normalized_hook_source
+
+    root = package_path.resolve()
+    relative = hook_file.resolve().relative_to(root).as_posix()
+    return normalized_hook_source(relative, root) or relative
 
 
 def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
@@ -120,7 +129,7 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
     scripts = []
     for script in sorted(_referenced_hook_source_files(data, package_path, hook_file.parent)):
         digest = hashlib.sha256(script.read_bytes()).hexdigest()
-        scripts.append([script.relative_to(package_path).as_posix(), digest])
+        scripts.append([hook_item_key(package_path, script), digest])
     return definition_fingerprint(
         KIND_HOOK,
         hook_item_key(package_path, hook_file),

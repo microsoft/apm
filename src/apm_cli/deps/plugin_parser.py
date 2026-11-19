@@ -464,6 +464,47 @@ def install_generated_mirror_source(rel_path: str, plugin_path: Path) -> str | N
     return None if upstream.as_posix() == rel_path else upstream.as_posix()
 
 
+def normalized_hook_source(rel_path: str, plugin_path: Path) -> str | None:
+    """Return the publisher path a normalized ``.apm/hooks/`` file is a byte copy of.
+
+    Normalization copies a plugin's hooks into ``.apm/hooks/``: the default
+    ``hooks/`` directory, a manifest-declared hooks directory, or a declared
+    config file as ``hooks.json``. Only a byte-identical, non-symlinked
+    publisher file inside the plugin qualifies, so an approval keyed on the
+    publisher path still binds the bytes that deploy. ``None`` otherwise.
+    """
+    from ..utils.helpers import find_plugin_json
+
+    parts = PurePosixPath(rel_path).parts
+    if len(parts) < 3 or parts[:2] != (".apm", "hooks"):
+        return None
+    root = plugin_path.resolve()
+    tail = PurePosixPath(*parts[2:])
+    candidates = [root / "hooks" / tail]
+    manifest_path = find_plugin_json(root)
+    try:
+        declared = parse_plugin_manifest(manifest_path).get("hooks") if manifest_path else None
+    except (OSError, ValueError):
+        declared = None
+    for value in declared if isinstance(declared, list) else [declared]:
+        if isinstance(value, str) and value:
+            base = root / value
+            candidates.append(base if base.is_file() and str(tail) == "hooks.json" else base / tail)
+    try:
+        copied = (root / rel_path).read_bytes()
+        for candidate in candidates:
+            if (
+                not candidate.is_symlink()
+                and candidate.is_file()
+                and candidate.resolve().is_relative_to(root)
+                and candidate.read_bytes() == copied
+            ):
+                return candidate.resolve().relative_to(root).as_posix()
+    except OSError:
+        return None
+    return None
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,

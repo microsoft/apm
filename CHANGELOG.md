@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve` on a Claude plugin's hooks now takes effect on the next `apm install`; the approval and the install keyed the hook file differently, so it stayed parked. (#3290)
 - `apm install --global --target claude` installs Claude plugins intact and enables them in Claude settings, so `${CLAUDE_PLUGIN_ROOT}` hooks and commands find their files (#3290)
 - `apm install` again resolves transitive `git:` + `path:` dependencies from private GitHub monorepos on Git older than 2.36: a sparse checkout whose anonymous file fetch was rejected is no longer cached as an empty package (which failed `Not a valid APM package`). APM now retries it with credentials and rebuilds incomplete cached checkouts left by 0.29.1 and later, so `APM_NO_CACHE=1` is no longer needed. -- with credit to @jiteshjadav-rogers (#3602)
 - `apm install DIR` with a single argument now installs an APM source package that has `apm.yml` and a root `plugin.json` as a local dependency, recording it in `apm.yml` and `apm.lock.yaml` exactly like `apm install DIR DIR`, instead of copying its source tree as a legacy bundle; real `apm pack` output, archives and legacy manifestless bundles still install as bundles. Approach from #3447 by @xubenqiang. (#3604)
