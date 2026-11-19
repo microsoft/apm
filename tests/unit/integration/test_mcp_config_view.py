@@ -58,6 +58,44 @@ def test_dependency_omission_requires_bound_selection_evidence(
 
 
 @pytest.mark.parametrize(
+    "declaration,approved,omitted",
+    [
+        ({"name": "tools", "registry": False, "transport": "stdio", "command": "x"}, False, True),
+        ({"name": "tools", "registry": False, "transport": "stdio", "command": "x"}, True, False),
+        ("tools", False, False),
+    ],
+    ids=["gated-unapproved", "gated-approved", "registry-not-gated"],
+)
+def test_unapproved_executables_omission_binds_gated_declaration(
+    tmp_path: Path, declaration: dict | str, approved: bool, omitted: bool
+) -> None:
+    """Only a gated package server the filter left out is parked and accepted by audit."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "package"
+    _write_manifest(source, name="tools", mcp=[declaration])
+    dependency = LockedDependency(
+        repo_url="_local/tools", source="local", local_path=str(source), depth=1
+    )
+    lock = _lock(dependency)
+    modules = tmp_path / "apm_modules"
+    view = _derive(root, lock, modules)
+    parked = view.with_unapproved_executables(view.dependencies if approved else ())
+    assert ("tools" in parked.omission_evidence(lock)) is omitted
+    assert ("tools" in parked.configs) is not omitted
+
+    lock.mcp_omissions = {
+        "tools": {
+            "declaration": view.declaration_fingerprints["tools"],
+            "reason": "unapproved-executables",
+        }
+    }
+    audited = view.with_recorded_omissions(lock)
+    gated = not isinstance(declaration, str)
+    assert audited.diff(lock.mcp_configs).is_empty is gated
+    assert bool(audited.problems) is not gated
+
+
+@pytest.mark.parametrize(
     "damage",
     [
         "lost",

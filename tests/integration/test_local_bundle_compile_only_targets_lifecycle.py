@@ -90,6 +90,21 @@ class _Bundle:
         assert (bundle / "instructions/glob.instructions.md").is_file()
         return bundle
 
+    def pack_instructions_only(self, body: str, out: str) -> Path:
+        producer = self.root / "instr"
+        _write(
+            producer / "apm.yml",
+            "name: bundler\nversion: 1.0.0\ndescription: b\nlicense: MIT\n"
+            "dependencies:\n  apm: []\n",
+        )
+        _write(
+            producer / ".apm/instructions/glob.instructions.md",
+            f'---\ndescription: Global\napplyTo: "**"\n---\n{body}\n',
+        )
+        self.apm(producer, "install", _NO_POLICY, "--target", "claude")
+        self.apm(producer, "pack", "-o", str(self.root / out))
+        return self.root / out / "bundler-1.0.0"
+
     def consumer(self, target: str) -> Path:
         project = self.root / f"proj-{target}"
         _write(project / "apm.yml", f"name: proj\nversion: 1.0.0\ntargets: [{target}]\n")
@@ -133,9 +148,11 @@ def test_staged_instructions_are_compile_input_not_deployment_claims(
     assert "Always be global." in (project / "AGENTS.md").read_text(encoding="utf-8")
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
 
-    # A declarative install keeps the staging record it does not own.
+    # A declarative install keeps the staging record and its hash it does not own.
     world.apm(project, "install", _NO_POLICY)
-    assert load_yaml(project / "apm.lock.yaml")["local_staged_files"] == [_STAGED]
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert lock["local_staged_files"] == [_STAGED]
+    assert lock["local_staged_file_hashes"] == {_STAGED: compute_file_hash(project / _STAGED)}
     assert (project / _STAGED).is_file()
 
     # Prune clears the staging and its record; deployed bundle files stay claimed.
@@ -191,7 +208,87 @@ def test_bundle_reinstall_migrates_pre_3705_staging_claims(
     assert ".agents/skills/helper/SKILL.md" in _claims(project)
     world.apm(project, "compile")
     assert "Always be global." in (project / "AGENTS.md").read_text(encoding="utf-8")
+    # The migrated staging keeps its install-time hash, so a skipped edit is drift.
+    audited = world.apm(
+        project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1 if edited else 0
+    )
+    assert (f"hash-drift: {_STAGED} (staged," in _output(audited)) is edited
+
+
+def test_staged_instruction_edits_are_reported_as_hash_drift(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Staged compile input is hash-bound, so edits before compile are not silent (#3718)."""
+    world = _Bundle(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    project = world.consumer("codex")
+    install = ("install", str(bundle), "--target", "codex", _NO_POLICY)
+    world.apm(project, *install)
+    staged = project / _STAGED
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert lock["local_staged_file_hashes"] == {_STAGED: compute_file_hash(staged)}
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+    _write(staged, staged.read_text(encoding="ascii") + "Injected after install.\n")
+    compiled = world.apm(project, "compile")
+    assert f"hash-drift: staged file {_STAGED} changed since install" in _output(compiled)
+    audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    text = _output(audited)
+    assert f"hash-drift: {_STAGED} (staged," in text, text
+    assert "1 staged file(s) with hash drift" in text, text
+    # A plain reinstall skips the edited file and keeps its install-time hash.
+    assert f"Skipped {_STAGED}" in _output(world.apm(project, *install))
+    audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    assert f"hash-drift: {_STAGED} (staged," in _output(audited)
+
+    # A forced reinstall restages the bundle bytes and clears the drift.
+    world.apm(project, *install, "--force")
+    assert "Injected after install." not in staged.read_text(encoding="ascii")
+    compiled = world.apm(project, "compile")
+    assert "hash-drift" not in _output(compiled)
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+    # Lockfiles written before staged hashes existed make no drift claim.
+    lock = load_yaml(project / "apm.lock.yaml")
+    del lock["local_staged_file_hashes"]
+    dump_yaml(lock, project / "apm.lock.yaml")
+    _write(staged, staged.read_text(encoding="ascii") + "Edited locally.\n")
+    assert "hash-drift" not in _output(world.apm(project, "compile"))
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+    # Upgrading: the bundle reinstall skips the edit but binds it to the bundle bytes.
+    assert f"Skipped {_STAGED}" in _output(world.apm(project, *install))
+    audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    assert f"hash-drift: {_STAGED} (staged," in _output(audited)
+
+
+def test_instructions_only_bundle_upgrade_keeps_install_time_hash(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A skipped staged file keeps its prior hash, or binds to the bundle bytes (#3718)."""
+    world = _Bundle(tmp_path, apm_binary_path)
+    v1 = world.pack_instructions_only("Always be global.", "v1")
+    v2 = world.pack_instructions_only("Always be global, v2.", "v2")
+    project = world.consumer("codex")
+    world.apm(project, "install", str(v1), "--target", "codex", _NO_POLICY)
+    staged = project / _STAGED
+    installed = compute_file_hash(staged)
+
+    # Upgrading over unedited staging skips it; the install-time hash still wins.
+    assert f"Skipped {_STAGED}" in _output(
+        world.apm(project, "install", str(v2), "--target", "codex", _NO_POLICY)
+    )
+    assert load_yaml(project / "apm.lock.yaml")["local_staged_file_hashes"] == {_STAGED: installed}
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+    # An older lockfile with an edit: the all-skipped reinstall still records the bundle hash.
+    lock = load_yaml(project / "apm.lock.yaml")
+    del lock["local_staged_file_hashes"]
+    dump_yaml(lock, project / "apm.lock.yaml")
+    _write(staged, staged.read_text(encoding="ascii") + "Edited locally.\n")
+    world.apm(project, "install", str(v1), "--target", "codex", _NO_POLICY)
+    assert load_yaml(project / "apm.lock.yaml")["local_staged_file_hashes"] == {_STAGED: installed}
+    audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    assert f"hash-drift: {_STAGED} (staged," in _output(audited)
 
 
 def test_prune_retires_staging_records_whose_root_is_gone(

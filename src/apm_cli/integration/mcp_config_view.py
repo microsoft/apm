@@ -27,7 +27,10 @@ from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.validation import PackageType, detect_package_type
-from apm_cli.security.executables import locked_dependency_approval_keys
+from apm_cli.security.executables import (
+    is_executable_gated_mcp,
+    locked_dependency_approval_keys,
+)
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -166,11 +169,52 @@ class CurrentMcpConfigView:
             if name not in admitted
         }
 
+    def with_unapproved_executables(
+        self, approved: list[MCPDependency] | tuple[MCPDependency, ...]
+    ) -> CurrentMcpConfigView:
+        """Park gated package servers the executables filter left out, with exact evidence."""
+        kept = {dependency.name for dependency in approved}
+        parked = {
+            dependency.name
+            for dependency in self.dependencies
+            if is_executable_gated_mcp(dependency) and dependency.name not in kept
+        }
+        if not parked:
+            return self
+        return replace(
+            self,
+            dependencies=tuple(d for d in self.dependencies if d.name not in parked),
+            configs={name: c for name, c in self.configs.items() if name not in parked},
+            provenance={name: p for name, p in self.provenance.items() if name not in parked},
+            brought_in_by={k: v for k, v in self.brought_in_by.items() if k not in parked},
+            omissions={
+                **self.omissions,
+                **{
+                    name: {
+                        "declaration": self.declaration_fingerprints[name],
+                        "reason": "unapproved-executables",
+                    }
+                    for name in sorted(parked)
+                    if name in self.declaration_fingerprints
+                },
+            },
+        )
+
     def with_recorded_omissions(self, lockfile: LockFile) -> CurrentMcpConfigView:
         """Apply exact install evidence for audit, never infer intent from empty state."""
         configs = dict(self.configs)
         problems = list(self.problems)
         admitted = _admitted_names(lockfile)
+        gated = {
+            dependency.name
+            for dependency in self.dependencies
+            if is_executable_gated_mcp(dependency)
+        }
+        structural = {
+            "only-apm": set(self.declaration_fingerprints),
+            "untrusted-transitive": self.refusable_names,
+            "unapproved-executables": gated,
+        }
         candidates = (
             (set(lockfile.mcp_omissions) & set(configs)) | set(self.declaration_fingerprints)
         ) - admitted
@@ -180,13 +224,14 @@ class CurrentMcpConfigView:
             valid = (
                 fingerprint is not None
                 and isinstance(evidence, dict)
-                and evidence.get("reason") in ("only-apm", "untrusted-transitive")
+                and isinstance(evidence.get("reason"), str)
+                and evidence.get("reason") in structural
                 and evidence
                 == {
                     "declaration": fingerprint,
                     "reason": evidence.get("reason"),
                 }
-                and (evidence["reason"] == "only-apm" or name in self.refusable_names)
+                and name in structural[evidence["reason"]]
             )
             if valid and name not in admitted:
                 configs.pop(name, None)

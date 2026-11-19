@@ -65,10 +65,11 @@ def test_skills_only_preparation_retains_omissions_without_selected_comparison(
     )
     assert prepared.current_view is None
     assert prepared.dependencies == []
-    assert prepared.omissions is not None
-    assert set(prepared.omissions) == (set() if admitted else {"service"})
+    omissions = prepared.omissions(lock)
+    assert omissions is not None
+    assert set(omissions) == (set() if admitted else {"service"})
     if not admitted:
-        assert prepared.omissions["service"]["reason"] == "only-apm"
+        assert omissions["service"]["reason"] == "only-apm"
     assert lock_path.read_bytes() == before
 
 

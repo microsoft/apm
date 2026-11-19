@@ -1,7 +1,7 @@
 Cut release {version}.
 
 - Bump `pyproject.toml` to {version} (and `uv.lock`).
-- Move `[Unreleased]` to `[{version}] - {date}` in `CHANGELOG.md`, with one short "so what?" entry per PR merged since {prev_version}.
+- Move `[Unreleased]` to `[{version}] - {date}` in `CHANGELOG.md`, re-sanitized to one short line per user-facing PR merged since {prev_version} (deduped, with Highlights and upgrade notes).
 
 ## Why {bump_kind} ({version}), not {alt_bump_kind} ({alt_version})
 
