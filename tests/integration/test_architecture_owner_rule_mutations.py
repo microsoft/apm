@@ -930,6 +930,22 @@ def test_pack_never_ships_apm_rendered_mcp_servers(path: str, old: str, new: str
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_bundle_reinstall_reconciles_owned_mcp_servers() -> None:
+    """Dropping the empty-list reconcile lets denied bundle MCP servers linger (#3956)."""
+    rule_id = "install-deployment-mcp-ownership-migration"
+    path = "src/apm_cli/install/local_bundle_handler.py"
+    old = "bool(bundle_mcp_deps) or bundle_info.format == BundleFormat.CLAUDE_PLUGIN.value"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "bool(bundle_mcp_deps)")
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

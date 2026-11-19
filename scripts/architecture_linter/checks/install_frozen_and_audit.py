@@ -356,6 +356,13 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "run_owned_mcp_integration",
             "retain_deferred_mcp_claims",
         ),
+        # A bundle reinstall reconciles its owner's servers even when it ships
+        # none, so revoke, deny and repack retire them (#3956).
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "_wire_legacy_bundle_mcp_servers",
+            "run_owned_mcp_integration",
+        ),
         ("src/apm_cli/adapters/client/claude.py", "configure_mcp_server", "mcp_native_hash"),
         ("src/apm_cli/adapters/client/codex.py", "configure_mcp_server", "mcp_native_hash"),
         (
@@ -381,6 +388,19 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                     f"{function} must route native MCP ownership through {required_call}",
                 )
             )
+    bundle = provider.file_facts("src/apm_cli/install/local_bundle_handler.py")
+    if not any(
+        "bool(bundle_mcp_deps) or bundle_info.format == BundleFormat.CLAUDE_PLUGIN.value" in line
+        for line in _lines(bundle)
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/local_bundle_handler.py",
+                "A Claude bundle must reconcile its owned MCP servers even when its "
+                "filtered list is empty (#3956)",
+            )
+        )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
     opt_in_gate = re.compile(r'/ "\.(?:claude|opencode)"\)\.is_dir\(\)')
     for number, line in enumerate(_lines(cleanup), start=1):
