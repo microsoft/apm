@@ -391,6 +391,50 @@ def split_mcp_claims(
     )
 
 
+def moved_root_entry_fingerprints(
+    names: set[str], *, project_root: Path, stored_configs: Mapping[str, Any]
+) -> dict[str, str]:
+    """Fingerprints of the ``.mcp.json`` entries a ``--frozen`` install moved for *names*.
+
+    For moved, no longer declared self-defined servers
+    (:attr:`RetiredMcpClaims.moved_unrecorded`): an entry identical, by JSON
+    type and value, to APM's render of the locked declaration is APM's write,
+    so it is removed like any proven stale entry. Registry entries cannot be
+    re-rendered from the lock and stay where they are.
+    """
+    if not names:
+        return {}
+    from apm_cli.adapters.client.copilot_project import CopilotProjectClientAdapter
+    from apm_cli.install.mcp.ownership import _native_config_key, mcp_native_hash
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.utils.path_security import has_symlink_component
+
+    client = CopilotProjectClientAdapter(project_root=project_root)
+    path = Path(client.get_config_path())
+    if has_symlink_component(project_root, path) or not path.is_file():
+        return {}
+    servers = client.get_current_config().get(client.mcp_servers_key) or {}
+    proven: dict[str, str] = {}
+    for name in sorted(names):
+        stored = stored_configs.get(name)
+        if not isinstance(stored, dict) or stored.get("registry") is not False:
+            continue
+        entry = servers.get(_native_config_key(client, name, stored_config=stored))
+        if not isinstance(entry, dict):
+            continue
+        try:
+            render = client.render_server_config(
+                MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
+            )
+        except (TypeError, ValueError):
+            continue
+        comparable = client.managed_server_config(entry)
+        if client.json_identical(comparable, render):
+            proven[name] = mcp_native_hash(comparable)
+    return proven
+
+
 def _absent_from_retired_files(
     names: set[str], *, project_root: Path, stored_configs: Mapping[str, Any]
 ) -> set[str]:

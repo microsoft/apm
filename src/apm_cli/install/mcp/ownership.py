@@ -251,15 +251,23 @@ def compare_native_mcp_connection(
         and client.target_name == "copilot"
         and name in _adoptable_root_names.get()
     )
-    if adoptable and isinstance(stored_config, dict) and stored_config.get("registry") is False:
-        # What --frozen wrote from the locked declaration, before apm.yml changed.
-        try:
-            locked = client.render_server_config(
-                MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored_config))
-            )
-            matches_baseline = client.matches_managed_server_config(native, locked)
-        except (TypeError, ValueError):
-            logger.debug("Unusable locked declaration for %s", name)
+    if adoptable and isinstance(native, dict):
+        # --frozen wrote this entry from apm.yml, or from the locked declaration
+        # before apm.yml changed. Compared by JSON type too: true is not 1.
+        renders = [requested]
+        if isinstance(stored_config, dict) and stored_config.get("registry") is False:
+            try:
+                renders.append(
+                    client.render_server_config(
+                        MCPIntegrator._build_self_defined_info(
+                            MCPDependency.from_dict(stored_config)
+                        )
+                    )
+                )
+            except (TypeError, ValueError):
+                logger.debug("Unusable locked declaration for %s", name)
+        comparable = client.managed_server_config(native)
+        matches_baseline = any(client.json_identical(comparable, render) for render in renders)
     if managed and isinstance(stored_config, dict):
         try:
             dependency = MCPDependency.from_dict(stored_config)
@@ -366,7 +374,7 @@ def compare_native_mcp_connection(
         if matches_request:
             return (
                 NativeMcpConnectionState.MATCHING_MANAGED
-                if matches_baseline or adoptable
+                if matches_baseline
                 else NativeMcpConnectionState.MATCHING_FOREIGN
             )
     if not matches_baseline:

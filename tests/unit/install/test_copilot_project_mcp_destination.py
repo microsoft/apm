@@ -558,3 +558,36 @@ def test_bundle_retarget_keeps_the_entry_the_new_runtime_owns(tmp_path: Path) ->
 
     assert "echo" in json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
     assert LockFile.read(lock_path).mcp_target_servers.get("copilot") == ["echo"]
+
+
+@pytest.mark.parametrize(
+    ("native_timeout", "expected"),
+    [
+        (1, NativeMcpConnectionState.MATCHING_MANAGED),
+        (True, NativeMcpConnectionState.MATCHING_FOREIGN),
+    ],
+)
+def test_moved_root_entry_is_adopted_only_when_json_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_timeout: object, expected: object
+) -> None:
+    """Python equality says True == 1; adopting an unrecorded entry needs the exact JSON."""
+    from apm_cli.install.mcp.ownership import adoptable_root_mcp_entries
+
+    _write(
+        tmp_path / ".mcp.json",
+        {"mcpServers": {"echo": {"type": "stdio", "command": "echo", "timeout": native_timeout}}},
+    )
+    client = CopilotProjectClientAdapter(project_root=tmp_path)
+    monkeypatch.setattr(
+        client,
+        "render_server_config",
+        lambda *_args, **_kwargs: {"type": "stdio", "command": "echo", "timeout": 1},
+    )
+    info = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_ECHO))
+
+    with adoptable_root_mcp_entries(frozenset({"echo"})):
+        state = compare_native_mcp_connection(
+            client, "echo", requested_info=info, stored_config=_ECHO, managed=False
+        )
+
+    assert state is expected

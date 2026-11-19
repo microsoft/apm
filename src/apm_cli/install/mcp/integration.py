@@ -338,6 +338,7 @@ def run_mcp_integration(  # noqa: PLR0913
         heal_retired_project_mcp_destinations,
         healable_names,
         lock_holds_untranslated_mcp_claims,
+        moved_root_entry_fingerprints,
         report_retired_mcp_heal,
         restore_pending_retired_claims,
         split_mcp_claims,
@@ -417,6 +418,15 @@ def run_mcp_integration(  # noqa: PLR0913
         if should_install and old_mcp_target_servers and heal_basis is not None
         else RetiredMcpClaims({}, {})
     )
+    # A --frozen install moved these servers and they are no longer
+    # declared: their .mcp.json entry is removed on the same proof as adoption.
+    undeclared_moved = moved_root_entry_fingerprints(
+        retired_owned.moved_unrecorded - MCPIntegrator.get_server_names(mcp_deps),
+        project_root=project_root,
+        stored_configs=old_mcp_configs,
+    )
+    if undeclared_moved:
+        old_native_hashes.setdefault("copilot", {}).update(undeclared_moved)
     # The claims are translated once this install persists them (heal and
     # receipts), so the lock may then record the running version.
     translated = heal_basis is not None and lock_holds_untranslated_mcp_claims(
@@ -575,6 +585,8 @@ def run_mcp_integration(  # noqa: PLR0913
             cleanup_owners = {
                 target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
             }
+            if undeclared_moved:
+                cleanup_owners.setdefault("copilot", builtins.set()).update(undeclared_moved)
             if not old_mcp_target_servers_present and not user_scope:
                 # A lockfile written before per-target ownership names no runtime for
                 # its servers, so a project install cleans the runtimes it targets,
@@ -628,6 +640,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 project_root=project_root,
                 user_scope=user_scope,
             )
+            if undeclared_moved:
+                cleanup_owners.setdefault("copilot", builtins.set()).update(undeclared_moved)
             for cleanup_runtime, managed_servers in sorted(cleanup_owners.items()):
                 scoped_stale = builtins.set(old_mcp_servers).intersection(managed_servers)
                 if not scoped_stale:

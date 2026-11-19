@@ -666,7 +666,7 @@ def test_moved_claim_never_adopts_a_differing_root_entry(
 
 @pytest.mark.parametrize(
     "case",
-    ["undeclared", "lock-0.37", "claims-another-name", "github-file-missing", "github-symlinked"],
+    ["lock-0.37", "claims-another-name", "github-file-missing", "github-symlinked"],
 )
 def test_identical_root_entry_stays_the_users_unless_every_adoption_bound_holds(
     tmp_path: Path, apm_binary_path: Path, case: str
@@ -674,10 +674,9 @@ def test_identical_root_entry_stays_the_users_unless_every_adoption_bound_holds(
     """Each case breaks one bound; the user's identical .mcp.json entry is never adopted."""
     project = _Project(tmp_path, apm_binary_path)
     rendered = {"type": "stdio", "command": "echo", "args": []}
-    checked = "gone" if case == "undeclared" else "echo"
-    servers = [_ECHO, {**_ECHO, "name": "gone"}, {**_ECHO, "name": "other"}]
+    checked = "echo"
+    servers = [_ECHO, {**_ECHO, "name": "other"}]
     claims = {
-        "undeclared": {"copilot": ["echo", "gone"]},
         "lock-0.37": {"vscode": ["echo"]},
         "claims-another-name": {"copilot": ["other"]},
     }.get(case, {"copilot": ["echo"]})
@@ -701,3 +700,64 @@ def test_identical_root_entry_stays_the_users_unless_every_adoption_bound_holds(
     project.manifest(targets=["copilot"])
     project.install()
     assert project.read_json(".mcp.json")["mcpServers"][checked] == rendered
+
+
+def _seed_036_two_servers(project: _Project) -> None:
+    servers = [_ECHO, {**_ECHO, "name": "keep"}]
+    legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
+    project.write_json(".github/mcp.json", {"mcpServers": {"echo": legacy, "keep": legacy}})
+    project.manifest(targets=["copilot"], dependencies={"mcp": servers})
+    _seed_036_lock(project, servers, {"copilot": ["echo", "keep"]})
+
+
+@pytest.mark.parametrize("kept", [[], ["keep"]], ids=["last-server", "one-of-two"])
+def test_frozen_upgrade_then_removing_the_server_removes_its_root_entry(
+    tmp_path: Path, apm_binary_path: Path, kept: list[str]
+) -> None:
+    """The entry --frozen wrote from the locked declaration goes when the server goes."""
+    project = _Project(tmp_path, apm_binary_path)
+    _seed_036_two_servers(project)
+    project.install("--frozen")
+    assert set(project.read_json(".mcp.json")["mcpServers"]) == {"echo", "keep"}
+
+    declared = [{**_ECHO, "name": name} for name in kept]
+    project.manifest(targets=["copilot"], dependencies={"mcp": declared})
+    project.install()
+
+    assert set(project.read_json(".mcp.json")["mcpServers"]) == set(kept)
+
+
+def test_frozen_upgrade_keeps_an_edited_root_entry_of_a_removed_server(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    project = _Project(tmp_path, apm_binary_path)
+    _seed_036_two_servers(project)
+    project.install("--frozen")
+    edited = {"type": "stdio", "command": "echo", "args": ["--mine"]}
+    root = project.read_json(".mcp.json")["mcpServers"]
+    project.write_json(".mcp.json", {"mcpServers": {**root, "echo": edited}})
+
+    project.manifest(targets=["copilot"], dependencies={"mcp": [{**_ECHO, "name": "keep"}]})
+    project.install()
+
+    assert project.read_json(".mcp.json")["mcpServers"]["echo"] == edited
+
+
+def test_a_committed_frozen_move_is_adopted_in_a_clone_without_vscode_dir(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Accepted bound: a teammate's --frozen moved a vscode entry and committed .mcp.json.
+
+    .vscode/ is often gitignored, so a missing .vscode/mcp.json counts as moved for a
+    pre-0.37 vscode claim; only an entry equal to APM's render is taken over.
+    """
+    project = _Project(tmp_path, apm_binary_path)
+    entry = {"type": "stdio", "command": "echo", "args": []}
+    project.write_json(".mcp.json", {"mcpServers": {"echo": entry}})
+    project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
+    _seed_036_lock(project, [_ECHO], {"vscode": ["echo"]})
+
+    project.install()
+
+    assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": entry}
