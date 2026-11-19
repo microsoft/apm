@@ -76,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- `apm pack` no longer ships the MCP servers `apm install` writes to root `.mcp.json`, which can hold your credentials: the Codex `plugin.json` stops referencing that file, and Claude manifests and bundles leave those servers out. (#PRNUM)
+- `apm pack` no longer ships MCP servers that `apm install` wrote to root `.mcp.json`, which can carry credentials, in Codex, Claude or bundle output. (#3971)
 
 ## [0.36.1] - 2026-11-18
 
