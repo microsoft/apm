@@ -1639,7 +1639,7 @@ class LockFile:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
         from .lockfile_generator import warn_if_newer
 
-        warn_if_newer(path, lock.apm_version, text)
+        warn_if_newer(path, lock.apm_version)
         return lock
 
     @classmethod

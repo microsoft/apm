@@ -368,6 +368,30 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     return _bounded_load(text)
 
 
+def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
+    """Return every top-level *key* occurrence's scalar text, in document order.
+
+    Works on the composed node graph (no object construction, so no merge-key
+    expansion) and therefore sees duplicate keys that a loader would silently
+    collapse, in block or flow style. A ``null`` or non-scalar value is
+    ``None``. Returns ``None`` when the text is not parseable YAML and ``[]``
+    when the document is not a mapping or lacks *key*.
+    """
+    try:
+        node = yaml.compose(text, Loader=_BoundedSafeLoader)
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return None
+    if not isinstance(node, yaml.MappingNode):
+        return []
+    values: list[str | None] = []
+    for key_node, value_node in node.value:
+        if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
+            is_scalar = isinstance(value_node, yaml.ScalarNode)
+            null = is_scalar and value_node.tag == "tag:yaml.org,2002:null"
+            values.append(value_node.value if is_scalar and not null else None)
+    return values
+
+
 def _roundtrip_yaml() -> Any:
     """Return a configured ruamel.yaml round-trip parser."""
     from ruamel.yaml import YAML

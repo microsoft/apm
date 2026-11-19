@@ -53,8 +53,10 @@ def test_older_cli_is_refused_with_both_versions(tmp_path, running, running_vers
         "apm_version: 0.25.0\napm_version: 0.25.0\n",
         "apm_version: 1.0\n",
         "apm_version: banana\n",
+        "apm_version: null\n",
+        "apm_version:\n",
     ],
-    ids=["duplicate", "float", "garbage"],
+    ids=["duplicate", "float", "garbage", "null", "empty"],
 )
 def test_unverifiable_metadata_fails_closed(tmp_path, running, header):
     with pytest.raises(LockfileGeneratorError, match="Restore the lockfile"):
@@ -73,3 +75,36 @@ def test_lockfile_write_backstop_leaves_newer_lockfile_bytes(tmp_path, running):
     with pytest.raises(LockfileGeneratorError):
         LockFile(apm_version="0.25.0").write(path)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"lockfile_version": "1", "apm_version": "9.0.0", "dependencies": []}\n',
+        'lockfile_version: "1"\n"apm_version": \'9.0.0\'  # pinned\ndependencies: []\n',
+    ],
+    ids=["flow", "quoted-key"],
+)
+def test_newer_generator_is_seen_in_any_yaml_style(tmp_path, running, text):
+    path = tmp_path / "apm.lock.yaml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(LockfileGeneratorError, match=r"written by APM 9\.0\.0"):
+        assert_writable(path)
+
+
+def test_flow_style_duplicate_key_fails_closed(tmp_path, running):
+    path = tmp_path / "apm.lock.yaml"
+    path.write_text('{apm_version: "0.25.0", apm_version: "0.25.0"}\n', encoding="utf-8")
+    with pytest.raises(LockfileGeneratorError, match="more than once"):
+        assert_writable(path)
+
+
+def test_legacy_lockfile_is_checked_without_renaming(tmp_path, running):
+    from apm_cli.deps.lockfile_generator import check_current_cli
+
+    legacy = tmp_path / "apm.lock"
+    legacy.write_text('lockfile_version: "1"\napm_version: 9.0.0\ndependencies: []\n')
+    with pytest.raises(LockfileGeneratorError, match=r"apm\.lock:"):
+        check_current_cli(tmp_path, command="apm install")
+    assert legacy.exists()
+    assert not (tmp_path / "apm.lock.yaml").exists()

@@ -363,9 +363,12 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
     # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
-    from ..deps.lockfile_generator import require_current_cli
+    from ..deps.lockfile_generator import LockfileGeneratorError, check_current_cli
 
-    require_current_cli(project_root, command="apm pack")
+    try:
+        check_current_cli(project_root, command="apm pack")
+    except LockfileGeneratorError as exc:
+        _emit_json_error_or_raise(ctx, json_output, "lockfile_generator", str(exc))
     # Authoring-path nudge (#1777): warn when the author's own package declares
     # no license. Suppressed under --json (machine output). Never blocks pack.
     if not json_output:

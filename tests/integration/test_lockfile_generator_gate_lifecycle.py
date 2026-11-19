@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -125,11 +126,12 @@ def test_older_cli_refuses_every_lockfile_command_without_mutation(
 @pytest.mark.parametrize(
     ("label", "stamp"),
     [
-        ("equal", lambda release: "{}.{}.{}".format(*release)),
-        ("build-metadata", lambda release: "{}.{}.{}+build.7".format(*release)),
-        ("own-prerelease", lambda release: "{}.{}.{}rc1".format(*release)),
-        ("older", lambda _release: "0.1.0"),
-        ("unknown", lambda _release: "unknown"),
+        ("equal", lambda current, _release: current),
+        ("build-metadata", lambda current, _release: f"{current}+build.7"),
+        # a0 is the lowest prerelease of the running release, never newer.
+        ("own-prerelease", lambda _current, release: "{}.{}.{}a0".format(*release)),
+        ("older", lambda _current, _release: "0.1.0"),
+        ("unknown", lambda _current, _release: "unknown"),
     ],
 )
 def test_equal_or_older_generators_continue(
@@ -139,7 +141,7 @@ def test_equal_or_older_generators_continue(
     project = _Project(tmp_path, apm_binary_path)
     project.seed()
     current = project.stamped()
-    project.stamp(stamp(_release(project)))
+    project.stamp(stamp(current, _release(project)))
     project.guide.write_text(_GUIDE + f"# {label}\n", encoding="utf-8")
 
     result = project.run("install")
@@ -156,6 +158,7 @@ def test_equal_or_older_generators_continue(
             lambda text: text.replace("apm_version:", "apm_version: 0.1.0\napm_version:", 1),
         ),
         ("invalid", lambda text: re.sub(r"(?m)^apm_version: .*$", "apm_version: 1.0", text)),
+        ("null", lambda text: re.sub(r"(?m)^apm_version: .*$", "apm_version: null", text)),
     ],
 )
 def test_unverifiable_generator_metadata_fails_closed(
@@ -171,6 +174,28 @@ def test_unverifiable_generator_metadata_fails_closed(
     assert result.returncode == 1, _evidence(result)
     assert "Restore the lockfile from version control" in _output(result), label
     assert project.state() == before
+
+
+def test_flow_style_and_legacy_lockfiles_are_guarded(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A newer generator is seen in flow-style YAML and in a legacy ``apm.lock``."""
+    project = _Project(tmp_path, apm_binary_path)
+    project.seed()
+    major = _release(project)[0]
+    flow = f'{{"lockfile_version": "1", "apm_version": "{major + 1}.0.0", "dependencies": []}}\n'
+    for name in ("apm.lock.yaml", "apm.lock"):
+        project.lock.unlink(missing_ok=True)
+        (project.root / name).write_text(flow, encoding="utf-8")
+        before = (project.root / name).read_bytes()
+        for args in (("install",), ("pack", "--json")):
+            result = project.run(*args)
+            assert result.returncode == 1, _evidence(result)
+            assert f"written by APM {major + 1}.0.0" in _output(result), (name, args)
+            assert (project.root / name).read_bytes() == before
+            if args[0] == "pack":
+                envelope = json.loads(result.stdout)
+                assert envelope["ok"] is False
+                assert envelope["errors"][0]["code"] == "lockfile_generator"
+        (project.root / name).unlink()
 
 
 def test_user_scope_lockfile_is_guarded(tmp_path: Path, apm_binary_path: Path) -> None:

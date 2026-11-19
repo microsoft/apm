@@ -15,16 +15,11 @@ There is deliberately no override: the fix is upgrading the CLI.
 
 from __future__ import annotations
 
-import re
 import threading
 from pathlib import Path
 
 LOCKFILE_UNKNOWN_VERSION = "unknown"
 
-_APM_VERSION_KEY = re.compile(
-    r"""^(?:apm_version|"apm_version"|'apm_version')[ \t]*:[ \t]*(?P<value>.*)$""", re.M
-)
-_YAML_NULLS = frozenset({"", "~", "null", "Null", "NULL"})
 _UPGRADE_HINT = (
     "Upgrade, then retry:\n"
     "  apm self-update                            (installer script)\n"
@@ -51,10 +46,6 @@ def _precedence(version: object) -> tuple[int, int, int, int, int] | None:
     from ..utils.version_checker import release_precedence
 
     return release_precedence(version) if isinstance(version, str) else None
-
-
-def _declared_versions(text: str) -> int:
-    return len(_APM_VERSION_KEY.findall(text))
 
 
 _RESTORE_HINT = (
@@ -88,32 +79,27 @@ def _blocking_reason(recorded: object, declarations: int, running: str) -> tuple
     return None
 
 
-def _scalar(raw: str) -> str | None:
-    """Return the plain or quoted scalar text of one ``apm_version`` line."""
-    value = raw.strip()
-    if value[:1] in ("'", '"'):
-        quote = value[0]
-        end = value.find(quote, 1)
-        return value[1:end] if end > 0 else value
-    value = value.split(" #", 1)[0].strip()
-    return None if value in _YAML_NULLS else value
-
-
 def _inspect(path: Path) -> tuple[object, int] | None:
     """Return ``(apm_version, declaration count)`` or ``None`` without a lockfile.
 
-    Scans the top-level key in the raw text rather than parsing YAML again:
-    APM writes it as a block scalar, and a raw scan also sees duplicates that
-    a YAML loader would silently collapse.
+    Reads the composed top-level mapping, so flow style, indentation and
+    duplicate keys (which a loader silently collapses) are all seen. An
+    explicitly declared ``null`` is reported as the invalid value ``"null"``.
     """
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         # Absent or unreadable lockfiles are handled by the lockfile parser.
         return None
-    matches = list(_APM_VERSION_KEY.finditer(text))
-    recorded = _scalar(matches[0].group("value")) if matches else None
-    return recorded, len(matches)
+    from ..utils.yaml_io import top_level_scalar_values
+
+    values = top_level_scalar_values(text, "apm_version")
+    if values is None:
+        # Unparseable lockfiles fail in the lockfile parser with its own error.
+        return None
+    if not values:
+        return None, 0
+    return ("null" if values[0] is None else values[0]), len(values)
 
 
 def assert_writable(path: Path, *, action: str = "use") -> None:
@@ -136,9 +122,11 @@ def check_current_cli(project_root: Path, *, command: str) -> Path:
 
     Returns *project_root* so callers can bind the checked root inline.
     """
-    from .lockfile import get_lockfile_path
+    from .lockfile import resolve_lockfile_path_for_read
 
-    assert_writable(get_lockfile_path(Path(project_root)), action=f"run '{command}' on")
+    # Read-only resolution also finds a legacy ``apm.lock`` without renaming it.
+    lockfile = resolve_lockfile_path_for_read(Path(project_root), read_only=True)
+    assert_writable(lockfile, action=f"run '{command}' on")
     return project_root
 
 
@@ -156,9 +144,10 @@ def require_current_cli(project_root: Path, *, command: str) -> Path:
         raise click.ClickException(str(exc)) from exc
 
 
-def warn_if_newer(path: Path, recorded: object, text: str) -> None:
+def warn_if_newer(path: Path, recorded: object) -> None:
     """Warn once when a read-only command reads a lockfile it cannot vouch for."""
-    blocked = _blocking_reason(recorded, _declared_versions(text), running_cli_version())
+    # Reads stay cheap: duplicate detection is left to the refusing gates.
+    blocked = _blocking_reason(recorded, int(recorded is not None), running_cli_version())
     if blocked is None:
         return
     reason = blocked[0]
