@@ -208,7 +208,10 @@ def test_skills_only_preserves_admitted_baseline_and_real_drift(
         ]
         dump_yaml(data, manifest_path)
         scenario.audit(passed=False)
-    scenario.run("install", "--trust-transitive-mcp")
+    # The admitted baseline comes from a pinned approval in apm.yml (#3902);
+    # a one-off --trust-transitive-mcp run is not consent audit accepts.
+    scenario.run("approve", "firebase/agent-skills")
+    scenario.run("install")
     scenario.audit(passed=True)
     lock_path = scenario.project / "apm.lock.yaml"
     baseline = load_yaml(lock_path)
@@ -224,11 +227,8 @@ def test_skills_only_preserves_admitted_baseline_and_real_drift(
     assert not after.get("mcp_omissions"), "a kept admitted baseline records no omission"
     assert native.read_bytes() == native_before
     frozen_lock = lock_path.read_bytes()
-    refusal = scenario.runner.run(
-        ("install", "--only", "apm", "--frozen"), cwd=scenario.project, env=scenario.env
-    )
-    assert refusal.returncode == 1, refusal.stdout + refusal.stderr
-    assert "firebase" in refusal.stdout + refusal.stderr
+    # The approval travels in apm.yml, so --frozen reproduces it without a flag.
+    scenario.run("install", "--only", "apm", "--frozen")
     assert lock_path.read_bytes() == frozen_lock
     assert native.read_bytes() == native_before
     scenario.run("install", "--only", "apm", "--frozen", "--trust-transitive-mcp")

@@ -26,7 +26,7 @@ flat top-level server map whose values are all server objects. A file with no
 usable server is skipped with a warning naming the file and plugin.
 `${CLAUDE_PLUGIN_ROOT}` in MCP and LSP servers is locked unexpanded and
 written per target: `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<pkg>/...` in
-`.mcp.json` (Claude, Copilot), `${workspaceFolder}/...` for Cursor and VS Code,
+`.mcp.json` (Claude, Copilot), `${workspaceFolder}/...` for Cursor,
 `${CLAUDE_PROJECT_DIR}/...` in the Claude LSP plugin, otherwise (and with
 `--global`) the absolute path. A lockfile from an older release holding the
 absolute path still replays `--frozen` unchanged; the next `apm install`
@@ -137,9 +137,9 @@ contained symlinks are validated and copied as real files into
 `apm_modules/` before agent discovery. `apm pack` likewise does not follow
 symlinked source files and names each skipped link in a warning.
 
-`apm install <bundle>` (a packed Claude plugin bundle) does not register
-plugin hooks yet: `hooks.json` and `hooks/` files are skipped with one
-warning per file. Install the package from source to deploy its hooks.
+`apm install <bundle>` (a packed Claude plugin bundle) registers plugin hooks
+like a source install once the bundle key is approved; see
+[Hook files](#hook-files).
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
@@ -214,7 +214,7 @@ an additional target set at this gate.
 ```yaml
 name: claude-hooks
 version: "1.0.0"
-target: claude
+targets: [claude]
 ```
 
 This package cannot write to `.cursor/hooks.json`, even when Cursor is active.
@@ -222,7 +222,7 @@ A consumer can narrow it further with per-dependency `targets:`; see
 `dependencies.md`.
 
 To ship different hooks per harness, publish one package per target set,
-each declaring its own `target:`, and keep shared content in a common
+each declaring its own `targets:`, and keep shared content in a common
 package. Declaring several targets on one package does not assign different
 files to each target.
 
@@ -242,7 +242,7 @@ declares it:
 ```yaml
 name: codex-hooks
 version: "1.0.0"
-target: codex
+targets: [codex]
 ```
 
 A consumer can instead narrow the dependency with object-form
@@ -695,7 +695,7 @@ not add a per-target model map or `codex:`
 override block (#3324). Workarounds:
 
 1. Omit `model` from the shared agent so each harness uses its default.
-2. Split by target: a package per harness with its own `target:` and
+2. Split by target: a package per harness with its own `targets:` and
    `model:`, plus a common package for shared content.
 3. A `post-install` / `post-update` lifecycle script in the consuming
    project's `apm.yml` (trusted with `apm lifecycle trust`; a dependency
@@ -707,7 +707,7 @@ For a portable fix, raise it upstream with Claude Code or Codex.
 
 #### OpenCode target: frontmatter constraints
 
-OpenCode (`target: opencode`, deploys to `.opencode/agents/`) parses
+OpenCode (`targets: [opencode]`, deploys to `.opencode/agents/`) parses
 agent frontmatter through a strict Zod schema and refuses to load
 the agent on any mismatch. APM installs OpenCode agents verbatim
 and emits an install-time warning when it detects either of these
@@ -747,33 +747,40 @@ If you target multiple agent runtimes from one source file, keep the
 frontmatter to the intersection of their schemas (or maintain
 target-specific copies). For Kiro, only `description`, `model`, and `tools`
 are forwarded; `name` and unknown fields are silently stripped; tools are
-permission-bearing and APM fails closed if any unsupported value is present
-(supported: `read`, `write`, `shell`, `web`, `subagent`, `knowledge`,
-`context`, `todo_list`, `@mcp`, `@builtin`, `*`).
+permission-bearing and APM skips the agent if any value is not a Kiro tool
+selector (see "Kiro target: tools constraint" below).
 
 #### Kiro target: tools constraint
 
-Kiro (`target: kiro`, deploys to `.kiro/agents/<relative-stem>.md`) treats
-`tools` as permission-bearing capability tags. APM fails closed -- the agent
-is NOT deployed -- if any `tools` value is outside the approved set:
+Kiro (`targets: [kiro]`, deploys to `.kiro/agents/<relative-stem>.md`) treats
+`tools` as permission-bearing. APM fails closed for that agent -- it is NOT
+deployed and a warning names the value -- if any `tools` value is not a Kiro
+tool selector. Other agents in the same install still deploy and are locked.
 
 ```yaml
 # OK
 tools:
-  - read
-  - write
-  - shell
+  - read              # category tag
+  - web_fetch         # built-in tool ID
+  - "@git"            # all tools from MCP server 'git'
+  - "@git/git_status" # one tool from MCP server 'git'
+  - subagent/reviewer # may start only the 'reviewer' sub-agent
 
-# Fails closed -- apm install emits an error, file is NOT written:
+# Fails closed for this agent -- apm install warns, file is NOT written:
 # tools:
 #   - execute_arbitrary_code
-#   - read
+#   - grep            # CLI 2.x name; use grep_search
 ```
 
-The approved tags are: `read`, `write`, `shell`, `web`, `subagent`,
-`knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`, `*`.
-Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
-(accessed 2026-08-03).
+Accepted selectors: category tags `read`, `write`, `shell`, `web`,
+`subagent`; built-in tool IDs (`read_file`, `list_directory`, `file_search`,
+`grep_search`, `code`, `fs_write`, `fs_append`, `str_replace`, `delete_file`,
+`execute_bash`, `execute_pwsh`, `remote_web_search`, `web_fetch`,
+`invoke_sub_agent`, `disclose_context`, `introspect`, `knowledge`, and the
+IDE process, hook, and powers tools); `@server`, `@server/tool`,
+`subagent/<agent>`, `@builtin`, `@mcp`, `*`. `context` and `todo_list` stay accepted for compatibility.
+Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)
+(accessed 2026-11-19).
 
 ### 6. Skill (folder-based, `SKILL.md`)
 
@@ -804,7 +811,7 @@ distinct from the portable Agent Plugins v1 `plugin.json` produced by
 `apm pack --format agent-plugin` -- see [Package Types](../../../../../docs/src/content/docs/reference/package-types.md#agent-plugin-pluginjson-with-an-agent-plugins-schema)
 for the portable format.
 
-When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.
+When `apm.yml` `targets:` includes `claude`, `copilot`, or `codex`, `apm pack` also generates an ecosystem-specific `plugin.json` automatically (`.codex-plugin/plugin.json` for Codex) -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.
 
 When a marketplace `plugin.json` declares `skills`, that declaration is the
 complete deploy list: declare each skill directory or an immediate container.
@@ -1030,7 +1037,7 @@ marketplace:
     tagPattern: "v{version}"
   metadata:                    # pass-through, copied verbatim
     homepage: https://example.com
-  plugins:
+  packages:                    # compiled to marketplace.json `plugins:`
     - name: example-plugin
       description: What this plugin does
       source: acme-org/example-plugin    # owner/repo (remote)
@@ -1167,7 +1174,8 @@ flags (`--archive`, `-o`, `--format`, `--target`, `--force`) are silent no-ops.
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
 `--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.
 
-Exit codes: `0` success, `1` build error, `2` schema error.
+Exit codes: `0` success, `1` build or schema error, `2` usage error, `3`-`5`
+release-gate failures (see `apm pack --help`).
 
 ### Migrating from legacy `marketplace.yml`
 

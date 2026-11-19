@@ -7,8 +7,6 @@ projection and the symmetric comparison with the stored lockfile baseline.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
@@ -27,10 +25,15 @@ from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.validation import PackageType, detect_package_type
-from apm_cli.security.executables import (
-    is_executable_gated_mcp,
-    locked_dependency_approval_keys,
+from apm_cli.security.executables import _strip_version, locked_dependency_approval_keys
+from apm_cli.security.trust import (
+    REASON_DEFINITION_CHANGED,
+    REASON_DENIED,
+    REASON_UNAPPROVED,
+    REASON_UNTRUSTED_TRANSITIVE,
+    McpAdmission,
 )
+from apm_cli.security.trust_fingerprint import evidence_fingerprint
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -81,6 +84,59 @@ class CurrentMcpConfigView:
     # only lets ``diff`` accept a lock recorded before that, already expanded.
     plugin_roots: Mapping[str, str] = field(default_factory=dict)
     project_root: Path | None = None
+    # Dependency servers the executables gate decides (self-defined).
+    gated_names: frozenset[str] = frozenset()
+    # Server name -> lock identity of the package to ``apm approve``.
+    approval_targets: Mapping[str, str] = field(default_factory=dict)
+    # ``(server, package)`` admitted only by this run's --trust-transitive-mcp.
+    one_off_admitted: tuple[tuple[str, str], ...] = ()
+    # True once ``select`` replayed this run's complete selection (executables
+    # gate, dependency inclusion, transitive trust): ``omissions`` then holds
+    # exactly the evidence this run would record, so recorded evidence must equal it.
+    selection_replayed: bool = False
+
+    @classmethod
+    def select(
+        cls,
+        root: APMPackage,
+        lockfile: LockFile | None,
+        modules_root: Path,
+        *,
+        admission: McpAdmission,
+        recorded: LockFile | None,
+        exact: bool = True,
+        diagnostics: DiagnosticCollector | None = None,
+        logger: _McpViewLogger | None = None,
+        include_dependency_mcp: bool = True,
+        allow_pending: bool | None = None,
+        active_package_keys: frozenset[str] | None = None,
+    ) -> CurrentMcpConfigView:
+        """Derive the view install, ``--frozen`` and audit compare with the lockfile.
+
+        *admission* is the trust owner's gate for this run (security/trust.py).
+        ``recorded`` is the committed lockfile whose omission evidence must
+        justify every left-out server; only install, which records new
+        evidence, passes None. With *exact* (install, ``--frozen``) recorded
+        evidence must equal what this run would record; audit passes False and
+        accepts any reason the server's structure permits, while consent is
+        re-checked through ``consent_problems``.
+        """
+        view = cls.derive(
+            root,
+            lockfile,
+            modules_root,
+            admission=admission,
+            diagnostics=diagnostics,
+            logger=logger,
+            include_dependency_mcp=include_dependency_mcp,
+            allow_pending=allow_pending,
+            active_package_keys=active_package_keys,
+        )
+        if exact:
+            view = replace(view, selection_replayed=True)
+        if recorded is not None:
+            view = view.with_recorded_omissions(recorded)
+        return view
 
     @classmethod
     def derive(
@@ -89,7 +145,7 @@ class CurrentMcpConfigView:
         lockfile: LockFile | None,
         modules_root: Path,
         *,
-        trust_transitive_self_defined: bool,
+        admission: McpAdmission,
         diagnostics: DiagnosticCollector | None = None,
         logger: _McpViewLogger | None = None,
         include_dependency_mcp: bool = True,
@@ -98,26 +154,22 @@ class CurrentMcpConfigView:
     ) -> CurrentMcpConfigView:
         """Derive MCP truth for the resolver's complete active graph, when supplied.
 
+        Every dependency-declared server is admitted through *admission* (the
+        security/trust.py owner), so install, update, ``--frozen`` and audit
+        reach the same verdict for the same inputs.
+
         ``allow_pending`` selects pending (True), strict (False), or legacy
         compatibility (None) evidence. Active membership is not a materialized
         package selection: unavailable active sources still require evidence.
         """
         project_root = root.package_path or Path.cwd()
         with ExitStack() as scratch:
-            (
-                package_deps,
-                problems,
-                fingerprints,
-                omissions,
-                refusable,
-                pending_packages,
-                brought_in_by,
-            ) = _collect_locked_dependencies(
+            collected = _collect_locked_dependencies(
                 lockfile,
                 modules_root,
                 project_root,
                 scratch=scratch,
-                trust_transitive_self_defined=trust_transitive_self_defined,
+                admission=admission,
                 diagnostics=diagnostics,
                 logger=logger,
                 include_dependency_mcp=include_dependency_mcp,
@@ -130,26 +182,28 @@ class CurrentMcpConfigView:
         # _collect_unlocked_compat).
         root_deps = root.get_all_mcp_dependencies()
         root_names = set(_get_server_configs(root_deps))
-        dependencies = tuple(_deduplicate(root_deps + package_deps))
+        dependencies = tuple(_deduplicate(root_deps + collected.dependencies))
         configs = _get_server_configs(dependencies)
         return cls(
             dependencies=dependencies,
             configs=configs,
             provenance=_get_server_provenance(dependencies),
-            problems=tuple(problems),
-            pending_packages=frozenset(pending_packages),
+            problems=tuple(collected.problems),
+            pending_packages=frozenset(collected.pending_packages),
             declaration_fingerprints={
                 name: fingerprint
-                for name, fingerprint in fingerprints.items()
+                for name, fingerprint in collected.fingerprints.items()
                 if name not in root_names
             },
             omissions={
-                name: evidence for name, evidence in omissions.items() if name not in configs
+                name: evidence
+                for name, evidence in collected.omissions.items()
+                if name not in configs
             },
-            refusable_names=frozenset(refusable - root_names),
+            refusable_names=frozenset(collected.refusable - root_names),
             brought_in_by={
                 name: key
-                for name, key in brought_in_by.items()
+                for name, key in collected.brought_in_by.items()
                 if key is not None and name not in root_names
             },
             plugin_roots={
@@ -158,6 +212,17 @@ class CurrentMcpConfigView:
                 if (root := plugin_root_of(dependency)) is not None
             },
             project_root=project_root,
+            gated_names=frozenset(collected.gated - root_names),
+            approval_targets={
+                name: target
+                for name, target in collected.approval_targets.items()
+                if name not in root_names
+            },
+            one_off_admitted=tuple(
+                (name, package)
+                for name, package in collected.one_off
+                if name not in root_names and name in configs
+            ),
         )
 
     def omission_evidence(self, lockfile: LockFile) -> dict[str, dict[str, str]]:
@@ -169,51 +234,24 @@ class CurrentMcpConfigView:
             if name not in admitted
         }
 
-    def with_unapproved_executables(
-        self, approved: list[MCPDependency] | tuple[MCPDependency, ...]
-    ) -> CurrentMcpConfigView:
-        """Park gated package servers the executables filter left out, with exact evidence."""
-        kept = {dependency.name for dependency in approved}
-        parked = {
-            dependency.name
-            for dependency in self.dependencies
-            if is_executable_gated_mcp(dependency) and dependency.name not in kept
-        }
-        if not parked:
-            return self
-        return replace(
-            self,
-            dependencies=tuple(d for d in self.dependencies if d.name not in parked),
-            configs={name: c for name, c in self.configs.items() if name not in parked},
-            provenance={name: p for name, p in self.provenance.items() if name not in parked},
-            brought_in_by={k: v for k, v in self.brought_in_by.items() if k not in parked},
-            omissions={
-                **self.omissions,
-                **{
-                    name: {
-                        "declaration": self.declaration_fingerprints[name],
-                        "reason": "unapproved-executables",
-                    }
-                    for name in sorted(parked)
-                    if name in self.declaration_fingerprints
-                },
-            },
-        )
-
     def with_recorded_omissions(self, lockfile: LockFile) -> CurrentMcpConfigView:
-        """Apply exact install evidence for audit, never infer intent from empty state."""
+        """Apply exact install evidence, never infer intent from empty state.
+
+        After this run's executables gate decided the view, recorded evidence
+        must equal what this run would record. Otherwise (audit) any reason the
+        server's structure permits is accepted.
+        """
         configs = dict(self.configs)
         problems = list(self.problems)
         admitted = _admitted_names(lockfile)
-        gated = {
-            dependency.name
-            for dependency in self.dependencies
-            if is_executable_gated_mcp(dependency)
-        }
+        # Parking is always safe, so any reason the current inputs can produce
+        # for a server is accepted evidence; admission is what audit verifies.
         structural = {
             "only-apm": set(self.declaration_fingerprints),
-            "untrusted-transitive": self.refusable_names,
-            "unapproved-executables": gated,
+            REASON_UNTRUSTED_TRANSITIVE: self.refusable_names,
+            REASON_UNAPPROVED: self.gated_names,
+            REASON_DENIED: self.gated_names | self.refusable_names,
+            REASON_DEFINITION_CHANGED: self.gated_names | self.refusable_names,
         }
         candidates = (
             (set(lockfile.mcp_omissions) & set(configs)) | set(self.declaration_fingerprints)
@@ -221,20 +259,26 @@ class CurrentMcpConfigView:
         for name in sorted(candidates):
             evidence = lockfile.mcp_omissions.get(name)
             fingerprint = self.declaration_fingerprints.get(name)
-            valid = (
-                fingerprint is not None
-                and isinstance(evidence, dict)
-                and isinstance(evidence.get("reason"), str)
-                and evidence.get("reason") in structural
-                and evidence
-                == {
-                    "declaration": fingerprint,
-                    "reason": evidence.get("reason"),
-                }
-                and name in structural[evidence["reason"]]
-            )
+            if self.selection_replayed:
+                valid = fingerprint is not None and evidence == self.omissions.get(name, False)
+            else:
+                valid = (
+                    fingerprint is not None
+                    and isinstance(evidence, dict)
+                    and isinstance(evidence.get("reason"), str)
+                    and evidence.get("reason") in structural
+                    and evidence
+                    == {
+                        "declaration": fingerprint,
+                        "reason": evidence.get("reason"),
+                    }
+                    and name in structural[evidence["reason"]]
+                )
             if valid and name not in admitted:
                 configs.pop(name, None)
+            elif self.selection_replayed and evidence is None and name in configs:
+                # This run deploys it; the diff reports it missing from the lock.
+                continue
             elif name not in admitted or evidence is not None:
                 problems.append(
                     McpSourceProblem(
@@ -243,11 +287,43 @@ class CurrentMcpConfigView:
                         message=(
                             "MCP selection is unknown: omission evidence is missing, damaged "
                             "or stale. Repeat the intended install selection "
-                            "('--only apm' for skills-only); do not enable MCP just to pass audit"
+                            "('--only apm' for skills-only); do not enable MCP just to pass "
+                            "this check"
                         ),
                     )
                 )
+        for name, message in self.consent_problems(lockfile).items():
+            # The locked config stays in the comparison so the consent problem
+            # is the single, actionable signal for this server.
+            if name in lockfile.mcp_configs:
+                configs[name] = lockfile.mcp_configs[name]
+            problems.append(
+                McpSourceProblem(
+                    package_key=name, manifest_path=Path("apm.lock.yaml"), message=message
+                )
+            )
         return replace(self, configs=configs, problems=tuple(problems))
+
+    def consent_problems(self, lockfile: LockFile) -> dict[str, str]:
+        """Servers the lock admitted that current manifest consent parks (#3716).
+
+        The lockfile is evidence, never consent: a lock-only edit or a lock
+        produced by a one-off ``--trust-transitive-mcp`` run cannot keep a
+        server that ``apm.yml`` does not approve.
+        """
+        problems: dict[str, str] = {}
+        admitted = set(lockfile.mcp_configs) | set(lockfile.mcp_servers)
+        for name in sorted(admitted):
+            evidence = self.omissions.get(name)
+            reason = evidence.get("reason") if isinstance(evidence, Mapping) else None
+            if reason in (None, "only-apm") or name in self.configs:
+                continue
+            target = self.approval_targets.get(name, "<package>")
+            problems[name] = (
+                f"admitted in apm.lock.yaml but not approved in apm.yml ({reason}); "
+                f"run 'apm approve {target}' and re-run 'apm install'"
+            )
+        return problems
 
     def pending_servers(self, lockfile: LockFile) -> frozenset[str]:
         """Defer only unambiguous recorded declarers whose sources are unavailable."""
@@ -438,8 +514,7 @@ def _declaration_fingerprint(dependency: LockedDependency, declaration: MCPDepen
         "depth": dependency.depth,
         "declaration": declaration.to_dict(),
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return "sha256:" + hashlib.sha256(encoded.encode("ascii")).hexdigest()
+    return evidence_fingerprint(payload)
 
 
 def _authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDependency]:
@@ -651,41 +726,50 @@ def _allows_missing_manifest(
     )
 
 
+@dataclass
+class _CollectedDependencies:
+    """Admitted dependency MCP declarations plus the evidence behind each verdict.
+
+    ``brought_in_by`` maps each collected server to the single direct
+    dependency key that brings it in, or None when that is not unique/known.
+    """
+
+    dependencies: list[MCPDependency] = field(default_factory=list)
+    problems: list[McpSourceProblem] = field(default_factory=list)
+    fingerprints: dict[str, str] = field(default_factory=dict)
+    omissions: dict[str, dict[str, str]] = field(default_factory=dict)
+    refusable: set[str] = field(default_factory=set)
+    gated: set[str] = field(default_factory=set)
+    pending_packages: set[str] = field(default_factory=set)
+    brought_in_by: dict[str, str | None] = field(default_factory=dict)
+    approval_targets: dict[str, str] = field(default_factory=dict)
+    one_off: list[tuple[str, str]] = field(default_factory=list)
+
+
 def _collect_locked_dependencies(
     lockfile: LockFile | None,
     modules_root: Path,
     project_root: Path,
     *,
     scratch: ExitStack,
-    trust_transitive_self_defined: bool,
+    admission: McpAdmission,
     diagnostics: DiagnosticCollector | None,
     logger: _McpViewLogger | None = None,
     include_dependency_mcp: bool = True,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
-) -> tuple[
-    list[MCPDependency],
-    list[McpSourceProblem],
-    dict[str, str],
-    dict[str, dict[str, str]],
-    set[str],
-    set[str],
-    dict[str, str | None],
-]:
-    """Collect MCP declarations from only package manifests named by the lockfile.
-
-    The last element maps each collected server to the single direct
-    dependency key that brings it in, or None when that is not unique/known.
-    """
+) -> _CollectedDependencies:
+    """Collect MCP declarations from only package manifests named by the lockfile."""
+    result = _CollectedDependencies()
     if lockfile is None:
-        return [], [], {}, {}, set(), set(), {}
+        return result
 
-    collected: list[MCPDependency] = []
-    problems: list[McpSourceProblem] = []
-    fingerprints: dict[str, str] = {}
-    omissions: dict[str, dict[str, str]] = {}
-    refusable: set[str] = set()
-    pending_packages: set[str] = set()
+    collected = result.dependencies
+    problems = result.problems
+    fingerprints = result.fingerprints
+    omissions = result.omissions
+    refusable = result.refusable
+    pending_packages = result.pending_packages
     direct_roots: dict[str, set[str] | None] = {}
     direct_index = _DirectDependencyIndex(lockfile)
     parent_index = build_local_parent_index(lockfile)
@@ -845,42 +929,59 @@ def _collect_locked_dependencies(
                 dependency, authored_declarations[mcp_dependency.name]
             )
             fingerprints.setdefault(mcp_dependency.name, fingerprint)
+            approval_keys = locked_dependency_approval_keys(dependency)
+            target = _strip_version(approval_keys[0]) if approval_keys else package_key
+            result.approval_targets.setdefault(mcp_dependency.name, target)
             if mcp_dependency.requires_transitive_trust and dependency.depth > 1:
                 refusable.add(mcp_dependency.name)
+            if mcp_dependency.is_self_defined:
+                result.gated.add(mcp_dependency.name)
             if not include_dependency_mcp:
                 omissions.setdefault(
                     mcp_dependency.name, {"declaration": fingerprint, "reason": "only-apm"}
                 )
                 continue
-            if mcp_dependency.requires_transitive_trust:
-                if dependency.depth == 1:
-                    if logger is not None and mcp_dependency.is_self_defined:
-                        logger.progress(
-                            f"Trusting direct dependency MCP '{mcp_dependency.name}' "
-                            f"from '{declarer}'"
-                        )
-                elif trust_transitive_self_defined:
-                    if logger is not None:
-                        logger.progress(
-                            f"Trusting self-defined MCP server '{mcp_dependency.name}' "
-                            f"from transitive package '{declarer}' (--trust-transitive-mcp)"
-                        )
-                else:
-                    omissions.setdefault(
-                        mcp_dependency.name,
-                        {"declaration": fingerprint, "reason": "untrusted-transitive"},
-                    )
-                    message = _untrusted_transitive_mcp_message(declarer, mcp_dependency)
-                    if diagnostics is not None:
-                        diagnostics.warn(message)
-                    elif logger is not None:
-                        logger.warning(message)
-                    continue
+            # Fingerprint the authored declaration, as `apm approve` pins it,
+            # not the copy with ${CLAUDE_PLUGIN_ROOT} already expanded.
+            subject = admission.subject(
+                dependency,
+                authored_declarations.get(mcp_dependency.name, mcp_dependency),
+                approval_keys,
+            )
+            verdict = admission.admit(subject)
+            if not verdict.allowed:
+                omissions.setdefault(
+                    mcp_dependency.name,
+                    {"declaration": fingerprint, "reason": str(verdict.reason)},
+                )
+                message = parked_mcp_message(
+                    mcp_dependency,
+                    target,
+                    str(verdict.reason),
+                    layer=verdict.layer,
+                    unverifiable=subject.fingerprint is None,
+                )
+                if diagnostics is not None:
+                    diagnostics.warn(message)
+                elif logger is not None:
+                    logger.warning(message)
+                continue
+            if verdict.one_off:
+                result.one_off.append((mcp_dependency.name, target))
+            elif (
+                logger is not None
+                and mcp_dependency.is_self_defined
+                and dependency.depth == 1
+                and verdict.layer not in ("project-allow", "user-allow")
+            ):
+                logger.progress(
+                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'"
+                )
             collected.append(
                 replace(
                     mcp_dependency,
                     resolved_by=declarer,
-                    approval_keys=locked_dependency_approval_keys(dependency),
+                    approval_keys=approval_keys,
                 )
             )
             roots = direct_index.roots(package_key)
@@ -889,39 +990,60 @@ def _collect_locked_dependencies(
                 direct_roots[mcp_dependency.name] = None
             else:
                 known.update(roots)
-    brought_in_by = {
+    result.brought_in_by = {
         name: next(iter(roots)) if roots is not None and len(roots) == 1 else None
         for name, roots in direct_roots.items()
     }
-    return (
-        collected,
-        problems,
-        fingerprints,
-        omissions,
-        refusable,
-        pending_packages,
-        brought_in_by,
-    )
+    return result
 
 
-def _untrusted_transitive_mcp_message(declarer: str, dependency: MCPDependency) -> str:
-    """Return the warning for a transitive MCP declaration skipped without trust."""
-    if dependency.is_self_defined:
-        detail = "self-defined MCP server"
-        suffix = " (registry: false)"
-    else:
-        detail = "MCP server"
-        suffix = " with a custom registry or configuration overlay"
+def parked_mcp_message(
+    dependency: MCPDependency,
+    package: str,
+    reason: str,
+    *,
+    layer: str = "",
+    unverifiable: bool = False,
+) -> str:
+    """Return the warning for one dependency MCP server the trust owner parked."""
+    name = dependency.name
+    if reason == REASON_UNTRUSTED_TRANSITIVE:
+        detail = (
+            "self-defined"
+            if dependency.is_self_defined
+            else "custom registry or configuration overlay"
+        )
+        return (
+            f"Parked MCP server '{name}' from transitive package {package} "
+            f"({detail}, not approved)\n"
+            f"    Approve for everyone: apm approve {package}  |  "
+            "This run only: --trust-transitive-mcp"
+        )
+    if reason == REASON_DEFINITION_CHANGED:
+        why = (
+            "its definition could not be verified (registry unreachable or unreadable)"
+            if unverifiable
+            else "definition changed since approval"
+        )
+        return (
+            f"Parked MCP server '{name}' ({package}): {why}\n"
+            f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+        )
+    if reason == REASON_DENIED:
+        return (
+            f"Parked MCP server '{name}' ({package}): denied ({layer})\n"
+            f"    Explain: apm policy explain {package}"
+        )
     return (
-        f"Transitive package '{declarer}' declares {detail} '{dependency.name}'{suffix}. "
-        "Re-declare it in your apm.yml or use --trust-transitive-mcp."
+        f"Parked MCP server '{name}' ({package}): executables not approved\n"
+        f"    Explain: apm policy explain {package}  |  Approve: apm approve {package}"
     )
 
 
 def _collect_unlocked_compat(
     modules_root: Path,
     *,
-    trust_transitive_self_defined: bool,
+    admission: McpAdmission,
     diagnostics: DiagnosticCollector | None,
     logger: _McpViewLogger | None,
 ) -> list[MCPDependency]:
@@ -937,8 +1059,8 @@ def _collect_unlocked_compat(
         # Only collect prod MCP from packages; devDependencies.mcp are scoped to
         # the package author's own environment (#2340).
         for dependency in package.get_mcp_dependencies():
-            if dependency.requires_transitive_trust and not trust_transitive_self_defined:
-                message = _untrusted_transitive_mcp_message(declarer, dependency)
+            if dependency.requires_transitive_trust and not admission.one_off:
+                message = parked_mcp_message(dependency, declarer, REASON_UNTRUSTED_TRANSITIVE)
                 if diagnostics is not None:
                     diagnostics.warn(message)
                 elif logger is not None:
@@ -965,19 +1087,19 @@ def _collect_transitive_compat(
     if lockfile is None:
         return _collect_unlocked_compat(
             modules_root,
-            trust_transitive_self_defined=trust_private,
+            admission=McpAdmission(None, one_off=trust_private),
             diagnostics=diagnostics,
             logger=logger,
         )
     project_root = lock_path.parent if lock_path is not None else Path.cwd()
     with ExitStack() as scratch:
-        dependencies, *_ = _collect_locked_dependencies(
+        collected = _collect_locked_dependencies(
             lockfile,
             modules_root,
             project_root,
             scratch=scratch,
-            trust_transitive_self_defined=trust_private,
+            admission=McpAdmission(None, one_off=trust_private),
             diagnostics=diagnostics,
             logger=logger,
         )
-    return dependencies
+    return collected.dependencies

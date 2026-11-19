@@ -30,7 +30,7 @@ approval prompt at unpack time -- a bundle that contains a canvas
 `extension.mjs` (executable Node.js code) deploys that file when the
 `canvas` experimental flag is enabled. Only unpack bundles from sources
 you trust, and use `--dry-run` to inspect the file list first. See
-[Executable approval](/apm/reference/cli/approve/) for the gate that
+[Executable approval](../approve/) for the gate that
 governs dependency installs.
 :::
 

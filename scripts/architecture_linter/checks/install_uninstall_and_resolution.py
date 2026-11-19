@@ -114,11 +114,125 @@ _SELECTION_OWNER = "src/apm_cli/models/dependency/selection.py"
 
 
 _OWNED_SELECTION_DEFS = frozenset(
-    {"manifest_declarations_of", "parse_dependency_entry", "select_manifest_dependency"}
+    {
+        "manifest_declarations_of",
+        "parse_dependency_entry",
+        "select_manifest_dependency",
+        "select_marketplace_declaration",
+    }
 )
 
 
+# #3928: ``plugin@alias`` selects object-form declarations through the owner,
+# and every lock, checkout and edge identity of a removed declaration routes
+# through _removal_target so object-form entries resolve to their locked row.
+_UNINSTALL_ROUTES = (
+    ("_validate_uninstall_packages", "_select_marketplace_declarations", 1),
+    ("_validate_uninstall_packages", "_refuse_unsafe_marketplace_removals", 1),
+    ("_refuse_unsafe_marketplace_removals", "_removed_lock_key", 2),
+    ("_refuse_unsafe_marketplace_removals", "_locked_marketplace_rows", 1),
+    ("_locked_marketplace_rows", "lockfile.marketplace_rows", 1),
+    ("_select_marketplace_declarations", "select_marketplace_declaration", 1),
+    ("_removal_target", "_locked_marketplace_rows", 1),
+    ("_removal_targets", "_removal_target", 1),
+    ("_removed_lock_key", "_removal_target", 1),
+    ("_remove_packages_from_disk", "_removal_target", 1),
+    ("_dry_run_uninstall", "_removal_target", 1),
+    ("_dry_run_uninstall", "_removal_targets", 1),
+    ("_project_transitive_orphans", "_removal_targets", 1),
+    # #3953: read-only package selection reuses the uninstall selector.
+    ("select_installed_lock_key", "_validate_uninstall_packages", 1),
+    ("select_installed_lock_key", "_removed_lock_key", 1),
+    ("select_installed_lock_key", "manifest_dependency_entries", 1),
+)
+
+
+def _uninstall_route_findings(engine, cli, rule_id: str) -> list[Violation]:
+    findings: list[Violation] = []
+    for facts, path, routes in (
+        (engine, _UNINSTALL_ENGINE, _UNINSTALL_ROUTES),
+        (
+            cli,
+            _UNINSTALL_CLI,
+            (
+                ("uninstall", "_removed_lock_key", 1),
+                ("_prepare_dependency_sections", "manifest_dependency_entries", 1),
+            ),
+        ),
+    ):
+        for scope, callee, minimum in routes:
+            calls = [c for c in facts.calls if c.qualname == callee and c.scope == scope]
+            if len(calls) < minimum:
+                findings.append(
+                    _summary(rule_id, path, f"{scope} must route through {callee} (#3928)")
+                )
+    # Negative half: cli.py never derives a lock key from a manifest entry itself.
+    for call in cli.calls:
+        terminal = call.qualname.rsplit(".", 1)[-1]
+        if terminal in {"get_unique_key", "parse_dependency_entry", "_parse_dependency_entry"}:
+            findings.append(
+                violation(
+                    rule_id,
+                    _UNINSTALL_CLI,
+                    "uninstall lock keys for removed entries must come from _removed_lock_key",
+                    line=call.line,
+                )
+            )
+    return findings
+
+
 _UNINSTALL_CLI = "src/apm_cli/commands/uninstall/cli.py"
+
+
+_AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
+
+
+# #3953: ``apm audit PACKAGE`` must not grow a second package selector.
+_AUDIT_FORBIDDEN_SELECTION_CALLS = frozenset(
+    {
+        "_validate_uninstall_packages",
+        "get_unique_key",
+        "parse_dependency_entry",
+        "parse_marketplace_ref",
+        "select_manifest_dependency",
+        "select_marketplace_declaration",
+    }
+)
+
+
+def _audit_selection_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """``apm audit PACKAGE`` selects through the uninstall selector owner only."""
+    audit, audit_fail = _facts_for(provider, _AUDIT_COMMAND, rule_id)
+    if audit_fail:
+        return list(audit_fail)
+    findings: list[Violation] = []
+    if not any(
+        call.qualname.rsplit(".", 1)[-1] == "select_installed_lock_key"
+        and call.scope == "_require_installed_package_key"
+        for call in audit.calls
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _AUDIT_COMMAND,
+                "_require_installed_package_key must route through select_installed_lock_key",
+            )
+        )
+    for call in audit.calls:
+        terminal = call.qualname.rsplit(".", 1)[-1]
+        if terminal in _AUDIT_FORBIDDEN_SELECTION_CALLS or call.qualname.endswith(
+            ("DependencyReference.parse", "DependencyReference.parse_from_dict")
+        ):
+            findings.append(
+                violation(
+                    rule_id,
+                    _AUDIT_COMMAND,
+                    "audit package selection belongs in the uninstall selector "
+                    "(select_installed_lock_key)",
+                    line=call.line,
+                )
+            )
+    return findings
 
 
 _PACKAGE_RESOLUTION = "src/apm_cli/install/package_resolution.py"
@@ -309,6 +423,9 @@ def check_uninstall_selection(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Cross-section install reconciliation must use manifest_declarations_of()",
             )
         )
+    if not cli_fail:
+        findings.extend(_uninstall_route_findings(engine, cli, rule_id))
+    findings.extend(_audit_selection_findings(provider, rule_id))
     engine_index = provider.tree_index(_UNINSTALL_ENGINE)
     if engine_index is not None:
         findings.extend(_validator_selection_findings(provider, engine_index, rule_id))

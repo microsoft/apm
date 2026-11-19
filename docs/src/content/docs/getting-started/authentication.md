@@ -350,7 +350,7 @@ apm install dev.azure.com/myorg/myproject/myrepo
 4. If the helper is empty or rejected: an auth-failed error naming the attempted steps
 
 Every Azure DevOps operation uses this chain: install validation, clone,
-ref and tag resolution, `apm install --update` pre-flight, single-file
+ref and tag resolution, `apm update` pre-flight, single-file
 downloads, org policy discovery, and marketplace fetches. `apm marketplace
 check` uses it for an ADO `marketplace.sourceBase` too.
 
@@ -390,7 +390,7 @@ A successful bearer retry emits:
 ```
 
 This fallback applies to all ADO operations, including semver tag enumeration,
-marketplace version resolution, and `apm install --update`. If you have a stale
+marketplace version resolution, and `apm update`. If you have a stale
 `ADO_APM_PAT` but an active `az login` session, the ref lookup succeeds
 transparently via the bearer retry.
 
@@ -420,7 +420,7 @@ Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted
 
 ### Auth-failure diagnostics
 
-When authentication fails, APM prints a targeted diagnostic instead of a generic "not accessible or doesn't exist" message. The diagnostic tells you exactly which path failed and what to do next. For `--update` operations, APM verifies auth *before* modifying any files -- if the pre-flight check fails, you will see `No files were modified` and your `apm.yml`, `apm.lock.yaml`, and `apm_modules/` directory remain untouched.
+When authentication fails, APM prints a targeted diagnostic instead of a generic "not accessible or doesn't exist" message. The diagnostic tells you exactly which path failed and what to do next. For `apm update`, APM verifies auth *before* modifying any files -- if the pre-flight check fails, you will see `No files were modified` and your `apm.yml`, `apm.lock.yaml`, and `apm_modules/` directory remain untouched.
 
 ## GitLab (SaaS and self-managed)
 
@@ -499,7 +499,7 @@ dependencies:
     resolved_commit: abc123def456
 ```
 
-Subsequent `apm install` runs (without `--update`) read these fields to reconstruct the proxy URL and route auth to `PROXY_REGISTRY_TOKEN`, ensuring byte-for-byte reproducibility without needing the original env vars to be set identically.
+Subsequent `apm install` runs (not `apm update`) read these fields to reconstruct the proxy URL and route auth to `PROXY_REGISTRY_TOKEN`, ensuring byte-for-byte reproducibility without needing the original env vars to be set identically.
 
 ### Proxy-only enforcement
 

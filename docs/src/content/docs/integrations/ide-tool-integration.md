@@ -15,7 +15,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 
 | Target               | Marker / signal                     | Notes                                  |
 |----------------------|--------------------------------------|----------------------------------------|
-| VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
+| Copilot (VS Code, CLI) | `.github/copilot-instructions.md`  | Instructions, prompts, agents, skills, hooks, MCP; `vscode` is a deprecated alias |
 | Claude Code          | `.claude/`                           | Rules, skills, agents, commands, hooks, MCP |
 | Grok Build           | `.grok/`                             | Rules, agents, commands, skills        |
 | Cursor               | `.cursor/`                           | Rules, agents, commands, skills, hooks, MCP |
@@ -91,7 +91,7 @@ Or pin in `apm.yml` and rerun install.
 
 ### Remove a target
 
-1. Edit `apm.yml` to drop the target from `target:`.
+1. Edit `apm.yml` to drop the target from `targets:`.
 2. `apm install` to remove APM-managed files for the dropped target.
 3. `apm compile` to refresh compiled context files.
 
@@ -112,7 +112,7 @@ MCP servers declared by the root project under `dependencies.mcp:` or
 Dependency packages contribute only `dependencies.mcp`; their
 `devDependencies.mcp` entries stay in the package author's environment.
 
-- `.mcp.json` at the repo root (Copilot CLI and VS Code Copilot; also Claude Code when `.claude/` exists)
+- `.mcp.json` at the repo root (Copilot CLI and VS Code's Copilot harness; also Claude Code when `.claude/` exists; Claude ignores Copilot's `tools` allow-list). VS Code's deprecated Local mode reads `.vscode/mcp.json`, which APM no longer writes.
 - `.cursor/mcp.json` (Cursor)
 - `.codex/config.toml` (Codex)
 - `.agents/mcp_config.json` (Antigravity)
@@ -137,10 +137,11 @@ steering frontmatter (`inclusion: fileMatch`); unscoped instructions become
 `inclusion: always`. Agents are deployed to `.kiro/agents/<relative-stem>.md`
 for Kiro IDE/CLI v3; identity derives from the relative path. Only
 `description`, `model`, and `tools` are emitted -- `name` and unknown
-frontmatter fields are stripped. Tools are permission-bearing: APM fails
-closed if any value outside the Kiro-approved capability set is present
-(`read`, `write`, `shell`, `web`, `subagent`, `knowledge`, `context`,
-`todo_list`, `@mcp`, `@builtin`, `*`). Skills are copied verbatim to
+frontmatter fields are stripped. Tools are permission-bearing: an agent
+whose `tools` holds anything other than a Kiro tool selector (category tag,
+built-in tool ID, `@server`, `@server/tool`, `subagent/<agent>`, `@builtin`,
+`@mcp`, `*`) is
+skipped with a warning; other agents still deploy. Skills are copied verbatim to
 `.kiro/skills/`, hooks become one JSON file per hook action in `.kiro/hooks/`,
 and MCP servers are written to `.kiro/settings/mcp.json` or
 `~/.kiro/settings/mcp.json` for `--global`.
@@ -170,6 +171,9 @@ Notes and limits:
   global config directory. It is therefore considered for MCP configuration in
   every project once the plugin directory exists. This signal does not select a
   file-primitive profile; use `--target intellij` explicitly.
+- **Not a manifest target.** `apm.yml` cannot record `intellij`, so `apm init`
+  and installs that would create `apm.yml` refuse it. Declare `copilot` in
+  `targets:`; once `apm.yml` exists, `--target intellij` writes JetBrains MCP config.
 - **Composed targets stay exact.** `--target intellij,claude` writes the
   JetBrains and Claude MCP configs. `--target all,intellij` adds JetBrains to
   the normal `all` target set; plain `all` excludes it.

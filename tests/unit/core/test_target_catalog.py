@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.apm_yml import CANONICAL_TARGETS
 from apm_cli.core.target_catalog import (
+    DEPRECATED_TARGET_ALIASES,
     TARGET_CAPABILITIES,
     TargetCapability,
     _build_target_catalog,
@@ -316,6 +317,8 @@ def test_every_accepted_value_is_advertised_and_parses() -> None:
             assert value in help_fragment
             with pytest.warns(Warning) if value == "agents" else nullcontext():
                 assert parse_target_field(value) is not None
+        for alias, target in DEPRECATED_TARGET_ALIASES.items():
+            assert f"'{alias}' is a deprecated alias of '{target}'." in help_fragment
 
 
 @pytest.mark.parametrize("command", COMMANDS)

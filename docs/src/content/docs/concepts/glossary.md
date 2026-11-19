@@ -22,7 +22,7 @@ Source: `src/apm_cli/deps/lockfile.py`.
 ### apm.yml
 
 The package manifest. A YAML file at the package root that declares
-`name`, `version`, `dependencies`, `scripts`, `targets` / `target`, and metadata. Both
+`name`, `version`, `dependencies`, `scripts`, `targets` (singular `target` is deprecated), and metadata. Both
 the unit of authoring and the unit of consumption -- a directory becomes
 an APM package the moment it has an `apm.yml`.
 
@@ -253,10 +253,10 @@ Source: `src/apm_cli/models/apm_package.py`,
 
 ### target
 
-The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
+The `targets:` field in `apm.yml` (singular `target:` is deprecated). Names which harnesses the package
 compiles for (`copilot`, `claude`, `grok-build`, `cursor`, `codex`, `gemini`,
 `antigravity`, `opencode`, `windsurf`, `kiro`, `hermes`, `grok-bot`, or
-`agent-skills`). `all` is a CLI `--target` value only. Drives which integrator runs and
+`agent-skills`; `vscode` is a deprecated alias of `copilot`). `all` is a CLI `--target` value only. Drives which integrator runs and
 which directories receive output during `apm install` and `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the
@@ -284,8 +284,9 @@ Source: `src/apm_cli/install/context.py`,
 The install-time consent step before APM writes a new MCP server config
 to disk. Required because an MCP server pulled in transitively by a deep
 dependency can introduce a new outbound integration the user did not
-explicitly request. Today this is enforced via `--trust-transitive-mcp`
-opt-in plus `apm-policy.yml` allow-listing; an interactive prompt is on
+explicitly request. Today this is enforced via `apm approve` pins in
+`apm.yml` (or a one-run `--trust-transitive-mcp`) plus `apm-policy.yml`
+allow-listing; an interactive prompt is on
 the Promise 2 roadmap.
 
 Source: `src/apm_cli/install/mcp/`,

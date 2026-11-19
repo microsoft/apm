@@ -54,7 +54,7 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 | `--global`, `-g` | off | Refresh user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the current project (mirrors `apm install -g`). |
 | `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
-| `--trust-transitive-mcp` | off | Trust self-defined MCP servers declared by transitive packages for this run, as with `apm install`. Servers recorded in `apm.lock.yaml` are not trusted again without it. |
+| `--trust-transitive-mcp` | off | Deploy unapproved transitive MCP servers for this run only, as with [`apm install`](../install/). Neither `apm.yml` nor `apm.lock.yaml` carries this consent; to keep a server, run [`apm approve`](../approve/) on its package. |
 | `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
 | `--legacy-skill-paths` | off | Keep refreshed skills in per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Pass it when the project was installed with `apm install --legacy-skill-paths`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
@@ -109,7 +109,9 @@ apm update
   restoration is also denied, preserve the reported backups and follow
   [recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before rerunning `apm update`; the prior package may not be active.
-- **Marketplace catalogs are revalidated.** Each catalog behind a `name` + `marketplace` dependency is fetched once per run instead of trusting the cached copy. If it cannot be verified, the update fails with no changes. `plugin@marketplace` selects that dependency.
+- **Marketplace catalogs are revalidated.** Each catalog behind a `name` + `marketplace` dependency is fetched once per run instead of trusting the cached copy. If it cannot be verified, the update fails with no changes. `plugin@marketplace` selects that dependency. If a marketplace name now points at a different origin than `apm.lock.yaml` recorded (`source_url`), the update fails naming both origins and changes nothing.
+- **Newer lockfiles are refused.** If `apm.lock.yaml` was written by a newer APM, `apm update` exits 1 before changing anything, naming both versions and how to upgrade; see [Lockfile written by a newer APM](../../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm).
+- **Registry-only proxies.** Under `PROXY_REGISTRY_ONLY=1`, `apm update` re-resolves dependencies locked to direct VCS sources through the registry; a targeted update still requires the entries it keeps to be registry-routed.
 - **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
 - **Registry deps.** Updates stay within the manifest constraint and use the configured registry. An exact `1.7.0` or `=1.7.0` pin remains **unchanged** even when `apm outdated` reports `Latest` as `1.8.0`. To take an outside-constraint release, [select it explicitly](../outdated/#registry-reporting). Unlike read-only `outdated`, `update` can write the manifest, lockfile, modules, and deployed files.
 - **Structured plan.** Output is grouped into four sections:

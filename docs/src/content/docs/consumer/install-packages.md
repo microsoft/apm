@@ -60,8 +60,9 @@ devDependencies:
 apm install
 ```
 
-Supported reference forms: `owner/repo` shorthand (with optional
-`#ref` for a tag, branch, or commit), full HTTPS or SSH git URLs,
+Supported reference forms: `owner/repo` shorthand (on the manifest's
+[`default_host`](../../reference/manifest-schema/#315-default_host) when set,
+with optional `#ref` for a tag, branch, or commit), full HTTPS or SSH git URLs,
 virtual subdirectory paths into a monorepo, single-file references,
 and local paths starting with `./`, `../`, or `/`. For private hosts
 and tokens, see [Authentication](../authentication/).
@@ -177,12 +178,15 @@ same bytes. Commit the lockfile.
 
 :::note[Lockfile replay]
 Plain `apm install` and `apm install --frozen` replay locked commits for
-unchanged dependencies, including transitive packages, and reuse matching
+unchanged dependencies, including transitive packages and marketplace entries
+(without contacting the marketplace, except for a package whose locked MCP or
+LSP servers have no `apm_modules/` copy), and reuse matching
 [cached package content](../../reference/cli/cache/) when available. This keeps
 mutable branches and tags pinned to their recorded commits.
 
 Run [`apm update`](../../reference/cli/update/) or `apm install --refresh` to
-establish current upstream mutable refs. `apm outdated` checks the same current
+establish current upstream mutable refs; both revalidate marketplaces and fail
+rather than use stale cached data. `apm outdated` checks the same current
 state without changing the lockfile. See the
 [lockfile specification](../../reference/lockfile-spec/) for the replay
 contract.
@@ -190,10 +194,10 @@ contract.
 
 Transitive **APM** packages flow through automatically. Transitive
 **MCP servers** are gated: if a deep dependency declares a self-defined
-MCP server, a custom registry, or a configuration overlay, install skips
-it with a warning asking you to re-declare it in your top-level
-`apm.yml`. Use `--trust-transitive-mcp` to skip this in trusted
-environments. See
+MCP server, a custom registry, or a configuration overlay, install parks
+it with a warning. Re-declare it in your top-level `apm.yml`, or pin it with
+[`apm approve <pkg>`](../../reference/cli/approve/) and commit `apm.yml`.
+`--trust-transitive-mcp` deploys it for one run only. See
 [Drift and secure-by-default](../drift-and-secure-by-default/) for
 the rationale.
 
@@ -281,6 +285,9 @@ and the full flag reference, or run `apm install --help`.
 - **Drift between `apm_modules/` and the lockfile.** Run
   `apm audit --ci` locally to reproduce the CI gate; see
   [Update and refresh](../update-and-refresh/) to recover.
+- **Lockfile written by a newer APM.** APM refuses to change or replay it,
+  naming both versions. Upgrade APM; there is no override. See
+  [Lockfile written by a newer APM](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm).
 - **Skipped symlinked agent source.** `apm install` warns and skips agent
   files or directories that are symlinks (for example
   `.apm/agents -> ../agents`). Fix by shipping real files and directories in

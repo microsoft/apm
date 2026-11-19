@@ -10,6 +10,7 @@ Exit codes:
 """
 
 import dataclasses
+import functools
 import os
 import sys
 from pathlib import Path
@@ -626,7 +627,23 @@ def _audit_ci_gate(
 
     fail_fast = not no_fail_fast
 
-    materialization = resolve_ci_audit_materialization(cfg.project_root, verbose=cfg.verbose)
+    from ..policy.discovery import discover_policy_with_chain
+
+    # One policy discovery per run, shared by drift replay and policy checks.
+    fetch_policy = functools.cache(
+        lambda: discover_policy_with_chain(
+            cfg.project_root, policy_override=policy_source or None, no_cache=no_cache
+        )
+    )
+
+    def replay_policy():
+        if no_policy and not policy_source:
+            return None
+        return getattr(fetch_policy(), "policy", None)
+
+    materialization = resolve_ci_audit_materialization(
+        cfg.project_root, verbose=cfg.verbose, policy_provider=replay_policy
+    )
     prepared_replay = materialization.prepared_replay
     prepared_replay_error = materialization.error
 
@@ -637,12 +654,12 @@ def _audit_ci_gate(
         ci_mode=True,
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
+        no_policy=no_policy,
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
     # files via unmanaged-files checks. --no-policy skips discovery.
-    from ..policy.discovery import discover_policy_with_chain
     from ..policy.project_config import (
         read_project_fetch_failure_default,
     )
@@ -652,11 +669,7 @@ def _audit_ci_gate(
     # Explicit --policy and auto-discovery (mirror install path) share one
     # discovery call so --no-cache forces a fresh fetch for both (#3659).
     if (policy_source or not no_policy) and (not fail_fast or ci_result.passed):
-        fetch_result = discover_policy_with_chain(
-            cfg.project_root,
-            policy_override=policy_source or None,
-            no_cache=no_cache,
-        )
+        fetch_result = fetch_policy()
 
     # An explicit --policy <source> names the exact policy the caller wants
     # enforced, so failing to load it fails closed regardless of
@@ -802,6 +815,7 @@ def _audit_ci_gate(
                         cache_only=prepared_replay is None,
                         verbose=cfg.verbose,
                         prepared_replay=prepared_replay,
+                        policy_provider=replay_policy,
                     )
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":
@@ -970,51 +984,47 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     return bool(policy.security.audit.fail_on_drift)
 
 
-def _project_manifest_host_scope(project_root: Path, logger):
-    """Return the project apm.yml ``default_host:`` scope, or exit 1 if invalid.
+def _require_installed_package_key(
+    package: str, lockfile: LockFile | None, logger, project_root: Path
+) -> str:
+    """Return the ``apm.lock.yaml`` key for *package* or exit 1 (#3840, #3953).
 
-    No apm.yml means no override (req-mf-019, #3843).
+    Selection routes through the ``apm uninstall`` selector, offline, so every
+    form uninstall accepts (lock key, URL, ``host/owner/repo``,
+    ``owner/repo#ref``, ``plugin@marketplace``, ``_local/<name>``) resolves
+    exactly as install recorded it under the project manifest's
+    ``default_host:`` (req-mf-019, #3843). An unknown package fails so a typo
+    in a CI gate cannot pass silently.
     """
     from ..constants import APM_YML_FILENAME
     from ..models.dependency.manifest_host import manifest_host_scope_for
     from ..models.manifest_io import load_manifest
+    from .uninstall.engine import select_installed_lock_key
 
     manifest_path = project_root / APM_YML_FILENAME
     try:
-        data = load_manifest(manifest_path) if manifest_path.is_file() else None
+        manifest = load_manifest(manifest_path) if manifest_path.is_file() else None
     except Exception as e:
         logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)
     try:
-        return manifest_host_scope_for(data)
+        host_scope = manifest_host_scope_for(manifest)
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
-
-
-def _require_installed_package_key(
-    package: str, lockfile: LockFile | None, logger, project_root: Path
-) -> str:
-    """Return the ``apm.lock.yaml`` key for *package* or exit 1 (#3840).
-
-    Accepts the lockfile key itself or any form ``apm uninstall`` accepts
-    (URL, ``host/owner/repo``, ``owner/repo#ref``), normalized through the
-    dependency-selection owner under the project manifest's ``default_host:``,
-    exactly as install recorded it. An unknown package fails so a typo in a CI
-    gate cannot pass silently.
-    """
-    from ..models.dependency.selection import parse_dependency_entry
-
-    installed = lockfile.dependencies if lockfile is not None else {}
-    if package in installed:
-        return package
     try:
-        with _project_manifest_host_scope(project_root, logger):
-            key = parse_dependency_entry(package).get_unique_key()
-    except (ValueError, TypeError, AttributeError, KeyError):
-        key = None
-    if key is not None and key in installed:
-        return key
+        with host_scope:
+            selection = select_installed_lock_key(package, manifest, lockfile)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    if selection is not None:
+        if selection.installed_via:
+            logger.warning(
+                f"'{package}' is not installed from that marketplace; auditing "
+                f"{selection.key}, installed via {selection.installed_via}."
+            )
+        return selection.key
     logger.error(
         f"Package '{package}' is not installed: no matching dependency in apm.lock.yaml. "
         "Run 'apm deps list' to see installed packages."

@@ -111,7 +111,7 @@ under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
 |---|---|---|
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
-| grok-build | `.grok/rules/<name>.instructions.md` and folded into `AGENTS.md` | native rule plus compiled root context |
+| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
 | cursor | `.cursor/rules/<name>.mdc` | exactly one universal `**` (scalar, padded, or single-item list) -> `alwaysApply: true`, no `globs:`; other non-empty `applyTo`, including `**` mixed with scoped globs -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); absent, empty, or null `applyTo` -> neither key (Cursor decides from `description`); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
@@ -196,11 +196,14 @@ metadata.
 verbatim. Kiro receives `description`, `model`, and `tools` only;
 unknown frontmatter fields (including `name`) are stripped because
 Kiro derives agent identity from the deployed path, not from a `name`
-field. Tools are permission-bearing for Kiro: each value must be one
-of the supported capability tags (`read`, `write`, `shell`, `web`,
-`subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
-`*`). If any unsupported tag is present, the agent is not deployed at
-all -- APM fails closed. Kiro may warn and fall back if the specified
+field. Tools are permission-bearing for Kiro: each value must be a
+Kiro tool selector -- a category tag (`read`, `write`, `shell`, `web`,
+`subagent`), a built-in tool ID such as `read_file`, `grep_search`, or
+`web_fetch`, `@server` or `@server/tool`, `subagent/<agent>`, `@builtin`,
+`@mcp`, or `*`
+([Kiro built-in tools](https://kiro.dev/docs/tools/)). If any other
+value is present, that agent is not deployed -- APM fails closed and
+warns; other agents in the install still deploy. Kiro may warn and fall back if the specified
 `model` is unavailable; APM passes the value through without
 validation.
 
@@ -252,7 +255,7 @@ could read it. Workarounds:
 1. **Omit `model`** from the shared agent so each harness uses its own
    default or user setting (simplest).
 2. **Split by target:** one small package per harness with its own
-   `target:` and `model:`, plus a common package for shared content.
+   `targets:` and `model:`, plus a common package for shared content.
 3. **A `post-install` / `post-update`
    [lifecycle script](../../../enterprise/lifecycle-scripts/) in the
    consuming project** (its `apm.yml`, trusted with `apm lifecycle trust`;

@@ -87,9 +87,9 @@ written. Critical findings cause the command to exit non-zero. See
 | `-t, --target VALUE` | Target(s) to compile. Comma-separated. The help text derives its values from the same catalog used for validation, including `intellij`. |
 | `--all` | Compile for all canonical targets. Equivalent to `--target all` and mutually exclusive with `--target`. Preferred form. |
 
-`vscode` and `agents` are accepted as deprecated aliases for `copilot`
-and emit a one-line warning. `--target all` also emits a deprecation
-warning -- prefer `--all`.
+`vscode` is a deprecated alias for `copilot` and prints a warning naming
+the replacement; `agents` also selects `copilot`. `--target all` also emits a
+deprecation warning -- prefer `--all`.
 
 Every accepted project target is also accepted by `compile`. `grok-build`
 produces `AGENTS.md`. Targets without root-context output (`agent-skills`,
@@ -102,7 +102,7 @@ is MCP-only.
 None is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
-`apm deps update` when you want shared `.agents/skills/` output.
+`apm update` when you want shared `.agents/skills/` output.
 
 ### Output control
 
@@ -158,7 +158,7 @@ without a valid Build ID, hand-authored files, and symbolic links are retained.
 | `--with-constitution` / `--no-constitution` | Include or omit the Spec Kit `memory/constitution.md` block at the top. Default: included. When disabled, an existing block is preserved but not regenerated. |
 | `--local-only` | Ignore `apm_modules/`; compile only `.apm/` primitives. |
 | `--force-instructions` (alias: `--no-dedup`) | Include instructions in `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. |
-| `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm deps update`, not `apm compile`. |
+| `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm update`, not `apm compile`. |
 
 ### Modes
 
@@ -176,7 +176,7 @@ globally installed instruction packages -- one command, no per-tool setup.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --global` | Compile user-scope root context files from `$APM_HOME/apm_modules` (default `~/.apm/apm_modules`). Writes targets declared by `target:` or `targets:` in `$APM_HOME/apm.yml`, or every supported user-scope target when neither field is declared. `APM_HOME` selects the input metadata only; compiled files use each target's home variable or the operating-system home. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if the user-scope modules directory does not exist. |
+| `-g, --global` | Compile user-scope root context files from `$APM_HOME/apm_modules` (default `~/.apm/apm_modules`). Writes targets declared by `targets:` (or the deprecated singular `target:`) in `$APM_HOME/apm.yml`, or every supported user-scope target when neither field is declared. `APM_HOME` selects the input metadata only; compiled files use each target's home variable or the operating-system home. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if the user-scope modules directory does not exist. |
 
 `apm compile --global` is explicit. `apm install -g` does not run it; instead,
 when global instructions land on a root-context-only target, install prints a
@@ -341,7 +341,8 @@ re-runs compilation automatically.
 
 - Watched directories (when present): `.apm/`, `.github/instructions/`,
   `.github/agents/`.
-- Triggers on changes to `.md` files and `apm.yml`.
+- Triggers on changes to primitive files (such as `*.instructions.md`,
+  `*.agent.md`, `SKILL.md`) and `apm.yml`; other `.md` edits are ignored.
 - Editing `apm.yml`'s `target:` / `targets:` mid-session takes effect on
   the next file event; no need to restart the watcher. The CLI `--target`
   flag, when passed to `apm compile --watch`, still outranks `apm.yml`.

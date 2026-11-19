@@ -244,6 +244,27 @@ def project_apm_owned_hook_entries(
     return json.dumps(owned, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def apm_owned_hook_entries_remain(
+    config_path: Path, sidecar_path: Path, event_container_key: str
+) -> bool:
+    """Return whether a shared hook config still holds APM-owned entries.
+
+    Audit asks this when replay deploys no hooks to the config (#3924).
+    Unreadable or non-hook JSON is treated as user-owned.
+    """
+    from apm_cli.utils.normalization import _normalize
+
+    try:
+        owned = project_apm_owned_hook_entries(
+            _normalize(config_path.read_bytes()),
+            _normalize(sidecar_path.read_bytes()) if sidecar_path.is_file() else b"{}",
+            event_container_key,
+        )
+    except (OSError, ValueError):
+        return False
+    return owned != b"{}"
+
+
 # "::" never appears in a canonical dependency string, so no package can claim it.
 LOCAL_BUNDLE_HOOK_SOURCE_PREFIX = "local-bundle::"
 

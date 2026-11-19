@@ -206,12 +206,14 @@ A catalog on port `8443` does not change a package's default HTTPS
 port, even when both URLs share the same hostname and repository path.
 An explicit SSH source stays SSH. Lookup and installation use the same package
 identity; bare cross-repository entries retain their normal dependency defaults.
-On an enterprise (`*.ghe.com`) marketplace, a `type: github` plugin source
-with a bare cross-repository `repo:` would fall back to public `github.com`, so
+On an enterprise (`*.ghe.com`) marketplace, a plugin source of any type
+(`github`, `git-subdir`, `gitlab`, `url`) with a bare cross-repository
+`owner/repo` would fall back to public `github.com`, so
 APM refuses that entry as a dependency-confusion risk (#1326) before contacting
 the package repository or writing any file, whether it comes from the command
 line, `apm.yml`, a transitive dependency, or `apm update`. Ask the publisher to
-host-qualify the `repo:` field. `apm install` replays entries already in
+host-qualify the `repo:` field. If `GITHUB_HOST` is the marketplace host,
+bare entries resolve to that host, install, and lock it. `apm install` replays entries already in
 `apm.lock.yaml` without re-reading the catalog, so run `apm update` to re-check
 entries an older APM locked.
 Invalid URLs, unsafe subdirectory paths, and malformed `sha` values fail

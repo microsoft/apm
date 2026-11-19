@@ -114,7 +114,10 @@ apm install
 Use `APM_ADO_HOSTS` instead when you have multiple Server instances. Server
 does not use the Azure CLI bearer; a rejected PAT retries path-scoped
 `git credential fill`. ADO is always auth-required -- there is no
-anonymous fallback. See the
+anonymous fallback. When a credential comes from your Git credential helper,
+APM reports success or HTTP 401 back to it, so Git Credential Manager can
+replace an expired credential; `ADO_APM_PAT` and `az` tokens are never
+reported. See the
 [full Azure DevOps flow](../../getting-started/authentication/#azure-devops).
 
 ## Bitbucket, Gitea, and any other git host

@@ -2,6 +2,7 @@
 
 import builtins
 import contextlib
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,8 +16,11 @@ from ...install.orphans import collect_orphan_candidates as _collect_orphan_cand
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
+    DependencySelection,
     DependencySelectionStatus,
+    manifest_declarations_of,
     select_manifest_dependency,
+    select_marketplace_declaration,
 )
 from ...models.dependency.selection import (
     parse_dependency_entry as _parse_dependency_entry,
@@ -43,6 +47,111 @@ def _is_marketplace_ref(package: str) -> bool:
     from ...marketplace.resolver import parse_marketplace_ref
 
     return parse_marketplace_ref(package) is not None
+
+
+def _removal_target(dep_entry: object, lockfile: LockFile | None) -> object:
+    """Return what removing a manifest declaration acts on: lock row, checkout, edges.
+
+    An object-form ``{name, marketplace}`` declaration is identified as
+    ``_marketplace/<alias>/<plugin>``; its lock row, ``apm_modules`` checkout
+    and transitive edges belong to the one locked row recorded for that
+    alias/plugin pair, matched case-insensitively like the selection (#3928).
+    With no such row the entry is returned unchanged (nothing was locked); an
+    ambiguous pair is refused earlier by
+    :func:`_refuse_unsafe_marketplace_removals`.
+    """
+    rows = _locked_marketplace_rows(dep_entry, lockfile)
+    return rows[0].to_dependency_ref() if len(rows) == 1 else dep_entry
+
+
+def _locked_marketplace_rows(dep_entry: object, lockfile: LockFile | None) -> list:
+    """Return the lock rows an object-form declaration's alias/plugin pair records."""
+    if lockfile is None:
+        return []
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return []
+    if not dependency.is_marketplace:
+        return []
+    return lockfile.marketplace_rows(
+        dependency.marketplace_name or "", dependency.marketplace_plugin_name or ""
+    )
+
+
+def _removal_targets(packages: list, lockfile: LockFile | None) -> list:
+    """Map removed manifest declarations to their lock and disk targets."""
+    return [_removal_target(package, lockfile) for package in packages]
+
+
+def _marketplace_declaration_label(dep_entry: object) -> str | None:
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return None
+    if not dependency.is_marketplace:
+        return None
+    return f"{dependency.marketplace_plugin_name}@{dependency.marketplace_name}"
+
+
+def _refuse_unsafe_marketplace_removals(
+    packages_to_remove: list, current_deps: list, lockfile: LockFile | None, logger
+) -> list[str]:
+    """Refuse marketplace removals that would leave package state behind (#3928).
+
+    An object-form ``{name, marketplace}`` entry whose alias/plugin pair is
+    recorded on several lock rows cannot be mapped to one package, so removing
+    it would drop the declaration but keep its lock row and files. And an
+    object-form entry plus another declaration (for example the same package's
+    Git URL) can own one locked coordinate; removing only one would delete the
+    checkout, files and lock row the survivor still needs. Both fail closed.
+    """
+    if lockfile is None or not packages_to_remove:
+        return []
+    removed = manifest_declarations_of(current_deps, packages_to_remove)
+    refused: list[str] = []
+    for entry in removed:
+        rows = _locked_marketplace_rows(entry, lockfile)
+        if len(rows) > 1:
+            label = _marketplace_declaration_label(entry)
+            logger.error(
+                f"apm.lock.yaml records {len(rows)} packages for {label}, so uninstall "
+                "cannot tell which one to remove. Nothing was changed. Run 'apm install' "
+                "to refresh apm.lock.yaml, then retry."
+            )
+            refused.append(label)
+    if refused:
+        return refused
+    removed_ids = {id(entry) for entry in removed}
+    removed_by_key = {_removed_lock_key(entry, lockfile): entry for entry in removed}
+    for survivor in current_deps:
+        if id(survivor) in removed_ids:
+            continue
+        removed_entry = removed_by_key.get(_removed_lock_key(survivor, lockfile))
+        if removed_entry is None:
+            continue
+        removed_label = _marketplace_declaration_label(removed_entry)
+        survivor_label = _marketplace_declaration_label(survivor)
+        if removed_label is None and survivor_label is None:
+            continue
+        removed_label = removed_label or _dependency_public_label(removed_entry)
+        survivor_label = survivor_label or _dependency_public_label(survivor)
+        logger.error(
+            f"{removed_label} and {survivor_label} are the same installed package, and "
+            f"{survivor_label} would stay declared in apm.yml. Remove both together: "
+            f"apm uninstall {shlex.quote(removed_label)} {shlex.quote(survivor_label)}"
+        )
+        refused.append(removed_label)
+    return refused
+
+
+def _removed_lock_key(dep_entry: object, lockfile: LockFile | None) -> str:
+    """Return the lock key a removed manifest declaration owns."""
+    target = _removal_target(dep_entry, lockfile)
+    try:
+        return _parse_dependency_entry(target).get_unique_key()
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return target if isinstance(target, str) else str(target)
 
 
 def _dependency_public_label(dep_entry: object) -> str:
@@ -445,6 +554,24 @@ def _compute_actual_orphans(
     return candidate_orphans - reachability.reachable, repairs
 
 
+def _select_marketplace_declarations(
+    marketplace_refs: set[str], current_deps: list
+) -> dict[str, DependencySelection]:
+    """Map each ``plugin@marketplace`` ref that names an object-form declaration."""
+    from ...marketplace.resolver import parse_marketplace_ref
+
+    selections: dict[str, DependencySelection] = {}
+    for package in marketplace_refs:
+        parsed = parse_marketplace_ref(package)
+        if parsed is None:
+            continue
+        plugin_name, marketplace_name, _ref = parsed
+        selection = select_marketplace_declaration(plugin_name, marketplace_name, current_deps)
+        if selection.status is not DependencySelectionStatus.NOT_FOUND:
+            selections[package] = selection
+    return selections
+
+
 def _resolve_marketplace_packages(
     packages: list[str],
     lockfile: "LockFile | None",
@@ -622,12 +749,15 @@ def _validate_uninstall_packages(
         *packages_to_remove* contains matched dep entries and
         *packages_not_found* contains unresolved or unmatched package strings.
     """
-    # Pre-resolve any marketplace refs before the main validation loop
+    # Pre-resolve any marketplace refs before the main validation loop. A ref
+    # that names an object-form ``{name, marketplace}`` declaration is selected
+    # from apm.yml directly, with no lock or registry lookup (#3928).
     mkt_refs_set = {p for p in packages if _is_marketplace_ref(p)}
+    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)
     mkt_resolved: dict[str, str | None] = {}
-    if mkt_refs_set:
+    if unresolved := mkt_refs_set - declared_selections.keys():
         mkt_resolved = _resolve_marketplace_packages(
-            list(mkt_refs_set),
+            sorted(unresolved),
             lockfile,
             logger,
             auth_resolver=auth_resolver,
@@ -650,7 +780,10 @@ def _validate_uninstall_packages(
         # so paths fall through to DependencyReference parsing on
         # every platform.
         is_local = DependencyReference.is_local_path(package)
-        if "/" not in package and not is_local:
+        selection: DependencySelection | None = declared_selections.get(package)
+        if selection is not None:
+            canonical_for_match = display_label = package
+        elif "/" not in package and not is_local:
             if package in mkt_refs_set:
                 canonical = mkt_resolved.get(package)
                 if canonical is None:
@@ -672,7 +805,8 @@ def _validate_uninstall_packages(
             canonical_for_match = package
             display_label = package
 
-        selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
+        if selection is None:
+            selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
             # Selection returns the original manifest object, including unhashable mappings.
@@ -732,7 +866,98 @@ def _validate_uninstall_packages(
                     "Run 'apm deps list' and retry with an installed package identifier."
                 )
 
+    packages_not_found.extend(
+        _refuse_unsafe_marketplace_removals(packages_to_remove, current_deps, lockfile, logger)
+    )
     return packages_to_remove, packages_not_found
+
+
+class _DiscardSelectionLogger:
+    """Drop uninstall-worded selection diagnostics; read-only callers word their own."""
+
+    verbose = False
+
+    def error(self, *_args, **_kwargs) -> None:
+        return None
+
+    def warning(self, *_args, **_kwargs) -> None:
+        return None
+
+    def progress(self, *_args, **_kwargs) -> None:
+        return None
+
+    def verbose_detail(self, *_args, **_kwargs) -> None:
+        return None
+
+
+def manifest_dependency_entries(manifest: object) -> list:
+    """Return every ``dependencies.apm`` then ``devDependencies.apm`` entry of *manifest*.
+
+    The one candidate list both ``apm uninstall`` and read-only selection hand
+    to :func:`_validate_uninstall_packages`, so they always agree (#3953).
+    """
+    entries: list = []
+    if not isinstance(manifest, dict):
+        return entries
+    for section in ("dependencies", "devDependencies"):
+        block = manifest.get(section)
+        apm_entries = block.get("apm") if isinstance(block, dict) else None
+        if isinstance(apm_entries, list):
+            entries.extend(apm_entries)
+    return entries
+
+
+@dataclass(frozen=True)
+class InstalledLockSelection:
+    """The lock row a read-only identifier selects.
+
+    ``installed_via`` names the marketplace the row was installed from when a
+    ``plugin@marketplace`` identifier matched it through uninstall's
+    provenance-mismatch fallback, so the caller can say so instead of
+    auditing a different marketplace's plugin silently.
+    """
+
+    key: str
+    installed_via: str | None = None
+
+
+def select_installed_lock_key(
+    package: str, manifest: object, lockfile: "LockFile | None"
+) -> InstalledLockSelection | None:
+    """Select the ``apm.lock.yaml`` row the installed package *package* names (#3953).
+
+    Read-only commands such as ``apm audit PACKAGE`` select through the uninstall
+    selector, so every identifier ``apm uninstall`` accepts (``owner/repo``, a
+    URL, ``plugin@marketplace``, the ``_local/<name>`` key ``apm deps list``
+    prints, a declared local path) maps to the lock row a removal would act on.
+    Selection is offline: the marketplace registry is never consulted. A lock
+    key, or an identifier that normalizes to one, also selects a locked
+    transitive package apm.yml does not declare. Callers enter the manifest's
+    ``default_host`` scope first. Returns ``None`` when nothing installed matches.
+    """
+    from ...marketplace.resolver import parse_marketplace_ref
+
+    installed = lockfile.dependencies if lockfile is not None else {}
+    if package in installed:
+        return InstalledLockSelection(key=package)
+    selected, _refused = _validate_uninstall_packages(
+        [package],
+        manifest_dependency_entries(manifest),
+        _DiscardSelectionLogger(),
+        lockfile,
+        dry_run=True,
+        log_matches=False,
+    )
+    for candidate in [*selected, package]:
+        key = _removed_lock_key(candidate, lockfile)
+        if key not in installed:
+            continue
+        parsed = parse_marketplace_ref(package)
+        via = installed[key].discovered_via
+        if parsed is not None and via and via.casefold() != parsed[1].casefold():
+            return InstalledLockSelection(key=key, installed_via=via)
+        return InstalledLockSelection(key=key)
+    return None
 
 
 def _dry_run_uninstall(
@@ -742,6 +967,7 @@ def _dry_run_uninstall(
     apm_yml_path=None,
     *,
     surviving_dependencies=None,
+    lockfile=None,
 ):
     """Show what would be removed without making changes.
 
@@ -753,12 +979,16 @@ def _dry_run_uninstall(
     reachability rescue (see ``_compute_actual_orphans``) is exercised
     for every real ``--dry-run`` invocation.
     """
+    if lockfile is None:
+        from ...deps.lockfile import get_lockfile_path
+
+        lockfile = LockFile.read(get_lockfile_path(Path(".")))
     logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)
         logger.progress(f"  - {package_label} from apm.yml")
         try:
-            dep_ref = _parse_dependency_entry(pkg)
+            dep_ref = _parse_dependency_entry(_removal_target(pkg, lockfile))
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (ValueError, TypeError, AttributeError, KeyError):
             pkg_str = pkg if isinstance(pkg, str) else str(pkg)
@@ -777,12 +1007,10 @@ def _dry_run_uninstall(
             else:
                 logger.progress(f"  - {package_label} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path
-
-    lockfile_path = get_lockfile_path(Path("."))
-    lockfile = LockFile.read(lockfile_path)
     if lockfile:
-        candidates, removed_parents = _collect_orphan_candidates(lockfile, packages_to_remove)
+        candidates, removed_parents = _collect_orphan_candidates(
+            lockfile, _removal_targets(packages_to_remove, lockfile)
+        )
         actual_orphans, _resolved_by_repairs = _compute_actual_orphans(
             lockfile,
             candidates,
@@ -810,6 +1038,7 @@ def _remove_packages_from_disk(
     *,
     staged_refreshes=None,
     refreshed_survivor_keys=None,
+    lockfile=None,
 ):
     """Remove direct packages, stopping on failure before ownership is released."""
     removed = 0
@@ -824,7 +1053,7 @@ def _remove_packages_from_disk(
         for package in packages_to_remove:
             package_label = _dependency_public_label(package)
             try:
-                dep_ref = _parse_dependency_entry(package)
+                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))
                 package_path = dep_ref.get_install_path(apm_modules_dir)
             except PathTraversalError as e:
                 logger.error(f"Refusing to remove {package_label}: {e}")
@@ -1014,7 +1243,9 @@ def _project_transitive_orphans(
     if not lockfile or not apm_modules_dir.exists():
         return builtins.frozenset(), {}
 
-    orphans, removed_repo_urls = _collect_orphan_candidates(lockfile, packages_to_remove)
+    orphans, removed_repo_urls = _collect_orphan_candidates(
+        lockfile, _removal_targets(packages_to_remove, lockfile)
+    )
     if not orphans:
         return builtins.frozenset(), {}
 
@@ -1242,7 +1473,7 @@ def _sync_integrations_after_uninstall(
     _allow_executables = None
     if target_survivor_plan:
         _allow_executables = resolve_project_exec_allow_map(
-            project_root, apm_package, logger=logger
+            project_root, apm_package, user_scope=user_scope, logger=logger
         )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
@@ -1565,13 +1796,14 @@ def _cleanup_stale_mcp(
     if not managed_servers:
         return
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.security.trust import McpAdmission
 
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission.admit_all(),
     )
     # Uninstall never admits a server: only previously managed servers survive.
     new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers

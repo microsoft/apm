@@ -36,7 +36,6 @@ from apm_cli.security.executables import (
     _is_fully_approved,
     build_approval_key,
     filter_lsp_by_allow_executables,
-    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
     local_bundle_approval_key,
@@ -693,7 +692,7 @@ class TestSaveUserExecutablesAtomic:
 
 
 # ---------------------------------------------------------------------------
-# filter_mcp_by_allow_executables (fail-closed under v1 deny-wins)
+# filter_lsp_by_allow_executables (fail-closed under v1 deny-wins)
 # ---------------------------------------------------------------------------
 
 
@@ -724,51 +723,6 @@ class _RecordingLogger:
 
     def warning(self, message: str, *args, **kwargs) -> None:
         self.warnings.append(message)
-
-
-class TestFilterMcpFailClosed:
-    """Self-defined MCP servers from dependencies follow their package's decision."""
-
-    @staticmethod
-    def _dep(name, *, owner=None, keys=(), self_defined=True):
-        dep = _FakeMcpDep(name, resolved_by=owner, approval_keys=keys)
-        dep.is_self_defined = self_defined
-        return dep
-
-    def test_none_gate_passes_all(self) -> None:
-        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
-        assert logger.warnings == []
-
-    def test_unapproved_package_server_filtered_out(self) -> None:
-        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, {}, logger) == []
-        assert logger.warnings
-
-    def test_approved_package_passes_regardless_of_server_name(self) -> None:
-        deps = [self._dep("srv", owner="o/a", keys=("o/a",))]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger)
-        assert result == deps
-
-    def test_server_name_matching_an_approved_key_is_not_enough(self) -> None:
-        deps = [self._dep("o/a", owner="o/b", keys=("o/b",))]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
-
-    def test_package_server_without_lock_identity_is_fail_closed(self) -> None:
-        deps = [self._dep("a", owner="o/a", keys=())]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
-        assert logger.warnings
-
-    def test_root_and_registry_servers_pass(self) -> None:
-        root = self._dep("root-srv")
-        registry = self._dep("io.github.x/y", owner="o/a", keys=("o/a",), self_defined=False)
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables([root, registry], {}, logger) == [root, registry]
 
 
 class TestFilterLspFailClosed:
@@ -975,6 +929,24 @@ class TestDenyIdentitySpellings:
         kwargs = {"project_deny": deny} if layer == "project" else {"user_deny": deny}
         ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_deny_ignores_the_port_and_grants_do_not(self) -> None:
+        """#3927: denies cover every port of a package; a grant names one server."""
+        from apm_cli.security.executables import canonical_exec_identity, resolve_exec_decision
+
+        assert canonical_exec_identity("https://github.com:8443/Evil/Pkg.git") == "evil/pkg"
+        ported = "github.com:8443/acme/tool"
+        ctx = self._ctx(project_allow={"acme/tool": {"hooks": True}})
+        assert resolve_exec_decision(ctx, "acme/tool", "hooks").allowed is True
+        assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
+        allow = {ported: {"hooks": True}}
+        for ctx in (
+            self._ctx(org_deny=["acme/tool"], project_allow=allow),
+            self._ctx(org_deny=["github.com:7999/acme/*"], project_allow=allow),
+            self._ctx(project_allow=allow, project_deny={"acme/tool": {"hooks": True}}),
+        ):
+            assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
 
     def test_content_bound_keys_stay_exact(self) -> None:
         from apm_cli.security.executables import canonical_exec_identity

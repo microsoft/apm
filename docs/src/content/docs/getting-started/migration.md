@@ -149,6 +149,10 @@ skill collection layout reference.
 
 :::note[Deprecated]
 `--target agents` is deprecated and maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` for GitHub Copilot deployment, or `--target agent-skills` for cross-client `.agents/skills/` deployment. `vscode` (in `apm.yml` or on the CLI) is a deprecated alias of `copilot` and selects exactly what `copilot` selects. Both aliases will be removed in a future release.
+
+The singular `target:` key is deprecated too. The warning prints the `targets:` value that deploys the same files, for example `Replace 'target: vscode,claude' with 'targets: [copilot, claude]'.` Delete `compilation.target`; APM ignores it.
+
+Copilot project MCP servers now live in root `.mcp.json`, shared with Claude Code, instead of `.github/mcp.json` or `.vscode/mcp.json`. Run `apm install` and commit the result. See [MCP servers](../../consumer/install-mcp-servers/).
 :::
 
 ## Skill routing convergence
@@ -156,7 +160,7 @@ skill collection layout reference.
 :::caution[Behavior change]
 Skills for **Copilot, Cursor, OpenCode, Codex, Gemini, and Windsurf** now deploy to `.agents/skills/` by default instead of per-client directories (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). This matches the `.agents/` discovery path documented by those clients and eliminates redundant copies when targeting multiple clients.
 
-**Claude and Kiro are unchanged** - their skills continue to deploy to `.claude/skills/` and `.kiro/skills/`.
+**Claude, Kiro, and Grok Build are unchanged** - their skills continue to deploy to `.claude/skills/`, `.kiro/skills/`, and `.grok/skills/`.
 
 To restore the previous per-client layout, pass `--legacy-skill-paths` to any command, or set the `APM_LEGACY_SKILL_PATHS=1` environment variable.
 :::

@@ -29,6 +29,8 @@ resolved last time. On install, APM reconciles the two:
   pruned (orphan cleanup).
 - A dependency whose `apm.yml` ref changed (e.g. you bumped a tag) is
   re-resolved; the new `resolved_commit` is written to the lockfile.
+- A lockfile written by a newer APM is refused, naming both versions
+  and how to upgrade.
 
 The lockfile is regenerated from the resolution result on every
 install, so the on-disk lockfile cannot drift away from the manifest
@@ -104,8 +106,9 @@ configuration:
 What these checks do **not** cover, by design:
 
 - Hidden Unicode inside primitive content (a prompt that displays as
-  one thing and parses as another). That is the `apm audit` scan
-  described below.
+  one thing and parses as another). Install's separate pre-deploy scan
+  blocks critical findings; the `apm audit` scan described below reports
+  and strips them.
 - Org policy (allow-listed sources, forbidden primitives, scope
   restrictions). Policy enforcement is an enterprise concern; see
   [Security model](../../enterprise/security/)
@@ -174,5 +177,5 @@ For the full flag set, see [CLI audit](../../reference/cli/audit/).
 | Hidden-Unicode finding from `apm audit` | A primitive file contains invisible characters | `apm audit --strip` to remove them, then re-audit |
 
 None of these require disabling a check. The escape hatches
-(`--update`, `--no-drift`) exist for narrow cases and always require
-an explicit flag.
+(`apm update <pkg>`, `apm audit --no-drift`) exist for narrow cases and
+always require an explicit command or flag.

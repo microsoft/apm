@@ -114,7 +114,9 @@ canonical targets validator will reject them).
 
 ## copilot
 
-GitHub Copilot (CLI and IDE).
+GitHub Copilot (CLI and IDE). `vscode` is a deprecated alias that selects
+`copilot`; replace it in `apm.yml` and `--target`. VS Code's deprecated Local
+mode no longer gets MCP servers; use the Copilot harness.
 
 - **Detection.** `.github/copilot-instructions.md`.
 - **Deploy directory.** `.github/` at project scope; `~/.copilot/` at user scope
@@ -129,6 +131,8 @@ GitHub Copilot (CLI and IDE).
   - skills: `.agents/skills/<name>/SKILL.md` at project scope and
     `~/.agents/skills/<name>/SKILL.md` at user scope
   - hooks: `.github/hooks/<name>.json`
+  - mcp: root `.mcp.json` (project, shared with Claude Code, which ignores
+    Copilot `tools` allow-lists) or `~/.copilot/mcp-config.json` (user)
   - generated: `.github/copilot-instructions.md` (compile output, project scope only)
 - **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
   `instructions` deploy individually under `~/.copilot/instructions/`, mirroring
@@ -204,6 +208,8 @@ OpenAI Codex CLI.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.codex/hooks.json`
 - **Compile output.** `AGENTS.md` only. Per-file instructions are not installed for Codex.
+- **Plugin manifest.** For `targets: [codex]`, `apm pack` writes
+  `.codex-plugin/plugin.json`; see [`apm pack`](../cli/pack/).
 
 ## gemini
 
@@ -275,13 +281,16 @@ Kiro IDE and CLI V3 target layout.
   - agents: `.kiro/agents/<relative-stem>.md` -- identity derives from the
     relative path. Only `description`, `model`, and `tools` frontmatter are
     emitted; `name` and unknown fields are stripped. Tools are
-    permission-bearing: APM fails closed (no partial write) if any tool
-    value is outside the approved set (`read`, `write`, `shell`, `web`,
-    `subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
-    `*`). Kiro may warn and fall back if the specified `model` is
+    permission-bearing: APM fails closed for that agent (no partial write,
+    a warning names the value) if any tool value is not a Kiro tool
+    selector: category tags `read`, `write`, `shell`, `web`, `subagent`;
+    built-in tool IDs such as `read_file`, `grep_search`, `web_fetch`,
+    `execute_bash`, `invoke_sub_agent`; `@server` or `@server/tool`;
+    `subagent/<agent>`; `@builtin`, `@mcp`, `*`. Other agents in the install still deploy.
+    Kiro may warn and fall back if the specified `model` is
     unavailable; APM passes model values through without validation.
-    Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
-    (accessed 2026-08-03).
+    Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)
+    (accessed 2026-11-19).
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
   - prompts: `.kiro/prompts/<name>.md` (project) or `~/.kiro/prompts/<name>.md` (user).
@@ -323,6 +332,10 @@ GitHub Copilot for JetBrains IDEs.
 - **Scope.** MCP configuration is user scope only. File primitives use the
   project or user scope selected for the Copilot profile. IntelliJ does not
   participate in plain `all` expansion.
+- **Selection.** `--target intellij` writes JetBrains MCP config once
+  `apm.yml` exists. `targets:` rejects it, and a command that would create
+  `apm.yml` (`apm init --target intellij`, or a first `apm install --target
+  intellij`) refuses before writing. Record `copilot` for JetBrains projects.
 
 ## agent-skills
 

@@ -1724,7 +1724,7 @@ class HookIntegrator(BaseIntegrator):
         project_root: Path,
         excluded_targets,
     ) -> HookTargetReconcileStats:
-        """Remove this package's merged hooks from newly excluded targets."""
+        """Remove this package's merged hooks from targets it no longer deploys to (#3924)."""
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
@@ -1988,7 +1988,9 @@ class HookIntegrator(BaseIntegrator):
         )
         allow_map = None
         if survivor_plan:
-            allow_map = resolve_project_exec_allow_map(project_root, apm_package)
+            allow_map = resolve_project_exec_allow_map(
+                project_root, apm_package, user_scope=user_scope
+            )
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(

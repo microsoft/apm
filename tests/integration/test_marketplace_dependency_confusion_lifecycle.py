@@ -1,13 +1,17 @@
 """Real-CLI #1326 dependency-confusion refusal on every marketplace install path (#3913).
 
 An enterprise (``*.ghe.com``) marketplace, registered over SSH and served by a
-local Git fixture, lists a plugin whose dict source has a bare cross-repo
-``repo: acme/tools``. The bare form falls back to public ``github.com``, where
-the test stages a repository under that exact name. Every path that turns the
-entry into a dependency -- ``apm install NAME@MARKETPLACE``, an ``apm.yml``
-entry (with or without a version range), a transitive declaration and ``apm
-update`` -- must refuse it before any write or package fetch. A host-qualified
-``repo: github.com/acme/tools`` entry still installs.
+local Git fixture, lists plugins whose dict sources (``type: github``,
+``type: git-subdir`` and ``type: url``, #3937) have a bare cross-repo
+``acme/tools`` locator. The bare form falls back to public ``github.com``,
+where the test stages a repository under that exact name. Every path that
+turns the entry into a dependency -- ``apm install NAME@MARKETPLACE``, an
+``apm.yml`` entry (with or without a version range), a transitive declaration
+and ``apm update`` -- must refuse it before any write or Git request to that
+repository (a ``GIT_TRACE`` log is the tripwire). A host-qualified
+``repo: github.com/acme/tools`` entry and an in-marketplace ``git-subdir``
+entry still install, as do in-marketplace ``repository:``/``url:`` synonyms
+and a bare entry when ``GITHUB_HOST`` is the marketplace host (#3945).
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import dump_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
@@ -34,9 +38,17 @@ pytestmark = [
 
 _MARKETPLACE = "corp-mkt"
 _CATALOG_REMOTE = "ssh://git@corp.ghe.com/corp/marketplace"
+_CATALOG_HTTPS = "https://corp.ghe.com/corp/marketplace"
 _BARE = "shared-tool"
 _QUALIFIED = "public-tool"
+_SUBDIR = "plugins/x"
+# Cross-repo plugin names by dict source type; bare and host-qualified pairs.
+_BARE_BY_TYPE = {"github": _BARE, "git-subdir": "shared-subdir-tool", "url": "shared-url-tool"}
+_QUALIFIED_BY_TYPE = {"github": _QUALIFIED, "git-subdir": "public-subdir-tool"}
+_IN_MARKETPLACE = "internal-subdir-tool"
+_IN_MARKETPLACE_SYNONYMS = ("internal-repository-tool", "internal-url-subdir-tool")
 _ATTACKER_REMOTE = "https://github.com/acme/tools"
+_ENTERPRISE_REMOTE = "https://corp.ghe.com/acme/tools"
 _TARGET = "copilot"
 _FLAGS = ("--target", _TARGET, "--parallel-downloads", "0")
 _REFUSAL = "refused (dependency-confusion risk #1326)"
@@ -49,11 +61,32 @@ class _World:
     runner: ApmLifecycleRunner
     repositories: LocalGitRepositoryFactory
     catalog: LocalGitRepository
+    package: LocalGitRepository
+    trace: Path
 
     def publish(self, bare_repo: str) -> None:
+        subdir = {"type": "git-subdir", "subdir": _SUBDIR}
         plugins = [
             {"name": _BARE, "source": {"type": "github", "repo": bare_repo}},
             {"name": _QUALIFIED, "source": {"type": "github", "repo": "github.com/acme/tools"}},
+            {"name": _BARE_BY_TYPE["git-subdir"], "source": {**subdir, "repo": "acme/tools"}},
+            {"name": _BARE_BY_TYPE["url"], "source": {"type": "url", "url": "acme/tools"}},
+            {
+                "name": _QUALIFIED_BY_TYPE["git-subdir"],
+                "source": {**subdir, "repo": "github.com/acme/tools"},
+            },
+            {
+                "name": _IN_MARKETPLACE,
+                "source": {"type": "git-subdir", "repo": "corp/marketplace", "subdir": "plugins/y"},
+            },
+            {
+                "name": _IN_MARKETPLACE_SYNONYMS[0],
+                "source": {"type": "github", "repository": "corp/marketplace", "path": "plugins/y"},
+            },
+            {
+                "name": _IN_MARKETPLACE_SYNONYMS[1],
+                "source": {"type": "git-subdir", "url": "corp/marketplace", "subdir": "plugins/y"},
+            },
         ]
         (self.catalog.worktree / "marketplace.json").write_text(
             json.dumps({"name": _MARKETPLACE, "owner": {"name": "Corp"}, "plugins": plugins}),
@@ -79,6 +112,24 @@ class _World:
             env=self.env,
         )
 
+    def locked_host(self, plugin: str) -> str:
+        """Return the ``host`` recorded in ``apm.lock.yaml`` for marketplace *plugin*."""
+        lock = load_yaml(self.root / "apm.lock.yaml") or {}
+        rows = [
+            row
+            for row in lock.get("dependencies", [])
+            if row.get("marketplace_plugin_name") == plugin
+        ]
+        assert len(rows) == 1, rows
+        return rows[0].get("host", "")
+
+    def contacted_package(self) -> bool:
+        """True when any Git process logged in ``trace`` named the staged repository."""
+        if not self.trace.exists():
+            return False
+        log = self.trace.read_text(encoding="utf-8", errors="replace")
+        return _ATTACKER_REMOTE in log or str(self.package.origin.resolve()) in log
+
 
 def _with_ssh_rewrite(env: dict[str, str], repository: LocalGitRepository) -> dict[str, str]:
     """Route the SSH catalog remote to the local fixture (the harness rewrites HTTPS only)."""
@@ -90,6 +141,12 @@ def _with_ssh_rewrite(env: dict[str, str], repository: LocalGitRepository) -> di
     return env
 
 
+def _write_skill(root: Path, name: str) -> None:
+    skill = root / "skills" / name / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(f"---\nname: {name}\ndescription: staged\n---\n# {name}\n", encoding="utf-8")
+
+
 def _world(tmp_path: Path, binary: Path, *, bare_repo: str = "acme/tools") -> _World:
     isolated = IsolatedApmEnvironment.create(
         tmp_path.resolve() / "isolated", base_env=dict(os.environ)
@@ -98,18 +155,32 @@ def _world(tmp_path: Path, binary: Path, *, bare_repo: str = "acme/tools") -> _W
         isolated.repository_root, env=isolated.subprocess_env()
     )
     package = repositories.create("acme-tools")
-    skill = package.worktree / "skills" / "pwned" / "SKILL.md"
-    skill.parent.mkdir(parents=True)
-    skill.write_text("---\nname: pwned\ndescription: staged\n---\n# pwned\n", encoding="utf-8")
+    _write_skill(package.worktree, "pwned")
+    _write_skill(package.worktree / _SUBDIR, "pwned")
     repositories.tag(package, "v1.0.0", repositories.commit(package, message="stage"))
     catalog = repositories.create("corp-marketplace")
-    env = repositories.url_rewrite_subprocess_env_many(((package, _ATTACKER_REMOTE),))
+    _write_skill(catalog.worktree / "plugins" / "y", "internal")
+    enterprise = repositories.create("corp-acme-tools")
+    _write_skill(enterprise.worktree, "trusted")
+    _write_skill(enterprise.worktree / _SUBDIR, "trusted")
+    repositories.commit(enterprise, message="enterprise package")
+    env = repositories.url_rewrite_subprocess_env_many(
+        (
+            (package, _ATTACKER_REMOTE),
+            (catalog, _CATALOG_HTTPS),
+            (enterprise, _ENTERPRISE_REMOTE),
+        )
+    )
+    trace = isolated.work_root / "git-trace.log"
+    env["GIT_TRACE"] = str(trace)
     world = _World(
         root=isolated.work_root / "consumer",
         env=_with_ssh_rewrite(env, catalog),
         runner=ApmLifecycleRunner((str(binary),), timeout_seconds=120),
         repositories=repositories,
         catalog=catalog,
+        package=package,
+        trace=trace,
     )
     world.publish(bare_repo)
     world.root.mkdir(parents=True)
@@ -118,12 +189,12 @@ def _world(tmp_path: Path, binary: Path, *, bare_repo: str = "acme/tools") -> _W
     return world
 
 
-def _arrange(world: _World, path: str) -> tuple[str, ...]:
-    """Lay out the consumer for *path* and return the command that resolves the entry."""
-    entry: dict[str, object] = {"name": _BARE, "marketplace": _MARKETPLACE}
+def _arrange(world: _World, path: str, plugin: str = _BARE) -> tuple[str, ...]:
+    """Lay out the consumer for *path* and return the command that resolves *plugin*."""
+    entry: dict[str, object] = {"name": plugin, "marketplace": _MARKETPLACE}
     if path == "cli":
         world.write_manifest(world.root, [])
-        return ("install", f"{_BARE}@{_MARKETPLACE}", *_FLAGS)
+        return ("install", f"{plugin}@{_MARKETPLACE}", *_FLAGS)
     if path == "transitive":
         world.write_manifest(world.root.parent / "middle", [entry])
         world.write_manifest(world.root, ["../middle"])
@@ -138,14 +209,26 @@ def _arrange(world: _World, path: str) -> tuple[str, ...]:
     return ("install", *_FLAGS)
 
 
-@pytest.mark.parametrize("path", ["cli", "apm-yml", "apm-yml-range", "transitive", "update"])
+_PATHS = ("cli", "apm-yml", "apm-yml-range", "transitive", "update")
+
+
+@pytest.mark.parametrize(
+    ("path", "source_type"),
+    [
+        *((path, source_type) for path in _PATHS for source_type in ("git-subdir", "github")),
+        # ``type: url`` reaches the sentinel through a structured reference; the
+        # admission owner is shared, so one path proves it.
+        ("cli", "url"),
+    ],
+)
 def test_bare_cross_repo_marketplace_entry_is_refused_before_any_write(
-    tmp_path: Path, apm_binary_path: Path, path: str
+    tmp_path: Path, apm_binary_path: Path, path: str, source_type: str
 ) -> None:
     """The #1326 refusal fires on every path; nothing is fetched, written or deployed."""
     world = _world(tmp_path, apm_binary_path)
-    command = _arrange(world, path)
+    command = _arrange(world, path, _BARE_BY_TYPE[source_type])
     manifest_before = (world.root / "apm.yml").read_bytes()
+    world.trace.unlink(missing_ok=True)
 
     result = world.run(*command)
 
@@ -158,14 +241,25 @@ def test_bare_cross_repo_marketplace_entry_is_refused_before_any_write(
     assert not (world.root / "apm.lock.yaml").exists()
     assert not (world.root / "apm_modules" / "acme").exists()
     assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "a Git request reached the github.com lookalike"
 
 
-def test_host_qualified_marketplace_entry_still_installs(
-    tmp_path: Path, apm_binary_path: Path
+@pytest.mark.parametrize(
+    ("plugin", "skill"),
+    [
+        (_QUALIFIED_BY_TYPE["github"], "pwned"),
+        (_QUALIFIED_BY_TYPE["git-subdir"], "pwned"),
+        (_IN_MARKETPLACE, "internal"),
+        (_IN_MARKETPLACE_SYNONYMS[0], "internal"),
+        (_IN_MARKETPLACE_SYNONYMS[1], "internal"),
+    ],
+)
+def test_host_qualified_or_in_marketplace_entry_still_installs(
+    tmp_path: Path, apm_binary_path: Path, plugin: str, skill: str
 ) -> None:
-    """The documented escape hatch is not refused on the resolver path."""
+    """The documented escape hatch and in-marketplace sources are not refused."""
     world = _world(tmp_path, apm_binary_path)
-    world.write_manifest(world.root, [{"name": _QUALIFIED, "marketplace": _MARKETPLACE}])
+    world.write_manifest(world.root, [{"name": plugin, "marketplace": _MARKETPLACE}])
 
     result = world.run("install", *_FLAGS)
 
@@ -173,7 +267,63 @@ def test_host_qualified_marketplace_entry_still_installs(
     assert result.returncode == 0, output
     assert _REFUSAL not in output
     assert (world.root / "apm.lock.yaml").exists()
-    assert list(world.root.rglob("pwned/SKILL.md"))
+    assert list(world.root.rglob(f"{skill}/SKILL.md"))
+    # Positive control for the refusal test's tripwire: a real fetch is logged.
+    assert world.contacted_package() is (skill == "pwned")
+    if skill == "internal":
+        # In-marketplace entries resolve to the enterprise host (#1285, #3945).
+        assert world.locked_host(plugin) == "corp.ghe.com"
+
+
+@pytest.mark.parametrize("source_type", ["git-subdir", "github"])
+def test_bare_entry_is_admitted_when_github_host_is_the_marketplace_host(
+    tmp_path: Path, apm_binary_path: Path, source_type: str
+) -> None:
+    """With ``GITHUB_HOST`` set to the marketplace host, bare means that host (#3945)."""
+    world = _world(tmp_path, apm_binary_path)
+    world.env["GITHUB_HOST"] = "corp.ghe.com"
+    entry = {"name": _BARE_BY_TYPE[source_type], "marketplace": _MARKETPLACE}
+    world.write_manifest(world.root, [entry])
+    world.trace.unlink(missing_ok=True)
+
+    result = world.run("install", *_FLAGS)
+
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert result.returncode == 0, output
+    assert _REFUSAL not in output
+    assert list(world.root.rglob("trusted/SKILL.md"))
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "a Git request reached the github.com lookalike"
+    assert world.locked_host(entry["name"]) == "corp.ghe.com"
+
+    # The lock pins the enterprise host: replaying without GITHUB_HOST stays there.
+    del world.env["GITHUB_HOST"]
+    world.trace.unlink(missing_ok=True)
+    again = world.run("install", *_FLAGS)
+
+    output = " ".join(f"{again.stdout}\n{again.stderr}".split())
+    assert again.returncode == 0, output
+    assert world.locked_host(entry["name"]) == "corp.ghe.com"
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "lock replay reached the github.com lookalike"
+
+
+def test_bare_entry_is_still_refused_when_github_host_is_another_host(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``GITHUB_HOST`` naming a different host does not admit the bare entry (#3945)."""
+    world = _world(tmp_path, apm_binary_path)
+    world.env["GITHUB_HOST"] = "other.ghe.com"
+    command = _arrange(world, "cli", _BARE_BY_TYPE["git-subdir"])
+    world.trace.unlink(missing_ok=True)
+
+    result = world.run(*command)
+
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert result.returncode != 0, output
+    assert _REFUSAL in output, output
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package()
 
 
 def test_apm_update_re_admits_an_entry_locked_before_its_catalog_turned_ambiguous(

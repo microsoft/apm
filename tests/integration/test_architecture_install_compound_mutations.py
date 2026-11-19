@@ -759,11 +759,11 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
             "        prepared_replay.modules_root\n"
             "        if prepared_replay is not None\n"
             "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
+            "        # Consent is re-evaluated from apm.yml and org policy, never from the\n",
             "        prepared_replay.project_root\n"
             "        if prepared_replay is not None\n"
             "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
+            "        # Consent is re-evaluated from apm.yml and org policy, never from the\n",
         ),
     ),
     CompoundMutation(
@@ -832,6 +832,42 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "uninstall-object-form-selection-owner",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)",
+            "    declared_selections = {}",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-removal-target",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))",
+            "                dep_ref = _parse_dependency_entry(package)",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-shared-coordinate",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    packages_not_found.extend(\n        _refuse_unsafe_marketplace_removals(",
+            "    packages_not_found.extend(\n        list(",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-lock-key",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "                key = _removed_lock_key(pkg, lockfile)",
+            "                key = _parse_dependency_entry(pkg).get_unique_key()",
+        ),
+    ),
+    CompoundMutation(
         "uninstall-duplicate-owner",
         UNINSTALL_RULE,
         "src/apm_cli/commands/uninstall/cli.py",
@@ -890,6 +926,42 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         UNINSTALL_RULE,
         "src/apm_cli/commands/uninstall/cli.py",
         append="\n\ndef _first_section(package, dev_deps):\n    return package in dev_deps\n",
+    ),
+    CompoundMutation(
+        "audit-package-selection-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "        selection = select_installed_lock_key(package, manifest, lockfile)",
+            "        selection = None",
+        ),
+    ),
+    CompoundMutation(
+        "audit-package-second-selector",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        append=(
+            "\n\ndef _lock_key_for(package):\n"
+            "    return parse_dependency_entry(package).get_unique_key()\n"
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-uninstall-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    selected, _refused = _validate_uninstall_packages(",
+            "    selected, _refused = _validate_uninstall_packages_disabled(",
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-shared-candidates",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "    return had_dev_section, prod_deps, dev_deps, manifest_dependency_entries(data)",
+            "    return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]",
+        ),
     ),
     *(
         CompoundMutation(

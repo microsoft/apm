@@ -40,8 +40,8 @@ targets](../primitives-and-targets/) for what each target receives.
 
 **Common surprises**
 
-- Re-running `apm init` in a directory that already has `apm.yml` warns and asks before overwriting it; `-y` overwrites without asking.
-- `targets:` must contain at least one target. Omit the field (or leave legacy `target:` blank) when you want auto-detection at compile time.
+- Re-running `apm init` in a directory that already has `apm.yml` warns and asks before overwriting it; `-y` overwrites without asking. Existing targets carry over, with deprecated singular `target:` rewritten to `targets:`.
+- `targets:` must contain at least one target. Omit the field when you want auto-detection at compile time.
 
 **Read more:** [`apm init` reference](/apm/reference/cli/init/), [package anatomy](/apm/concepts/package-anatomy/).
 
@@ -72,7 +72,7 @@ After narrowing `targets:`, run `apm install` to reconcile obsolete target outpu
 **Common surprises**
 
 - The scan is not optional in normal operation. If you need to land an install with a known critical finding (for example, an upstream package you cannot patch yet), use `--force` and document the exception.
-- Transitive MCP servers are gated behind explicit trust. If a deep dependency declares a new MCP server, re-declare it in your top-level `apm.yml` or use `--trust-transitive-mcp` in trusted environments.
+- Transitive MCP servers are gated behind explicit trust. If a deep dependency declares a new MCP server, re-declare it in your top-level `apm.yml` or pin it with `apm approve <pkg>`; `--trust-transitive-mcp` deploys it for one run only.
 
 **Read more:** [`apm install` reference](/apm/reference/cli/install/), [security](/apm/enterprise/security/), [policy reference](/apm/enterprise/policy-reference/).
 

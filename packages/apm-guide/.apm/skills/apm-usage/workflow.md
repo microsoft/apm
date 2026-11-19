@@ -21,7 +21,7 @@ apm install microsoft/apm-sample-package#v1.0.0
 apm compile
 
 # 5. Commit and share
-git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/ .grok/ AGENTS.md
+git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/ .grok/ .mcp.json AGENTS.md
 git commit -m "Add APM dependencies"
 ```
 
@@ -44,7 +44,7 @@ devDependencies:                           # optional -- excluded from bundles
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:                               # optional
-  target:      <enum>                      # copilot|claude|grok-build|codex|opencode|all (or list)
+  target:      <enum>                      # deprecated and ignored -- delete; use top-level targets:
   strategy:    <enum>                      # distributed|single-file
   output:      <string>                    # custom output path
   chatmode:    <string>                    # chatmode to prepend
@@ -99,7 +99,7 @@ aliases; experimental targets such as `grok-cloud` cannot be stored in
 | `apm.yml` | Yes | Manifest -- declares dependencies |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
 | `.apm/` | Yes | Local primitives (instructions, agents, etc.) |
-| Target-owned directories such as `.github/`, `.claude/`, `.grok/`, and `.agents/` | Yes | Deployed agent files |
+| Target-owned directories such as `.github/`, `.claude/`, `.grok/`, and `.agents/`, plus root `.mcp.json` | Yes | Deployed agent files and project MCP config |
 | `AGENTS.md` | Yes | Compiled root context for agents-family targets |
 | `apm_modules/` | **No** | Installed dependencies -- gitignored automatically; restored by `apm install` |
 

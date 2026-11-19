@@ -320,7 +320,7 @@ On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not vi
 
 **Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
 
-**Marketplace entries replay their lock row.** A `{name, marketplace}` dependency names no repository in `apm.yml`; once locked, install takes its `repo_url`, `host` and `resolved_commit` from `apm.lock.yaml` without asking the catalog. A lock diff can therefore change where it comes from while `apm.yml` stays unchanged, so review those rows too. Org policy still checks the replayed source, and `apm update` resolves the catalog again.
+**Marketplace entries replay their lock row.** A `{name, marketplace}` dependency names no repository in `apm.yml`; once locked, install takes its `repo_url`, `host` and `resolved_commit` from `apm.lock.yaml` without asking the catalog. A lock diff can therefore change where it comes from while `apm.yml` stays unchanged, so review those rows too. Org policy still checks the replayed source, and `apm update` resolves the catalog again. The lock row also records the marketplace's origin (its repository or `marketplace.json` URL), so `apm update` fails, naming both, if the alias now points at a different origin. Rows written before origins were recorded, local marketplaces, and a move to another path in the same repository are not checked.
 
 See the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity) for field details.
 
@@ -459,6 +459,17 @@ across targets.
 | **Grok Build** | `.grok/commands/*.md` | Deployed when `.grok/` exists. |
 | **Windsurf** | `.windsurf/workflows/*.md` | Deployed when `.windsurf/` exists. |
 
+## Agent tool capability gate (Kiro)
+
+Kiro agent `tools` are permission-bearing. An agent that declares a value
+outside the [approved Kiro tool selectors](../../reference/targets-matrix/)
+fails closed: APM writes zero bytes for it, does not adopt an existing
+copy, and does not record it in `apm.lock.yaml` (a previously deployed copy
+is removed on reinstall). The gate is per agent and non-fatal: other agents
+still deploy, `apm install` prints a warning naming the value, and the
+command exits 0. Pipelines that need a hard failure should check install
+output for the warning.
+
 ## Executable trust gate
 
 When the executable trust gate is enabled, APM blocks unapproved executable
@@ -503,6 +514,21 @@ to `recommend`. Local bundle hook, MCP, LSP, and canvas approvals are narrower: 
 prints an exact `executables.allow` key containing the bundle's SHA-256 content
 digest, so another bundle that claims the same package name cannot inherit that
 consent.
+
+### Content-pinned approvals
+
+`apm approve` pins each dependency hook file and self-defined MCP server to a
+SHA-256 fingerprint of what runs: the MCP command, args, env, URL, headers and
+related fields, or the hook document plus the scripts it references. When an
+approved definition changes upstream, install parks it as `definition-changed`
+until someone reviews and re-approves it. Org, user, and project deny win
+over every grant, including pins and the one-off `--trust-transitive-mcp`
+flag, for self-defined MCP servers, hooks, and transitive MCP servers that need
+trust. A hook's run-time downloads (`npx`, `curl`) and indirectly
+loaded code are not covered. Legacy `hooks: true` / `mcp: true` grants still
+deploy any content and warn on every install. See
+[Pinned approvals](../../reference/cli/approve/#pinned-approvals) for the
+fingerprint inputs and admission order.
 
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
@@ -549,12 +575,13 @@ MCP servers declared by your direct dependencies (packages listed in your `apm.y
 
 ### Transitive dependencies
 
-Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Registry-resolved servers declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
+Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Plain registry references declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
 
-To allow transitive self-defined MCP servers, you must either:
+The same applies to a transitive registry reference that sets its own `registry:` URL or a configuration overlay. To allow such a server:
 
 - **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
-- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to opt in for that run. The lockfile records which servers were written; it does not carry this consent to later runs.
+- **Approve it:** `apm approve <pkg>` pins the server's definition in `apm.yml`; commit it to share. A type-level `mcp: true` does not admit a transitive server.
+- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to deploy it for that run only. The flag is not saved, and `apm audit --ci` fails a lockfile that admitted a server `apm.yml` does not approve.
 
 ## Token handling
 
@@ -605,6 +632,7 @@ See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-
 | Version substitution | Malicious version replaces legitimate one | Lock file pins exact commit SHA; content hash detects post-download tampering |
 | Post-install scripts | Arbitrary code runs after install | Dependency packages cannot run install scripts; only [lifecycle scripts](../lifecycle-scripts/) from policy, user, or explicitly trusted project sources run |
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
+| Dependency confusion | Bare `owner/repo` resolves on an unintended host | Bare shorthand uses the declaring manifest's default host (its `default_host`, else `GITHUB_HOST`, else `github.com`), so a dependency's `apm.yml` decides where its own bare deps resolve; write `host/owner/repo` for other hosts and enforce hosts with [host-qualified](../policy-reference/#host-qualified-patterns) allow patterns. The same `owner/repo` from two hosts in one install fails before download, naming both; `*.ghe.com` marketplaces refuse bare cross-repo sources |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
 | Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
@@ -620,10 +648,10 @@ For an org standardizing on APM:
 - Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
 - Treat insecure transport as a separate CI control. `apm-policy.yml` has no
   dedicated `allow_insecure` field: `dependencies.allow` and
-  `dependencies.deny` match scheme-blind, host-blind canonical package identities
-  (for example `owner/repo`, not `github.com/owner/repo`). Policy patterns cannot
-  restrict host identity and cannot distinguish `http://` from `https://` for the
-  same package path. Reject committed
+  `dependencies.deny` can name a host (see
+  [Host-qualified patterns](../policy-reference/#host-qualified-patterns)) but
+  match scheme-blind, so they cannot distinguish `http://` from `https://` for
+  the same package. Reject committed
   `allow_insecure: true` entries and prohibit `--allow-insecure` and
   `--allow-insecure-host` in standard CI; review both explicit gates for any
   air-gapped exception. `registry_source.allow_non_registry` is a separate

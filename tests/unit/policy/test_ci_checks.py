@@ -2294,15 +2294,16 @@ def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -
         derived_lock,
         modules_root,
         *,
-        trust_transitive_self_defined,
+        admission,
         diagnostics=None,
+        **_options,
     ):
         calls.append(
             (
                 derived_root,
                 derived_lock,
                 modules_root,
-                trust_transitive_self_defined,
+                admission.one_off,
                 diagnostics,
             )
         )
@@ -2318,7 +2319,8 @@ def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -
     result = _check_config_consistency(manifest, lock)
 
     assert result.passed
-    assert calls == [(manifest, lock, tmp_path / "apm_modules", True, None)]
+    # Audit re-evaluates consent: it never grants the one-off transitive trust.
+    assert calls == [(manifest, lock, tmp_path / "apm_modules", False, None)]
 
 
 def test_mcp_config_consistency_has_no_package_manifest_traversal() -> None:

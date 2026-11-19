@@ -17,7 +17,7 @@ apm pack [OPTIONS]
 
 - `dependencies:` mapping present -> a bundle (directory by default, or archive with `--archive`; see `--archive-format`). An explicit empty mapping (`dependencies: {}`) produces a bundle of the package's local content; an omitted or null `dependencies:` value does not.
 - `marketplace:` block present -> selected marketplace artifacts.
-- `target:` (or `targets:`) field containing `claude`, `copilot`, or `codex` -> ecosystem-specific `plugin.json` files.
+- `targets:` (or deprecated singular `target:`) field containing `claude`, `copilot`, or `codex` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
 The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` and `--format apm` require the project lockfile.
@@ -250,7 +250,7 @@ fail before writing with uncertifiable remote metadata. `--check-clean` also fai
 
 ### Plugin manifests
 
-Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target-and-targets) (or `targets:`) field containing `claude`, `copilot`, or `codex`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory, a Copilot plugin path, or a Codex marketplace entry with no hand-editing.
+Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`targets:`](../../manifest-schema/#36-target-and-targets) (or deprecated singular `target:`) field containing `claude`, `copilot`, or `codex`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory, a Copilot plugin path, or a Codex marketplace entry with no hand-editing.
 
 | Ecosystem | Output path |
 |---|---|
@@ -309,6 +309,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 ## Behavior
 
 - **Lockfile-attested dependencies.** Dependency content is packed exclusively from lockfile `deployed_files` and verified against `deployed_file_hashes`; the `apm_modules` cache is never packed. If a dependency has cached primitives but no `deployed_files`, `apm pack` errors and tells you to run `apm install`.
+- **Newer lockfiles fail closed.** If `apm.lock.yaml` was written by a newer APM, `apm pack` refuses before writing, names both versions, and tells you how to upgrade.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
 - **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
 - **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.

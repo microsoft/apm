@@ -56,21 +56,33 @@ ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm
     [
         pytest.param(
             "src/apm_cli/install/drift.py",
-            "replay_modules_root(scratch_root, user_scope=config.user_scope)",
-            "private_modules_root(scratch_root, user_scope=config.user_scope)",
+            "deployment_modules_dir, deployment_frame = replay_deployment_frame(",
+            "deployment_modules_dir, deployment_frame = private_deployment_frame(",
             id="replay-call",
         ),
         pytest.param(
             "src/apm_cli/install/audit_target_roots.py",
-            "InstallScope.USER if user_scope else InstallScope.PROJECT",
-            "InstallScope.PROJECT",
-            id="user-scope",
+            "return get_modules_dir(scope), (scratch_root, get_deploy_root(scope))",
+            'return scratch_root / ".apm" / APM_MODULES_DIR, (scratch_root, scratch_root)',
+            id="user-scope-live-frame",
         ),
         pytest.param(
-            "src/apm_cli/install/audit_target_roots.py",
-            "get_modules_dir(scope).relative_to(get_deploy_root(scope))",
-            'Path("apm_modules")',
-            id="canonical-layout",
+            "src/apm_cli/install/drift.py",
+            "package_info.deployment_frame = deployment_frame",
+            "package_info.deployment_frame = None",
+            id="replay-live-link-frame",
+        ),
+        pytest.param(
+            "src/apm_cli/compilation/link_resolver.py",
+            "target_location = live_root / target_location.relative_to(replay_root)",
+            "target_location = target_location",
+            id="resolver-live-link-frame",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "replay_path=install_path,",
+            "replay_path=package_info.deployment_package_root,",
+            id="native-replay-image",
         ),
         pytest.param(
             "src/apm_cli/install/drift.py",
@@ -170,6 +182,58 @@ def test_deploy_selection_cannot_bypass_owner(path: str, original: str, replacem
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(original) == 1
     rule = "install-deployment-effective-selection"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/models/dependency/identity.py",
+            "    if port:\n",
+            "    if False:\n",
+            id="builder-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/reference.py",
+            "            host=self.host,\n            port=self.port,\n"
+            '            source="local" if self.is_local else self.source,\n',
+            "            host=self.host,\n"
+            '            source="local" if self.is_local else self.source,\n',
+            id="reference-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "            host=self.host,\n            port=self.port,\n"
+            "            source=self.source,\n",
+            "            host=self.host,\n            source=self.source,\n",
+            id="lockfile-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/security/executables.py",
+            "canonical = build_port_blind_dependency_key(reference)",
+            "canonical = reference.get_unique_key()",
+            id="deny-keeps-port",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/identity.py",
+            "return replace(dependency, port=None).get_unique_key()",
+            "return dependency.get_unique_key()",
+            id="port-blind-key-keeps-port",
+        ),
+    ],
+)
+def test_dependency_unique_key_cannot_drop_the_port(
+    path: str, original: str, replacement: str
+) -> None:
+    """Both identity models key a non-default port through one builder (#3927)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "contracts-tooling-dependency-identity"
     report = run_selected_rules(
         ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
     )
@@ -702,6 +766,65 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/drift.py",
+            "allow_executables=gated_allow_map.for_dependency(lock_dep),",
+            "allow_executables=None,",
+        ),
+        (
+            "src/apm_cli/install/exec_gate.py",
+            "self._map = effective_exec_map_for_project(",
+            "self._map = build_effective_exec_map(",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
+            "gated_allow_map = ReplayExecAllowMap(project_root)",
+        ),
+        (
+            "src/apm_cli/install/audit_replay.py",
+            "policy_provider=policy_provider,",
+            "policy_provider=None,",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "policy_provider=policy_provider,",
+            "policy_provider=None,",
+        ),
+        (
+            "src/apm_cli/commands/audit.py",
+            "policy_provider=replay_policy",
+            "policy_provider=None",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "reconcile_package_targets(package_info, project_root, targets),",
+            "{},",
+        ),
+        (
+            "src/apm_cli/install/exec_gate.py",
+            "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+            "denied = frozenset(unapproved)",
+        ),
+    ],
+)
+def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, new: str) -> None:
+    """Gated hooks retire at install and stay withheld in audit replay (#3924)."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) >= 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.
@@ -1165,6 +1288,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Uninstall re-integrates survivors without their effective skill selection.",
     ),
     MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/security/executables.py",
+        old="return entry.get(exec_type, False) is True",
+        new="return bool(entry.get(exec_type, False))",
+        intent="A pinned item map reads as a type-level grant for any content.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
@@ -1262,6 +1393,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="snapshot = APMPackage.from_mapping(",
         new="snapshot = APMPackage.from_apm_yml(",
         intent="Acquired metadata reuses the process-lifetime manifest path cache.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-mcp-admission",
+        rule_id="install-deployment-mcp-admission",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old="verdict = admission.admit(subject)",
+        new="verdict = McpAdmission.admit_all().admit(subject)",
+        intent="The MCP view admits every dependency server whatever the command's consent.",
     ),
     MutationCase(
         guard_id="install-deployment-mcp-native-comparison",
@@ -1466,6 +1605,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def reconcile_target_deployed_files(",
         new="def reconcile_target_deployed_files_disabled(",
         intent="Target-scoped deployed-file contraction loses its canonical owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-trust-fingerprint",
+        rule_id="install-deployment-trust-fingerprint",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old="from collections.abc import Callable, Mapping\n",
+        new="import hashlib\nfrom collections.abc import Callable, Mapping\n",
+        intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-reachability",

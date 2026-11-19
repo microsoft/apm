@@ -41,7 +41,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 105 | 1 | 0 | 0 |
+| Consumer | 106 | 8 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 21 | 0 | 0 | 0 |
 
@@ -104,6 +104,13 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-mf-025](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-025) | MUST | 4.3.2 | consumer | active | 45 | - |
 | [req-mf-026](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-026) | MUST | 4.5 | consumer | active | 3 | - |
 | [req-mf-027](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-027) | MUST | 4.5 | consumer | active | 2 | - |
+| [req-na-001](docs/src/content/docs/specs/openapm-v0.1.md#req-na-001) | MUST | 8.5.11 | consumer | skipped | 1 | - |
+| [req-na-002](docs/src/content/docs/specs/openapm-v0.1.md#req-na-002) | MUST | 8.5.11 | consumer | skipped | 1 | - |
+| [req-na-003](docs/src/content/docs/specs/openapm-v0.1.md#req-na-003) | MUST | 8.5.11 | consumer | skipped | 1 | - |
+| [req-na-004](docs/src/content/docs/specs/openapm-v0.1.md#req-na-004) | MUST | 8.5.11 | consumer | skipped | 1 | tests/fixtures/spec-conformance/native-activation/req-na-004.json |
+| [req-na-005](docs/src/content/docs/specs/openapm-v0.1.md#req-na-005) | MUST | 8.5.11 | consumer | skipped | 1 | - |
+| [req-na-006](docs/src/content/docs/specs/openapm-v0.1.md#req-na-006) | MUST | 8.5.11 | consumer | skipped | 1 | - |
+| [req-na-007](docs/src/content/docs/specs/openapm-v0.1.md#req-na-007) | MUST | 8.5.11 | consumer | skipped | 1 | - |
 | [req-pl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-001) | MUST | 6.1 | governance | active | 1 | - |
 | [req-pl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-002) | MUST | 6.2 | governance | active | 1 | - |
 | [req-pl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-003) | MUST | 6.4 | governance | active | 1 | - |
@@ -164,13 +171,14 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 1 | - |
 | [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | active | 1 | - |
 | [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | active | 1 | - |
-| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 2 | - |
+| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 6 | - |
 | [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | active | 1 | - |
-| [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 1 | - |
+| [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 2 | - |
 | [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | active | 1 | - |
 | [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 | - |
 | [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | active | 1 | - |
 | [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 8 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
+| [req-sc-016](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-016) | MUST | 10.13 | consumer | active | 5 | - |
 | [req-tg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-001) | MUST | 8.4 | consumer | active | 1 | - |
 | [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 4 | - |
 | [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | active | 1 | - |
@@ -179,7 +187,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 8 | - |
-| [req-tg-009](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-009) | MUST | 8.5.1 | consumer | active | 1 | - |
+| [req-tg-009](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-009) | MUST | 8.5.1 | consumer | active | 2 | - |
 | [req-tg-010](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-010) | MUST | 8.5.4 | consumer | active | 1 | - |
 | [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 4 | - |
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 7 | - |
@@ -200,4 +208,25 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 
 ### req-mf-016
 - Path-shape negative test requires apm_cli's path-policy loader to be invokable from the test harness; the JSON Schema currently models `path` as a free-form string. Tracked as a follow-up: tighten the schema to forbid leading `/` and document the absolute-path rejection in the schema additionalProperties.
+
+### req-na-001
+- No APM route natively activates under sec.8.5.11 yet; the conformance statement disclosure lands with the Claude user-scope route (#3290).
+
+### req-na-002
+- Deployment to .agents/plugins is implemented by the Claude user-scope route (#3290) and the project-scope route for Claude and Copilot (#3921).
+
+### req-na-003
+- Settings-only declaration is implemented by the Claude user-scope route (#3290) and the shared settings writer for Copilot (#3921).
+
+### req-na-004
+- Lock-derived settings ownership is implemented by the Claude user-scope route (#3290), which runs against the native-activation/req-na-004.json oracle.
+
+### req-na-005
+- Content-bound enablement is implemented by the Claude user-scope route (#3290); this profile does not adopt proposed amendment 0.1.64.
+
+### req-na-006
+- The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011.
+
+### req-na-007
+- Per-scope marketplace naming is implemented by the Claude user-scope route (#3290) and the project-scope route (#3921).
 

@@ -790,6 +790,105 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-na-001",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_native_activation_requires_documented_part_a_qualification"
+      ],
+      "waivers": [
+        "No APM route natively activates under sec.8.5.11 yet; the conformance statement disclosure lands with the Claude user-scope route (#3290)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-002",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lockfile_drives_deployment_of_the_approved_plugin_root"
+      ],
+      "waivers": [
+        "Deployment to .agents/plugins is implemented by the Claude user-scope route (#3290) and the project-scope route for Claude and Copilot (#3921)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-003",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_uses_only_documented_activation_entries"
+      ],
+      "waivers": [
+        "Settings-only declaration is implemented by the Claude user-scope route (#3290) and the shared settings writer for Copilot (#3921)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-004",
+      "keyword": "MUST",
+      "oracle": "tests/fixtures/spec-conformance/native-activation/req-na-004.json",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile"
+      ],
+      "waivers": [
+        "Lock-derived settings ownership is implemented by the Claude user-scope route (#3290), which runs against the native-activation/req-na-004.json oracle."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-005",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_enable_requires_content_bound_approval"
+      ],
+      "waivers": [
+        "Content-bound enablement is implemented by the Claude user-scope route (#3290); this profile does not adopt proposed amendment 0.1.64."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-006",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_unqualified_target_gets_explicit_split_install"
+      ],
+      "waivers": [
+        "The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-007",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_project_and_scope"
+      ],
+      "waivers": [
+        "Per-scope marketplace naming is implemented by the Claude user-scope route (#3290) and the project-scope route (#3921)."
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1640,10 +1739,14 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 2,
+      "test_count": 6,
       "tests": [
         "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-install-hooks]",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-mcp-admission]",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[unlisted-denied-install-hooks]",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[unlisted-denied-mcp-admission]"
       ]
     },
     {
@@ -1663,9 +1766,10 @@
       "keyword": "MUST",
       "section": "10.14",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_frozen_install_reaches_the_install_verdict"
       ]
     },
     {
@@ -1721,6 +1825,21 @@
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_fixture_oracle_covers_symlinked_content",
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_limits_scanning_and_skill_materialization",
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_requirement_covers_reintegration_and_symlinks"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-016",
+      "keyword": "MUST",
+      "section": "10.13",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_changed_definition_is_withheld_with_a_named_diagnostic",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_lockfile_state_never_grants_transitive_consent",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_organization_denial_still_wins_over_a_pin",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_per_user_pin_admits_and_the_opt_in_never_overrides_a_stale_pin",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_transitive_mcp_consent_comes_from_a_pinned_manifest_grant"
       ]
     },
     {
@@ -1840,9 +1959,10 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt"
+        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt",
+        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings"
       ]
     },
     {
@@ -1980,8 +2100,8 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 105,
-      "skipped": 1,
+      "active": 106,
+      "skipped": 8,
       "unbound": 0,
       "xfail": 0
     },
@@ -2004,5 +2124,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 140
+  "total_requirements": 148
 }
