@@ -693,8 +693,10 @@ marketplace-integrations-authoring-source
 marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-freshness
 marketplace-integrations-catalog-manifest
+marketplace-integrations-catalog-origin
 marketplace-integrations-codex-native-lifecycle
 marketplace-integrations-copilot-ownership
+marketplace-integrations-dependency-confusion
 marketplace-integrations-generated-bundle-lf-writers
 marketplace-integrations-hash-visible-lf-writers
 marketplace-integrations-legacy-skill-membership

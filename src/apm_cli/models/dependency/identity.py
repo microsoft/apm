@@ -11,8 +11,10 @@ comparison identity. It must never be used as a display or filesystem path.
 """
 
 import re
+from dataclasses import replace
 from enum import Enum
 from functools import lru_cache
+from typing import Any
 
 from ...utils.github_host import default_host, is_github_hostname
 
@@ -221,6 +223,7 @@ def build_dependency_unique_key(
     repo_url: str,
     *,
     host: str | None = None,
+    port: int | None = None,
     source: str | None = None,
     local_path: str | None = None,
     is_virtual: bool = False,
@@ -238,6 +241,10 @@ def build_dependency_unique_key(
     This deliberately uses the literal ``github.com`` default rather than
     environment-specific host overrides, so lockfile keys stay portable across
     machines with different GitHub Enterprise defaults.
+
+    A non-default *port* names a different server, so it qualifies the host
+    segment (``host:port/owner/repo``), including on github.com. Parsing has
+    already dropped scheme-default ports, so port-less keys are unchanged.
 
     Registry-proxy deps (``registry_prefix`` set, e.g. an Artifactory mirror)
     keep the bare logical key: the proxy host is a transport detail, not the
@@ -264,11 +271,24 @@ def build_dependency_unique_key(
     if registry_prefix:
         return key
 
-    host_value = (host or "").strip()
-    normalized_host = host_value.lower()
+    normalized_host = (host or "").strip().lower()
+    if port:
+        return f"{normalized_host or 'github.com'}:{port}/{key}"
     if normalized_host and normalized_host != "github.com":
         return f"{normalized_host}/{key}"
     return key
+
+
+def build_port_blind_dependency_key(dependency: Any) -> str:
+    """Return *dependency*'s unique key with any port removed.
+
+    Deny matching ignores the port, like :func:`normalize_policy_host`, so a
+    deny cannot be bypassed by naming another port; grants compare the exact
+    ported key. Lockfiles written before ports entered the key (#3927) recorded
+    parents in this form. *dependency* is a dataclass with ``port`` and
+    ``get_unique_key`` (``DependencyReference`` or ``LockedDependency``).
+    """
+    return replace(dependency, port=None).get_unique_key()
 
 
 def build_canonical_dependency_string(

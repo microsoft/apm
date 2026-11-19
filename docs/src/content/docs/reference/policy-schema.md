@@ -455,6 +455,8 @@ consent can never widen past an org deny.
 
 > **Glob scope (v1):** only `deny` supports glob patterns (it is the safety ceiling -- broad denial is safety-positive). `allow`, `recommend`, and `require` are exact-match only; widening the GRANT side with a wildcard has a larger blast radius and is deferred.
 
+> **Ports:** a dependency on a non-default port has the key `host:port/owner/repo`. `deny` ignores the port, so `acme/tool` also denies `github.com:8443/acme/tool`. `allow`, `recommend`, and `require` must name the ported key.
+
 ```yaml
 # apm-policy.yml
 executables:

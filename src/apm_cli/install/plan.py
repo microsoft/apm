@@ -104,6 +104,7 @@ def _dep_ref_key(dep: DependencyReference) -> str:
     return build_dependency_unique_key(
         getattr(dep, "repo_url", ""),
         host=getattr(dep, "host", None),
+        port=getattr(dep, "port", None),
         source="local" if getattr(dep, "is_local", False) else getattr(dep, "source", None),
         local_path=getattr(dep, "local_path", None),
         is_virtual=getattr(dep, "is_virtual", False),

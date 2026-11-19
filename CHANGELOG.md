@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - If `apm.yml` sets `default_host:`, shorthand dependencies now resolve against it; write `github.com/owner/repo` for GitHub packages. (#3865)
 - Lockfiles with diamond `skills:`/`targets:` selections fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
 - With `mcp.transport.allow` set, registry servers on a disallowed or unresolvable transport are blocked; pick `transport:` or update the policy. (#3788)
+- Dependencies on a non-default port are keyed `host:8443/owner/repo`, so same-repo ports no longer merge; re-approve their hooks and MCP servers with `apm approve`. (#3932)
 - **BREAKING:** `copilot` moves project MCP servers to root `.mcp.json`, shared with Claude Code, which ignores Copilot `tools` allow-lists; run `apm install`, review static `env:` values, and commit. (#3875)
 - The `vscode` target is deprecated as an alias of `copilot`, and VS Code's Local mode no longer gets MCP servers; use the `copilot` target and the Copilot harness. Lockfiles that recorded `vscode` still install. (#3875)
 - Singular `target:` and the ignored `compilation.target` are deprecated and warn once per run: replace `target:` with the `targets:` value its warning prints, and delete `compilation.target`. (#3801, #3875)
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
+- OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 
 ### Changed
 
@@ -36,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - After `apm deny` or a removed approval, `apm install` removes the hooks and hook scripts that package deployed earlier, and `apm audit --ci` agrees; the skip message now says the package is denied. (#PR_NUMBER)
+- Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)
+- A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
 - `apm install --frozen` passes on its first run after a lock bump: `apm_modules` copies that no longer match `apm.lock.yaml` are re-downloaded first. (#3900)
 - `apm install` on a fresh clone adopts committed skills after an `apm.yml` ref bump; hand-edited skill files still fail closed. (#3900)
 - Claude plugin MCP and LSP servers record `${CLAUDE_PLUGIN_ROOT}` portably, so `--frozen` and `audit --ci` pass in any clone; commit the one-time `apm.lock.yaml` diff. (#3900)
@@ -46,7 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <bundle>` registers a plugin bundle's hooks like a source install once its exact key is approved, and installing another package no longer removes local-bundle files. (#3897)
 - `apm approve <pkg>` on a dependency redirected by `replace:` now grants its selected source, so the next `apm install` deploys its hooks. -- by @MohammedAlkindi (#3742)
 - The same `owner/repo` from two hosts (such as `acme/tool` and `gitlab.example.com/acme/tool`) now fails before download, naming both declarations; set `alias:` on one or remove one. (#3895)
+- A Claude or Copilot `.mcp.json` conflict on a plugin MCP path now names the `${CLAUDE_PROJECT_DIR:-.}/...` path to restore, instead of calling it an `apm.yml` environment reference and asking to rotate credentials. (#3930)
 - `apm audit --ci` no longer fails `config-consistency` for MCP servers that install left out on purpose (not yet approved by the executables gate, or untrusted transitive servers). (#3893)
+- `apm install --frozen` now accepts MCP servers the executables gate left out when `apm.lock.yaml` records matching omission evidence. (#3938)
 - `apm update`: hints name it instead of `apm install --update`, it accepts `--legacy-skill-paths`, and it works under `PROXY_REGISTRY_ONLY=1` with VCS-locked lockfiles. (#3865)
 - `apm audit PACKAGE` accepts the same forms as `apm uninstall` and exits 1 when nothing matches; `apm audit --ci` shows `[x]` for failed checks. (#3865)
 - `apm install <pkg> --dry-run` no longer creates `apm.yml`, and `apm compile --target` for a target with no compile output no longer writes `CLAUDE.md` or `AGENTS.md`. (#3865)
@@ -63,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Versions and tags with leading zeros or non-ASCII digits (`v01.2.3`, `v1.2.3-01`) are no longer SemVer: resolution skips them and `require_pinned_constraint` reports them as bare branches. (#3894)
 - Starting with this release, APM refuses to change, replay, audit or pack a lockfile written by a newer APM, naming both versions and how to upgrade. (#3916)
 - `apm install --refresh`, `apm update` and `apm marketplace update` revalidate marketplace catalogs and fail rather than use stale cached data; plain installs keep the cache. (#3910)
+- `apm self-update` on Windows no longer fails in `Expand-Archive` when run from PowerShell 7; the installer also falls back to .NET zip extraction. (#3931)
 
 ## [0.36.1] - 2026-11-18
 

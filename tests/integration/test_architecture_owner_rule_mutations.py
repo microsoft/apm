@@ -181,6 +181,58 @@ def test_deploy_selection_cannot_bypass_owner(path: str, original: str, replacem
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/models/dependency/identity.py",
+            "    if port:\n",
+            "    if False:\n",
+            id="builder-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/reference.py",
+            "            host=self.host,\n            port=self.port,\n"
+            '            source="local" if self.is_local else self.source,\n',
+            "            host=self.host,\n"
+            '            source="local" if self.is_local else self.source,\n',
+            id="reference-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "            host=self.host,\n            port=self.port,\n"
+            "            source=self.source,\n",
+            "            host=self.host,\n            source=self.source,\n",
+            id="lockfile-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/security/executables.py",
+            "canonical = build_port_blind_dependency_key(reference)",
+            "canonical = reference.get_unique_key()",
+            id="deny-keeps-port",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/identity.py",
+            "return replace(dependency, port=None).get_unique_key()",
+            "return dependency.get_unique_key()",
+            id="port-blind-key-keeps-port",
+        ),
+    ],
+)
+def test_dependency_unique_key_cannot_drop_the_port(
+    path: str, original: str, replacement: str
+) -> None:
+    """Both identity models key a non-default port through one builder (#3927)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "contracts-tooling-dependency-identity"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
@@ -1555,6 +1607,19 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Catalog-only marketplace manifest materialization loses its owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-catalog-origin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old=(
+            "require_locked_catalog_origin(\n"
+            "            dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, "
+            "self._existing_lockfile\n"
+            "        )"
+        ),
+        new="None",
+        intent="A rebound marketplace alias resolves without comparing the locked catalog origin.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-codex-native-lifecycle",
         rule_id="marketplace-integrations-codex-native-lifecycle",
         path="src/apm_cli/codex_plugins/client.py",
@@ -1569,6 +1634,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def synchronize_copilot_plugins(",
         new="def synchronize_copilot_plugins_X(",
         intent="Copilot marketplace ownership loses its single synchronization owner.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-dependency-confusion",
+        rule_id="marketplace-integrations-dependency-confusion",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="        admit_marketplace_resolution(resolution)\n",
+        new="",
+        intent="apm.yml and transitive marketplace entries skip the #1326 admission.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-legacy-skill-membership",

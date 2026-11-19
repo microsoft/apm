@@ -771,6 +771,34 @@ class TestFilterMcpFailClosed:
         assert filter_mcp_by_allow_executables([root, registry], {}, logger) == [root, registry]
 
 
+class TestProjectMcpExecutablesGate:
+    """#3925: the shared install/--frozen gate resolves lazily and stays silent."""
+
+    def test_resolves_allow_map_only_for_gated_servers_and_is_silent(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from apm_cli.security import executables
+
+        calls: list[bool] = []
+
+        def resolve(*_args, **_kwargs):
+            calls.append(True)
+            return {}
+
+        gated = TestFilterMcpFailClosed._dep("a", owner="o/a", keys=("o/a",))
+        registry = TestFilterMcpFailClosed._dep(
+            "io.github.x/y", owner="o/a", keys=("o/a",), self_defined=False
+        )
+        with patch.object(executables, "resolve_project_exec_allow_map", resolve):
+            gate = executables.project_mcp_executables_gate(tmp_path, object())
+            assert gate([registry]) == [registry]
+            assert calls == []
+            assert gate([registry, gated]) == [registry]
+        assert calls == [True]
+        captured = capsys.readouterr()
+        assert "Filtered" not in captured.out + captured.err
+
+
 class TestFilterLspFailClosed:
     def test_root_lsp_passes_as_project_authored_content(self) -> None:
         deps = [_FakeMcpDep("pyright")]
@@ -975,6 +1003,24 @@ class TestDenyIdentitySpellings:
         kwargs = {"project_deny": deny} if layer == "project" else {"user_deny": deny}
         ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_deny_ignores_the_port_and_grants_do_not(self) -> None:
+        """#3927: denies cover every port of a package; a grant names one server."""
+        from apm_cli.security.executables import canonical_exec_identity, resolve_exec_decision
+
+        assert canonical_exec_identity("https://github.com:8443/Evil/Pkg.git") == "evil/pkg"
+        ported = "github.com:8443/acme/tool"
+        ctx = self._ctx(project_allow={"acme/tool": {"hooks": True}})
+        assert resolve_exec_decision(ctx, "acme/tool", "hooks").allowed is True
+        assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
+        allow = {ported: {"hooks": True}}
+        for ctx in (
+            self._ctx(org_deny=["acme/tool"], project_allow=allow),
+            self._ctx(org_deny=["github.com:7999/acme/*"], project_allow=allow),
+            self._ctx(project_allow=allow, project_deny={"acme/tool": {"hooks": True}}),
+        ):
+            assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
 
     def test_content_bound_keys_stay_exact(self) -> None:
         from apm_cli.security.executables import canonical_exec_identity
