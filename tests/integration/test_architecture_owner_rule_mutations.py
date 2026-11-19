@@ -600,7 +600,7 @@ def test_hook_sidecar_comparison_must_use_canonical_owner(path: str, old: str, n
         (
             "src/apm_cli/integration/hook_integrator.py",
             "return local_bundle_hook_source_marker(bundle_id)",
-            'return f"local-bundle/{bundle_id}"',
+            'return f"local-bundle::{bundle_id}"',
         ),
         (
             "src/apm_cli/install/local_bundle_hooks.py",

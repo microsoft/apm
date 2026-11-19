@@ -1032,7 +1032,7 @@ def _nhc_local_bundle_markers(
             provider,
             rule_id=rule_id,
             paths=_python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,)),
-            pattern=r"[\"']local-bundle/",
+            pattern=r"[\"']local-bundle::",
             message="local-bundle hook source markers must route through hook_ownership.py",
             exempt=False,
         )

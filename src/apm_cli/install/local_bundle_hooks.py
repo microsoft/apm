@@ -69,7 +69,19 @@ def integrate_local_bundle_hooks(
     hook_targets = [target for target in targets if target.supports("hooks")]
     if not hook_targets:
         return result
-    from .local_bundle_paths import bundle_slug_validation_error
+    from .local_bundle_paths import bundle_pack_files, bundle_slug_validation_error
+
+    verified_files = bundle_pack_files(bundle_info)
+    if not verified_files:
+        result.skipped = len(hook_paths)
+        _warn(
+            f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: the bundle has "
+            "no integrity manifest. Repack it with 'apm pack' to register its hooks.",
+            slug,
+            diagnostics,
+            logger,
+        )
+        return result
 
     if slug_error := bundle_slug_validation_error(slug):
         result.skipped = len(hook_paths)
@@ -92,7 +104,7 @@ def integrate_local_bundle_hooks(
     user_scope = scope == InstallScope.USER
     managed_files = _prior_bundle_claims(project_root)
     with tempfile.TemporaryDirectory(prefix="apm-bundle-hooks-") as tmp:
-        package_info = _bundle_hook_package(bundle_info, pack_files, Path(tmp) / slug, slug)
+        package_info = _bundle_hook_package(bundle_info, verified_files, Path(tmp) / slug, slug)
         integrator = HookIntegrator()
         for target in hook_targets:
             outcome = integrator.integrate_hooks_for_target(
@@ -118,16 +130,20 @@ def integrate_local_bundle_hooks(
     return result
 
 
-def _bundle_hook_package(bundle_info: Any, pack_files: dict[str, str], stage: Path, slug: str):
-    """Stage verified bundle bytes and load them as the Claude plugin they are."""
+def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage: Path, slug: str):
+    """Stage integrity-listed bundle bytes and load them as the Claude plugin they are.
+
+    Only files in ``pack.bundle_files`` are staged, and the staged copy is
+    re-verified, so hooks come only from bytes the approval key covers.
+    """
+    from ..bundle.local_bundle import verify_bundle_integrity
     from ..models.apm_package import PackageInfo
     from ..models.validation import PackageType, validate_legacy_marketplace_plugin
     from ..utils.helpers import find_plugin_json
 
     bundle_dir = Path(bundle_info.source_dir)
     stage.mkdir(parents=True)
-    manifests = ("plugin.json", ".claude-plugin/plugin.json")
-    for rel in (*pack_files, *manifests):
+    for rel in verified_files:
         validate_path_segments(rel, context="bundle hook staging path")
         src = bundle_dir / rel
         if not src.is_file() or src.is_symlink():
@@ -136,6 +152,8 @@ def _bundle_hook_package(bundle_info: Any, pack_files: dict[str, str], stage: Pa
         ensure_path_within(dest, stage)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest, follow_symlinks=False)
+    if errors := verify_bundle_integrity(stage, bundle_info.lockfile):
+        raise ValueError(f"Bundle hooks from {slug!r} changed after verification: {errors[0]}")
     validation = validate_legacy_marketplace_plugin(stage, find_plugin_json(stage))
     if validation.errors or validation.package is None:
         raise ValueError(
@@ -150,11 +168,16 @@ def _bundle_hook_package(bundle_info: Any, pack_files: dict[str, str], stage: Pa
 
 
 def _prior_bundle_claims(project_root: Path) -> set[str]:
-    """Return paths a previous local install recorded, so reinstall replaces them."""
+    """Return paths a previous bundle install recorded, so reinstall replaces them."""
+    from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..deps.lockfile import LockFile, get_lockfile_path
 
     lockfile = LockFile.read(get_lockfile_path(project_root))
-    return set(lockfile.local_deployed_files) if lockfile is not None else set()
+    if lockfile is None:
+        return set()
+    return set(
+        DeploymentLedgerCodec.local_bundle_values(DeploymentLedgerCodec.from_lockfile(lockfile))
+    )
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:

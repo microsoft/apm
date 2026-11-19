@@ -244,7 +244,8 @@ def project_apm_owned_hook_entries(
     return json.dumps(owned, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-LOCAL_BUNDLE_HOOK_SOURCE_PREFIX = "local-bundle/"
+# "::" never appears in a canonical dependency string, so no package can claim it.
+LOCAL_BUNDLE_HOOK_SOURCE_PREFIX = "local-bundle::"
 
 
 def local_bundle_hook_source_marker(bundle_id: str) -> str:

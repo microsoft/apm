@@ -36,6 +36,7 @@ from .helpers.reconciliation_scope import (
     _is_manifest_target,
     _profiles_by_name,
     _record_inactive_resolver_skip,
+    _retain_dropped,
     _scoped_known_targets_for_reconciliation,
 )
 from .presentation import surface_target_cleanup
@@ -561,35 +562,6 @@ def surviving_deployed_paths(
         if parent.as_posix() != "."
     }
     return frozenset(survivors | parents)
-
-
-def _retain_dropped(
-    files: list[str],
-    hashes: dict[str, str],
-    ledger: DeploymentLedger,
-    paths: set[str],
-    prior_hashes: dict[str, str],
-    prior_ledger: DeploymentLedger | None,
-) -> DeploymentLedger:
-    """Keep *paths* in the returned rows, hashes and ledger instead of pruning them."""
-    for path in paths:
-        if path not in files:
-            files.append(path)
-        if path in prior_hashes:
-            hashes[path] = prior_hashes[path]
-    if prior_ledger is None:
-        return ledger
-    from apm_cli.core.deployment_state import DeploymentLedger
-
-    records = dict(ledger.records)
-    records.update(
-        {
-            key: record
-            for key, record in prior_ledger.records.items()
-            if record.locator.value in paths
-        }
-    )
-    return DeploymentLedger(records=records)
 
 
 def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrapper; each knob is orthogonal

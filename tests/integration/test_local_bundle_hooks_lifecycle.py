@@ -35,7 +35,7 @@ pytestmark = [
 def _hooked_package(root: Path, name: str, matcher: str, skill: str) -> Path:
     write(
         root / "apm.yml",
-        f"name: {name}\nversion: 1.0.0\ndescription: h\nlicense: MIT\ntargets: [claude]\n"
+        f"name: {name}\nversion: 1.0.0\ndescription: h\nlicense: MIT\ntargets: [claude, copilot]\n"
         "dependencies:\n  apm: []\n",
     )
     write(root / ".apm" / "skills" / skill / "SKILL.md", skill_md(skill))
@@ -57,6 +57,18 @@ def _allow(project: Path, *keys: str) -> None:
     manifest = load_yaml(project / "apm.yml")
     manifest["executables"] = {"allow": {key: {"hooks": True} for key in keys}}
     dump_yaml(manifest, project / "apm.yml")
+
+
+def _packed_bundle(world: MarketplacePackWorld, tmp_path: Path) -> tuple[Path, Path, str]:
+    producer = _hooked_package(world.isolated.work_root / "hookpkg", "hookpkg", "Bash", "hs")
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / "out"))
+    bundle = tmp_path / "out" / "hookpkg-1.0.0"
+    info = detect_local_bundle(bundle)
+    key = local_bundle_approval_key(
+        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
+    )
+    return producer, bundle, key
 
 
 def _hook_entries(project: Path) -> dict[str, list[str]]:
@@ -92,14 +104,7 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
-    producer = _hooked_package(world.isolated.work_root / "hookpkg", "hookpkg", "Bash", "hs")
-    world.apm(producer, "install", "--no-policy")
-    world.apm(producer, "pack", "-o", str(tmp_path / "out"))
-    bundle = tmp_path / "out" / "hookpkg-1.0.0"
-    info = detect_local_bundle(bundle)
-    key = local_bundle_approval_key(
-        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
-    )
+    producer, bundle, key = _packed_bundle(world, tmp_path)
 
     # Source install of the same package: the reference registration.
     source = world.consumer("source-consumer", targets=("claude",))
@@ -120,13 +125,18 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert not (consumer / ".claude" / "hooks").exists()
     assert (consumer / ".claude" / "skills" / "hs" / "SKILL.md").is_file()
 
-    # Approved: registered through the same merge path as the source install.
+    # Approved: a dry run still writes no hook config or scripts.
     _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle), "--no-policy", "--dry-run")
+    assert not (consumer / ".claude" / "settings.json").exists()
+    assert not (consumer / ".claude" / "hooks").exists()
+
+    # Approved: registered through the same merge path as the source install.
     world.apm(consumer, "install", str(bundle), "--no-policy")
     assert _hook_entries(consumer) == _hook_entries(source)
     assert _run_hook(world, consumer, "Bash") == _run_hook(world, source, "Bash") == "hookpkg\n"
     sidecar = json.loads((consumer / ".claude" / "apm-hooks.json").read_text())
-    assert [e["_apm_source"] for e in sidecar["PreToolUse"]] == ["local-bundle/hookpkg"]
+    assert [e["_apm_source"] for e in sidecar["PreToolUse"]] == ["local-bundle::hookpkg"]
     assert list(consumer.rglob("*.sh.json")) == []
     lock = world.lock(consumer)
     scripts = [p for p in lock["local_deployed_files"] if p.endswith("/x.sh")]
@@ -148,3 +158,38 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert _run_hook(world, consumer, "Bash") == "hookpkg\n"
     assert (consumer / ".claude" / "skills" / "hs" / "SKILL.md").is_file()
     world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
+def test_bundle_hooks_register_for_copilot_and_user_scope(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer, bundle, key = _packed_bundle(world, tmp_path)
+
+    # Copilot keeps one hook file per package; the bundle's matches a source install's.
+    source = world.consumer("copilot-source", targets=("copilot",))
+    world.apm(source, "install", str(producer), "--no-policy")
+    world.apm(source, "approve", str(producer))
+    world.apm(source, "install", "--no-policy")
+    consumer = world.consumer("copilot-bundle", targets=("copilot",))
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+
+    def copilot_hooks(project: Path) -> dict[str, list[str]]:
+        (hook_file,) = (project / ".github" / "hooks").glob("*.json")
+        data = json.loads(hook_file.read_text())
+        return {event: [e["matcher"] for e in entries] for event, entries in data["hooks"].items()}
+
+    assert copilot_hooks(consumer) == copilot_hooks(source) == {"preToolUse": ["Bash"]}
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+    # User scope registers once, with a cwd-independent command.
+    home = world.isolated.home
+    (home / ".claude").mkdir(exist_ok=True)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    _allow(home / ".apm", key)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
+    assert _hook_entries(home) == {"PreToolUse": ["Bash"]}
+    assert _run_hook(world, home, "Bash") == "hookpkg\n"
