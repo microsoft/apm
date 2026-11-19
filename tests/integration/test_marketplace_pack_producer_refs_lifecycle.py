@@ -208,29 +208,3 @@ def test_pack_names_each_dropped_source_symlink(tmp_path: Path, apm_binary_path:
     assert not (bundle / "skills" / "ls" / "alias.md").exists()
     assert not (bundle / "skills" / "ls" / "guide.md").exists()
     assert "Skipped symlinked source file .apm/skills/ls/real.md" not in text
-
-
-def test_bundle_install_skips_plugin_hooks_with_a_named_warning(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """Local bundle installs never copy hooks.json raw or rename scripts to *.json."""
-    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
-    root = _linked_producer(world)
-    world.apm(root, "install", "--no-policy")
-    world.apm(root, "pack", "-o", str(tmp_path / "out"))
-    bundle = tmp_path / "out" / "linked-1.0.0"
-    assert (bundle / "hooks.json").is_file()
-    assert (bundle / "hooks" / "scripts" / "fmt.sh").is_file()
-
-    consumer = world.consumer("bundle-hooks-consumer", targets=("claude",))
-    result = world.apm(consumer, "install", str(bundle), "--no-policy")
-    text = output(result)
-    for skipped in ("hooks.json", "hooks/scripts/fmt.sh"):
-        assert f"Skipped packed bundle hook file '{skipped}'" in text, text
-    assert not (consumer / ".claude" / "hooks.json").exists()
-    assert list(consumer.rglob("*.sh.json")) == []
-    assert not (consumer / ".claude" / "hooks").exists()
-    assert (consumer / ".claude" / "skills" / "ls" / "SKILL.md").is_file()
-    lock_text = (consumer / "apm.lock.yaml").read_text()
-    assert "hooks" not in lock_text
-    world.apm(consumer, "audit", "--ci", "--no-policy")

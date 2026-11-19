@@ -221,6 +221,11 @@ only for Claude and `gamma` only for Copilot, in any declaration order.
 `apm.lock.yaml` records this as `subset_pairings`, and `--frozen` fails if the
 pairing changed.
 
+`apm_modules/` paths do not include the host, so `acme/tool` and
+`gitlab.example.com/acme/tool` (or two dependencies with the same `alias:`)
+would share `apm_modules/acme/tool`. Install fails before fetching and names
+both declarations; remove one, or set `alias:` on one of them.
+
 Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
 source identity or local `../sibling` source anchors. After upgrading an older
 aliased install, run `apm install` and review the updated lockfile; use the

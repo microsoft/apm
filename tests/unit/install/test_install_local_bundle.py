@@ -842,7 +842,8 @@ class TestLocalBundlePathRouting:
             assert not original_path.exists()
 
     @pytest.mark.parametrize("rel", ["hooks.json", "hooks/scripts/fmt.sh", "hooks/fmt.json"])
-    def test_plugin_hook_paths_are_skipped_with_a_named_warning(self, rel: str) -> None:
+    def test_plugin_hook_paths_are_left_to_the_hook_integrator(self, rel: str) -> None:
+        """Plugin hook files are never file-copied; local_bundle_hooks registers them."""
         from apm_cli.install.local_bundle_paths import (
             bundle_deploy_relative_path,
             bundle_deploy_skip_warning,
@@ -852,9 +853,7 @@ class TestLocalBundlePathRouting:
         for target in (KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]):
             prefixes = frozenset({f"{target.root_dir}/"})
             assert bundle_deploy_relative_path(rel, prefixes, prefixes, target=target) is None
-            warning = bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target)
-            assert warning is not None
-            assert f"Skipped packed bundle hook file {rel!r}" in warning
+            assert bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target) is None
 
     def test_target_rooted_hook_files_keep_routing(self) -> None:
         """Deployed-layout bundles keep their target hook files (not plugin hooks)."""
@@ -1188,3 +1187,41 @@ class TestLocalBundleCanvasTrust:
         assert not (project / ".github" / "extensions" / "widget").exists()
         # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output
+
+
+def test_bundle_without_integrity_manifest_skips_hooks(tmp_path: Path) -> None:
+    """Hooks register only from bytes ``pack.bundle_files`` covers (#3700)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_hooks import integrate_local_bundle_hooks
+
+    bundle = tmp_path / "bundle"
+    (bundle / "hooks").mkdir(parents=True)
+    (bundle / "hooks.json").write_text('{"hooks": {}}')
+    (bundle / "hooks" / "x.sh").write_text("echo x\n")
+    (bundle / "plugin.json").write_text('{"name": "b", "hooks": "./hooks.json"}')
+    info = types.SimpleNamespace(source_dir=bundle, lockfile=None)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    logger = MagicMock()
+
+    result = integrate_local_bundle_hooks(
+        info,
+        {"hooks.json": "a", "hooks/x.sh": "b"},
+        project,
+        targets=[KNOWN_TARGETS["claude"]],
+        slug="b",
+        hooks_approved=True,
+        approval_key=None,
+        force=False,
+        dry_run=False,
+        scope=InstallScope.PROJECT,
+        logger=logger,
+    )
+
+    assert (result.skipped, result.scripts) == (2, [])
+    (message,), _ = logger.warning.call_args
+    assert "no integrity manifest" in message
+    assert "apm pack" in message
+    assert not (project / ".claude" / "settings.json").exists()

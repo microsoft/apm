@@ -136,7 +136,8 @@ are preserved, with Node module type retained when needed. A `./scripts/check.py
 reference resolves the way `apm install` resolves it (hook file directory, then
 package root) and is anchored on the installed plugin root, such as
 `"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check.py"`; existing quoting is kept. No hook or package
-script is executed during packing.
+script is executed during packing. `apm install <bundle>` registers these hooks
+like a source install once the bundle's exact key is approved.
 
 Quoted filenames and split-quoted roots retain their shell meaning.
 References to selected directories, such as `cd "${CLAUDE_PLUGIN_ROOT}/.apm/skills/demo"`,
