@@ -293,6 +293,7 @@ def test_update_probe_reconciles_a_denied_row_whose_types_are_mixed(
         ("garbage_response", True),
         ("malformed", True),
         ("hash_mismatch", True),
+        ("incomplete_chain", True),
         ("raise", True),
         ("found", False),
     ],
