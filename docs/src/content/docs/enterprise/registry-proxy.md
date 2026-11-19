@@ -130,9 +130,12 @@ Build a bundle on a connected machine, carry it across, and install it.
    `security.integrity.require_hashes: true` refuses bundles without hashes.
 
 To enforce org policy on a disconnected CI runner, vendor the policy file and pass it
-explicitly. An explicit source that fails to load fails the check:
+explicitly to both steps: `apm install --policy` blocks at install
+([Enforce a policy discovery cannot reach](../apm-policy/#enforce-a-policy-discovery-cannot-reach)),
+and the audit fails when the source does not load:
 
 ```bash frame="terminal"
+apm install --policy ./vendor/apm-policy.yml
 apm audit --ci --policy ./vendor/apm-policy.yml
 ```
 

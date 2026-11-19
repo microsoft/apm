@@ -136,8 +136,32 @@ and looks for `apm-policy.yml` in these repositories, in this order. The earlies
 Prefer `.github-private`: policy rules are internal. APM recognizes self-managed
 GitLab when `GITLAB_HOST` or `APM_GITLAB_HOSTS` names it. GitLab answers 404 for a private
 project the token cannot read, so give the CI token read access to every `apm-policy`
-project in the group path. For other hosts, pass the source explicitly:
-`apm audit --ci --policy <path-or-url>`.
+project in the group path. For other hosts, pass the source explicitly; see
+[Enforce a policy discovery cannot reach](#enforce-a-policy-discovery-cannot-reach).
+
+## Enforce a policy discovery cannot reach
+
+`apm install --policy <source>` and `apm update --policy <source>` enforce a policy
+that discovery cannot reach: a plain git remote, another host, or an air-gapped
+install. The source is a local path, `owner/repo`, or an `https://` URL.
+
+```bash frame="terminal"
+apm install --policy ./vendor/apm-policy.yml        # air-gapped: no network
+apm install --policy https://policies.corp.example/apm-policy.yml
+```
+
+- **Adds, never removes.** The source combines with any discovered org policy under
+  the tighten-only merge below. It cannot re-allow what the org policy denies or lower
+  its enforcement.
+- **Unreachable sources follow `fetch_failure_default`.** `warn` (default) reports the
+  source and continues with any discovered policy; `block` fails closed.
+- **Reported.** The effective sources print at any verbosity, for example
+  `[i] Policy: org:contoso/.github + file:/repo/vendor/apm-policy.yml -- enforcement=warn`.
+- `policy.hash` pins the discovered org policy, not the explicit source. `--policy` is
+  not valid with `--global` or `--no-policy`.
+
+`apm audit --ci --policy <source>` keeps its own meaning: it audits against that one
+source instead of the discovered policy, and fails closed when the source cannot load.
 
 ## Inherit policies without loosening them
 
