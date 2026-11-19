@@ -185,7 +185,7 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
         None,
         st.just(
             NativePluginRecord(
-                "plugin", "sha256:" + "0" * 64, ("claude",), "apm-u-0a1b2c3d", "/h/.agents/plugins"
+                "plugin", "sha256:" + "0" * 64, "apm-u-0a1b2c3d", "/h/.agents/plugins"
             )
         ),
     )

@@ -95,7 +95,7 @@ def native_ownership(lockfile: Any) -> dict[str, NativeOwnership]:
             _source_pin(lockfile.dependencies[key]),
             lockfile.dependencies[key].source == "local",
         )
-        for key, record in lock_native_plugins(lockfile, HARNESS).items()
+        for key, record in lock_native_plugins(lockfile).items()
     }
 
 
@@ -340,7 +340,7 @@ def verify_claude_native_cache(*, modules_dir: Path, locked: Any, source_root: P
     from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 
     record = locked.native_plugin
-    if record is None or HARNESS not in record.harnesses:
+    if record is None:
         return
     deployed = plugins_root(get_deploy_root(InstallScope.USER)) / record.name
     for label, path in (("source", source_root), ("deployed copy", deployed)):

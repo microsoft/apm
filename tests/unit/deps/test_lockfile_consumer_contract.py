@@ -62,7 +62,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "name": "consume-contract",
     "extensions": {"x-vendor": {"k": "v"}},
     "native_plugin": NativePluginRecord(
-        "consume", f"sha256:{'a' * 64}", ("claude",), "apm-u-0a1b2c3d", "/home/u/.agents/plugins"
+        "consume", f"sha256:{'a' * 64}", "apm-u-0a1b2c3d", "/home/u/.agents/plugins"
     ),
     "replacement": None,
     "_unknown_fields": {"future_consumer_field": {"enabled": True}},

@@ -70,7 +70,6 @@ def test_malformed_native_record_fails_lock_parsing() -> None:
         "name": "alpha",
         "root": "../escape",
         "fingerprint": "sha256:" + "0" * 64,
-        "harnesses": ["claude"],
     }
     with pytest.raises(LockfileFormatError, match="native_plugin"):
         LockedDependency.from_dict(data)
@@ -102,7 +101,6 @@ class _Home:
         dependency.native_plugin = NativePluginRecord(
             name,
             fingerprint_native_claude_source(root),
-            ("claude",),
             *marketplace_binding(self.modules.parent, self.home),
         )
         self.lock.dependencies[repo] = dependency

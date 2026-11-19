@@ -399,7 +399,7 @@ class LockfileBuilder:
         for dep_key, plugin in plugins.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
-                    plugin.name, plugin.bundle_hash, ("claude",), name, path
+                    plugin.name, plugin.bundle_hash, name, path
                 )
         existing = getattr(self.ctx, "existing_lockfile", None)
         if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):

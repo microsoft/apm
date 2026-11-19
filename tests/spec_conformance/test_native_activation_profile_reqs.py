@@ -108,7 +108,6 @@ class _Home:
         dependency.native_plugin = NativePluginRecord(
             name,
             fingerprint_native_claude_source(root),
-            ("claude",),
             *marketplace_binding(self.modules.parent, self.home),
         )
         self.lock.dependencies[repo] = dependency
