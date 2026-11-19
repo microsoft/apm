@@ -765,7 +765,7 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
         (
             "src/apm_cli/install/exec_gate.py",
             "self._map = effective_exec_map_for_project(",
-            "self._map = (",
+            "self._map = build_effective_exec_map(",
         ),
         (
             "src/apm_cli/install/drift.py",
