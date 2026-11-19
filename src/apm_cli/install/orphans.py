@@ -31,6 +31,8 @@ def build_expected_install_paths(
     consistency with how packages are actually installed. Prune opts into
     recognizing existing case-equivalent paths without renaming them.
     """
+    from ..deps.reachability import locked_marketplace_form, retained_lock_keys
+
     reader = CachedMaterializationPathReader()
 
     def expected_path(dependency):
@@ -40,6 +42,11 @@ def build_expected_install_paths(
 
     expected = set()
     for dep in declared_deps:
+        if dep.is_marketplace and lockfile:
+            dep = locked_marketplace_form(dep, lockfile)
+        if dep.is_marketplace:
+            # An object-form declaration with no lock row was never materialized (#3960).
+            continue
         install_path = expected_path(dep)
         try:
             relative_path = install_path.relative_to(apm_modules_dir)
@@ -48,8 +55,6 @@ def build_expected_install_paths(
             expected.add(str(install_path))
 
     if lockfile:
-        from ..deps.reachability import retained_lock_keys
-
         retained = retained_lock_keys(
             lockfile, apm_modules_dir.parent, apm_modules_dir, list(declared_deps)
         )
