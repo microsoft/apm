@@ -93,3 +93,11 @@ class TestAuthenticationError:
         err = AuthenticationError("msg", diagnostic_context=diag)
         assert "\n" in err.diagnostic_context
         assert "ADO_APM_PAT" in err.diagnostic_context
+
+
+def test_lockfile_generator_refusal_message_stays_canonical():
+    from apm_cli.deps.lockfile_generator import LockfileGeneratorError
+    from apm_cli.install.errors import install_failure_message
+
+    error = LockfileGeneratorError("Refusing to run 'apm install' on apm.lock.yaml: x")
+    assert install_failure_message(error) == str(error)

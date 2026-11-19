@@ -374,8 +374,10 @@ def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
     Works on the composed node graph (no object construction, so no merge-key
     expansion) and therefore sees duplicate keys that a loader would silently
     collapse, in block or flow style. A ``null`` or non-scalar value is
-    ``None``. Returns ``None`` when the text is not parseable YAML and ``[]``
-    when the document is not a mapping or lacks *key*.
+    ``None``. Returns ``None`` when the text is not parseable YAML or the
+    top-level mapping uses a ``<<`` merge key (its effective keys are only
+    known after construction), and ``[]`` when the document is not a mapping
+    or lacks *key*.
     """
     try:
         node = yaml.compose(text, Loader=_BoundedSafeLoader)
@@ -385,6 +387,8 @@ def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
         return []
     values: list[str | None] = []
     for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            return None
         if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
             is_scalar = isinstance(value_node, yaml.ScalarNode)
             null = is_scalar and value_node.tag == "tag:yaml.org,2002:null"

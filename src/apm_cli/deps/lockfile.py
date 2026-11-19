@@ -153,11 +153,16 @@ def suppress_lockfile_writes() -> Iterator[list[str]]:
 
 
 def installed_apm_version() -> str:
-    """Return the running APM distribution version for lockfile metadata."""
-    try:
-        from importlib.metadata import version
+    """Return the running APM version stamped into lockfile metadata.
 
-        return version("apm-cli")
+    Delegates to :func:`apm_cli.version.get_version` (build constant, package
+    metadata, then source tree) so the stamp and the generator compatibility
+    gate always agree on which APM this is.
+    """
+    try:
+        from ..version import get_version
+
+        return get_version()
     except Exception:
         return "unknown"
 
@@ -201,7 +206,15 @@ class LockfileConflictError(LockfileFormatError):
         )
 
 
-class LockfileSymlinkError(OSError):
+class LockfileRefusal(Exception):
+    """Marker for canonical refusals to write a lockfile.
+
+    Its message is the user's next step; render sites show it verbatim
+    instead of a generic write-failure hint.
+    """
+
+
+class LockfileSymlinkError(OSError, LockfileRefusal):
     """Raised instead of replacing a symlinked lockfile with a regular file."""
 
     def __init__(self, path: Path) -> None:
@@ -232,7 +245,7 @@ def ensure_lockfile_writable(path: Path) -> None:
         raise LockfileSymlinkError(path)
     from .lockfile_generator import assert_writable
 
-    assert_writable(path, action="rewrite")
+    assert_writable(path, action="rewrite", before_mutation=False)
 
 
 def refuse_lockfile_before_mutation(

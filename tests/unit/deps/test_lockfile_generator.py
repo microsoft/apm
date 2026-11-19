@@ -108,3 +108,36 @@ def test_legacy_lockfile_is_checked_without_renaming(tmp_path, running):
         check_current_cli(tmp_path, command="apm install")
     assert legacy.exists()
     assert not (tmp_path / "apm.lock.yaml").exists()
+
+
+def test_write_backstop_refuses_unreadable_lockfile_without_claiming_atomicity(tmp_path, running):
+    path = tmp_path / "apm.lock.yaml"
+    path.write_text("lockfile_version: [unterminated\n", encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(LockfileGeneratorError) as exc:
+        LockFile(apm_version="0.25.0").write(path)
+    assert "cannot be verified" in str(exc.value)
+    assert "Nothing was changed" not in str(exc.value)
+    assert "review other files" in str(exc.value)
+    assert path.read_bytes() == before
+    # Entry gates leave unreadable lockfiles to the parser's own diagnostics.
+    assert_writable(path)
+
+
+def test_top_level_merge_key_hides_the_generator(tmp_path, running):
+    path = tmp_path / "apm.lock.yaml"
+    path.write_text('base: &b {apm_version: "9.0.0"}\n<<: *b\ndependencies: []\n')
+    with pytest.raises(LockfileGeneratorError, match="cannot be verified"):
+        LockFile(apm_version="0.25.0").write(path)
+
+
+def test_stamp_and_gate_share_one_version_owner():
+    from apm_cli.deps.lockfile import installed_apm_version
+    from apm_cli.version import get_version
+
+    assert installed_apm_version() == get_version() == lockfile_generator.running_cli_version()
+
+
+def test_running_version_always_accepts_its_own_stamp(tmp_path, running):
+    running("0.25.0.dev1")
+    assert_writable(_lock(tmp_path, "apm_version: 0.25.0.dev1\n"))

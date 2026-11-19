@@ -24,10 +24,13 @@ _DEPLOYED = Path(".github/instructions/guide.instructions.md")
 _REFUSING = (
     ("install",),
     ("install", "--frozen"),
+    ("install", "--dry-run"),
     ("update", "--yes"),
     ("uninstall", "../pkg"),
     ("prune",),
     ("lock",),
+    ("deps", "update"),
+    ("audit",),
     ("audit", "--ci"),
     ("pack",),
 )
@@ -114,6 +117,7 @@ def test_older_cli_refuses_every_lockfile_command_without_mutation(
         assert "brew upgrade apm" in output
         assert "apm self-update" in output
         assert "pip install --upgrade apm-cli" in output
+        assert "Error installing dependencies" not in output
         assert project.state() == before, args
 
     for args in _WARNING:
@@ -196,6 +200,19 @@ def test_flow_style_and_legacy_lockfiles_are_guarded(tmp_path: Path, apm_binary_
                 assert envelope["ok"] is False
                 assert envelope["errors"][0]["code"] == "lockfile_generator"
         (project.root / name).unlink()
+
+
+def test_dependency_failure_is_not_a_version_refusal(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A real dependency failure on a current lockfile never reads as a version refusal."""
+    project = _Project(tmp_path, apm_binary_path)
+    project.seed()
+    project.guide.unlink()
+    (project.package / "apm.yml").unlink()
+
+    result = project.run("install")
+    assert result.returncode != 0, _evidence(result)
+    assert "written by APM" not in _output(result)
+    assert "Refusing to run" not in _output(result)
 
 
 def test_user_scope_lockfile_is_guarded(tmp_path: Path, apm_binary_path: Path) -> None:

@@ -18,6 +18,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+from .lockfile import LockfileRefusal
+
 LOCKFILE_UNKNOWN_VERSION = "unknown"
 
 _UPGRADE_HINT = (
@@ -31,15 +33,15 @@ _warned: set[Path] = set()
 _warned_lock = threading.Lock()
 
 
-class LockfileGeneratorError(RuntimeError):
+class LockfileGeneratorError(RuntimeError, LockfileRefusal):
     """The lockfile's generator metadata forbids this CLI from using it."""
 
 
 def running_cli_version() -> str:
-    """Return the version this CLI reports (``apm --version``)."""
-    from ..version import get_version
+    """Return the version this CLI stamps into lockfiles and reports."""
+    from .lockfile import installed_apm_version
 
-    return get_version()
+    return installed_apm_version()
 
 
 def _precedence(version: object) -> tuple[int, int, int, int, int] | None:
@@ -60,7 +62,7 @@ def _blocking_reason(recorded: object, declarations: int, running: str) -> tuple
         return "it declares apm_version more than once, so its generator cannot be verified", (
             _RESTORE_HINT
         )
-    if recorded is None or recorded == LOCKFILE_UNKNOWN_VERSION:
+    if recorded is None or recorded in (LOCKFILE_UNKNOWN_VERSION, running):
         return None
     if _precedence(recorded) is None:
         return f"its apm_version {recorded!r} is not a valid APM version", _RESTORE_HINT
@@ -79,41 +81,64 @@ def _blocking_reason(recorded: object, declarations: int, running: str) -> tuple
     return None
 
 
+_UNPARSEABLE = object()
+
+
 def _inspect(path: Path) -> tuple[object, int] | None:
     """Return ``(apm_version, declaration count)`` or ``None`` without a lockfile.
 
     Reads the composed top-level mapping, so flow style, indentation and
     duplicate keys (which a loader silently collapses) are all seen. An
     explicitly declared ``null`` is reported as the invalid value ``"null"``.
+    Text whose generator cannot be read is reported as ``_UNPARSEABLE``.
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        # Absent or unreadable lockfiles are handled by the lockfile parser.
+    except FileNotFoundError:
         return None
+    except (OSError, UnicodeDecodeError):
+        return _UNPARSEABLE, 0
     from ..utils.yaml_io import top_level_scalar_values
 
     values = top_level_scalar_values(text, "apm_version")
     if values is None:
-        # Unparseable lockfiles fail in the lockfile parser with its own error.
-        return None
+        return _UNPARSEABLE, 0
     if not values:
         return None, 0
     return ("null" if values[0] is None else values[0]), len(values)
 
 
-def assert_writable(path: Path, *, action: str = "use") -> None:
-    """Raise :class:`LockfileGeneratorError` when this CLI must not *action* *path*."""
+def assert_writable(path: Path, *, action: str = "use", before_mutation: bool = True) -> None:
+    """Raise :class:`LockfileGeneratorError` when this CLI must not *action* *path*.
+
+    *before_mutation* is true for command entry gates. The ``LockFile.write``
+    backstop passes false: it refuses even a lockfile whose generator cannot
+    be read, and does not claim the command changed nothing else. Entry gates
+    leave an unreadable lockfile to the lockfile parser's own diagnostics.
+    """
     inspected = _inspect(Path(path))
     if inspected is None:
         return
     recorded, declarations = inspected
-    blocked = _blocking_reason(recorded, declarations, running_cli_version())
+    if recorded is _UNPARSEABLE:
+        if before_mutation:
+            return
+        blocked: tuple[str, str] | None = (
+            "its generator cannot be verified because it is not readable YAML",
+            _RESTORE_HINT,
+        )
+    else:
+        blocked = _blocking_reason(recorded, declarations, running_cli_version())
     if blocked is None:
         return
     reason, remedy = blocked
+    outcome = (
+        "Nothing was changed."
+        if before_mutation
+        else "The lockfile was not rewritten; review other files this command changed."
+    )
     raise LockfileGeneratorError(
-        f"Refusing to {action} {Path(path).name}: {reason}. Nothing was changed.\n{remedy}"
+        f"Refusing to {action} {Path(path).name}: {reason}. {outcome}\n{remedy}"
     )
 
 
