@@ -133,18 +133,22 @@ With Claude Code **2.1.291** or **2.1.322** on `PATH`, `apm install --global --t
 prepares eligible intact Claude plugins through a local `apm-claude`
 marketplace. APM still owns dependency acquisition, the lockfile, source
 security checks, and the materialized package under `~/.apm/apm_modules`.
-Claude owns native registration and activation. It reads the package in place;
-do not remove or edit its source while Claude uses it.
+Claude owns native registration and activation. It loads the plugin in place
+from that `apm_modules` directory (Claude's `readFromFolder`), not from its own
+plugin cache, so `CLAUDE_PLUGIN_ROOT` points there. Do not remove or edit the
+source while Claude uses it: edits take effect in Claude immediately. `apm audit`
+reports a changed fingerprint, and a reinstall at the same pin refuses it.
 
 New plugins default **disabled**; updates preserve activation choices. Activation,
 onboarding and workspace trust remain user decisions; APM does not run hooks.
 
 :::note[Runtime qualification]
-Reported qualification covers only the metadata lifecycle on Claude Code
-**2.1.291** and **2.1.322**, macOS arm64. Runtime witnesses are **absent**: `SessionStart`,
-`SubagentStart` and `UserPromptSubmit` execution, distinct effective plugin
-roots/resources, and native command loading/invocation/namespacing remain
-unverified. Metadata and unit/mock results do not establish execution.
+The metadata lifecycle is qualified on Claude Code **2.1.291** and **2.1.322**,
+macOS arm64. A human runtime witness on **2.1.322** (user scope, enabled plugin)
+observed `SessionStart` and `UserPromptSubmit` hooks and a namespaced plugin
+command resolving bundled resources through `CLAUDE_PLUGIN_ROOT`. `SubagentStart`
+execution, multiple plugin roots at runtime, and runtime behavior on 2.1.291
+remain unverified.
 :::
 
 APM preserves manifest selection, frontmatter, plugin-root expressions and sibling

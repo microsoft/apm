@@ -130,8 +130,8 @@ configuration.
 `apm install -g --target claude` registers Claude plugins natively;
 Claude Code exactly 2.1.291 or 2.1.322 must be on `PATH`. New plugins stay disabled;
 updates preserve activation choices. See [admission limits and outstanding
-runtime qualification](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins):
-registration is metadata-only, not runtime proof.
+runtime qualification](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+Claude loads the plugin in place from `~/.apm/apm_modules`, so do not edit it there.
 
 Claude-native registration and read-only audit verify a separate complete-source
 fingerprint, including `__pycache__` resources and the owner executable bit.
