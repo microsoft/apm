@@ -4327,3 +4327,72 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "    dep_runtimes = {id(dep): mcp_dependency_runtimes(dep, target_runtimes) for dep",
+            "    dep_runtimes = {id(dep): list(target_runtimes) for dep",
+            id="install-writes-every-server-to-every-target",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "managed_target_servers[target] &= selected[target]",
+            "managed_target_servers[target] &= set(managed_target_servers[target])",
+            id="claims-ignore-dependency-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        transfer_deselected_shared_claims(\n",
+            "        (lambda *args, **kwargs: None)(\n",
+            id="retarget-drops-shared-file-claim",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
+            "admitted = new_mcp_servers",
+            id="pruning-ignores-dependency-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "                mcp_deps, owned_target, named_only=True\n",
+            "                [], owned_target, named_only=True\n",
+            id="target-scoped-install-retires-other-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "mcp_servers_for_runtime(prepared_mcp.dependencies, target)",
+            "set(MCPIntegrator.get_server_names(prepared_mcp.dependencies))",
+            id="frozen-claims-every-server-on-every-target",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "target_decision is not None and target_decision.from_manifest",
+            'target_decision is not None and target_decision.source == "apm.yml"',
+            id="manifest-drop-keyed-on-display-label",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "            stale_for_target |= deselected_mcp_claims(\n",
+            "            stale_for_target |= set().union(\n",
+            id="owned-path-forks-deselection-algebra",
+        ),
+    ],
+)
+def test_mcp_dependency_target_selection_guard_rejects_mutations(
+    path: str, old: str, new: str
+) -> None:
+    """#2606: per-dependency MCP targets route through the one selection owner."""
+    rule_id = "mutation_writes.mcp_target_selection"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

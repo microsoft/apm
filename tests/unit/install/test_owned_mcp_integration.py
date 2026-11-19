@@ -170,3 +170,41 @@ def test_real_bundle_reconciliation_preserves_other_and_deferred_claims(
     assert set(actual) == ({"new", "old", "other", "clash"} if conflict else {"new", "other"})
     if conflict:
         assert actual["clash"] == native["mcpServers"]["clash"]
+
+
+def test_owned_mcp_retires_only_servers_targets_no_longer_select(tmp_path) -> None:
+    """#2606: a still-declared server leaves a target its ``targets:`` dropped."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile()
+    lockfile.mcp_config_provenance = {"a": "bundle:bundle-a", "b": "bundle:bundle-a"}
+    lockfile.mcp_configs = {"a": {"name": "a"}, "b": {"name": "b"}}
+    lockfile.mcp_target_servers = {"codex": {"a", "b"}}
+    lockfile.write(lock_path)
+    scoped = MCPDependency(name="a", transport="stdio", command="echo", targets=["claude"])
+
+    def fake_install(dependencies, **kwargs):
+        kwargs["managed_target_servers"].setdefault("codex", set())
+        return len(dependencies)
+
+    with (
+        patch(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            side_effect=fake_install,
+        ),
+        patch("apm_cli.integration.mcp_integrator.MCPIntegrator.remove_stale") as remove_stale,
+    ):
+        run_owned_mcp_integration(
+            dependencies=[scoped, _dependency("b")],
+            owner="bundle-a",
+            lock_path=lock_path,
+            project_root=tmp_path,
+            user_scope=False,
+            target_runtimes=["codex"],
+        )
+
+    remove_stale.assert_called_once()
+    assert remove_stale.call_args.args[0] == {"a"}
+    assert remove_stale.call_args.kwargs["runtime"] == "codex"
+    updated = LockFile.read(lock_path)
+    assert updated is not None
+    assert updated.mcp_target_servers == {"codex": ["b"]}

@@ -716,6 +716,16 @@ dependencies:
       env:
         API_KEY: ${{ secrets.KEY }}
 
+    # Per-server targets: install targets INTERSECT this list (omitted = all;
+    # no overlap = skipped with a warning). Never written into native config.
+    # Dropping a target here or from manifest targets: prunes it on reinstall.
+    # Project-scope claude and copilot share .mcp.json: either name reaches both.
+    - name: claude-only-tools
+      registry: false
+      transport: stdio
+      command: ./bin/claude-tools
+      targets: [claude]
+
     # Self-defined HTTP server
     - name: internal-kb
       registry: false
