@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Kiro agents using current tool IDs or `@server` selectors now deploy; an agent with an unsupported tool is skipped with a warning while its siblings still install. (closes #2671, #3947)
+- Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
 - Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)
 - A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
 - `apm install --frozen` passes on its first run after a lock bump: `apm_modules` copies that no longer match `apm.lock.yaml` are re-downloaded first. (#3900)
