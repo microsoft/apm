@@ -21,8 +21,15 @@ is not publicly specified, not that usage is absent.
 
 ## Add or update an entry
 
-Submit a pull request with one row per organization or project, sorted
-alphabetically by the Organization column:
+No issue or scope approval is needed. Two ways, pick the easier one:
+
+- **Fill in the [adopter form](https://github.com/microsoft/apm/issues/new?template=adopter.yml).**
+  A maintainer opens the PR and asks you to confirm the wording.
+- **Open a one-row pull request** yourself. You can skip the PR template
+  sections; a one-line description is enough.
+
+Each row describes one organization or project, sorted alphabetically by the
+Organization column:
 
 - **Organization:** the name approved for public listing. An approved industry
   description may be used instead when the organization needs to remain anonymous.
