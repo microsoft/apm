@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..core.errors import TargetResolutionError
 from ..models.apm_package import APMPackage, DependencyReference
-from ..models.dependency.materialization import nested_materialization_pairs
+from ..models.dependency.materialization import (
+    MaterializationSlots,
+    nested_materialization_pairs,
+)
 from ..models.dependency.replacement import build_replacement_index
 from ..models.dependency.subsets import EdgeSelection, merge_edge_selections
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
@@ -853,14 +856,12 @@ class APMDependencyResolver:
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
-        nested = nested_materialization_pairs((item[0] for item in processing_queue), modules_dir)
-        for outer, inner in nested:
-            tree.resolution_errors.append(
-                f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
-                "cannot both be declared in apm.yml: the subdirectory package would be "
-                "installed inside the repository package. Keep only one of them."
-            )
-        if nested:
+        # #3696: distinct packages that share one host-blind directory are
+        # rejected before their directory is fetched or staged.
+        slots = MaterializationSlots(modules_dir)
+        if self._reject_root_layout_conflicts(
+            tree, [item[0] for item in processing_queue], modules_dir, slots
+        ):
             # Structural manifest error: report it before fetching anything, even
             # if other root declarations would also fail during the walk.
             return tree
@@ -969,6 +970,8 @@ class APMDependencyResolver:
                 for item in work_items
                 if winner_ids[item[1].get_unique_key()] == item[0].get_id()
             ]
+            if self._reject_shared_slots(tree, slots, ((item[1], item[2]) for item in work_items)):
+                return tree
 
             # --- Phase B (workers): load packages ---
             if not work_items:
@@ -1113,6 +1116,41 @@ class APMDependencyResolver:
 
         self._apply_edge_selections(tree)
         return tree
+
+    @classmethod
+    def _reject_root_layout_conflicts(
+        cls,
+        tree: DependencyTree,
+        root_refs: list[DependencyReference],
+        modules_dir: Path,
+        slots: MaterializationSlots,
+    ) -> bool:
+        """Record root declarations that cannot coexist in apm_modules."""
+        nested = nested_materialization_pairs(root_refs, modules_dir)
+        for outer, inner in nested:
+            tree.resolution_errors.append(
+                f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
+                "cannot both be declared in apm.yml: the subdirectory package would be "
+                "installed inside the repository package. Keep only one of them."
+            )
+        if nested:
+            return True
+        return cls._reject_shared_slots(tree, slots, ((ref, None) for ref in root_refs))
+
+    @staticmethod
+    def _reject_shared_slots(
+        tree: DependencyTree,
+        slots: MaterializationSlots,
+        claims: Iterable[tuple[DependencyReference, DependencyNode | None]],
+    ) -> bool:
+        """Claim each package directory; record the first shared-directory collision."""
+        for dep_ref, parent_node in claims:
+            parent = parent_node.dependency_ref if parent_node is not None else None
+            collision = slots.claim(dep_ref, parent)
+            if collision is not None:
+                tree.resolution_errors.append(collision)
+                return True
+        return False
 
     def _record_edge_selection(
         self, dep_ref: DependencyReference, parent_node: DependencyNode | None

@@ -17,7 +17,7 @@
     },
     {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; root-owned exact source replacement and original ownership; embedded git URL subpath validation",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",

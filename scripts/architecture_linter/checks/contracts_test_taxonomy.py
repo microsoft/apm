@@ -694,6 +694,22 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Nested root package directories must be rejected via nested_materialization_pairs",
             )
         )
+    # #3696: distinct packages sharing one host-blind directory are rejected by
+    # the materialization owner before the resolver fetches or stages them.
+    if not errors and (
+        not _present_re(materialization, re.compile(r"^class MaterializationSlots\b"))
+        or not _present(resolver, "slots = MaterializationSlots(modules_dir)")
+        or not _present(resolver, "collision = slots.claim(dep_ref, parent)")
+        or _count_re(resolver, re.compile(r"_reject_shared_slots\(tree, slots,")) < 2
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _MATERIALIZATION_OWNER,
+                "Packages sharing one apm_modules directory must be rejected via "
+                "MaterializationSlots before fetch",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )
