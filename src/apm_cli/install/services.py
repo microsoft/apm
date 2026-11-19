@@ -123,31 +123,6 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _log_hooks_skip(
-    package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
-) -> None:
-    """Warn about skipped hooks only when the package actually ships them.
-
-    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
-    ``*.json`` in ``.apm/hooks/`` and ``hooks/``.
-    """
-    _install = Path(package_info.install_path)
-    has_hooks = False
-    for hook_dir in [_install / ".apm" / "hooks", _install / "hooks"]:
-        if hook_dir.is_dir() and any(hook_dir.glob("*.json")):
-            has_hooks = True
-            break
-    if not has_hooks:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    if logger:
-        logger.warning(
-            f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
-            symbol="warning",
-        )
-
-
 def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
     """Warn about skipped canvas extensions when the package ships them."""
     _install = Path(package_info.install_path)
@@ -173,6 +148,7 @@ def _warn_target_reconcile_failure(
     diagnostics: DiagnosticCollector,
     package_name: str,
     reconcile_stats: dict,
+    message: str = "Could not fully reconcile hooks excluded by target restrictions",
 ) -> None:
     if not reconcile_stats.get("errors", 0):
         return
@@ -183,7 +159,7 @@ def _warn_target_reconcile_failure(
     if not isinstance(failed_paths, list):
         failed_paths = ["unknown"]
     diagnostics.warn(
-        "Could not fully reconcile hooks excluded by target restrictions",
+        message,
         package=package_name,
         detail=(
             f"targets: [{', '.join(failed_targets)}]; "
@@ -460,9 +436,19 @@ def integrate_package_primitives(  # noqa: PLR0913
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
-        # Executable approval gate: skip hooks if not approved.
+        # Executable approval gate: skip hooks if not approved, and retire
+        # the hooks this package deployed before it was gated (#3924).
         if _prim_name == "hooks" and not _hooks_approved:
-            _log_hooks_skip(package_name, package_info, targets, logger)
+            from apm_cli.install.exec_gate import log_hooks_skip
+
+            log_hooks_skip(package_name, package_info, logger, ctx)
+            if callable(reconcile_package_targets):
+                _warn_target_reconcile_failure(
+                    diagnostics,
+                    package_name,
+                    reconcile_package_targets(package_info, project_root, targets),
+                    "Could not fully remove hooks the executables gate no longer deploys",
+                )
             continue
         # Executable approval gate: skip canvas if not approved.
         # First-party (is_first_party=True) always deploys.
