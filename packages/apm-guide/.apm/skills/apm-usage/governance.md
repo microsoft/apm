@@ -229,6 +229,8 @@ executables:
 
 Glob scope (v1): only `deny` supports glob patterns (the safety ceiling). `allow`, `recommend`, and `require` are exact-match only -- widening the GRANT side with a wildcard has a larger blast radius and is deferred.
 
+Ports: a non-default port is part of the package key (`host:port/owner/repo`). `deny` ignores the port; `allow`, `recommend`, and `require` must name the ported key.
+
 The install gate and `apm audit` resolve trust through one shared deny-wins,
 first-match-wins ladder:
 

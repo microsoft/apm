@@ -402,6 +402,7 @@ class DependencyReference(ProviderCoordinateMixin):
         return build_dependency_unique_key(
             self.repo_url,
             host=self.host,
+            port=self.port,
             source="local" if self.is_local else self.source,
             local_path=self.local_path,
             is_virtual=self.is_virtual,
