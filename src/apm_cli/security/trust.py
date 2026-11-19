@@ -599,7 +599,19 @@ def plugin_pin(
 def _trust_context(allow_executables: Any) -> ExecTrustContext | None:
     if isinstance(allow_executables, ExecTrustContext):
         return allow_executables
-    return getattr(allow_executables, "trust_context", None)
+    ctx = getattr(allow_executables, "trust_context", None)
+    if ctx is None and isinstance(allow_executables, dict):
+        # A bare grant map (gate on, no routed context) fails closed: only
+        # its own type-level grants apply.
+        from .executables import build_exec_trust_context
+
+        ctx = build_exec_trust_context(
+            policy=None,
+            project_data={"executables": {"allow": dict(allow_executables)}},
+            include_user=False,
+            migrate_user_legacy=False,
+        )
+    return ctx
 
 
 def admit_native_plugin(
