@@ -506,7 +506,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
             lock = LockFile(
                 lockfile_version="1",
                 generated_at="2025-01-01T00:00:00+00:00",
-                apm_version="0.0.0-test",
+                apm_version="0.0.0",
             )
             lock.add_dependency(
                 LockedDependency(
@@ -541,7 +541,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
             lock = LockFile(
                 lockfile_version="1",
                 generated_at="2025-01-01T00:00:00+00:00",
-                apm_version="0.0.0-test",
+                apm_version="0.0.0",
             )
             for dependency in (
                 LockedDependency(repo_url=repo_url, depth=1, version="1.0.0"),

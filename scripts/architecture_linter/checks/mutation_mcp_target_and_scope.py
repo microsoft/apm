@@ -15,6 +15,8 @@ Ports three of the owner guards recorded in
   path.
 * ``hooks-integrations-mcp-json-config-write`` -- MCP JSON config
   parse-for-update and atomic write owned by MCPClientAdapter.
+* ``hooks-integrations-plugin-root-render`` -- portable MCP/LSP
+  ``${CLAUDE_PLUGIN_ROOT}`` binding, per-target render and legacy equivalence.
 """
 
 from __future__ import annotations
@@ -452,6 +454,68 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             paths=_python_paths(provider, under=_SRC, exclude=(_EXECUTABLES_OWNER,)),
             pattern=r"resolved_by\b.*\bis not None\b.*\bis_self_defined\b",
             message="The MCP executables-gate predicate belongs to is_executable_gated_mcp",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
+_PLUGIN_ROOT_OWNER = "src/apm_cli/deps/plugin_root_render.py"
+_RAW_STDIO_READ_RE = r"""(?:\.get\(\s*|\[\s*)["']_raw_stdio["']"""
+
+
+def _check_plugin_root_render(provider: FactsProvider) -> Iterable[Violation]:
+    """Recorded MCP/LSP state keeps the authored plugin root; only renders expand it."""
+    rule_id = "mutation_writes.plugin_root_render"
+    required = {
+        _PLUGIN_ROOT_OWNER: (
+            "def bind_plugin_roots(",
+            "def render_plugin_root(",
+            "def finalize_project_root(",
+            "def legacy_absolute_equivalent(",
+        ),
+        _APM_PACKAGE: ('if kind in ("mcp", "lsp")', "bind_plugin_roots("),
+        _MCP_ADAPTER_BASE: (
+            "def _self_defined_stdio(",
+            "finalize_project_root(",
+            "def __init_subclass__(",
+        ),
+        _MCP_SCOPE_OWNER: ("legacy_absolute_equivalent(", "equivalent=self._legacy_equivalent"),
+        _MCP_INTEGRATION: ("current_view.replay_recorded_roots(mcp_deps, old_mcp_configs)",),
+        "src/apm_cli/integration/lsp_integrator.py": ("LSPIntegrator._render_plugin_roots(",),
+    }
+    facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "MCP/LSP plugin roots must stay authored in recorded state and expand "
+                    "only through deps/plugin_root_render.py at the target render",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=_RAW_STDIO_READ_RE,
+            message="Adapters read self-defined stdio through MCPClientAdapter._self_defined_stdio",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_PLUGIN_ROOT_OWNER,)),
+            pattern=r"^\s*def (?:render_plugin_root|legacy_absolute_equivalent|_substitute_plugin_root)\(",
+            message="Plugin-root rendering and legacy equivalence belong to deps/plugin_root_render.py",
             exempt=False,
         )
     )
@@ -1015,6 +1079,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-mcp-omission-evidence",),
         description="Dependency MCP omission evidence and comparison use the current-view owner.",
         check=_check_mcp_omission_evidence,
+    ),
+    Rule(
+        id="mutation_writes.plugin_root_render",
+        group=GROUP,
+        guard_ids=("hooks-integrations-plugin-root-render",),
+        description="MCP/LSP plugin roots stay authored in recorded state and expand per target.",
+        check=_check_plugin_root_render,
     ),
     Rule(
         id="mutation_writes.mcp_package_launcher",

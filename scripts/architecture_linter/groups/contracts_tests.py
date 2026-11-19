@@ -13,9 +13,18 @@ from scripts.architecture_linter.checks.contracts_dependency_replacements import
     RULES as REPLACEMENT_RULES,
 )
 from scripts.architecture_linter.checks.contracts_governance import RULES as GOVERNANCE_RULES
+from scripts.architecture_linter.checks.contracts_lockfile_generator import (
+    RULES as LOCKFILE_GENERATOR_RULES,
+)
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
 
-RULES = (*EXISTING_RULES, *POLICY_RULES, *GOVERNANCE_RULES, *REPLACEMENT_RULES)
+RULES = (
+    *EXISTING_RULES,
+    *POLICY_RULES,
+    *GOVERNANCE_RULES,
+    *REPLACEMENT_RULES,
+    *LOCKFILE_GENERATOR_RULES,
+)
 
 __all__ = ["COLLECTORS", "RULES"]

@@ -449,6 +449,26 @@ def test_agent_bundle_rejects_unrepresentable_resolved_mcp(tmp_path: Path) -> No
         export_agent_plugin_bundle(project, tmp_path / "build")
 
 
+def test_agent_bundle_rejects_claude_plugin_root_mcp(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    _write_lockfile(
+        project,
+        mcp_configs={
+            "synthdb": {
+                "name": "synthdb",
+                "registry": False,
+                "transport": "stdio",
+                "command": "node",
+                "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/server.js"],
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match=r"'synthdb'.*CLAUDE_PLUGIN_ROOT"):
+        export_agent_plugin_bundle(project, tmp_path / "build")
+    assert not (tmp_path / "build").exists()
+
+
 def test_agent_bundle_rejects_nonconforming_manifest_name(tmp_path: Path) -> None:
     project = _write_agent_project(tmp_path / "project")
     apm_yml = project / "apm.yml"

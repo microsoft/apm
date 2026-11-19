@@ -26,6 +26,7 @@ from ..deps.lockfile import (
     resolve_reproducible_timestamp,
 )
 from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
+from ..deps.plugin_root_render import contains_plugin_root
 from ..models.apm_package import APMPackage
 from ..utils.archive import (
     projected_archive_path,
@@ -165,6 +166,13 @@ def _agent_mcp_document(package: APMPackage, lockfile: LockFile) -> dict:
             continue
         if not isinstance(raw_config, dict):
             raise ValueError(f"Cannot pack MCP server {name!r}: resolved config is not an object")
+        if contains_plugin_root(raw_config):
+            raise ValueError(
+                f"Cannot pack MCP server {name!r}: it runs files from its Claude plugin "
+                "package through ${CLAUDE_PLUGIN_ROOT}, which Agent Plugins v1 does not "
+                "resolve and this bundle does not include. Have consumers install that "
+                "plugin as their own dependency instead."
+            )
 
         transport = str(raw_config.get("transport") or raw_config.get("type") or "").lower()
         if transport == "http":

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
 from apm_cli.integration.skill_adoption import (
+    installing_commit,
     is_skill_dir_identical_to_source,
     skill_tree_baselines,
 )
@@ -324,6 +325,7 @@ def find_unmanaged_conflicts(
                                 plan=source_plan,
                                 owner=owner,
                                 targets=targets,
+                                commit=installing_commit(package_info),
                             )
                         if path in adopted[key] or (identical and unchanged[key]):
                             continue

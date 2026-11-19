@@ -136,6 +136,13 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     _runtime_config_label: ClassVar[str] = "the project .mcp.json"
     _runtime_launch_command: ClassVar[str] = "claude"
 
+    # code.claude.com/docs/en/mcp: CLAUDE_PROJECT_DIR is set only in the
+    # server's environment, so a project .mcp.json reference needs a default.
+    # Copilot CLI shares this file through CopilotProjectClientAdapter and
+    # expands the same form (verified with Claude Code 2.1.126 and Copilot
+    # CLI 1.0.110 starting stdio servers from the project root).
+    plugin_root_project_reference: ClassVar[str | None] = "${CLAUDE_PROJECT_DIR:-.}"
+
     # Own post-install aggregation buckets: the parent's mutable ClassVars
     # are shared by reference, so without these Claude's diagnostics would
     # be reported (and worded) as Copilot CLI's.

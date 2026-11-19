@@ -148,7 +148,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         # three placeholder syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``)
         # are resolved at install time before being written to
         # ``.gemini/settings.json``. See issue #1266.
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["command"] = raw["command"]
             if raw.get("cwd") is not None:

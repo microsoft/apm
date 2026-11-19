@@ -128,12 +128,13 @@
     {
       "id": "unmanaged-skill-preflight",
       "decision": "Whole-plan unmanaged skill refusal and unmatched skills: selection refusal before native deployment",
-      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes",
+      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes; the receipt-less adoption exception is integration/skill_adoption.py skill_tree_baselines (rendered current source, then the rendered locked source via LockedSkillSources whenever installing_commit differs from the lock, never lockfile hashes alone)",
       "selectors": [
         "src/apm_cli/install/deployment_plan.py",
+        "src/apm_cli/integration/skill_adoption.py",
         "src/apm_cli/integration/skill_preflight.py"
       ],
-      "guards": ["install-deployment-skill-preflight"]
+      "guards": ["install-deployment-skill-preflight", "install-deployment-skill-adoption-baseline"]
     },
     {
       "id": "dependency-selection-merge",
@@ -313,6 +314,13 @@
       "owner": "models/manifest_io.py (load_manifest, load_manifest_roundtrip, read_manifest_text) for apm.yml reads: APMPackage.from_apm_yml, read_manifest_target_declaration, apm audit, project executable trust, apm run config and every rewrite; utils/yaml_io.py dump_yaml_roundtrip for install, uninstall, approve/deny and install --mcp rewrites",
       "selectors": ["src/apm_cli/install/mcp/writer.py", "src/apm_cli/models/manifest_io.py"],
       "guards": ["install-deployment-consumer-manifest-rewrite"]
+    },
+    {
+      "id": "locked-copy-validity",
+      "decision": "Whether an existing apm_modules package copy holds its locked commit or content, so resolution, pre-download and integrate reuse only lock-matching copies (#3884)",
+      "owner": "drift.py (locked_copy_proof: a readable git HEAD decides, else the verified content hash; the install/cache_pin.py .apm-pin marker counts only with trust_marker for resolution freshness via locked_copy_is_stale behind should_force_ref_recheck, never for deployed bytes); consumers: deps/apm_resolver.py and install/phases/resolve.py via should_force_ref_recheck, install/phases/download.py, install/phases/integrate.py, and the install/cache_pin.py marker writer via locked_copy_is_stale",
+      "selectors": ["src/apm_cli/install/cache_pin.py", "src/apm_cli/install/phases/_redownload.py"],
+      "guards": ["install-deployment-locked-copy-validity"]
     }
   ]
 }
