@@ -404,6 +404,15 @@ def _get_server_configs(dependencies: list[Any] | tuple[Any, ...]) -> dict[str, 
     return configs
 
 
+def mcp_package_owner(*names: str | None, package_dir: Path) -> str:
+    """Return the ``mcp_config_provenance`` token for a package's MCP servers.
+
+    The declaring package is named by the first non-empty manifest or lock
+    name, falling back to its materialized directory name.
+    """
+    return next((name for name in names if name), package_dir.name)
+
+
 def _get_server_provenance(dependencies: list[Any] | tuple[Any, ...]) -> dict[str, str]:
     """Project surviving transitive dependencies to their declaring package."""
     provenance: dict[str, str] = {}
@@ -756,7 +765,9 @@ def _collect_locked_dependencies(
             )
             continue
 
-        declarer = package.name or dependency.name or manifest_path.parent.name
+        declarer = mcp_package_owner(
+            package.name, dependency.name, package_dir=manifest_path.parent
+        )
         _log_skipped_dev_mcp(package, declarer, logger)
         # Only collect prod MCP from transitive packages; devDependencies.mcp
         # are scoped to the package author's own environment (#2340).
@@ -852,7 +863,7 @@ def _collect_unlocked_compat(
             package = APMPackage.from_apm_yml(manifest_path, source_path=manifest_path.parent)
         except (OSError, ValueError, UnicodeError):
             continue
-        declarer = package.name or manifest_path.parent.name
+        declarer = mcp_package_owner(package.name, package_dir=manifest_path.parent)
         _log_skipped_dev_mcp(package, declarer, logger)
         # Only collect prod MCP from packages; devDependencies.mcp are scoped to
         # the package author's own environment (#2340).

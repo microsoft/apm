@@ -671,23 +671,20 @@ class APMDependencyResolver:
             ValueError: Invalid marketplace or plugin configuration, or a
                 frozen or offline run without a matching lock row.
         """
-        from apm_cli.drift import locked_marketplace_replay, locked_marketplace_row
+        from apm_cli.drift import frozen_marketplace_refusal, locked_marketplace_replay
 
-        replayed = locked_marketplace_replay(
+        decision = locked_marketplace_replay(
             dep_ref,
             self._existing_lockfile,
             update_refs=self._update_refs,
             modules_dir=self._apm_modules_dir,
         )
-        if replayed is not None:
+        if decision.reference is not None:
             _logger.debug("Replaying %s from apm.lock.yaml", dep_ref.get_display_name())
-            return replayed
-        if self._frozen and locked_marketplace_row(dep_ref, self._existing_lockfile) is None:
-            raise ValueError(
-                "--frozen replays marketplace dependencies from apm.lock.yaml only, and "
-                "no locked entry matches this declaration. Run 'apm install' without "
-                "--frozen, then commit apm.lock.yaml"
-            )
+            return decision.reference
+        refusal = frozen_marketplace_refusal(decision) if self._frozen else None
+        if refusal is not None:
+            raise refusal
         if self._read_only:
             raise ValueError("Marketplace lookup is not available in an offline dependency preview")
         from apm_cli.marketplace.resolver import resolve_marketplace_plugin

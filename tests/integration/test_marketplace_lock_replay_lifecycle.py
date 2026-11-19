@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import (
@@ -40,6 +40,7 @@ _NAME = "replay-skill"
 _CATALOG = "acme"
 _PACKAGE_REMOTE = "https://git.example.invalid/team/replay-package"
 _CATALOG_REMOTE = "https://git.example.invalid/team/replay-catalog"
+_MID_REMOTE = "https://git.example.invalid/team/mid-package"
 _TARGET = "copilot"
 _INSTALL = ("install", "--target", _TARGET, "--no-policy", "--parallel-downloads", "0")
 
@@ -104,12 +105,16 @@ class _World:
 
     def locked_row(self) -> dict:
         rows = load_yaml(self.root / "apm.lock.yaml")["dependencies"]
-        assert len(rows) == 1
-        return rows[0]
+        (row,) = (row for row in rows if row.get("discovered_via") == _CATALOG)
+        return row
 
 
 def _world(
-    tmp_path: Path, binary: Path, *, servers: tuple[str, dict[str, object]] | None = None
+    tmp_path: Path,
+    binary: Path,
+    *,
+    servers: tuple[str, dict[str, object]] | None = None,
+    transitive: bool = False,
 ) -> _World:
     isolated = IsolatedApmEnvironment.create(
         tmp_path.resolve() / "isolated", base_env=dict(os.environ)
@@ -126,19 +131,27 @@ def _world(
     second = repositories.commit(package, message="v2")
     repositories.tag(package, "v2.0.0", second)
     catalog = repositories.create("replay-catalog")
+    declaration: dict[str, object] = {"name": _NAME, "marketplace": _CATALOG}
+    rewrites = [(package, _PACKAGE_REMOTE), (catalog, _CATALOG_REMOTE)]
+    if transitive:
+        # A locked package whose own apm.yml declares the marketplace entry.
+        mid = repositories.create("mid-package")
+        dump_yaml(
+            {"name": "mid-package", "version": "1.0.0", "dependencies": {"apm": [declaration]}},
+            mid.worktree / "apm.yml",
+        )
+        repositories.commit(mid, message="declare marketplace dependency")
+        rewrites.append((mid, _MID_REMOTE))
+        declaration = {"git": _MID_REMOTE}
     consumer = LocalPackageFactory(isolated.work_root).create(
-        "consumer",
-        dependencies=({"name": _NAME, "marketplace": _CATALOG},),
-        targets=(_TARGET,),
+        "consumer", dependencies=(declaration,), targets=(_TARGET,)
     )
     world = _World(
         repositories=repositories,
         catalog=catalog,
         second=second,
         root=consumer.root,
-        env=repositories.url_rewrite_subprocess_env_many(
-            ((package, _PACKAGE_REMOTE), (catalog, _CATALOG_REMOTE))
-        ),
+        env=repositories.url_rewrite_subprocess_env_many(tuple(rewrites)),
         runner=ApmLifecycleRunner((str(binary),), timeout_seconds=120),
         servers=servers,
     )
@@ -223,4 +236,40 @@ def test_catalog_defined_servers_replay_warm_and_reresolve_cold(
     world.run(*_INSTALL, "--frozen")
     assert world.lock_bytes == lock_bytes
     assert world.deployed.read_text(encoding="utf-8") == _skill("one")
-    assert "replay-server" in server_config.read_text(encoding="utf-8")
+    deployed_config = server_config.read_bytes()
+    assert b"replay-server" in deployed_config
+
+    # A catalog that changes the inline server under the same selection
+    # cannot reach a cold frozen install: the locked content hash refuses it.
+    world.servers = (field, {"replay-server": {**servers["replay-server"], "command": "false"}})
+    world.select("v1.0.0")
+    world.remove_materialized()
+    world.run(*_INSTALL, "--frozen", expected=1)
+    assert world.lock_bytes == lock_bytes
+    assert server_config.read_bytes() == deployed_config
+
+
+def test_transitive_marketplace_entry_replays_cold_and_frozen_refuses_unlocked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A package's own marketplace declaration replays too; --frozen never asks the catalog."""
+    world = _world(tmp_path, apm_binary_path, transitive=True)
+    lock_bytes = world.lock_bytes
+    world.block_catalog()
+    world.run("marketplace", "remove", _CATALOG, "--yes")
+    world.remove_materialized()
+    world.run(*_INSTALL, "--frozen")
+    assert world.lock_bytes == lock_bytes
+    assert world.deployed.read_text(encoding="utf-8") == _skill("one")
+
+    lock_path = world.root / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    lock["dependencies"] = [
+        row for row in lock["dependencies"] if row.get("discovered_via") != _CATALOG
+    ]
+    dump_yaml(lock, lock_path)
+    world.remove_materialized()
+    failed = world.run(*_INSTALL, "--frozen", expected=1)
+    output = " ".join((failed.stdout + failed.stderr).split())
+    assert "--frozen replays marketplace dependencies from apm.lock.yaml only" in output
+    assert "required by" in output

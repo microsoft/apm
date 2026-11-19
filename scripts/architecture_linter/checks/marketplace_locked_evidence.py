@@ -18,11 +18,20 @@ _ROUTES = (
     ("src/apm_cli/drift.py", "locked_marketplace_row", "lockfile.get_dependency"),
     ("src/apm_cli/drift.py", "locked_marketplace_row", "marketplace_ref_mismatch"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_marketplace_row"),
+    ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_dep.to_edge_reference"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "_owns_locked_servers"),
     ("src/apm_cli/drift.py", "_owns_locked_servers", "package_lsp_owner"),
+    ("src/apm_cli/drift.py", "_owns_locked_servers", "mcp_package_owner"),
     ("src/apm_cli/install/lsp/integration.py", "_dependency_provenance", "package_lsp_owner"),
+    (
+        "src/apm_cli/integration/mcp_config_view.py",
+        "_collect_locked_dependencies",
+        "mcp_package_owner",
+    ),
+    ("src/apm_cli/integration/mcp_config_view.py", "_collect_unlocked_compat", "mcp_package_owner"),
+    ("src/apm_cli/deps/reachability.py", "_locked_marketplace_form", "locked.to_edge_reference"),
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_replay"),
-    ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_row"),
+    ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "frozen_marketplace_refusal"),
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "build_tag_regex"),
 )
 # Lock-first replay (#3911): the replay decision precedes any catalog call.
@@ -31,6 +40,12 @@ _ORDERED = (
         "src/apm_cli/deps/apm_resolver.py",
         "_resolve_marketplace_dep",
         "locked_marketplace_replay",
+        "resolve_marketplace_plugin",
+    ),
+    (
+        "src/apm_cli/deps/apm_resolver.py",
+        "_resolve_marketplace_dep",
+        "frozen_marketplace_refusal",
         "resolve_marketplace_plugin",
     ),
 )

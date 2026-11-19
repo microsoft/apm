@@ -140,12 +140,7 @@ def _locked_marketplace_form(
     locked = lockfile.get_dependency(ref.get_unique_key(), marketplace_index=marketplace_index)
     if locked is None:
         return ref
-    return replace(
-        locked.to_dependency_ref(),
-        skill_subset=ref.skill_subset,
-        target_subset=ref.target_subset,
-        alias=ref.alias,
-    )
+    return locked.to_edge_reference(ref)
 
 
 def _join_local(anchor: Path, local_path: str) -> Path:

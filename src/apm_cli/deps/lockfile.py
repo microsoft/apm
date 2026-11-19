@@ -12,7 +12,7 @@ import re
 from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -1045,6 +1045,21 @@ class LockedDependency:
         if not selected.is_local:
             selected.reference = self.resolved_ref or selected.reference
         return selected
+
+    def to_edge_reference(self, edge: DependencyReference) -> DependencyReference:
+        """Project this row's coordinates under a declaring edge's own selection.
+
+        A marketplace edge stands for the locked coordinate it resolved to;
+        its alias and skill/target selection stay the edge's, never the row's
+        merged record.
+        """
+        return replace(
+            self.to_dependency_ref(),
+            alias=edge.alias,
+            skill_subset=edge.skill_subset,
+            target_subset=edge.target_subset,
+            subset_pairings=edge.subset_pairings,
+        )
 
     def selection(self) -> SkillTargetSelection:
         """Decode this entry's skills x targets selection through the owner.
