@@ -1293,7 +1293,6 @@ def fetch_marketplace(
         )
     cache_name = _cache_key(source)
     use_sidecar_cache = source.kind in _SIDECAR_KINDS
-    source_url = source.url if source.kind == "url" else ""
     # Local catalogs stay ordinary local reads even under explicit refresh.
     strict = require_fresh and source.kind != "local"
 
