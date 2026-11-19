@@ -71,6 +71,13 @@ def _expanded_leaves(old: object, new: object) -> Iterator[tuple[str, str]]:
             yield path, new_text
 
 
+def _holds(fields: list[str]) -> str:
+    """Name the conflicting *fields* as the subject of a guidance sentence."""
+    if len(fields) == 1:
+        return f"Field {fields[0]} holds a value"
+    return f"Fields {', '.join(fields)} hold values"
+
+
 def _expand_like_install_time(text: str, environ: Mapping[str, str]) -> str:
     """Expand bare ``${VAR}`` references the way pre-#3252 installs did."""
     # An empty value counts as unset on purpose: a compound string such as
@@ -350,7 +357,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         return _legacy_equivalent(self.managed_server_config(native), expected, os.environ)
 
     def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
-        """Explain a preserved entry that holds values where apm.yml has references."""
+        """Explain a preserved entry where apm.yml has references or APM writes a path."""
         if self._is_user_scope():
             return None
         servers = self.get_current_config().get(self.mcp_servers_key) or {}
@@ -360,25 +367,36 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         expanded = sorted(_expanded_leaves(native, expected))
         if not expanded:
             return None
-        fields = [path for path, _text in expanded]
-        where = (
-            f"Field {fields[0]} holds a value"
-            if len(fields) == 1
-            else f"Fields {', '.join(fields)} hold values"
-        )
-        # Names only: show which reference belongs where, never a value or default.
-        mapping = "; ".join(
-            f"{path}: "
-            + ", ".join(
-                dict.fromkeys("${" + m.group(1) + "}" for m in _CLAUDE_REFERENCE_RE.finditer(text))
+        # APM's own project-root reference renders a package path (#3927): it
+        # is neither an apm.yml environment reference nor a credential.
+        root = self._plugin_root_reference()
+        names = {
+            path: list(
+                dict.fromkeys(
+                    "${" + m.group(1) + "}"
+                    for m in _CLAUDE_REFERENCE_RE.finditer(text.replace(root, "") if root else text)
+                )
             )
             for path, text in expanded
-        )
+        }
+        paths = [(path, text) for path, text in expanded if not names[path]]
+        restore = "; ".join(f"{path}: {ascii(text)[1:-1]}" for path, text in paths)
+        env_fields = [path for path, _text in expanded if names[path]]
+        if not env_fields:
+            return (
+                f"{_holds([path for path, _text in paths])} where APM writes a package "
+                f"path, and APM cannot confirm it wrote {'it' if len(paths) == 1 else 'them'}. "
+                f"Restore what APM writes ({restore}) or rename or remove the connection "
+                "yourself, then retry."
+            )
+        # Names only: show which reference belongs where, never a value or default.
+        mapping = "; ".join(f"{path}: {', '.join(names[path])}" for path in env_fields)
+        restore_paths = f" and the package paths APM writes ({restore})" if paths else ""
         return (
-            f"{where} where apm.yml declares environment references, and APM cannot "
-            "confirm it wrote them. Put the references declared in apm.yml back "
-            f"yourself ({mapping}), then retry. If .mcp.json was committed, rotate "
-            "those credentials: editing the file does not erase them in Git history."
+            f"{_holds(env_fields)} where apm.yml declares environment references, and APM "
+            "cannot confirm it wrote them. Put the references declared in apm.yml back "
+            f"yourself ({mapping}){restore_paths}, then retry. If .mcp.json was committed, "
+            "rotate those credentials: editing the file does not erase them in Git history."
         )
 
     @classmethod

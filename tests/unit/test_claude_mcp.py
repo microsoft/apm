@@ -588,6 +588,42 @@ class TestClaudeLegacyEntries(unittest.TestCase):
 
         self.assertEqual(snapshot, native)
 
+    def test_conflict_guidance_restores_plugin_root_path_without_rotation(self):
+        # #3927: the adapter's own ${CLAUDE_PROJECT_DIR:-.} render is a path.
+        written = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/scripts/server.js"
+        expected = {"type": "stdio", "command": "node", "args": [written]}
+        native = dict(expected, args=["/elsewhere/apm_modules/_local/p/scripts/server.js"])
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn("Field args[0] holds a value where APM writes a package path", guidance)
+        self.assertIn(f"(args[0]: {written})", guidance)
+        self.assertNotIn("environment references", guidance)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
+        self.assertNotIn("rotate", guidance)
+        self.assertNotIn("/elsewhere", guidance)
+
+    def test_conflict_guidance_keeps_env_hint_beside_plugin_root_path(self):
+        root = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p"
+        expected = {
+            "type": "stdio",
+            "command": "node",
+            "args": [f"{root}/server.js", f"--db={root}/data/${{DB_NAME}}"],
+            "env": {"TOKEN": "${TOKEN}"},
+        }
+        native = dict(
+            expected, args=["/x/server.js", "--db=/x/data/prod"], env={"TOKEN": "leaked-sentinel"}
+        )
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn("Fields args[1], env.TOKEN hold values", guidance)
+        self.assertIn("(args[1]: ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance)
+        self.assertIn(f"(args[0]: {root}/server.js)", guidance)
+        self.assertIn("rotate those credentials", guidance)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
+        self.assertNotIn("leaked-sentinel", guidance)
+
     def test_conflict_guidance_is_silent_without_expanded_fields(self):
         self.adapter.update_config({"legacy": dict(_LEGACY_EXPECTED, command="other")})
         self.assertIsNone(self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED))
