@@ -535,14 +535,17 @@ def _check_config_consistency(
             message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
-    view = CurrentMcpConfigView.derive(
+    # Audit trusts recorded approval evidence; it does not re-check approvals.
+    view = CurrentMcpConfigView.select(
         manifest,
         lock,
         prepared_replay.modules_root
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR,
+        approve=None,
+        recorded=lock,
         trust_transitive_self_defined=True,
-    ).with_recorded_omissions(lock)
+    )
     stored_configs = lock.mcp_configs or {}
     diff = view.diff(stored_configs)
 

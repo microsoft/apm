@@ -209,6 +209,8 @@ If more than one declaration would remain in that slot, uninstall fails without
 APM writes. Pass enough exact paths in one command that at most one declaration
 remains.
 
+When `apm.yml` declares the package in object form (`{name: my-plugin, marketplace: official}`), `apm uninstall my-plugin@official` selects that declaration directly. The marketplace name matches case-insensitively, and the lock row, `apm_modules/` checkout and deployed files are found through the lockfile. Neither the marketplace nor its catalog is contacted, with or without `--dry-run`.
+
 If a marketplace ref cannot be resolved (neither the lockfile nor the registry has a matching entry), APM logs an error and aborts without changes. Use `owner/repo` notation to uninstall directly, or run `apm deps list` to find the canonical name.
 
 ### Supply-chain guard

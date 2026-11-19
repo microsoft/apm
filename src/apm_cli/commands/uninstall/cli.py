@@ -27,10 +27,10 @@ from .engine import (
     _cleanup_transitive_orphans,
     _dependency_public_label,
     _dry_run_uninstall,
-    _parse_dependency_entry,
     _preflight_uninstall_survivors,
     _project_transitive_orphans,
     _remove_packages_from_disk,
+    _removed_lock_key,
     _shrink_surviving_selections,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
@@ -389,7 +389,7 @@ def _split_selected_profile_packages(
     return split_profile_retained(
         packages_to_remove,
         lockfile,
-        lambda package: _parse_dependency_entry(package).get_unique_key(),
+        lambda package: _removed_lock_key(package, lockfile),
     )
 
 
@@ -419,6 +419,7 @@ def _dry_run_with_selected_profile(
     apm_yml_path,
     *,
     surviving_dependencies: list,
+    lockfile=None,
 ) -> None:
     """Preview full removals and selected-profile-only removals."""
     if packages_to_remove:
@@ -428,6 +429,7 @@ def _dry_run_with_selected_profile(
             logger,
             apm_yml_path,
             surviving_dependencies=surviving_dependencies,
+            lockfile=lockfile,
         )
     _report_selected_profile_packages(retained_packages, logger, dry_run=True)
 
@@ -475,7 +477,7 @@ def _plan_selected_profile_removal(
         logger,
         warn_on_incomplete=False,
     )
-    keys = {_parse_dependency_entry(package).get_unique_key() for package in retained_packages}
+    keys = {_removed_lock_key(package, lockfile) for package in retained_packages}
     keys = frozenset((keys | set(retained_orphans)) - excluded_keys)
     return keys, frozenset(selected_profile_survivors(lockfile, keys))
 
@@ -644,7 +646,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             surviving_deps.remove(declaration)
         removed_keys = builtins.set()
         for package in packages_to_remove:
-            removed_keys.add(_parse_dependency_entry(package).get_unique_key())
+            removed_keys.add(_removed_lock_key(package, lockfile))
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -712,7 +714,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             surviving_deps.remove(declaration)
         removed_keys = builtins.set()
         for package in packages_to_remove:
-            removed_keys.add(_parse_dependency_entry(package).get_unique_key())
+            removed_keys.add(_removed_lock_key(package, lockfile))
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -754,6 +756,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger,
                 apm_yml_path,
                 surviving_dependencies=surviving_deps,
+                lockfile=lockfile,
             )
             return
 
@@ -776,6 +779,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger,
                 staged_refreshes=staged_local_refreshes,
                 refreshed_survivor_keys=refreshed_survivor_keys,
+                lockfile=lockfile,
             )
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
@@ -891,11 +895,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         lockfile_updated = False
         if lockfile:
             for pkg in packages_to_remove:
-                try:
-                    ref = _parse_dependency_entry(pkg)
-                    key = ref.get_unique_key()
-                except (ValueError, TypeError, AttributeError, KeyError):
-                    key = pkg
+                key = _removed_lock_key(pkg, lockfile)
                 if key in lockfile.dependencies:
                     del lockfile.dependencies[key]
                     lockfile_updated = True

@@ -96,6 +96,43 @@ def test_unapproved_executables_omission_binds_gated_declaration(
 
 
 @pytest.mark.parametrize(
+    "approved,reason,accepted",
+    [
+        (False, "unapproved-executables", True),
+        (True, "unapproved-executables", False),
+        (False, "only-apm", False),
+    ],
+    ids=["parked-matching", "approved-since", "other-reason"],
+)
+def test_gated_selection_accepts_only_this_runs_omission_evidence(
+    tmp_path: Path, approved: bool, reason: str, accepted: bool
+) -> None:
+    """#3925: after the gate ran, recorded evidence must equal what this run records."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "package"
+    _write_manifest(source, name="tools", mcp=[_self_defined("tools", "x")])
+    lock = _lock(
+        LockedDependency(repo_url="_local/tools", source="local", local_path=str(source), depth=1)
+    )
+    modules = tmp_path / "apm_modules"
+    fingerprint = _derive(root, lock, modules).declaration_fingerprints["tools"]
+    lock.mcp_omissions = {"tools": {"declaration": fingerprint, "reason": reason}}
+
+    selected = CurrentMcpConfigView.select(
+        root,
+        lock,
+        modules,
+        approve=(lambda deps: deps) if approved else (lambda deps: []),
+        recorded=lock,
+        trust_transitive_self_defined=False,
+        allow_pending=False,
+    )
+
+    assert (not selected.problems) is accepted
+    assert ("tools" in selected.configs) is approved
+
+
+@pytest.mark.parametrize(
     "damage",
     [
         "lost",
