@@ -102,8 +102,10 @@ GitHub Copilot servers move from `.github/mcp.json` and `.vscode/mcp.json` to
 root `.mcp.json`, which Claude Code also reads, so Copilot's `tools`
 allow-list does not restrict Claude Code. The next `apm install` moves
 entries APM wrote; entries you edited stay and APM names them. VS Code's
-deprecated Local mode no longer gets servers. Run `apm install`, review static
-`env:` values, and commit.
+deprecated Local mode no longer gets servers. Preview with `apm install --dry-run`,
+which lists the servers that move and those only removed. Then run `apm install`,
+review static `env:` values, and commit. APM empties `.github/mcp.json` rather than
+deleting it, and `apm uninstall` reports servers it removes from retired files.
 :::
 
 ### OpenCode 2 configuration
