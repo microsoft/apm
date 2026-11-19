@@ -50,12 +50,16 @@ def integrate_local_bundle_hooks(
 
     result = BundleHookResult()
     hook_paths = sorted(rel for rel in pack_files if is_plugin_hook_path(rel))
+    # A reinstall whose hooks will not register retires the earlier version's.
+    retire = not dry_run and bundle_slug_validation_error(slug) is None
     if not hook_paths:
-        if not dry_run and bundle_slug_validation_error(slug) is None:
+        if retire:
             _retire_bundle_hooks(project_root, targets, slug)
         return result
     if not hooks_approved:
         result.skipped = len(hook_paths)
+        if retire:
+            _retire_bundle_hooks(project_root, targets, slug)
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: hooks are "
             "executable and not approved for this exact bundle content. To approve "
@@ -77,6 +81,8 @@ def integrate_local_bundle_hooks(
     verified_files = bundle_pack_files(bundle_info)
     if not verified_files:
         result.skipped = len(hook_paths)
+        if retire:
+            _retire_bundle_hooks(project_root, targets, slug)
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: the bundle has "
             "no integrity manifest. Repack it with 'apm pack' to register its hooks.",
@@ -171,18 +177,11 @@ def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage
 
 
 def _retire_bundle_hooks(project_root: Path, targets: Any, slug: str) -> None:
-    """Remove this bundle's merged hook entries when a reinstall ships no hooks."""
+    """Remove this bundle's merged hook entries from every hook-capable target."""
     from ..integration.hook_integrator import HookIntegrator
-    from ..models.apm_package import APMPackage, PackageInfo
 
-    stage = Path(tempfile.gettempdir()) / slug
-    package_info = PackageInfo(
-        package=APMPackage(name=slug, version="0.0.0", package_path=stage),
-        install_path=stage,
-        local_bundle_id=slug,
-    )
     hook_targets = [target for target in targets if target.supports("hooks")]
-    HookIntegrator().reconcile_package_target_restriction(package_info, project_root, hook_targets)
+    HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
 
 
 def _prior_bundle_claims(project_root: Path) -> set[str]:

@@ -1725,19 +1725,29 @@ class HookIntegrator(BaseIntegrator):
         excluded_targets,
     ) -> HookTargetReconcileStats:
         """Remove this package's merged hooks from newly excluded targets."""
-        stats: HookTargetReconcileStats = {
-            "files_removed": 0,
-            "errors": 0,
-            "failed_targets": [],
-            "failed_paths": [],
-        }
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
             project_root,
             package_name,
         )
-        source_markers = frozenset({source_marker, *legacy_source_markers})
+        markers = frozenset({source_marker, *legacy_source_markers})
+        return self._retire_source_markers(project_root, excluded_targets, markers)
+
+    def retire_local_bundle_hooks(self, bundle_id: str, project_root: Path, targets):
+        """Remove one local bundle's merged hooks; its next install ships none (#3700)."""
+        marker = frozenset({local_bundle_hook_source_marker(bundle_id)})
+        return self._retire_source_markers(project_root, targets, marker)
+
+    def _retire_source_markers(
+        self, project_root: Path, excluded_targets, source_markers: frozenset[str]
+    ) -> HookTargetReconcileStats:
+        stats: HookTargetReconcileStats = {
+            "files_removed": 0,
+            "errors": 0,
+            "failed_targets": [],
+            "failed_paths": [],
+        }
         for target in excluded_targets:
             config = _MERGE_HOOK_TARGETS.get(target.name)
             if config is None:

@@ -1187,3 +1187,41 @@ class TestLocalBundleCanvasTrust:
         assert not (project / ".github" / "extensions" / "widget").exists()
         # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output
+
+
+def test_bundle_without_integrity_manifest_skips_hooks(tmp_path: Path) -> None:
+    """Hooks register only from bytes ``pack.bundle_files`` covers (#3700)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_hooks import integrate_local_bundle_hooks
+
+    bundle = tmp_path / "bundle"
+    (bundle / "hooks").mkdir(parents=True)
+    (bundle / "hooks.json").write_text('{"hooks": {}}')
+    (bundle / "hooks" / "x.sh").write_text("echo x\n")
+    (bundle / "plugin.json").write_text('{"name": "b", "hooks": "./hooks.json"}')
+    info = types.SimpleNamespace(source_dir=bundle, lockfile=None)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    logger = MagicMock()
+
+    result = integrate_local_bundle_hooks(
+        info,
+        {"hooks.json": "a", "hooks/x.sh": "b"},
+        project,
+        targets=[KNOWN_TARGETS["claude"]],
+        slug="b",
+        hooks_approved=True,
+        approval_key=None,
+        force=False,
+        dry_run=False,
+        scope=InstallScope.PROJECT,
+        logger=logger,
+    )
+
+    assert (result.skipped, result.scripts) == (2, [])
+    (message,), _ = logger.warning.call_args
+    assert "no integrity manifest" in message
+    assert "apm pack" in message
+    assert not (project / ".claude" / "settings.json").exists()

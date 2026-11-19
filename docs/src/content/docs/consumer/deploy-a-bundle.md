@@ -101,8 +101,10 @@ If executable trust blocks bundle hooks, MCP, LSP, or canvas content, copy the
 exact `name#version@sha256:<digest>` key printed by `apm install` into
 `executables.allow`; changed bundle bytes require a new key. Approved hooks
 merge into each target's hook config (for example `.claude/settings.json`)
-with the same events and commands as a source install; reinstalling the
-bundle replaces them.
+with the same events and commands as a source install. Reinstalling replaces
+them, and a reinstall whose hooks are not approved, or that ships none,
+removes them; Copilot's per-file `.github/hooks/<bundle>-hooks.json` stays
+until you delete it.
 For centrally governed installs, warm the policy cache before distributing an
 offline bundle. See [APM policy](../../enterprise/apm-policy/).
 

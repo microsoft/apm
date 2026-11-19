@@ -10,6 +10,7 @@ dependency is installed or uninstalled.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -76,7 +77,7 @@ def _repack(
     world: MarketplacePackWorld, producer: Path, tmp_path: Path, version: str, script: str | None
 ) -> tuple[Path, str]:
     """Repack *producer* as *version*; ``script=None`` drops its hooks."""
-    manifest = (producer / "apm.yml").read_text().replace("version: 1.0.0", f"version: {version}")
+    manifest = re.sub(r"version: \S+", f"version: {version}", (producer / "apm.yml").read_text())
     write(producer / "apm.yml", manifest)
     if script is None:
         shutil.rmtree(producer / ".apm" / "hooks")
@@ -187,10 +188,22 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert (consumer / ".claude" / "skills" / "hs" / "SKILL.md").is_file()
     world.apm(consumer, "audit", "--ci", "--no-policy")
 
-    # A newer bundle of the same package that ships no hooks retires its entries.
-    hookless, _ = _repack(world, producer, tmp_path, "1.0.1", None)
+    # A newer bundle whose hooks are not approved retires only this bundle's entries.
+    world.apm(consumer, "install", str(dep), "--no-policy")
+    unapproved, _ = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
+    text = output(world.apm(consumer, "install", str(unapproved), "--no-policy"))
+    assert "Skipped 2 bundle hook file(s) from hookpkg" in text, text
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
+
+    # A newer bundle that ships no hooks retires them too; a dry run retires nothing.
+    hookless, _ = _repack(world, producer, tmp_path, "1.0.2", None)
+    settings = (consumer / ".claude" / "settings.json").read_bytes()
+    world.apm(consumer, "install", str(hookless), "--no-policy", "--dry-run")
+    assert (consumer / ".claude" / "settings.json").read_bytes() == settings
     world.apm(consumer, "install", str(hookless), "--no-policy")
-    assert _hook_entries(consumer) == {}
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
     world.apm(consumer, "audit", "--ci", "--no-policy")
 
 
@@ -233,3 +246,8 @@ def test_bundle_hooks_register_for_copilot_and_user_scope(
     _allow(home / ".apm", key, updated_key)
     world.apm(world.isolated.work_root, "install", "-g", str(updated), "--no-policy")
     assert _run_hook(world, home, "Bash") == "v2\n"
+
+    # A newer user-scope bundle that ships no hooks retires them.
+    hookless, _ = _repack(world, producer, tmp_path, "1.0.2", None)
+    world.apm(world.isolated.work_root, "install", "-g", str(hookless), "--no-policy")
+    assert _hook_entries(home) == {}
