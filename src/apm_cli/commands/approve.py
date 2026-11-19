@@ -405,29 +405,34 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
 def _find_declaration(
     declarations: Sequence[ExecutableDeclaration], pkg: str
 ) -> ExecutableDeclaration | None:
-    """Return the installed declaration that *pkg* names, or None.
+    """Return the installed declaration that *pkg* names exactly, or None.
 
     Lockfile-derived names (the approval key, or the locked identity a
     ``replace:`` rule redirected) are tried before the package's own
     ``apm.yml`` name, so another package cannot capture a grant or deny by
-    declaring a lookalike name. Exact matches are tried before prefix forms;
-    ``acme/hooky#1.0.0`` still finds a replaced ``acme/hooky``.
+    declaring a lookalike name. ``acme/hooky#1.0.0`` still finds a replaced
+    ``acme/hooky``, but a partial name never matches, and a name that matches
+    more than one installed package is refused rather than guessed: a wrong
+    match would grant or deny execution for another package.
     """
 
-    def _original_prefix(decl: ExecutableDeclaration) -> bool:
+    def _original_versioned(decl: ExecutableDeclaration) -> bool:
         original = decl.original_identity
         return bool(original) and (original.startswith(pkg + "#") or pkg.startswith(original + "#"))
 
     tiers = (
         lambda d: pkg in (d.package_key, d.original_identity),
         lambda d: pkg == d.package_name,
-        lambda d: d.package_key.startswith(pkg + "#") or _original_prefix(d),
-        lambda d: d.package_name.startswith(pkg),
+        lambda d: d.package_key.startswith(pkg + "#") or _original_versioned(d),
     )
     for matches in tiers:
-        for decl in declarations:
-            if matches(decl):
-                return decl
+        found = list({id(d): d for d in declarations if matches(d)}.values())
+        if len(found) > 1:
+            names = ", ".join(sorted(d.package_key for d in found))
+            _rich_error(f"{pkg!r} matches more than one installed package ({names}); name one.")
+            sys.exit(1)
+        if found:
+            return found[0]
     return None
 
 
