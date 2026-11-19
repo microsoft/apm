@@ -195,3 +195,42 @@ def test_forged_bundle_provenance_cannot_hide_a_denied_server_from_audit(
     text = output(world.apm(consumer, "audit", "--ci", "--policy", str(policy), expect=1))
     assert f"{failing_check} details:" in text, text
     assert name in text, text
+
+
+def test_user_scope_bundle_reads_grants_from_the_user_manifest(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``install -g <bundle>`` never takes executables consent from the working
+    directory's apm.yml; the user manifest ($APM_HOME/apm.yml) holds it."""
+    from apm_cli.bundle.local_bundle import detect_local_bundle
+    from apm_cli.security.executables import local_bundle_approval_key
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = _mcp_package(world.isolated.work_root / "mcppkg", "mcppkg")
+    bundle = _pack(world, producer, tmp_path / "out", "1.0.0")
+    info = detect_local_bundle(bundle)
+    key = local_bundle_approval_key(
+        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
+    )
+    grant = f'executables:\n  allow:\n    "{key}":\n      mcp: true\n'
+    home, apm_home = world.isolated.home, world.isolated.config_root
+    (home / ".claude").mkdir(exist_ok=True)
+    # A user deny entry turns the executables gate on.
+    write(apm_home / "config.json", json.dumps({"executables": {"deny": {"o/x": {"hooks": True}}}}))
+    user_manifest = apm_home / "apm.yml"
+    write(user_manifest, "name: user\nversion: 1.0.0\ntargets: [claude]\n")
+    repo = world.isolated.work_root / "untrusted-repo"
+    write(repo / "apm.yml", f"name: repo\nversion: 1.0.0\n{grant}")
+
+    def user_servers() -> list[str]:
+        path = home / ".claude.json"
+        return sorted(json.loads(path.read_text()).get("mcpServers", {})) if path.exists() else []
+
+    text = output(world.apm(repo, "install", "-g", str(bundle), "--target", "claude"))
+    assert user_servers() == [], text
+    # Rich wraps long paths mid-token; compare without whitespace.
+    assert f"addtotheusermanifest{user_manifest}:" in "".join(text.split()), text
+
+    write(user_manifest, f"name: user\nversion: 1.0.0\ntargets: [claude]\n{grant}")
+    world.apm(repo, "install", "-g", str(bundle), "--target", "claude")
+    assert user_servers() == [_SERVER]

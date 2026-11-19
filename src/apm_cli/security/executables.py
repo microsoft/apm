@@ -619,6 +619,27 @@ def local_bundle_approval_key(
     return f"{package_id}#{artifact_version}@{digest}"
 
 
+def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the manifest whose ``executables.allow`` approves *approval_key*.
+
+    Grants come from the scope's manifest: the project ``apm.yml``, or the
+    user manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads.
+    """
+    from apm_cli.core.scope import InstallScope, get_manifest_path
+
+    target = (
+        f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
+    )
+    return (
+        f"To approve this exact local bundle, add to {target}:\n"
+        "executables:\n"
+        "  allow:\n"
+        f'    "{approval_key}":\n'
+        f"      {exec_type}: true\n"
+        "Then rerun the install."
+    )
+
+
 # -------------------------------------------------------------------
 # Package scanning
 # -------------------------------------------------------------------

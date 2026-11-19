@@ -105,7 +105,8 @@ installing or uninstalling other packages keeps them, and `apm audit --ci` and
 also records its deployment, and org MCP policy still applies to it.
 If executable trust blocks bundle hooks, MCP, LSP, or canvas content, copy the
 exact `name#version@sha256:<digest>` key printed by `apm install` into
-`executables.allow`; changed bundle bytes require a new key. Approved hooks
+`executables.allow` (with `-g`, in the user manifest `~/.apm/apm.yml`, never
+the current directory's `apm.yml`); changed bundle bytes require a new key. Approved hooks
 merge into each target's hook config (for example `.claude/settings.json`)
 with the same events and commands as a source install. Reinstalling replaces
 them, and a reinstall whose hooks are not approved, or that ships none,
