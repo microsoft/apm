@@ -817,7 +817,14 @@ def browse(name, verbose, offline=False):
         sys.exit(1)
 
 
-@marketplace.command(help="Revalidate marketplace cache; exit 1 if any marketplace fails")
+@marketplace.command(
+    short_help="Refresh marketplace cache (all, or NAME)",
+    help=(
+        "Revalidate cached marketplace data for NAME, or for every registered "
+        "marketplace if NAME is omitted. Exits 1 if any marketplace fails to "
+        "revalidate; its last valid cached copy is kept."
+    ),
+)
 @click.argument("name", required=False, default=None)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @serialized_lifecycle
