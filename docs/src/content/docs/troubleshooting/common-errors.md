@@ -124,12 +124,13 @@ See also: [Install failures](../install-failures/)
 
 ```
 [!] Drift detected: N file(s)
+[i] To restore the locked content, delete the modified files and rerun 'apm install', or run 'apm install --force' (overwrites local edits).
 [i] Run 'apm install' to re-sync deployed files with the lockfile.
 ```
 
 Cause: deployed primitive files in the project differ from the content recorded in `apm.lock.yaml`. Either the files were edited locally, or the lockfile was updated without re-running install.
 
-Fix: run `apm install` to re-deploy from the cache. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
+Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them and rerun `apm install`, or run `apm install --force`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
 For `unmanaged-conflict`, the file is yours, not a managed edit: install skipped
 it (or refused the skill plan). Rename the conflicting local file or skill, or

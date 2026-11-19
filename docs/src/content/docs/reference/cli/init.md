@@ -23,7 +23,8 @@ fields without prompts.
 With `--discover`, inventories existing skill and package
 directories in recognized layouts. It
 does not copy, translate, or execute their content. Add `--apply` (or `--write`)
-to merge missing local package references into `apm.yml`.
+to merge missing local package references into `apm.yml`; `--apply` implies
+`--discover`.
 
 The legacy `--plugin` and `--marketplace` flags (which scaffold a
 plugin or marketplace authoring block alongside `apm.yml`) are
@@ -43,7 +44,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `-y`, `--yes` | off | Skip interactive prompts. Plain `apm init --yes` keeps its existing behavior and overwrites an existing `apm.yml`; with `--discover --apply`, it consents to a merge instead. |
 | `--discover` | off | Report admissible existing skill and package directories without changing files. Unsupported loose native rules, hooks, MCP configuration, and similar files are reported but not translated. |
 | `--format text\|json\|yaml` | `text` | Select discovery report format. Used with `--discover`. |
-| `--apply`, `--write` | off | After discovery, create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Requires consent unless `--yes` is set. |
+| `--apply`, `--write` | off | Run discovery, then create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Implies `--discover`. Requires consent unless `--yes` is set. |
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
 | `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name: 1-64 lowercase letters, digits, dots, or hyphens; must start and end with a letter or digit, with no `..` or `--`. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
