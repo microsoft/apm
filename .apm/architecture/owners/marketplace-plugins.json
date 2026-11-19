@@ -50,6 +50,15 @@
       "guards": ["marketplace-integrations-source-admission"]
     },
     {
+      "id": "marketplace-dependency-confusion-admission",
+      "decision": "Whether a resolved marketplace entry may be installed despite the #1326 bare cross-repo dependency-confusion sentinel",
+      "owner": "marketplace/dependency_confusion.py (admit_marketplace_resolution); required consumers are enforced by guard marketplace-integrations-dependency-confusion",
+      "selectors": [
+        "src/apm_cli/marketplace/dependency_confusion.py"
+      ],
+      "guards": ["marketplace-integrations-dependency-confusion"]
+    },
+    {
       "id": "marketplace-entry-ref-verification",
       "decision": "Which remote an authored marketplace entry resolves against, and whether its explicit ref exists there",
       "owner": "marketplace/ref_resolver.py (package_entry_coordinates, explicit_ref_error); consumers: apm marketplace check and marketplace package add/set. Build-time sibling: builder._remote_source_coordinates",
