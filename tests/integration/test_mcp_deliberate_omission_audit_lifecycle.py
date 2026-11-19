@@ -167,6 +167,33 @@ def test_frozen_install_applies_executables_gate_and_omission_evidence(
     assert "tools-server" in chain.servers("claude")
 
 
+def test_frozen_no_policy_gate_ignores_org_policy(tmp_path: Path, apm_binary_path: Path) -> None:
+    """--frozen --no-policy derives the gate without org policy, like install does."""
+    chain = Chain(tmp_path / "world", apm_binary_path, dirs=(".claude",))
+    chain.seed_org_policy(
+        "name: p\nversion: 1.0.0\nenforcement: block\nexecutables:\n  deny_all: true\n"
+    )
+    _write(
+        chain.project / "pkgs" / "tools" / "apm.yml",
+        {
+            "name": "tools",
+            "version": "1.0.0",
+            "dependencies": {"mcp": [stdio_server("tools-server", "x")]},
+        },
+    )
+    chain.write_manifest(
+        [],
+        apm=[_PACKAGE],
+        targets=["claude"],
+        executables={"allow": {_PACKAGE: {"mcp": True}}},
+    )
+    chain.ok("install", "--no-policy")
+    assert "tools-server" in (chain.lock().get("mcp_configs") or {})
+
+    chain.ok("install", "--frozen", "--no-policy")
+    assert "tools-server" in chain.servers("claude")
+
+
 def _transitive_chain(tmp_path: Path, binary: Path) -> Chain:
     chain = Chain(tmp_path / "world", binary, dirs=(".claude",))
     _write(
