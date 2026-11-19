@@ -165,6 +165,9 @@ class MCPDependency:
     # authored ``${CLAUDE_PLUGIN_ROOT}`` for a target. Never serialized and
     # not part of equality, so recorded state stays location-independent.
     plugin_root: str | None = field(default=None, compare=False)
+    # Another clone's root a pre-#3825 lock recorded, set only by a --frozen
+    # replay so an unchanged native entry is kept; never rendered or written.
+    recorded_plugin_root: str | None = field(default=None, compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":

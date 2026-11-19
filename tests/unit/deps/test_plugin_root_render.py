@@ -95,3 +95,38 @@ def test_each_target_renders_its_documented_root(
 
     root = prefix or str(package_root.resolve())
     assert rendered["args"] == [f"{root}/server.js", f"--data={root}/data"]
+
+
+_OTHER = "/ci/other clone/apm_modules/acme/synth"
+_REF = "${CLAUDE_PROJECT_DIR:-.}"
+
+
+def test_portable_rewrite_accepts_this_projects_render_of_a_recorded_root() -> None:
+    from apm_cli.deps.plugin_root_render import portable_rewrite_equivalent
+
+    recorded = {"command": "node", "args": [f"{_OTHER}/server.js"], "env": {"D": f"{_OTHER}/d"}}
+    native = {
+        "command": "node",
+        "args": [f"{_REF}/apm_modules/acme/synth/server.js"],
+        "env": {"D": f"{_REF}/apm_modules/acme/synth/d"},
+    }
+    assert portable_rewrite_equivalent(recorded, native, _REF)
+
+
+@pytest.mark.parametrize(
+    "native_args",
+    [
+        ["/tmp/evil/apm_modules/acme/synth/server.js"],
+        ["${workspaceFolder}/apm_modules/acme/synth/server.js"],
+        [f"{_REF}/apm_modules/acme/other/server.js"],
+        [f"{_REF}/apm_modules/acme/synth/server.js", "--extra"],
+    ],
+)
+def test_portable_rewrite_rejects_any_other_entry(native_args: list[str]) -> None:
+    from apm_cli.deps.plugin_root_render import portable_rewrite_equivalent
+
+    recorded = {"command": "node", "args": [f"{_OTHER}/server.js"]}
+    assert not portable_rewrite_equivalent(recorded, {"command": "node", "args": native_args}, _REF)
+    assert not portable_rewrite_equivalent(
+        recorded, {"command": "node", "args": [f"{_REF}/apm_modules/acme/synth/server.js"]}, None
+    )

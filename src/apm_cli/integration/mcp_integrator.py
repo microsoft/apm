@@ -384,6 +384,10 @@ def _clean_claude_config(
         return 0
 
 
+# MCPDependency fields that may carry an authored ``${CLAUDE_PLUGIN_ROOT}``.
+_PLUGIN_ROOT_FIELDS = ("command", "args", "env", "url", "headers", "cwd", "extra")
+
+
 class MCPIntegrator:
     """MCP lifecycle orchestrator  -- dependency resolution, installation, and cleanup.
 
@@ -466,10 +470,14 @@ class MCPIntegrator:
         own portable form. *plugin_root* binds a stored declaration that carries
         no materialized root to the current one.
         """
+        import dataclasses
+
         from apm_cli.deps.plugin_root_render import (
             PLUGIN_ROOT_INFO_KEY,
+            RECORDED_RENDER_INFO_KEY,
             plugin_root_of,
             render_plugin_root,
+            with_absolute_plugin_root,
         )
 
         root = plugin_root or plugin_root_of(dep)
@@ -548,6 +556,12 @@ class MCPIntegrator:
             info["_extra"] = absolute(dict(dep.extra))
 
         assert_no_staging_paths(info, f"MCP client configuration for '{dep.name}'")
+        recorded_root = getattr(dep, "recorded_plugin_root", None)
+        if isinstance(recorded_root, str) and recorded_root:
+            recorded = with_absolute_plugin_root(dep, _PLUGIN_ROOT_FIELDS, root=recorded_root)
+            info[RECORDED_RENDER_INFO_KEY] = MCPIntegrator._build_self_defined_info(
+                dataclasses.replace(recorded, plugin_root=None, recorded_plugin_root=None)
+            )
         return info
 
     @staticmethod

@@ -19,6 +19,11 @@ PLUGIN_ROOT_PLACEHOLDER = "${CLAUDE_PLUGIN_ROOT}"
 # Server-info key carrying the materialized package root to the adapter render.
 PLUGIN_ROOT_INFO_KEY = "_plugin_root"
 
+# Server-info key carrying the render a pre-#3825 lock recorded at another
+# clone's root. ``--frozen`` only keeps a native entry that already equals it;
+# it never writes a lock-sourced root.
+RECORDED_RENDER_INFO_KEY = "_recorded_render"
+
 # Inert stand-in for a target's project-root reference. No env, input or
 # runtime-template placeholder pattern matches it, so adapter placeholder
 # translation cannot rewrite the reference before ``finalize_project_root``.
@@ -229,3 +234,61 @@ def legacy_absolute_equivalent(
         legacy_absolute_root(current, stored, plugin_root=plugin_root, project_root=project_root)
         is not None
     )
+
+
+def _string_pairs(left: Any, right: Any, pairs: list[tuple[str, str]]) -> bool:
+    """Collect differing string leaves; False when the structures differ otherwise."""
+    if isinstance(left, dict):
+        if not isinstance(right, dict) or left.keys() != right.keys():
+            return False
+        return all(_string_pairs(left[key], right[key], pairs) for key in left)
+    if isinstance(left, list):
+        if not isinstance(right, list) or len(left) != len(right):
+            return False
+        return all(_string_pairs(a, b, pairs) for a, b in zip(left, right, strict=True))
+    if isinstance(left, str) and isinstance(right, str) and left != right:
+        pairs.append((left, right))
+        return True
+    return left == right
+
+
+def portable_rewrite_equivalent(recorded: Any, native: Any, reference: str | None) -> bool:
+    """Whether *native* is *recorded* rewritten to this target's project reference.
+
+    *recorded* is a render with another clone's absolute ``.../apm_modules/...``
+    package path; *native* qualifies only when replacing that one normalized
+    absolute project root with *reference* reproduces it exactly, which is
+    what APM writes when it renders the same declaration in this project.
+    """
+    if reference is None:
+        return False
+    pairs: list[tuple[str, str]] = []
+    if not _string_pairs(recorded, native, pairs) or not pairs:
+        return False
+    marker = "/apm_modules/"
+    roots: set[str] = set()
+    for old, new in pairs:
+        at = new.find(reference + marker)
+        if at < 0 or not old.startswith(new[:at]):
+            return False
+        rest = old[at:]
+        end = rest.find(marker)
+        if end <= 0:
+            return False
+        roots.add(rest[:end])
+    if len(roots) != 1:
+        return False
+    (root,) = roots
+    if not _is_normalized_root(root):
+        return False
+
+    def rewrite(value: Any) -> Any:
+        if isinstance(value, str):
+            return value.replace(root + marker, reference + marker)
+        if isinstance(value, dict):
+            return {key: rewrite(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        return value
+
+    return rewrite(recorded) == native
