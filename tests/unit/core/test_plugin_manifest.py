@@ -539,13 +539,18 @@ class TestApmManagedMcpExcludedFromPack:
         )
         logger = MagicMock()
 
+        claude_logger = MagicMock()
+
         codex = build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
-        claude = build_plugin_manifest(tmp_path, apm, "claude")
+        claude = build_plugin_manifest(tmp_path, apm, "claude", logger=claude_logger)
 
         assert "mcpServers" not in codex
         message = logger.warning.call_args.args[0]
         assert "devsrv" in message and "authored" in message
         assert claude["mcpServers"] == {"authored": {"command": "node"}}
+        # Claude names what it left out, so the author is not silently surprised.
+        dropped = claude_logger.warning.call_args.args[0]
+        assert "devsrv" in dropped and "authored" not in dropped
 
     def test_codex_references_file_without_managed_servers(self, tmp_path: Path) -> None:
         apm = self._project(

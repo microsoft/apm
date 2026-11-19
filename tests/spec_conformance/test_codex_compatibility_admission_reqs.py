@@ -77,7 +77,7 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
 def test_codex_consumer_denies_unapproved_manifest_referenced_mcp(codex_admission: tuple) -> None:
     """The real approval owner must deny referenced native MCP before queueing."""
     package, home, options, ctx = codex_admission
-    with pytest.raises(CodexNativeError, match="allowExecutables"):
+    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
         integrate_package_primitives(package, home, allow_executables={}, **options)
     assert ctx.codex_native_plugins == {}
     assert list(home.iterdir()) == []

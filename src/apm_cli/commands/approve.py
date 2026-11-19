@@ -811,10 +811,18 @@ def _user_flag(user_scope: bool) -> str:
 
 def _same_store_denies(deny: dict, decl: ExecutableDeclaration) -> list[str]:
     """Deny keys in the store being written that name *decl*'s package."""
-    from ..security.executables import _strip_version
+    from ..security.executables import _is_content_bound_key, canonical_exec_identity
 
     keys = {decl.package_key, _identity(decl)}
-    return [key for key in deny if key in keys or _strip_version(key) in keys]
+    # Same spellings the deny ladder matches (URL, host, case, version), so a
+    # deny that blocks the package is the deny approve clears.
+    identities = {canonical_exec_identity(key) for key in keys if not _is_content_bound_key(key)}
+    return [
+        key
+        for key in deny
+        if key in keys
+        or (not _is_content_bound_key(key) and canonical_exec_identity(key) in identities)
+    ]
 
 
 def _still_denied(

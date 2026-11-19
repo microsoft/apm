@@ -956,12 +956,12 @@ def test_bundle_reinstall_reconciles_owned_mcp_servers() -> None:
     [
         (
             "src/apm_cli/install/orphans.py",
-            "dep = locked_marketplace_form(dep, lockfile)",
+            "dep = locked_marketplace_form(dep, lockfile, marketplace_index)",
             "dep = dep",
         ),
         (
             "src/apm_cli/install/dry_run_plan.py",
-            "locked = locked_marketplace_row(dependency, lockfile)",
+            "locked = locked_marketplace_row(dependency, lockfile, marketplace_index)",
             "locked = None",
         ),
     ],

@@ -109,7 +109,7 @@ _ORIGIN_ENTRY_POINTS = (
     (
         "src/apm_cli/commands/uninstall/engine.py",
         "_resolve_marketplace_packages",
-        "require_locked_catalog_origin",
+        "require_locked_row_origin",
         "resolve_marketplace_plugin",
     ),
     (

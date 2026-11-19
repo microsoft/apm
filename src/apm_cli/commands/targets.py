@@ -29,7 +29,13 @@ def _manifest_targets(project_root: Path) -> list[str] | None:
     if not manifest.is_file():
         return None
     try:
-        return package_target_declaration(APMPackage.from_apm_yml(manifest)).restriction()
+        declaration = package_target_declaration(APMPackage.from_apm_yml(manifest))
+        if declaration.selection == "all":
+            from apm_cli.core.target_catalog import expand_all
+
+            # Singular ``target: all`` deploys the install set; restriction() folds it.
+            return list(expand_all("install"))
+        return declaration.restriction()
     except (OSError, ValueError) as exc:
         raise click.UsageError(f"Failed to read {APM_YML_FILENAME}: {exc}") from exc
 

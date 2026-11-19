@@ -81,10 +81,12 @@ class TestLifecycleTest:
 
     def test_fires_synthetic_event(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
         _write_yaml(
             tmp_path / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo test-ok"}]}},
         )
+        assert cli_runner.invoke(lifecycle, ["trust"]).exit_code == 0
         with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="test-ok", stderr="", returncode=0)
             result = cli_runner.invoke(lifecycle, ["test", "post-install", "--execute"])
@@ -231,17 +233,11 @@ class TestLifecycleTestTrustDisplay:
         assert "Dry-run" in result.output
         assert "trusted" in result.output.lower()
 
-    def test_execute_flag_runs_scripts_regardless_of_trust(self, cli_runner, tmp_path, monkeypatch):
-        """Document intentional design: --execute fires scripts even when untrusted.
+    def test_execute_flag_withholds_untrusted_scripts(self, cli_runner, tmp_path, monkeypatch):
+        """--execute fires through the script gate, like 'apm install' (#3983).
 
-        'apm lifecycle test --execute' is an explicit developer action (scaffold +
-        verify wiring before first trust). It bypasses the trust gate by design so
-        authors can iterate without cycling trust on every script edit. This is
-        distinct from 'apm install' which ALWAYS requires trust.
-
-        This test is a regression trap: if the behavior changes (either to enforce
-        trust or to change the bypass semantics), this test must be updated with a
-        comment explaining the new design rationale.
+        It used to bypass project script trust; now an untrusted script is
+        withheld and the output names 'apm lifecycle trust'.
         """
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
@@ -254,4 +250,6 @@ class TestLifecycleTestTrustDisplay:
             mock_run.return_value = MagicMock(stdout="ok", stderr="", returncode=0)
             result = cli_runner.invoke(lifecycle, ["test", "post-install", "--execute"])
         assert result.exit_code == 0
-        assert "fired" in result.output.lower()
+        assert "fired" not in result.output.lower()
+        assert "apm lifecycle trust" in result.output
+        assert not any("echo ok" in str(call) for call in mock_run.call_args_list)
