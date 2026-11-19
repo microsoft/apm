@@ -134,15 +134,25 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
     APM's normalization only copies plugin files into ``.apm/``, so every
     file there must equal some file :func:`native_plugin_files` covers;
     anything else is content the plugin pin would not bind. The one exception
-    is the parser-owned skill-source receipt normalization writes beside the
-    copies: APM metadata, never executable and never loaded by a harness.
+    is the skill-source receipt legacy-plugin normalization writes beside the
+    copies, and only when it is exactly the canonical receipt for this root.
+    An Agent Plugin is loaded live and never normalized, so it gets none.
     """
-    from apm_cli.deps.plugin_parser import _PLUGIN_SKILL_SOURCES_FILE
+    from apm_cli.agent_plugins.loader import detect_agent_plugin
+    from apm_cli.deps.plugin_parser import (
+        _PLUGIN_SKILL_SOURCES_FILE,
+        is_canonical_normalization_receipt,
+    )
 
     apm_dir = plugin_root / ".apm"
     if not apm_dir.exists():
         return None
-    receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+    receipt = (
+        apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+        if detect_agent_plugin(plugin_root) is None
+        and is_canonical_normalization_receipt(plugin_root)
+        else None
+    )
     try:
         pinned = {
             hashlib.sha256((plugin_root / relative).read_bytes()).digest()
@@ -152,7 +162,7 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
             label = path.relative_to(plugin_root).as_posix()
             if path.is_symlink():
                 return f"'{label}' is a symlink"
-            if path == receipt and path.is_file():
+            if receipt is not None and path == receipt:
                 continue
             if path.is_file() and hashlib.sha256(path.read_bytes()).digest() not in pinned:
                 return f"'{label}' is not a copy of a pinned plugin file"

@@ -1989,7 +1989,7 @@ class HookIntegrator(BaseIntegrator):
         allow_map = None
         if survivor_plan:
             root = manifest_root(project_root, user_scope=user_scope)
-            allow_map = resolve_project_exec_allow_map(root, apm_package)
+            allow_map = resolve_project_exec_allow_map(project_root, apm_package, manifest_dir=root)
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(

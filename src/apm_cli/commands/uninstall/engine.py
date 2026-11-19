@@ -1387,7 +1387,10 @@ def _sync_integrations_after_uninstall(
         from ...core.scope import manifest_root
 
         _allow_executables = resolve_project_exec_allow_map(
-            manifest_root(project_root, user_scope=user_scope), apm_package, logger=logger
+            project_root,
+            apm_package,
+            logger=logger,
+            manifest_dir=manifest_root(project_root, user_scope=user_scope),
         )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 

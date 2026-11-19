@@ -142,15 +142,52 @@ def test_unparseable_hook_file_cannot_be_fingerprinted(tmp_path: Path) -> None:
         hook_file_fingerprint(tmp_path, hook)
 
 
-def test_normalization_receipt_is_not_an_unpinned_apm_copy(tmp_path: Path) -> None:
-    """Legacy-plugin normalization writes one receipt; any other non-copy still parks."""
+def _normalized_plugin(root: Path) -> Path:
+    """A legacy plugin as normalization leaves it: skill copy plus canonical receipt."""
+    import json
+
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text('{"name": "p"}')
+    for base in (root / "skills/review", root / ".apm/skills/review"):
+        base.mkdir(parents=True)
+        (base / "SKILL.md").write_text("---\nname: review\n---\nbody\n")
+    receipt = {"version": 1, "declared": False, "sources": {"review": "skills/review"}}
+    (root / ".apm/.plugin-skill-sources.json").write_text(json.dumps(receipt, sort_keys=True))
+    return root
+
+
+def test_canonical_normalization_receipt_is_not_an_unpinned_apm_copy(tmp_path: Path) -> None:
     from apm_cli.utils.content_hash import unpinned_apm_copy
 
-    (tmp_path / "hooks").mkdir()
-    (tmp_path / "hooks/hooks.json").write_text("{}")
-    (tmp_path / ".apm/hooks").mkdir(parents=True)
-    (tmp_path / ".apm/hooks/hooks.json").write_text("{}")
-    (tmp_path / ".apm/.plugin-skill-sources.json").write_text('{"skills": []}')
-    assert unpinned_apm_copy(tmp_path) is None
-    (tmp_path / ".apm/hooks/extra.sh").write_text("echo unpinned")
-    assert "extra.sh" in unpinned_apm_copy(tmp_path)
+    root = _normalized_plugin(tmp_path / "plugin")
+    assert unpinned_apm_copy(root) is None
+    (root / ".apm/skills/review/extra.sh").write_text("echo unpinned")
+    assert "extra.sh" in unpinned_apm_copy(root)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda root: (root / ".apm/.plugin-skill-sources.json").write_text(
+            '{"declared": false, "payload": "x", "sources": {}, "version": 1}'
+        ),
+        lambda root: (root / ".apm/.plugin-skill-sources.json").write_text(
+            '{"declared":false,"sources":{"review":"skills/review"},"version":1}'
+        ),
+        lambda root: (root / ".apm/.plugin-skill-sources.json").write_text(
+            '{"declared": false, "sources": {"review": "../outside"}, "version": 1}'
+        ),
+        lambda root: (root / "plugin.json").write_text(
+            '{"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", '
+            '"name": "p", "version": "1.0.0"}'
+        ),
+    ],
+    ids=["extra-field", "non-canonical-bytes", "escaping-source", "agent-plugin-live-root"],
+)
+def test_publisher_controlled_receipt_bytes_still_park(tmp_path: Path, tamper) -> None:
+    """Only APM's canonical receipt for a normalized legacy plugin is exempt."""
+    from apm_cli.utils.content_hash import unpinned_apm_copy
+
+    root = _normalized_plugin(tmp_path / "plugin")
+    tamper(root)
+    assert unpinned_apm_copy(root) is not None

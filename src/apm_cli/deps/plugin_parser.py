@@ -321,6 +321,47 @@ def _read_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, str], bool]
     return sources, data.get("declared") is True
 
 
+def is_canonical_normalization_receipt(plugin_path: Path) -> bool:
+    """Whether ``.apm/<receipt>`` is exactly what normalization writes for this root.
+
+    Its bytes must be the writer's canonical serialization, every recorded
+    source a real skill directory inside the plugin with a flat ``.apm/skills``
+    copy, so the receipt carries nothing beyond facts the plugin pin binds.
+    """
+    receipt = plugin_path / ".apm" / _PLUGIN_SKILL_SOURCES_FILE
+    if not receipt.is_file() or receipt.is_symlink():
+        return False
+    try:
+        raw = receipt.read_bytes()
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"version", "declared", "sources"}
+        or data["version"] != 1
+        or not isinstance(data["declared"], bool)
+        or not isinstance(data["sources"], dict)
+    ):
+        return False
+    root = plugin_path.resolve()
+    for name, source in data["sources"].items():
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            return False
+        if not isinstance(source, str) or not source:
+            return False
+        directory = plugin_path / source
+        if (
+            directory.is_symlink()
+            or not directory.resolve().is_relative_to(root)
+            or not (directory / "SKILL.md").is_file()
+            or not (plugin_path / ".apm" / "skills" / name / "SKILL.md").is_file()
+        ):
+            return False
+    canonical = json.dumps(data, sort_keys=True).encode("utf-8")
+    return raw == canonical
+
+
 def normalized_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, Path], bool]:
     """Return parser-authorized normalized skill names and their byte sources.
 

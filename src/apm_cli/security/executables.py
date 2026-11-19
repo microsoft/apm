@@ -1151,12 +1151,15 @@ def resolve_project_exec_allow_map(
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
     logger: Any | None = None,
+    manifest_dir: Path | None = None,
 ) -> dict[str, dict[str, bool]] | None:
     """Return the deny-wins executables map for one project command.
 
     Reuses a map the caller already resolved (``executable_context`` is
     ``(map, resolved)``); otherwise resolves org policy (unless disabled),
     project, and user layers through :func:`effective_exec_map_for_project`.
+    Org policy is discovered from *project_root*; the grants are read from
+    *manifest_dir* (default *project_root*), which differs at user scope.
     """
     allow_map, resolved = executable_context
     if resolved:
@@ -1167,7 +1170,7 @@ def resolve_project_exec_allow_map(
 
         policy = getattr(discover_policy_with_chain(project_root), "policy", None)
     return effective_exec_map_for_project(
-        project_root,
+        manifest_dir or project_root,
         policy=policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,
