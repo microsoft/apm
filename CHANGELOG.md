@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `target: agents` warns once per run, and `apm update -g` names the user manifest it read. (#3967, #PRC)
 - `apm uninstall` reports MCP entries it heals out of retired files; `.github/mcp.json` is emptied, never deleted. (#3967, #PRC)
 - `--exclude` accepts runtime names in any case and aliases like `--target` does, and warns on unknown names. (#3967, #PRC)
-- `apm deps list` shows an aliased package on a non-default port under its own `host:port` identity. (#3967, #PRC)
+- `apm deps list` and `apm find` show a package on a non-default port under its own `host:port` identity. (#3967, #PRC)
 - `apm install -g --help` lists the user-scope runtimes from the runtime adapters, so it cannot drift. (#3967, #PRC)
 - `apm view plugin@marketplace` no longer suggests installing an entry `apm install` would refuse. (#3967, #PRC)
 - Every command prints the newer-lockfile refusal with the same `[x]` prefix and names the user-scope lockfile by its path. (#3967, #PRC)

@@ -229,13 +229,16 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
             click.echo(dep_key)
             continue
 
+        # A remote row keeps its lock key's host and port, so ported packages
+        # never collapse; local rows keep their declared name (B4, #3967).
+        name = dep.repo_url if dep.source == "local" else dep_key
         if show_path:
             chain_str = _render_why(lockfile, dep)
-            click.echo(f"{dep.repo_url}")
+            click.echo(name)
             for line in chain_str.splitlines():
                 click.echo(f"  {line}")
         elif show_source:
             origin = _format_origin(dep)
-            click.echo(f"{dep.repo_url}  {origin}")
+            click.echo(f"{name}  {origin}")
         else:
-            click.echo(dep.repo_url)
+            click.echo(name)
