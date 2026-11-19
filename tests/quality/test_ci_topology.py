@@ -56,6 +56,7 @@ REQUIRED_SHARD_ROOTS = (
     "tests/unit",
     "tests/test_console.py",
     "tests/red_team",
+    "tests/fixtures/policy",
 )
 
 # Lifecycle Smoke (Linux): the smallest stable hermetic subset of the real
