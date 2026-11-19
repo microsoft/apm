@@ -74,7 +74,7 @@ def test_shared_settings_command_inventory_is_visible_and_non_failing(
         args += ["--ci", "--no-policy", "--no-fail-fast"]
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == 0, result.output
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     if ci_mode:
         check = next(c for c in report["checks"] if c["name"] == "content-integrity")
         assert check["details"] == []
@@ -102,7 +102,7 @@ def test_decoded_prompt_fields_fail_without_scanning_unrelated_settings(
     assert "/hooks/Stop/0/hooks/1/prompt" in result.output
     assert settings.read_bytes() == before
     if output_format == "json":
-        report = json.loads(result.output)
+        report = json.loads(result.stdout)
         assert report["summary"]["critical"] == 1
         assert report["summary"]["files_scanned"] == 1
         assert [entry["status"] for entry in report["coverage"]["primitives"]] == [
@@ -136,7 +136,7 @@ def test_unknown_or_malformed_recognized_content_never_claims_success(
         args += ["--ci", "--no-policy", "--no-fail-fast"]
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == 1, result.output
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     if ci_mode:
         check = next(c for c in report["checks"] if c["name"] == "content-integrity")
         assert check["passed"] is False
@@ -159,7 +159,7 @@ def _copilot_hooks(root: Path, events: dict[str, object]) -> Path:
 def _ci_audit() -> tuple[int, dict]:
     args = ["audit", "--ci", "--no-policy", "--no-fail-fast", "--no-drift", "--format", "json"]
     result = CliRunner().invoke(cli, args)
-    return result.exit_code, json.loads(result.output)
+    return result.exit_code, json.loads(result.stdout)
 
 
 @pytest.mark.parametrize("prompt", ["Answer concisely.", "/review"])
@@ -240,7 +240,7 @@ def test_unreadable_recognized_file_is_reported(
     monkeypatch.setattr(Path, "read_text", unreadable)
     result = CliRunner().invoke(cli, ["audit", "--no-drift", "--format", "json"])
     assert result.exit_code == 1, result.output
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     assert report["coverage"]["primitives"][0]["status"] == "incomplete"
     assert report["summary"]["files_scanned"] == 0
     assert report["findings"] == []
@@ -504,12 +504,12 @@ def test_ci_inventory_is_informational_on_pass_and_failure(
         assert "not-applicable" in " ".join(result.output.split())
     elif output_format == "json":
         check = next(
-            c for c in json.loads(result.output)["checks"] if c["name"] == "content-integrity"
+            c for c in json.loads(result.stdout)["checks"] if c["name"] == "content-integrity"
         )
         assert any(e["status"] == "not-applicable" for e in check["primitive_coverage"])
         assert check["details"] == (["unicode: .claude/rules/dirty.md"] if dirty else [])
     else:
-        run = json.loads(result.output)["runs"][0]
+        run = json.loads(result.stdout)["runs"][0]
         entries = run["invocations"][0]["properties"]["primitiveCoverage"]
         assert any(e["status"] == "not-applicable" for e in entries)
         assert len(run["results"]) == int(dirty)
@@ -524,7 +524,7 @@ def test_incomplete_coverage_sarif_never_claims_success(project: Path, ci_mode: 
         args += ["--ci", "--no-policy", "--no-fail-fast"]
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == 1, result.output
-    run = json.loads(result.output)["runs"][0]
+    run = json.loads(result.stdout)["runs"][0]
     assert run["invocations"][0]["executionSuccessful"] is False
     assert len(run["results"]) == 1
     finding = run["results"][0]
@@ -551,7 +551,7 @@ def test_denied_parent_reports_incomplete_coverage(
     monkeypatch.setattr(Path, "lstat", denied)
     result = CliRunner().invoke(cli, ["audit", "--no-drift", "--format", "json"])
     assert result.exit_code == 1, result.output
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     assert report["passed"] is False
     assert report["summary"]["files_scanned"] == 0
     assert report["findings"] == []
@@ -571,7 +571,7 @@ def test_real_denied_parent_is_not_clean(project: Path) -> None:
     try:
         result = CliRunner().invoke(cli, ["audit", "--no-drift", "--format", "json"])
         assert result.exit_code == 1, result.output
-        report = json.loads(result.output)
+        report = json.loads(result.stdout)
         assert report["coverage"]["complete"] is False
         assert report["summary"]["files_scanned"] == 0
     finally:
@@ -617,13 +617,13 @@ def test_structured_locations_are_safe_and_not_physical_offsets(
     assert result.exit_code == 1, result.output
     pointer = f"/hooks/{event}/0/hooks/0/prompt"
     if output_format == "json":
-        finding = json.loads(result.output)["findings"][0]
+        finding = json.loads(result.stdout)["findings"][0]
         assert finding["pointer"] == pointer
         assert finding["coordinate_space"] == "decoded-prompt"
         assert (finding["decoded_line"], finding["decoded_column"]) == (1, 6)
         assert "line" not in finding and "column" not in finding
     elif output_format == "sarif":
-        finding = json.loads(result.output)["runs"][0]["results"][0]
+        finding = json.loads(result.stdout)["runs"][0]["results"][0]
         assert finding["properties"]["pointer"] == pointer
         assert "region" not in finding["locations"][0]["physicalLocation"]
     else:
@@ -879,7 +879,7 @@ def test_lockless_cli_still_discovers_prompt_primitives(project: Path, ci_mode: 
         args += ["--ci", "--no-policy", "--no-fail-fast"]
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == 1, result.output
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     if ci_mode:
         content = next(check for check in report["checks"] if check["name"] == "content-integrity")
         assert content["passed"] is False
