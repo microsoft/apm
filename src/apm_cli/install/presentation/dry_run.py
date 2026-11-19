@@ -80,6 +80,9 @@ def render_and_exit(
         else:
             logger.progress("No dependencies found in apm.yml")
 
+    for error in plan.dependency_declaration_errors:
+        # Shown without --verbose: install refuses these whatever is cached.
+        logger.warning(f"apm install would refuse: {error}")
     if plan.dependency_preview_errors:
         logger.dry_run_notice(
             "Dependency preview incomplete; showing only locally known dependencies. "
@@ -87,7 +90,8 @@ def render_and_exit(
             "to resolve dependencies."
         )
         for error in plan.dependency_preview_errors:
-            logger.verbose_detail(error)
+            if error not in plan.dependency_declaration_errors:
+                logger.verbose_detail(error)
 
     try:
         _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))

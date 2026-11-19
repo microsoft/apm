@@ -49,6 +49,7 @@ class ProspectiveInstallPlan:
     updated_apm_identities: frozenset[str] = frozenset()
     resolved_apm_dependencies: tuple[DependencyReference, ...] | None = None
     dependency_preview_errors: tuple[str, ...] = ()
+    dependency_declaration_errors: tuple[str, ...] = ()
 
     @classmethod
     def from_apm_package(
@@ -185,6 +186,7 @@ class ProspectiveInstallPlan:
             selected_apm_dependencies=dependencies,
             resolved_apm_dependencies=resolved_dependencies,
             dependency_preview_errors=tuple(errors),
+            dependency_declaration_errors=tuple(graph.declaration_errors),
         )
 
     def with_allowed_lsp_dependencies(
