@@ -218,8 +218,7 @@ def test_actual_resolver_rejects_port_distinct_package_on_shared_slot(tmp_path: 
     _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
     graph = APMDependencyResolver().resolve_dependencies(consumer.root)
     assert any(
-        "github.com/example/base and github.com:8443/example/base are different packages"
-        in error
+        "github.com/example/base and github.com:8443/example/base are different packages" in error
         and "would both install to apm_modules/example/base" in error
         for error in graph.resolution_errors
     )
