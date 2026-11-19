@@ -1,0 +1,61 @@
+"""The root marketplaces: map guard rejects bypasses of its owner (#2903)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from scripts.architecture_linter.checks.marketplace_project_map import RULE_ID
+from scripts.architecture_linter.runner import run_selected_rules
+
+pytestmark = pytest.mark.component
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_project_map_routes_through_owner() -> None:
+    report = run_selected_rules(_ROOT, (RULE_ID,))
+    assert not report.violations
+    assert not report.failures
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            "deps/apm_resolver.py",
+            "            require_root_declared_marketplace(\n",
+            "            print(\n",
+        ),
+        (
+            "deps/apm_resolver.py",
+            "            raise DownloadedPackageError(dependency_marketplaces_error(package.name))\n",
+            "            pass\n",
+        ),
+        (
+            "install/service.py",
+            "        marketplace_scope = bind_project_marketplaces(\n",
+            "        marketplace_scope = nullcontext(\n",
+        ),
+        (
+            "commands/view.py",
+            "def _display_marketplace_plugin(",
+            "ORIGIN_PROJECT = 'project'\n\n\ndef _display_marketplace_plugin(",
+        ),
+        (
+            "commands/view.py",
+            "def _display_marketplace_plugin(",
+            "project_marketplace_scope(())\n\n\ndef _display_marketplace_plugin(",
+        ),
+    ],
+)
+def test_project_map_guard_rejects_bypasses(path: str, before: str, after: str) -> None:
+    """Dropping an enforcement, binding ad hoc or minting project sources fails."""
+    source_path = f"src/apm_cli/{path}"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    assert source.count(before) == 1
+    report = run_selected_rules(
+        _ROOT, (RULE_ID,), source_overrides={source_path: source.replace(before, after)}
+    )
+    assert any(item.rule_id == RULE_ID for item in report.violations)

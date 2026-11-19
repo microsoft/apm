@@ -319,3 +319,24 @@ class GitLsRemoteError(BuildError):
             f"{summary} {hint}",
             package=package,
         )
+
+
+class UndeclaredMarketplaceError(MarketplaceError):
+    """A transitive dependency names a marketplace the root project does not declare.
+
+    Raised only when the root ``apm.yml`` declares ``marketplaces:``
+    (#2903 D3): every ``marketplace: <name>`` in the graph must then resolve
+    through that map, so a name cannot mean different things on different
+    machines.
+    """
+
+    def __init__(self, name: str, plugin_name: str, required_by: str):
+        self.name = name
+        self.plugin_name = plugin_name
+        self.required_by = required_by
+        super().__init__(
+            f"marketplace '{name}' is not declared in the root apm.yml, and a "
+            "transitive dependency may only use marketplaces the root declares. "
+            f"Add it to apm.yml:\n  marketplaces:\n    - name: {name}\n"
+            "      source: <catalog repository URL>"
+        )

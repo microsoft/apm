@@ -107,6 +107,8 @@ def run(ctx: InstallContext) -> None:
         registries_map = getattr(apm_package, "registries", None)
         if registries_map is not None:
             extra_kwargs["registries"] = registries_map
+        # Root ``marketplaces:`` origins are gated by marketplace.allow (#2903).
+        extra_kwargs["declared_marketplaces"] = getattr(apm_package, "marketplaces", None)
 
     audit_result = run_dependency_policy_checks(
         _with_prefetch_denials(ctx),

@@ -432,17 +432,6 @@ MARKETPLACE_HOST_CONFLICT = _entry(
     "register it from the host embedded in SOURCE",
     before="drop --host",
 )
-MARKETPLACES_OUTSIDE_USER_MANIFEST = _entry(
-    "marketplaces-outside-user-manifest",
-    "apm install -g",
-    "register them from the user manifest",
-    before="move the entries to the user manifest ({path})",
-)
-MARKETPLACE_REGISTER_MANUAL = _entry(
-    "marketplace-register-manual",
-    "apm marketplace add <source> --name <name>",
-    "register one manually",
-)
 MARKETPLACE_ORIGIN_READD = _entry(
     "marketplace-origin-readd", "apm marketplace add <source>", "re-add the marketplace"
 )

@@ -22,6 +22,7 @@ from .schema import (
     ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
+    MarketplacePolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
@@ -57,6 +58,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "unmanaged_files",
     "security",
     "registry_source",
+    "marketplace",
     "bin_deploy",
     "executables",
 }
@@ -86,6 +88,7 @@ _MAPPING_FIELDS: tuple[tuple[str, ...], ...] = (
     ("manifest", "content_types"),
     ("unmanaged_files",),
     ("registry_source",),
+    ("marketplace",),
     ("security",),
     ("security", "audit"),
     ("security", "integrity"),
@@ -135,6 +138,8 @@ _STR_LIST_FIELDS: dict[tuple[str, ...], str] = {
     ("unmanaged_files", "directories"): "a YAML list of directories",
     ("unmanaged_files", "exclude"): "a YAML list of path globs",
     ("registry_source", "require"): "a YAML list of package patterns",
+    # Fail closed: a malformed allow-list must not read as "no opinion".
+    ("marketplace", "allow"): "a YAML list of origin patterns",
     ("security", "audit", "external"): "a YAML list of scanner names",
     ("bin_deploy", "deny"): "a YAML list of package strings",
     ("executables", "deny"): "a YAML list of package strings",
@@ -384,6 +389,10 @@ def _build_policy(data: dict) -> ApmPolicy:
         allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
     )
 
+    marketplace = MarketplacePolicy(
+        allow=_parse_allow((data.get("marketplace") or {}).get("allow"))
+    )
+
     sec_data = data.get("security") or {}
     raw_audit = sec_data.get("audit")
     audit_data = raw_audit if isinstance(raw_audit, dict) else {}
@@ -436,6 +445,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         manifest=manifest,
         unmanaged_files=unmanaged_files,
         registry_source=registry_source,
+        marketplace=marketplace,
         security=security,
         bin_deploy=bin_deploy,
         executables=executables,

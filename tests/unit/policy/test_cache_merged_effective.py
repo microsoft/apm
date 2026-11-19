@@ -569,6 +569,8 @@ unmanaged_files:
 registry_source:
   require: [corp-main]
   allow_non_registry: false
+marketplace:
+  allow: [github.com/contoso/*]
 security:
   audit:
     on_install: block

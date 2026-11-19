@@ -134,6 +134,20 @@ def same_marketplace_catalog(left: MarketplaceSource, right: MarketplaceSource) 
     )
 
 
+def marketplace_policy_subject(origin_or_pattern: str) -> str:
+    """Return the ``host/path`` key ``marketplace.allow`` matches an origin by.
+
+    Applied to both sides: a recorded origin and an allow pattern, which may
+    be written with or without a scheme (``github.com/contoso/*``). Transport,
+    userinfo, default ports, a trailing ``.git`` and host case are ignored, as
+    in :func:`same_marketplace_origin`.
+    """
+    value = origin_or_pattern.strip()
+    if "://" not in value and not SCP_LIKE_RE.match(value):
+        value = f"https://{value}"
+    return _origin_comparison_key(value)
+
+
 def _origin_comparison_key(origin: str) -> str:
     _scheme, _, rest = normalize_repo_url(origin).partition("://")
     authority, slash, path = rest.partition("/")

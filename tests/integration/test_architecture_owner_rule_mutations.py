@@ -3022,6 +3022,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Agent-plugin producer loses its portability admission gate.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-project-map",
+        rule_id="marketplace-integrations-project-map",
+        path="src/apm_cli/marketplace/registry.py",
+        old="    declared = project_marketplace(name)\n",
+        new="    declared = None\n",
+        intent="A same-named registration silently overrides the root marketplaces: map.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-raw-diagnostics",
         rule_id="marketplace-integrations-raw-diagnostics",
         path="src/apm_cli/marketplace/models.py",
