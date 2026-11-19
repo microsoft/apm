@@ -247,3 +247,20 @@ def test_missing_generator_does_not_warn_on_read(tmp_path, running, monkeypatch)
     monkeypatch.setattr(console, "_rich_warning", lambda message, **_: warnings.append(message))
     LockFile.read(_lock(tmp_path, ""))
     assert warnings == []
+
+
+@pytest.mark.parametrize("command", ["lock", "prune"])
+def test_every_command_renders_the_refusal_like_install(tmp_path, running, monkeypatch, command):
+    """Commands share one ``[x]`` refusal renderer, never click's ``Error:`` (#3967)."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    _lock(tmp_path, "apm_version: 99.0.0\n")
+    result = CliRunner().invoke(cli, [command])
+    assert result.exit_code == 1, result.output
+    assert "[x] Refusing to run 'apm " in result.output
+    assert "Error: Refusing" not in result.output
+    assert "apm.lock.yaml:" in result.output

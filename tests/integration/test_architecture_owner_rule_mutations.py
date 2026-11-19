@@ -1204,6 +1204,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm pack stops refusing a lockfile written by a newer APM.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-generator-gate",
+        rule_id="contracts-tooling-lockfile-generator-gate",
+        path="src/apm_cli/commands/prune.py",
+        old='require_current_cli(Path.cwd(), command="apm prune")',
+        new='check_current_cli(Path.cwd(), command="apm prune")',
+        intent="apm prune renders its refusal with click's Error: prefix instead of [x].",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-generator-stamp",
         rule_id="contracts-tooling-lockfile-generator-stamp",
         path="src/apm_cli/deps/lockfile.py",
