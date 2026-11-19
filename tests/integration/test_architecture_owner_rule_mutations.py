@@ -257,7 +257,7 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
         ),
         pytest.param(
             "src/apm_cli/commands/compile/cli.py",
-            "    _report_staged_hash_drift(logger, _src)\n",
+            "    report_staged_hash_drift(logger, _src)\n",
             "",
             id="compile-skips-staged-drift",
         ),
@@ -287,9 +287,21 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
         ),
         pytest.param(
             "src/apm_cli/commands/compile/watcher.py",
-            '        _report_staged_hash_drift(self.logger, Path("."))\n',
+            '        report_staged_hash_drift(self.logger, Path("."))\n',
             "",
             id="watch-recompile-skips-staged-drift",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "if deployed or staged_instructions or staged_fallbacks:",
+            "if deployed or staged_instructions:",
+            id="all-skipped-bundle-drops-fallback-hashes",
+        ),
+        pytest.param(
+            "src/apm_cli/install/manifest_reconcile.py",
+            "    survivors.update(lockfile.local_staged_files)\n",
+            "    survivors.update(lockfile.local_staged_files)\n    lockfile.local_staged_files += []\n",
+            id="non-owner-writes-staged-files",
         ),
     ],
 )

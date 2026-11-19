@@ -37,6 +37,7 @@ from .._helpers import (
     _get_console,
     _rich_blank_line,
 )
+from .staging import report_staged_hash_drift
 from .watcher import _watch_mode
 
 
@@ -882,20 +883,6 @@ def _report_target_without_compile_output(
     return True
 
 
-def _report_staged_hash_drift(logger: CommandLogger, project_root: Path) -> None:
-    """Warn when bundle-staged compile input changed since install (#3718)."""
-    from ...deps.lockfile import LockFile, resolve_lockfile_path_for_read
-
-    lock = LockFile.read(resolve_lockfile_path_for_read(project_root, read_only=True))
-    if lock is None:
-        return
-    for path, _expected, _actual in lock.staged_hash_drift(project_root):
-        logger.warning(
-            f"hash-drift: staged file {path} changed since install and will be compiled "
-            "as-is -- run 'apm install <bundle> --force' to restage it"
-        )
-
-
 @serialized_lifecycle_unless("dry_run")
 def _run_compilation(
     logger: CommandLogger,
@@ -935,7 +922,7 @@ def _run_compilation(
     logger.start("Starting context compilation...", symbol="cogs")
 
     _src = source_root or Path(".")
-    _report_staged_hash_drift(logger, _src)
+    report_staged_hash_drift(logger, _src)
 
     # Resolve effective target using the shared helper (mirrors watch-mode path).
     effective_target, detection_reason, config_target = _resolve_effective_target(

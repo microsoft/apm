@@ -27,11 +27,14 @@ PRUNE = "src/apm_cli/commands/prune.py"
 AUDIT = "src/apm_cli/policy/ci_checks.py"
 COMPILE = "src/apm_cli/commands/compile/cli.py"
 WATCHER = "src/apm_cli/commands/compile/watcher.py"
+COMPILE_STAGING = "src/apm_cli/commands/compile/staging.py"
 PHASES = "src/apm_cli/install/phases/lockfile.py"
 _STAGED_HASH_WRITERS = frozenset({LOCKFILE, LEDGER})
+_STAGED_FIELD = r"\.local_staged_file(?:s|_hashes)"
 _STAGED_HASH_WRITE = re.compile(
-    r"\.local_staged_file_hashes(\s*\[[^\]]*\])?\s*=(?!=)"
-    r"|\.local_staged_file_hashes\.(update|setdefault|pop|clear)\("
+    rf"{_STAGED_FIELD}(\s*\[[^\]]*\])?\s*[|+-]?=(?!=)"
+    rf"|{_STAGED_FIELD}\.(update|setdefault|pop|popitem|clear|append|extend|insert|remove)\("
+    rf"|\bdel\s+\S*{_STAGED_FIELD}\["
 )
 
 _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
@@ -88,6 +91,10 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             'staged_hashes=result.get("staged_file_hashes", {})',
             "record staged hashes through the ledger owner",
         ),
+        (
+            "if deployed or staged_instructions or staged_fallbacks:",
+            "persist collision-skipped staging hashes",
+        ),
     ),
     DISCOVERY: (
         ("for slug in lock.local_staging_slugs():", "prove staging roots via the lockfile owner"),
@@ -111,20 +118,20 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "audit staged drift through the lockfile owner",
         ),
     ),
-    COMPILE: (
+    COMPILE_STAGING: (
         (
             "lock.staged_hash_drift(project_root)",
             "warn on staged drift through the lockfile owner",
         ),
-        ("_report_staged_hash_drift(logger, _src)", "check staged drift before compiling"),
     ),
+    COMPILE: (("report_staged_hash_drift(logger, _src)", "check staged drift before compiling"),),
     WATCHER: (
         (
-            '_report_staged_hash_drift(self.logger, Path("."))',
+            'report_staged_hash_drift(self.logger, Path("."))',
             "check staged drift before each watch recompile",
         ),
         (
-            '_report_staged_hash_drift(logger, Path("."))',
+            'report_staged_hash_drift(logger, Path("."))',
             "check staged drift before the initial watch compile",
         ),
     ),
@@ -165,8 +172,8 @@ def check_bundle_compile_staging(provider: FactsProvider) -> tuple[Violation, ..
                     _summary(
                         GUARD,
                         path,
-                        f"line {number}: write local_staged_file_hashes only through "
-                        "the lockfile or deployment-ledger owner",
+                        f"line {number}: write local_staged_files / local_staged_file_hashes "
+                        "only through the lockfile or deployment-ledger owner",
                     )
                 )
     return tuple(findings)
