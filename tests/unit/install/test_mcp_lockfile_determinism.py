@@ -779,3 +779,57 @@ def test_canonical_update_persists_explicit_empty_ownership(tmp_path: Path) -> N
     assert restored is not None
     assert restored._mcp_target_servers_present is True
     assert restored.mcp_target_servers == {}
+
+
+@pytest.mark.parametrize(
+    ("target_servers", "after_package_phase"),
+    [({"copilot": ["atlassian"]}, "0.35.0"), ({"claude": ["atlassian"]}, "0.37.0")],
+    ids=["copilot-claim-held", "claude-claim-restamped"],
+)
+def test_package_phase_keeps_a_pre_root_version_until_the_mcp_phase_stamps_it(
+    tmp_path: Path, target_servers: dict[str, list[str]], after_package_phase: str
+) -> None:
+    """Under a 0.37 APM, only the MCP phase may restamp a lock holding 0.36 copilot claims."""
+    package = _write_manifest_with_mcp(tmp_path)
+    lock_path = get_lockfile_path(tmp_path)
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.35.0",
+            "dependencies": [],
+            "mcp_servers": ["atlassian"],
+            "mcp_target_servers": target_servers,
+        },
+        lock_path,
+    )
+
+    with (
+        patch("apm_cli.deps.lockfile.installed_apm_version", return_value="0.37.0"),
+        patch("apm_cli.integration.mcp_integrator.installed_apm_version", return_value="0.37.0"),
+    ):
+        dep_ref = package.get_apm_dependencies()[0]
+        ctx = InstallContext(
+            project_root=tmp_path,
+            apm_dir=tmp_path,
+            apm_package=package,
+            existing_lockfile=LockFile.read(lock_path),
+            logger=MagicMock(),
+            diagnostics=MagicMock(),
+        )
+        ctx.installed_packages = [
+            InstalledPackage(dep_ref=dep_ref, resolved_commit=None, depth=1, resolved_by=None)
+        ]
+        LockfileBuilder(ctx).build_and_save()
+        packaged = LockFile.read(lock_path)
+        assert packaged is not None and packaged.dependencies
+        assert packaged.apm_version == after_package_phase
+
+        # A semantically unchanged MCP write still records the translation.
+        MCPIntegrator.update_lockfile(
+            {"atlassian"},
+            lock_path,
+            mcp_target_servers=target_servers,
+            stamp_version=True,
+        )
+    stamped = LockFile.read(lock_path)
+    assert stamped is not None and stamped.apm_version == "0.37.0"

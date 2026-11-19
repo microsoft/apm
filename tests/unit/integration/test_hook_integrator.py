@@ -5069,3 +5069,22 @@ class TestHookScriptAdopt:
         for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             assert (scripts_dir_target / script) in result.target_paths
         assert (scripts_dir_target / "pretooluse.py") not in result.target_paths
+
+
+@pytest.mark.parametrize("spec", ["local-bundle/x", "gitlab.com/local-bundle/x"])
+def test_dependency_named_local_bundle_stays_dependency_owned(spec: str) -> None:
+    """A dependency cannot claim the local-bundle hook marker namespace (#3700)."""
+    from apm_cli.integration.hook_ownership import (
+        dependency_hook_source_marker,
+        drop_dependency_owned_entries,
+        is_local_bundle_hook_source,
+        local_bundle_hook_source_marker,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    marker = dependency_hook_source_marker(DependencyReference.parse(spec))
+    bundle_marker = local_bundle_hook_source_marker("x")
+    assert not is_local_bundle_hook_source(marker)
+    hooks = {"PreToolUse": [{"_apm_source": marker}, {"_apm_source": bundle_marker}]}
+    assert drop_dependency_owned_entries(hooks)
+    assert hooks == {"PreToolUse": [{"_apm_source": bundle_marker}]}

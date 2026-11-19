@@ -54,6 +54,28 @@ def is_frozen_unrecorded_mcp_pair(name: str, runtime: str) -> bool:
     return (name, runtime) in _frozen_unrecorded_pairs.get()
 
 
+_adoptable_root_names: ContextVar[frozenset[str]] = ContextVar(
+    "apm_adoptable_root_mcp_names", default=frozenset()
+)
+
+
+@contextmanager
+def adoptable_root_mcp_entries(names: frozenset[str]) -> Iterator[None]:
+    """Let one install adopt the root ``.mcp.json`` entries of *names* for ``copilot``.
+
+    For a pre-0.37 lock's declared claims that a ``--frozen`` install already
+    moved (no retired file holds them, see
+    :class:`~apm_cli.install.mcp.retired_destinations.RetiredMcpClaims`), the
+    lock could not record that write. An entry equal to the requested render
+    is that write; any other entry stays a conflict.
+    """
+    token = _adoptable_root_names.set(frozenset(names))
+    try:
+        yield
+    finally:
+        _adoptable_root_names.reset(token)
+
+
 def native_mcp_entry_present(
     runtime: str,
     name: str,
@@ -230,6 +252,29 @@ def compare_native_mcp_connection(
     comparison = native
     matches_baseline = False
     retired_shape = False
+    adoptable = (
+        not managed
+        and requested is not None
+        and client.target_name == "copilot"
+        and name in _adoptable_root_names.get()
+    )
+    if adoptable and isinstance(native, dict):
+        # --frozen wrote this entry from apm.yml, or from the locked declaration
+        # before apm.yml changed. Compared by JSON type too: true is not 1.
+        renders = [requested]
+        if isinstance(stored_config, dict) and stored_config.get("registry") is False:
+            try:
+                renders.append(
+                    client.render_server_config(
+                        MCPIntegrator._build_self_defined_info(
+                            MCPDependency.from_dict(stored_config)
+                        )
+                    )
+                )
+            except (TypeError, ValueError):
+                logger.debug("Unusable locked declaration for %s", name)
+        comparable = client.managed_server_config(native)
+        matches_baseline = any(client.json_identical(comparable, render) for render in renders)
     if managed and isinstance(stored_config, dict):
         try:
             dependency = MCPDependency.from_dict(stored_config)

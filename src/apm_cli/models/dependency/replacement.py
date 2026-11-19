@@ -300,7 +300,6 @@ class ReplacementIndex:
         self._rules = list(rules)
         self._by_key: dict[tuple[str, int | None, str, str | None], ReplacementRule] = {}
         self._bindings: dict[tuple[str, int | None, str, str | None], ReplacementBinding] = {}
-        self._slots: dict[str, str] = {}
         self._identities: dict[str, str] = {}
         for rule in self._rules:
             key = rule.selector.key
@@ -344,17 +343,16 @@ class ReplacementIndex:
         """Apply the consumer's table once, before graph deduplication/admission."""
         if not self._rules or dep.replacement is not None:
             return dep
+        # Distinct packages sharing one directory are rejected by
+        # MaterializationSlots for every graph, with or without rules (#3696).
         identity = dep.get_identity()
-        slot = dep.get_install_path(modules_dir)
-        key = dep.get_unique_key()
-        for occupied, entry in ((self._slots, slot.as_posix()), (self._identities, key)):
-            previous = occupied.setdefault(entry, identity)
-            if previous != identity:
-                raise ReplacementCollisionError(
-                    f"Replacement graph identities {previous!r} and {identity!r} "
-                    f"share the existing materialization slot {slot}. "
-                    "Use distinct original package identities and destinations."
-                )
+        previous = self._identities.setdefault(dep.get_unique_key(), identity)
+        if previous != identity:
+            raise ReplacementCollisionError(
+                f"Replacement graph identities {previous!r} and {identity!r} "
+                "share one original package identity. "
+                "Use distinct original package identities."
+            )
         rule = self.lookup(dep)
         if rule is None:
             return dep
