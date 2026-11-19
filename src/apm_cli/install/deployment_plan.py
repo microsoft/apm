@@ -70,6 +70,16 @@ def prepare_package_deployment(  # noqa: PLR0913
         return PackageDeploymentPlan(selection)
     approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
     hooks, bin_approved, mcp, canvas, lsp = approvals
+    from .exec_gate import hook_file_admission
+
+    hook_filter = hook_file_admission(package_name, package_info, allow_executables)
+    native_codex_hooks = hooks
+    if hook_filter is not None:
+        from apm_cli.install.native_plugin_admission import native_hook_approval
+
+        native_codex_hooks = native_hook_approval(
+            hooks, allow_executables, package_info, package_name, None
+        )
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
@@ -82,7 +92,8 @@ def prepare_package_deployment(  # noqa: PLR0913
         scope=scope,
         skill_subset=skill_subset,
         approvals={
-            "hooks": hooks,
+            # A native plugin loads every hook file live: each must match its pin.
+            "hooks": native_codex_hooks,
             "mcp": mcp,
             "bin": bin_approved and not skip_bin,
             "canvas": canvas,
@@ -97,6 +108,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         projection_targets,
         skill_subset=skill_subset,
         hooks_approved=hooks,
+        hook_file_admitted=hook_filter,
         canvas_approved=canvas or is_first_party,
         skip_bin=skip_bin,
         diagnostics=diagnostics,
@@ -111,4 +123,17 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=skip_bin,
         ),
     )
+    if hook_filter is not None and hook_filter.parked:
+        from apm_cli.security.executables import _strip_version
+        from apm_cli.security.trust import parked_hook_message
+
+        from .exec_gate import resolve_package_key
+
+        package = _strip_version(resolve_package_key(package_info, package_name))
+        for item, parked_reason in hook_filter.parked:
+            message = parked_hook_message(package, item, parked_reason)
+            if diagnostics is not None:
+                diagnostics.warn(message)
+            elif logger is not None:
+                logger.warning(message)
     return PackageDeploymentPlan(selection, approvals, skip_bin, reason, codex_native, source_plan)

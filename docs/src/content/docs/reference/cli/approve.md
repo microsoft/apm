@@ -77,12 +77,66 @@ is trusted by its selected source, never by the original. `apm approve` and
 `../local-hooky` or `my-org/hooky-fork#patched`. `apm deny` also denies the
 original name, so removing the `replace:` rule does not revive an old grant.
 
+### Pinned approvals
+
+`apm approve` pins `hooks` and `mcp` grants to content: each hook file and
+each self-defined MCP server gets a SHA-256 fingerprint of what runs. `bin`,
+`lsp`, and `canvas` stay approved by type.
+
+- **MCP server**: transport, command, args, env (keys plus values or `${VAR}`
+  references), url, headers, cwd, registry, version, package, tools, enabled,
+  and extra keys. A registry-resolved server from a transitive package that
+  sets its own `registry:` or an overlay also binds the resolved registry
+  entry, so pinning it needs registry access.
+- **Hook file**: the hook JSON document plus the bytes of every script it
+  references that APM copies. Code a hook downloads at run time (`npx`,
+  `curl`) or loads indirectly is not covered.
+
+Each item is then admitted in this order (first match wins):
+
+1. Deny rungs 1-3 above -> parked (`denied`). Deny wins over every grant,
+   including pins and `--trust-transitive-mcp`, for self-defined MCP servers,
+   hooks, and transitive MCP servers that need trust.
+2. A pin for the item -> deploys if the fingerprint matches, otherwise parked
+   (`definition-changed`). A project pin decides alone; a user pin applies
+   only when the project has no pin for that item.
+3. A transitive MCP server that is self-defined, sets its own `registry:`, or
+   carries an overlay, with no matching pin -> parked
+   (`untrusted-transitive`). `--trust-transitive-mcp` admits it, and a changed
+   pinned one, for that run only.
+4. Type-level rungs 4-7 above.
+
+When an approved definition changes upstream, install parks the item and
+warns `Parked MCP server 'kit-docs' (acme/agent-kit): definition changed since
+approval` (or `Parked hook file '<path>' ...`), naming the review and
+re-approve commands.
+
+A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
+every install warns once that it is `not pinned to content`. Run
+`apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
+server. A Copilot or Codex native plugin loads every hook file live, so only a
+type-level `hooks: true` admits it; per-file pins do not.
+
 ### The gate opt-in
 
 The gate is enabled when any layer opts in: the project declares an
 `executables:` block (even empty `{}`), or the org policy carries a non-empty
 `executables:` block. Without any opt-in, executables deploy unconditionally
 (backward-compatible).
+
+The first project approval creates that block. When neither `apm.yml` nor org
+policy enables the gate yet, `apm approve` lists the other installed packages
+the next install will park and asks before writing:
+
+```
+[!] This approval turns on the executable gate. The next install will park 1 other package:
+      acme/tools (bin)
+    Review: apm approve --pending  |  Approve them: apm approve acme/tools
+    Continue? [y/N]:
+```
+
+Without a TTY it writes and keeps the warning. `--user` never turns the gate
+on.
 
 ## Options
 
@@ -91,11 +145,44 @@ The gate is enabled when any layer opts in: the project declares an
 | Flag | Description |
 |------|-------------|
 | `PACKAGE_REF` | One or more packages to approve (e.g. `owner/repo`). |
-| `--pending` | List all packages with unapproved executables. |
-| `--all` | Approve all currently blocked packages. |
-| `--recommended` | Bulk-accept the org `executables.recommend` set. |
+| `--pending` | List packages with unapproved or changed executables, one line per item with its state. |
+| `--all` | Pin and approve every package `--pending` lists. |
+| `--recommended` | Pin and approve the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
-| `--user` | Write the grant to `$APM_HOME/config.json` instead of `apm.yml`. |
+| `--user` | Write the grant, in the same pinned shape, to `$APM_HOME/config.json` instead of `apm.yml`. |
+
+#### Output
+
+`apm approve <package>` lists what the package runs, one line per item: type,
+item, summary, and the first 8 hex of the fingerprint. MCP summaries show the
+stdio command and args or the http URL; env keys are shown, values only for
+`${VAR}` references and code-loading keys such as `NODE_OPTIONS`,
+`LD_PRELOAD`, `DYLD_*`, and `PYTHONPATH`; headers show names only.
+
+```
+$ apm approve acme/agent-kit
+[i] acme/agent-kit declares:
+      hooks  .apm/hooks/lint-on-save.json  bash ./scripts/lint.sh  ca978112
+      mcp    kit-docs                      stdio  node ./server.js  (env: DOCS_TOKEN=${DOCS_TOKEN})  3e23e816
+[+] Approved acme/agent-kit at these exact definitions (1 hook file, 1 MCP server)
+[i] Updated apm.yml (1 approved). Run 'apm install' to deploy; commit apm.yml to share.
+```
+
+Re-approving a type-level `true` grant also prints
+`acme/agent-kit hooks: was approved for any content; now pinned to 1 hook file`.
+Re-approving replaces the package's pins with the current definitions.
+
+`apm approve` refuses a package when:
+
+- its installed files differ from `apm.lock.yaml`: run `apm install`, then
+  retry;
+- an item cannot be pinned, for example a transitive registry server while the
+  MCP registry is unreachable (`needs registry access to pin`).
+
+`--pending` marks each item `[approved]`, `[approved, any content]`,
+`[changed since approval]`, `[denied]`, or `[not approved]`. `--list` labels
+`hooks` and `mcp` grants `pinned` or `any content`, for example
+`hooks[+:project-allow, pinned]`.
 
 ### `apm policy explain`
 
@@ -115,18 +202,23 @@ policy explain` for the per-package detail.
 
 ## Store format
 
-The project `executables.allow` / `executables.deny` maps are keyed by
-`owner/repo#version` (or version-blind `owner/repo`) with per-type boolean
-flags:
+`apm approve` writes one entry per package, keyed by the version-blind
+identity `apm approve --pending` prints (`owner/repo`, `./pkgs/x`,
+`local:pkgs/leaf`). `hooks` and `mcp` map each item (package-relative hook
+file path, or server name) to its full `sha256:<64 hex>` fingerprint; other
+types are `true`:
 
 ```yaml
 # apm.yml  (committed)
 executables:
   allow:
-    "owner/repo#1.2.0":
-      hooks: true
+    acme/agent-kit:
+      hooks:
+        .apm/hooks/lint-on-save.json: sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+      mcp:
+        kit-docs: sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d
+    acme/tools:
       bin: true
-      lsp: true
   deny:
     "evil/pkg":
       hooks: true
@@ -136,6 +228,12 @@ executables:
       lsp: true
 ```
 
+An item set to `true`, or a short or malformed digest, fails with
+`apm.yml executables.allow.<pkg>.<type>.<item>: expected 'sha256:<64 hex>'.
+Run 'apm approve <pkg>' to record it.` A pinned map under `deny` denies the
+whole type. Once `apm.yml` holds pins, every client needs APM 0.37 or later;
+older clients reject the item form and fail closed.
+
 The legacy top-level `allowExecutables:` block is **deprecated**. It is still
 read as an alias for `executables.allow` for one minor cycle and is migrated to
 `executables.allow` on the next `apm approve` / `apm deny` write. Prefer
@@ -144,51 +242,24 @@ read as an alias for `executables.allow` for one minor cycle and is migrated to
 The personal store uses the same shape under `executables` in
 `$APM_HOME/config.json` (default `~/.apm/config.json`). The standalone
 `$APM_HOME/approvals.yml` file has been **removed**; its contents are migrated
-into `$APM_HOME/config.json` automatically on first read.
+into `$APM_HOME/config.json` automatically on first read. `apm audit --ci`
+ignores the personal store when it checks MCP consent, so CI and laptops agree.
 
-Ordinary dependency grant keys are package-scoped in v1: a bare `owner/repo`
-key and an `owner/repo#1.2.0` key both match the package name regardless of the
-installed version. Use that versioned form for audit readability, not as a
-per-release trust boundary. Local bundle grants are different: copy the full
-`name#version@sha256:<digest>` key from the install diagnostic. A changed local
-bundle does not inherit the prior grant.
+Existing `owner/repo#1.2.0` keys still match the package regardless of the
+installed version; `apm approve` folds them into the version-blind key. Local
+bundle grants are different: copy the full `name#version@sha256:<digest>` key
+from the install diagnostic. A changed local bundle does not inherit the prior
+grant.
 
 ## Examples
 
-Approve a specific package (writes committed project trust):
-
 ```bash
-apm approve owner/repo
-```
-
-Approve for this machine only:
-
-```bash
-apm approve --user owner/repo
-```
-
-List packages awaiting approval:
-
-```bash
-apm approve --pending
-```
-
-After review, approve everything still pending:
-
-```bash
-apm approve --all
-```
-
-Accept the org-recommended set:
-
-```bash
-apm approve --recommended
-```
-
-Inspect effective trust state across installed packages:
-
-```bash
-apm approve --list
+apm approve owner/repo          # pin and record in apm.yml (committed)
+apm approve --user owner/repo   # pin for this machine only
+apm approve --pending           # review unapproved or changed items
+apm approve --all               # after review, approve everything pending
+apm approve --recommended       # accept the org-recommended set
+apm approve --list              # effective trust state per installed package
 ```
 
 To block a package instead, see [`apm deny`](../deny/).
@@ -197,19 +268,15 @@ To block a package instead, see [`apm deny`](../deny/).
 
 In CI environments (`CI=true`, `APM_NON_INTERACTIVE=1`, or when stdin is not a
 TTY), `apm install` parks unapproved executables and prints the approval
-remedy instead of prompting. Pre-approve packages by committing them to the
-project `executables.allow` block (the way to share trust via source control).
-Required-but-untrusted executables are enforced by `apm audit` through the
-`required-executable-untrusted` signal:
+remedy instead of prompting. On a TTY, the install prompt records pinned
+approvals in the personal store. To share trust, run `apm approve <pkg>` and
+commit `apm.yml`. Required-but-untrusted executables are enforced by
+`apm audit` through the `required-executable-untrusted` signal.
 
-```yaml
-# apm.yml
-executables:
-  allow:
-    "ci-hooks/acme#1.2.0":
-      hooks: true
-      bin: true
-```
+If CI relied on `--trust-transitive-mcp`, run `apm approve <pkg>` and commit
+`apm.yml`: the flag is not saved, and `apm audit --ci` fails a server the
+lockfile admitted without approval in `apm.yml` (see
+[`config-consistency`](../../baseline-checks/#config-consistency)).
 
 ## See also
 

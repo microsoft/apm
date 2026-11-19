@@ -24,11 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `default_host:` in `apm.yml` now applies to shorthand dependencies in install, uninstall and audit (OpenAPM req-mf-019); write `github.com/owner/repo` for GitHub packages. (#3865)
 - Diamond dependencies deploy each skill only to the harnesses its own declaration selected; older lockfiles fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
 - `mcp.transport.allow` checks the transport install actually writes, in install, update and `apm audit --ci`; disallowed or unresolvable registry servers are now blocked, so set `transport:` or update the policy. (#3788)
+- **BREAKING:** `apm audit --ci` fails MCP servers the lockfile admits but `apm.yml` does not approve; if CI used `--trust-transitive-mcp`, run `apm approve <pkg>` and commit `apm.yml`. (#PRNUM)
+- Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#PRNUM)
+- `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#PRNUM)
 
 ### Added
 
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
+- `apm approve` lists what each package runs and pins MCP servers and hook files to their definition; a changed definition is parked until re-approved. (#PRNUM)
 
 ### Changed
 
@@ -46,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` on a fresh clone adopts committed skills after an `apm.yml` ref bump; hand-edited skill files still fail closed. (#3900)
 - Claude plugin MCP and LSP servers record `${CLAUDE_PLUGIN_ROOT}` portably, so `--frozen` and `audit --ci` pass in any clone; commit the one-time `apm.lock.yaml` diff. (#3900)
 - `apm install` works again when APM is installed without dev extras; it no longer fails with "No module named 'packaging'". (#3909)
+- `apm install --frozen` applies the executables gate like install, so gate-parked and approved MCP servers no longer fail it. (#PRNUM)
 - Upgrading to root `.mcp.json` after `--only apm`, a failed install or `--frozen` no longer strands or disowns APM's MCP entries. (#3899, #3909)
 - `apm install` and `apm install --frozen` replay locked marketplace dependencies without contacting the catalog; only new or changed entries and `apm update` read it. (closes #3911, #3915)
 - Instructions `apm install <bundle>` stages for Codex, Gemini or OpenCode are hash-checked, so edits before `apm compile` report `hash-drift`. (#3898)

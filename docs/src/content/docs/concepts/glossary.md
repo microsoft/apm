@@ -284,8 +284,9 @@ Source: `src/apm_cli/install/context.py`,
 The install-time consent step before APM writes a new MCP server config
 to disk. Required because an MCP server pulled in transitively by a deep
 dependency can introduce a new outbound integration the user did not
-explicitly request. Today this is enforced via `--trust-transitive-mcp`
-opt-in plus `apm-policy.yml` allow-listing; an interactive prompt is on
+explicitly request. Today this is enforced via `apm approve` pins in
+`apm.yml` (or a one-run `--trust-transitive-mcp`) plus `apm-policy.yml`
+allow-listing; an interactive prompt is on
 the Promise 2 roadmap.
 
 Source: `src/apm_cli/install/mcp/`,

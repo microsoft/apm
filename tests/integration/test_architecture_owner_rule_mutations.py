@@ -1276,6 +1276,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Uninstall re-integrates survivors without their effective skill selection.",
     ),
     MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/security/executables.py",
+        old="return entry.get(exec_type, False) is True",
+        new="return bool(entry.get(exec_type, False))",
+        intent="A pinned item map reads as a type-level grant for any content.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
@@ -1373,6 +1381,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="snapshot = APMPackage.from_mapping(",
         new="snapshot = APMPackage.from_apm_yml(",
         intent="Acquired metadata reuses the process-lifetime manifest path cache.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-mcp-admission",
+        rule_id="install-deployment-mcp-admission",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old="verdict = admission.admit(subject)",
+        new="verdict = McpAdmission.admit_all().admit(subject)",
+        intent="The MCP view admits every dependency server whatever the command's consent.",
     ),
     MutationCase(
         guard_id="install-deployment-mcp-native-comparison",
@@ -1577,6 +1593,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def reconcile_target_deployed_files(",
         new="def reconcile_target_deployed_files_disabled(",
         intent="Target-scoped deployed-file contraction loses its canonical owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-trust-fingerprint",
+        rule_id="install-deployment-trust-fingerprint",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old="from collections.abc import Mapping\n",
+        new="import hashlib\nfrom collections.abc import Mapping\n",
+        intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-reachability",

@@ -143,6 +143,7 @@ def finalize_native_plugin(
     ctx: InstallContext | None,
     diagnostics: DiagnosticCollector,
     logger: InstallLogger | None,
+    allow_executables: Any = None,
 ) -> dict:
     """Admit or refuse a native Agent Plugin after the shared gates ran."""
     from pathlib import Path
@@ -184,6 +185,13 @@ def finalize_native_plugin(
         set(ir_exec_types) | set(on_disk_types) | set(plugin_root_exec_types(install_path))
     )
 
+    # Pinned hook approvals admit a live-loaded plugin only when every hook
+    # file, as it sits in the install directory, matches its pin (#3902).
+    if install_path is not None:
+        hooks_approved = native_hook_approval(
+            hooks_approved, allow_executables, package_info, package_name, diagnostics, ctx=ctx
+        )
+
     approvals = {
         EXEC_TYPE_MCP: mcp_approved,
         EXEC_TYPE_BIN: bin_approved,
@@ -208,6 +216,47 @@ def finalize_native_plugin(
 
     result["native_plugin"] = True
     return result
+
+
+def native_hook_approval(
+    hooks_approved: bool,
+    allow_executables: Any,
+    package_info: Any,
+    package_name: str,
+    diagnostics: DiagnosticCollector | None,
+    *,
+    ctx: InstallContext | None = None,
+) -> bool:
+    """Hooks verdict for a live-loaded plugin, per hook file when pinned.
+
+    A refused verdict also folds the lockfile ``exec_status`` to gated, so the
+    registration phase retires a previously registered plugin instead of
+    leaving changed hooks live.
+    """
+    from pathlib import Path
+
+    from apm_cli.install.exec_gate import resolve_package_key
+    from apm_cli.security.executables import _strip_version
+    from apm_cli.security.trust import native_hooks_admission, parked_hook_message
+
+    pkg_key = resolve_package_key(package_info, package_name)
+    keys = tuple(dict.fromkeys((pkg_key, _strip_version(pkg_key))))
+    verdict = native_hooks_admission(allow_executables, keys, Path(package_info.install_path))
+    if verdict is None:
+        return hooks_approved
+    # Parked hook files were already reported by the source plan; a stray
+    # file under the live-loaded hooks/ directory is reported here.
+    for item in verdict.stray:
+        if diagnostics is not None:
+            diagnostics.warn(
+                parked_hook_message(_strip_version(pkg_key), item, "stray"), package=package_name
+            )
+    if not verdict.allowed and ctx is not None:
+        from apm_cli.security.executables import TRUST_GATED, more_severe_exec_status
+
+        existing = ctx.package_exec_status.get(package_name)
+        ctx.package_exec_status[package_name] = more_severe_exec_status(existing, TRUST_GATED)
+    return verdict.allowed
 
 
 def verify_native_plugin_cache(

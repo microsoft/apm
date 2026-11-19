@@ -142,7 +142,7 @@ How to read a cell:
 - `instructions / antigravity = native` -- APM deploys instructions as plain-markdown rules under `.agents/rules/`.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
-- `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
+- `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or approved with `apm approve` -- effectively `gated` for those, `native` for direct dependencies.
 - `canvas / copilot = gated` -- requires the `canvas` experimental flag; a canvas shipped by a dependency is executable code, so it stays blocked until the package is approved via the `executables` block in `apm.yml` (`apm approve <pkg>`). First-party canvases in your own package deploy at project scope once the flag is on. With `--global`, a dependency canvas deploys to `~/.copilot/extensions/` and always requires approval (first-party global install is not supported). Every other harness is `unsupported`: a canvas is a Copilot CLI construct only.
 
 ## Where compiled context files land

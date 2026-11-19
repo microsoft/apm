@@ -5,7 +5,8 @@ gate does not approve the package, and ``apm update`` retires a transitive
 self-defined server when the run lacks ``--trust-transitive-mcp``. Both record
 declaration-bound omission evidence, so ``apm audit --ci`` passes
 ``config-consistency``; missing evidence still fails, and a failed retirement
-keeps the previous baseline instead of recording an omission.
+keeps the previous baseline instead of recording an omission. A baseline only a
+one-off ``--trust-transitive-mcp`` run admitted fails audit consent (#3902).
 """
 
 from __future__ import annotations
@@ -214,8 +215,16 @@ def _transitive_chain(tmp_path: Path, binary: Path) -> Chain:
     chain.write_manifest([], apm=["./pkgs/parent"], targets=["claude"])
     chain.ok("install", "--trust-transitive-mcp")
     assert "leaf-server" in chain.servers("claude")
-    assert _audit(chain)["passed"]
+    # The one-off flag is never consent: audit re-evaluates apm.yml (#3902).
+    assert _consent_failure(chain)
     return chain
+
+
+def _consent_failure(chain: Chain) -> bool:
+    check = _audit(chain)
+    return not check["passed"] and any(
+        "not approved in apm.yml" in detail for detail in check["details"]
+    )
 
 
 @pytest.mark.parametrize("command", [("update", "--yes"), ("install",)])
@@ -237,7 +246,7 @@ def test_retiring_trusted_transitive_server_records_audit_evidence(
     chain.ok(*command, "--trust-transitive-mcp")
     assert "leaf-server" in chain.servers("claude")
     assert "leaf-server" not in (chain.lock().get("mcp_omissions") or {})
-    assert _audit(chain)["passed"]
+    assert _consent_failure(chain)
 
 
 def test_failed_retirement_keeps_prior_baseline(tmp_path: Path, apm_binary_path: Path) -> None:
@@ -250,4 +259,4 @@ def test_failed_retirement_keeps_prior_baseline(tmp_path: Path, apm_binary_path:
     lock = chain.lock()
     assert "leaf-server" in lock["mcp_configs"]
     assert "leaf-server" not in (lock.get("mcp_omissions") or {})
-    assert _audit(chain)["passed"]
+    assert _consent_failure(chain)

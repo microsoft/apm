@@ -18,10 +18,8 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import os
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -93,6 +91,11 @@ class ExecutableDeclaration:
     lsp_details: list[str] = field(default_factory=list)
     bin_details: list[str] = field(default_factory=list)
     canvas_details: list[str] = field(default_factory=list)
+    # Where the package is installed and whether its bytes still match the
+    # lock; ``apm approve`` pins only verified content (#3902).
+    install_path: str | None = None
+    depth: int = 1
+    content_verified: bool = True
 
     @property
     def has_executables(self) -> bool:
@@ -165,7 +168,8 @@ def is_package_approved(
     entry = allow_executables.get(package_key)
     if not entry or not isinstance(entry, dict):
         return False
-    return bool(entry.get(exec_type, False))
+    # Only a literal ``true`` is a type-level grant; a pinned item map never is.
+    return entry.get(exec_type, False) is True
 
 
 def is_any_type_approved(
@@ -178,7 +182,7 @@ def is_any_type_approved(
     entry = allow_executables.get(package_key)
     if not entry or not isinstance(entry, dict):
         return False
-    return any(entry.get(t, False) for t in ALL_EXEC_TYPES)
+    return any(entry.get(t, False) is True for t in ALL_EXEC_TYPES)
 
 
 # -------------------------------------------------------------------
@@ -288,6 +292,11 @@ class ExecTrustContext:
     project_deny: dict[str, dict[str, bool]]
     user_allow: dict[str, dict[str, bool]]
     user_deny: dict[str, dict[str, bool]]
+    # Content-pinned item grants ``{package: {exec_type: {item: fingerprint}}}``
+    # (#3902). Kept apart from the bool maps so no type-level lookup can read a
+    # pinned grant as "any content"; only security/trust.py consumes them.
+    project_items: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    user_items: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
 
 
 def _strip_version(package_key: str) -> str:
@@ -374,7 +383,7 @@ def _map_grants(
             if content_bound
             else stored_key in (package_key, name) or _strip_version(stored_key) == name
         )
-        if matches and bool(entry.get(exec_type, False)):
+        if matches and entry.get(exec_type, False) is True:
             return True
     return False
 
@@ -392,7 +401,7 @@ def _map_denies(
     identity = canonical_exec_identity(package_key)
     return any(
         isinstance(entry, dict)
-        and bool(entry.get(exec_type, False))
+        and entry.get(exec_type, False) is True
         and not _is_content_bound_key(stored_key)
         and canonical_exec_identity(stored_key) == identity
         for stored_key, entry in deny_map.items()
@@ -601,40 +610,10 @@ def local_bundle_approval_key(
     lockfile: dict[str, Any] | None = None,
 ) -> str:
     """Bind local-bundle executable consent to every deployable content byte."""
-    hasher = hashlib.sha256()
-    pack = lockfile.get("pack") if isinstance(lockfile, dict) else None
-    bundle_files = pack.get("bundle_files") if isinstance(pack, dict) else None
-    if isinstance(bundle_files, dict):
-        for rel_path in sorted(bundle_files, key=str):
-            digest = bundle_files[rel_path]
-            encoded_path = str(rel_path).encode("utf-8")
-            encoded_digest = str(digest).encode("utf-8")
-            hasher.update(len(encoded_path).to_bytes(8, "big"))
-            hasher.update(encoded_path)
-            hasher.update(len(encoded_digest).to_bytes(8, "big"))
-            hasher.update(encoded_digest)
-    else:
-        files: list[tuple[str, Path]] = []
-        for item in source_dir.rglob("*"):
-            rel_path = item.relative_to(source_dir).as_posix()
-            if item.is_symlink():
-                raise ValueError(f"Local bundle contains a symlink: {rel_path}")
-            if item.is_dir():
-                continue
-            if not item.is_file():
-                raise ValueError(f"Local bundle contains a special file: {rel_path}")
-            files.append((rel_path, item))
-        for rel_path, item in sorted(files):
-            encoded_path = rel_path.encode("utf-8")
-            content_length = item.stat().st_size
-            hasher.update(len(encoded_path).to_bytes(8, "big"))
-            hasher.update(encoded_path)
-            hasher.update(content_length.to_bytes(8, "big"))
-            with item.open("rb") as handle:
-                while chunk := handle.read(1024 * 1024):
-                    hasher.update(chunk)
+    from .trust_fingerprint import local_bundle_digest
+
+    digest = local_bundle_digest(source_dir, lockfile)
     artifact_version = version or "local"
-    digest = f"sha256:{hasher.hexdigest()}"
     return f"{package_id}#{artifact_version}@{digest}"
 
 
@@ -823,7 +802,7 @@ def prompt_executable_approval(
     # --trust-all: approve everything
     if trust_all:
         for decl in pending:
-            result[decl.package_key] = {t: True for t in decl.exec_types}
+            _record_prompt_approval(result, decl)
         return result
 
     # Non-interactive (CI): hard error
@@ -851,6 +830,11 @@ def prompt_executable_approval(
             provenance = f"transitive via {decl.parent_name}"
         _rich_echo(f"  {decl.package_key} ({provenance})")
         _rich_echo(f"    {decl.summary_line()}")
+        for pin in _prompt_pins(decl):
+            from .trust_fingerprint import short_fingerprint
+
+            digest = short_fingerprint(pin.fingerprint) if pin.fingerprint else "--------"
+            _rich_echo(f"      {pin.exec_type:<6} {pin.item}  {pin.summary}  {digest}")
         _rich_echo("")
 
     _rich_echo("  These will execute code on your machine when triggered by")
@@ -863,10 +847,30 @@ def prompt_executable_approval(
             default=False,
         )
         if approved:
-            result[decl.package_key] = {t: True for t in decl.exec_types}
+            _record_prompt_approval(result, decl)
         _rich_echo("")
 
     return result
+
+
+def _prompt_pins(decl: ExecutableDeclaration) -> list:
+    """Pins for one prompted package (empty when its install path is unknown)."""
+    if decl.install_path is None:
+        return []
+    from .trust import package_pins
+
+    return package_pins(Path(decl.install_path), transitive=decl.is_transitive)
+
+
+def _record_prompt_approval(result: dict, decl: ExecutableDeclaration) -> None:
+    """Record a prompt approval pinned to the definitions just listed (#3902)."""
+    from .trust import record_pins
+
+    if decl.install_path is None:
+        result[decl.package_key] = {t: True for t in decl.exec_types}
+        return
+    pins = [pin for pin in _prompt_pins(decl) if pin.fingerprint is not None]
+    record_pins(result, _strip_version(decl.package_key), decl.exec_types, pins)
 
 
 def _is_fully_approved(
@@ -877,7 +881,7 @@ def _is_fully_approved(
     entry = allow_executables.get(decl.package_key)
     if not entry or not isinstance(entry, dict):
         return False
-    return all(entry.get(t, False) for t in decl.exec_types)
+    return all(entry.get(t, False) is True for t in decl.exec_types)
 
 
 # -------------------------------------------------------------------
@@ -960,6 +964,17 @@ def write_allow_executables(
     dump_yaml_roundtrip(data, manifest_path)
 
 
+class EffectiveExecMap(dict):
+    """The materialised type-level allow-map, carrying its trust context.
+
+    The dict holds ONLY type-level grants, so a caller that knows nothing of
+    pinned items sees "not granted" and fails closed. Callers that admit
+    pinned items ask :mod:`apm_cli.security.trust` with ``trust_context``.
+    """
+
+    trust_context: ExecTrustContext | None = None
+
+
 def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
     """Materialise the deny-wins effective allow-map from a trust context.
 
@@ -977,7 +992,8 @@ def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | 
     candidate_keys |= set(ctx.org_recommend) | set(ctx.org_deny) | set(ctx.org_enforce)
     candidate_keys |= set(ctx.org_bin_deny)
 
-    result: dict[str, dict[str, bool]] = {}
+    result = EffectiveExecMap()
+    result.trust_context = ctx
     for key in candidate_keys:
         for exec_type in ALL_EXEC_TYPES:
             if not resolve_exec_decision(ctx, key, exec_type).allowed:
@@ -1078,6 +1094,7 @@ def exec_trust_context_for_project(
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
+    include_user: bool = True,
 ) -> ExecTrustContext:
     """Resolve project, user, and policy executable trust through one owner."""
     from apm_cli.models.manifest_io import load_manifest
@@ -1092,11 +1109,17 @@ def exec_trust_context_for_project(
                 warn_allow_executables_alias_once(logger)
     if project_data is None and isinstance(fallback_allow_executables, dict):
         project_data = {"allowExecutables": fallback_allow_executables}
-    return build_exec_trust_context(
+    ctx = build_exec_trust_context(
         policy=policy,
         project_data=project_data,
         migrate_user_legacy=migrate_user_legacy,
+        include_user=include_user,
     )
+    if logger is not None:
+        from .trust import warn_content_blind_grants_once
+
+        warn_content_blind_grants_once(ctx, logger)
+    return ctx
 
 
 def effective_exec_map_for_project(
@@ -1147,74 +1170,6 @@ def resolve_project_exec_allow_map(
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,
     )
-
-
-def is_executable_gated_mcp(dependency: Any) -> bool:
-    """Return whether the executables gate decides this MCP server's deployment."""
-    return getattr(dependency, "resolved_by", None) is not None and bool(
-        getattr(dependency, "is_self_defined", False)
-    )
-
-
-def filter_mcp_by_allow_executables(
-    mcp_deps: list,
-    effective_allow_execs: dict | None,
-    logger: Any,
-) -> list:
-    """Filter package-declared self-defined MCP servers by their package's decision.
-
-    Root-declared servers and registry servers pass; a self-defined server
-    from a dependency passes only when its declaring package is approved.
-    """
-    return _filter_declared_services(
-        mcp_deps,
-        effective_allow_execs,
-        logger,
-        exec_type=EXEC_TYPE_MCP,
-        service_label="MCP",
-        gated=is_executable_gated_mcp,
-    )
-
-
-class _SilentGateLogger:
-    """Swallow gate messages for a check that does not deploy (``--frozen``)."""
-
-    def verbose_detail(self, message: str) -> None:
-        """Discard a skip detail."""
-
-    def warning(self, message: str, symbol: str = "warning") -> None:
-        """Discard the filtered-servers summary."""
-
-
-def project_mcp_executables_gate(
-    project_root: Path,
-    apm_package: Any,
-    *,
-    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
-    no_policy: bool = False,
-    logger: Any | None = None,
-) -> Callable[[list], list]:
-    """Return this run's MCP executables gate for install and ``--frozen``.
-
-    The allow map resolves (through :func:`resolve_project_exec_allow_map`)
-    only when a gated server is present. Without *logger* the gate is silent,
-    so a check that does not deploy never repeats the filtered-servers warning.
-    """
-    quiet = logger if logger is not None else _SilentGateLogger()
-
-    def approve(dependencies: list) -> list:
-        if not any(is_executable_gated_mcp(dependency) for dependency in dependencies):
-            return dependencies
-        allow_map = resolve_project_exec_allow_map(
-            project_root,
-            apm_package,
-            executable_context=executable_context,
-            no_policy=no_policy,
-            logger=logger,
-        )
-        return filter_mcp_by_allow_executables(dependencies, allow_map, quiet)
-
-    return approve
 
 
 def filter_lsp_by_allow_executables(
@@ -1303,37 +1258,6 @@ def _filter_declared_services(
     return filtered
 
 
-def read_bundle_allow_executables(
-    apm_yml_path: Path,
-    logger: Any,
-    *,
-    migrate_user_legacy: bool = True,
-) -> dict | None:
-    """Read executable trust settings from apm.yml for bundle install."""
-    try:
-        from ..utils.yaml_io import load_yaml  # local import avoids circular at module init
-
-        if not apm_yml_path.is_file():
-            return None
-        data = load_yaml(apm_yml_path)
-        if isinstance(data, dict):
-            if data.get("allowExecutables") is not None:
-                warn_allow_executables_alias_once(logger)
-            return build_effective_exec_map(
-                policy=None,
-                project_data=data,
-                migrate_user_legacy=migrate_user_legacy,
-            )
-        return None
-    except Exception as exc:
-        logger.warning(
-            f"Could not read executable trust settings from apm.yml: {exc}. "
-            "Treating as fully enforced with no approvals.",
-            symbol="warning",
-        )
-        return {}
-
-
 # -------------------------------------------------------------------
 # Unified vocabulary layer (issue #1873): one noun ``executables``
 # -------------------------------------------------------------------
@@ -1345,12 +1269,40 @@ def read_bundle_allow_executables(
 # first read and DELETED -- net-new control-surface files = 0.
 
 
+# Executable types whose grants may pin individual items to a fingerprint.
+ITEM_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP)
+
+
+def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
+    return ValueError(
+        f"apm.yml {where}.{pkg_key}.{exec_type}.{item}: expected 'sha256:<64 hex>'. "
+        f"Run 'apm approve {pkg_key}' to record it."
+    )
+
+
+def _parse_item_map(raw: dict, *, where: str, pkg_key: str, exec_type: str) -> dict[str, str]:
+    """Validate one ``{item: sha256:<64 hex>}`` map; item-level ``true`` is rejected."""
+    from .trust_fingerprint import is_fingerprint
+
+    items: dict[str, str] = {}
+    for item, value in raw.items():
+        if not isinstance(item, str) or not item.strip() or not is_fingerprint(value):
+            raise _item_error(where, pkg_key, exec_type, item)
+        items[item] = value
+    return items
+
+
 def _parse_grant_block(
     raw: Any,
     *,
     where: str,
-) -> dict[str, dict[str, bool]]:
-    """Validate and normalise a ``{package_key: {exec_type: bool}}`` map."""
+    allow_items: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Validate and normalise a ``{package_key: {exec_type: bool | items}}`` map.
+
+    With *allow_items*, ``hooks`` and ``mcp`` may hold a pinned
+    ``{item: sha256:<64 hex>}`` map instead of a boolean (#3902).
+    """
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -1358,7 +1310,7 @@ def _parse_grant_block(
             f"{where} must be a mapping of package keys to "
             "{hooks: bool, mcp: bool, lsp: bool, bin: bool, canvas: bool}"
         )
-    result: dict[str, dict[str, bool]] = {}
+    result: dict[str, dict[str, Any]] = {}
     for pkg_key, entry in raw.items():
         if not isinstance(pkg_key, str):
             raise ValueError(f"{where} key must be a string, got {type(pkg_key).__name__}")
@@ -1367,7 +1319,7 @@ def _parse_grant_block(
                 f"{where}[{pkg_key!r}] must be a mapping of exec types to "
                 f"booleans, got {type(entry).__name__}"
             )
-        parsed: dict[str, bool] = {}
+        parsed: dict[str, Any] = {}
         for exec_type, value in entry.items():
             exec_type_str = str(exec_type)
             if exec_type_str not in ALL_EXEC_TYPES:
@@ -1375,6 +1327,11 @@ def _parse_grant_block(
                     f"{where}[{pkg_key!r}]: unknown exec type {exec_type_str!r} "
                     f"(valid: {', '.join(ALL_EXEC_TYPES)})"
                 )
+            if allow_items and exec_type_str in ITEM_EXEC_TYPES and isinstance(value, dict):
+                parsed[exec_type_str] = _parse_item_map(
+                    value, where=where, pkg_key=pkg_key, exec_type=exec_type_str
+                )
+                continue
             if not isinstance(value, bool):
                 raise ValueError(
                     f"{where}[{pkg_key!r}][{exec_type_str!r}] must be a boolean, "
@@ -1382,6 +1339,61 @@ def _parse_grant_block(
                 )
             parsed[exec_type_str] = value
         result[pkg_key] = parsed
+    return result
+
+
+def split_item_grants(
+    raw: dict[str, dict[str, Any]] | None,
+) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, dict[str, str]]]]:
+    """Split a stored grant map into type-level booleans and pinned item maps.
+
+    Only well-formed entries survive: anything else is dropped, so a damaged
+    user store fails closed instead of widening trust.
+    """
+    from .trust_fingerprint import is_fingerprint
+
+    types: dict[str, dict[str, bool]] = {}
+    items: dict[str, dict[str, dict[str, str]]] = {}
+    for pkg_key, entry in (raw or {}).items():
+        if not isinstance(pkg_key, str) or not isinstance(entry, dict):
+            continue
+        for exec_type, value in entry.items():
+            if isinstance(value, bool):
+                types.setdefault(pkg_key, {})[str(exec_type)] = value
+            elif isinstance(value, dict) and exec_type in ITEM_EXEC_TYPES:
+                pinned = {
+                    item: fingerprint
+                    for item, fingerprint in value.items()
+                    if isinstance(item, str) and is_fingerprint(fingerprint)
+                }
+                # An empty map is meaningful: nothing of this type is approved.
+                items.setdefault(pkg_key, {})[exec_type] = pinned
+    return types, items
+
+
+def _deny_types(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, bool]]:
+    """A pinned deny map denies the whole type: deny stays content-blind."""
+    return {
+        pkg_key: {
+            exec_type: (value is True or isinstance(value, dict))
+            for exec_type, value in entry.items()
+        }
+        for pkg_key, entry in raw.items()
+        if isinstance(entry, dict)
+    }
+
+
+def sorted_grant_map(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return *raw* with packages, types and items sorted for a stable diff."""
+    result: dict[str, dict[str, Any]] = {}
+    for pkg_key in sorted(raw):
+        entry = raw[pkg_key]
+        if not isinstance(entry, dict):
+            continue
+        result[pkg_key] = {
+            exec_type: (dict(sorted(value.items())) if isinstance(value, dict) else value)
+            for exec_type, value in sorted(entry.items())
+        }
     return result
 
 
@@ -1408,8 +1420,10 @@ def parse_project_executables(
     if block is not None:
         if not isinstance(block, dict):
             raise ValueError("executables must be a mapping with 'allow' and/or 'deny' keys")
-        allow.update(_parse_grant_block(block.get("allow"), where="executables.allow"))
-        deny = _parse_grant_block(block.get("deny"), where="executables.deny")
+        allow.update(
+            _parse_grant_block(block.get("allow"), where="executables.allow", allow_items=True)
+        )
+        deny = _parse_grant_block(block.get("deny"), where="executables.deny", allow_items=True)
 
     return allow, deny, used_alias
 
@@ -1559,6 +1573,7 @@ def build_exec_trust_context(
     policy: Any | None,
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
+    include_user: bool = True,
 ) -> ExecTrustContext:
     """Assemble an :class:`ExecTrustContext` from org / project / user inputs.
 
@@ -1573,8 +1588,15 @@ def build_exec_trust_context(
     block, or a legacy ``bin_deploy`` deny.
     """
     data = project_data or {}
-    project_allow, project_deny, _alias = parse_project_executables(data)
-    user_allow, user_deny = load_user_executables(migrate_legacy=migrate_user_legacy)
+    project_raw_allow, project_raw_deny, _alias = parse_project_executables(data)
+    project_allow, project_items = split_item_grants(project_raw_allow)
+    project_deny = _deny_types(project_raw_deny)
+    # ``apm audit`` never reads personal consent: CI and laptops must agree.
+    user_raw_allow, user_raw_deny = (
+        load_user_executables(migrate_legacy=migrate_user_legacy) if include_user else ({}, {})
+    )
+    user_allow, user_items = split_item_grants(user_raw_allow)
+    user_deny = _deny_types(user_raw_deny)
 
     org_deny_all = False
     org_deny: frozenset[str] = frozenset()
@@ -1623,6 +1645,8 @@ def build_exec_trust_context(
         project_deny=project_deny,
         user_allow=user_allow,
         user_deny=user_deny,
+        project_items=project_items,
+        user_items=user_items,
     )
 
 
@@ -1663,9 +1687,9 @@ def write_project_executables(
     had_alias = data.pop("allowExecutables", None) is not None
     block: dict[str, Any] = {}
     if allow:
-        block["allow"] = allow
+        block["allow"] = sorted_grant_map(allow)
     if deny:
-        block["deny"] = deny
+        block["deny"] = sorted_grant_map(deny)
 
     if block or had_alias or "executables" in data:
         data["executables"] = block

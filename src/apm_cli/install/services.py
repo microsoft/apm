@@ -357,6 +357,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             ctx=ctx,
             diagnostics=diagnostics,
             logger=logger,
+            allow_executables=allow_executables,
         )
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives

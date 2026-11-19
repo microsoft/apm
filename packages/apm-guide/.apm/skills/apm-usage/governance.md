@@ -251,6 +251,39 @@ labels its deciding layer `org-enforce-degraded` to make the v1 degrade explicit
 The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
+`apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
+fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`:
+
+```yaml
+executables:
+  allow:
+    acme/agent-kit:
+      hooks:
+        .apm/hooks/lint-on-save.json: sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+      mcp:
+        kit-docs: sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d
+    acme/tools:
+      bin: true
+```
+
+The MCP fingerprint covers transport, command, args, env, url, headers, cwd,
+registry, version, package, tools, enabled and extra keys; the hook
+fingerprint covers the hook JSON plus the scripts it references (not code it
+downloads at run time). Admission per item, first match wins: deny (org,
+user, project), which wins over every grant, including pins and the one-off
+`--trust-transitive-mcp` flag, for self-defined MCP servers, hooks, and
+transitive MCP servers that need trust; a pin (match deploys, mismatch parks as `definition-changed`;
+the project pin decides alone, a user pin applies only when the project has
+none); a transitive MCP server that is self-defined, sets its own `registry:`
+or an overlay parks as `untrusted-transitive` unless `--trust-transitive-mcp`
+(one run only); then the type-level ladder. Legacy `hooks: true` /
+`mcp: true` still deploy any content and warn on every install; `mcp: true`
+never admits a transitive server. An item-level `true` or malformed digest is
+an error; a pinned map under `deny` denies the whole type. Pinned `apm.yml`
+files need APM 0.37 or later on every client. The lockfile is evidence, never
+consent: `apm audit --ci` re-evaluates MCP admission from `apm.yml` and org
+policy (never the user layer) and fails a server the lock admitted but
+`apm.yml` does not approve.
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, `absent`).
 
