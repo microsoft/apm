@@ -169,8 +169,8 @@ def test_marketplace_catalog_origin_guard_requires_check_before_catalog_io() -> 
         ),
         (
             "commands/uninstall/engine.py",
-            "                    require_locked_catalog_origin(marketplace_name, plugin_name, lockfile)\n",
-            "",
+            "                        require_locked_row_origin(locked, marketplace_name=marketplace_name)\n",
+            "                        pass\n",
         ),
     ],
     ids=["cli-install-intercept", "outdated", "uninstall-registry-fallback"],
