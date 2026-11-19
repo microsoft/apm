@@ -91,6 +91,9 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
     check_package_target_authorization,
 )
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
+from scripts.architecture_linter.checks.install_portable_trust import (
+    RULES as PORTABLE_TRUST_RULES,
+)
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
@@ -333,6 +336,7 @@ RULES: tuple[Rule, ...] = (
         check_skill_layout,
     ),
     *EXTRA_RULES,
+    *PORTABLE_TRUST_RULES,
 )
 
 

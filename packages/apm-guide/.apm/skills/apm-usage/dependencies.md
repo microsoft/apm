@@ -824,10 +824,16 @@ The root project activates both sections during `apm install`. Direct
 and transitive dependency packages contribute only `dependencies.mcp`;
 their development MCP entries do not enter the consumer's target config
 or `mcp_config_provenance`. A transitive package's MCP entry is admitted
-without `--trust-transitive-mcp` only as a plain reference to the
-consumer's registry; self-defined entries and entries that set their own
-`registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or
-extra keys are skipped until re-declared or trusted.
+without approval only as a plain reference to the consumer's registry;
+self-defined entries and entries that set their own `registry:` URL or
+`env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys are parked
+(`untrusted-transitive`) until re-declared or pinned with
+`apm approve <pkg>` (commit `apm.yml`). A pinned server whose definition
+later changes parks as `definition-changed` until re-approved. A legacy
+`mcp: true` grant never admits a transitive server. `--trust-transitive-mcp`
+deploys them for one run only and warns that the next install without the
+flag removes them; `apm audit --ci` fails a lock that admitted a server
+`apm.yml` does not approve.
 
 At user scope, Claude MCP entries are written to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a

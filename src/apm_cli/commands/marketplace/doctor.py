@@ -46,8 +46,8 @@ def _executable_trust_drift_check(
             LAYER_USER_ALLOW,
             build_exec_trust_context,
             parse_project_executables,
-            resolve_exec_decision,
         )
+        from ...security.trust import package_type_verdicts
         from ...utils.yaml_io import load_yaml
         from ..approve import load_org_policy, scan_installed_executable_packages
 
@@ -94,13 +94,18 @@ def _executable_trust_drift_check(
         for decl in scan_installed_executable_packages(apm_path):
             if not getattr(decl, "has_executables", False):
                 continue
-            for exec_type in decl.exec_types:
-                decision = resolve_exec_decision(ctx, decl.package_key, exec_type)
-                if decision.deciding_layer in org_deny_layers and any(
-                    layer in decision.shadowed_layers for layer in allow_layers
-                ):
-                    conflicts.append(decl.package_name)
-                    break
+            verdicts = package_type_verdicts(
+                ctx,
+                (decl.package_key, decl.package_key.split("#", 1)[0]),
+                Path(decl.install_path) if decl.install_path else None,
+                decl.exec_types,
+            )
+            if any(
+                verdict.layer in org_deny_layers
+                and any(layer in verdict.shadowed for layer in allow_layers)
+                for verdict in verdicts.values()
+            ):
+                conflicts.append(decl.package_name)
     except Exception:
         return None
 
