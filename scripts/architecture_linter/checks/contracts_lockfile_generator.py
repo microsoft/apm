@@ -35,6 +35,7 @@ _ROUTES = (
 _RENDER_ROUTES = (
     (_OWNER, "require_current_cli", "refusal_exit"),
     ("src/apm_cli/commands/pack.py", "pack_cmd", "refusal_exit"),
+    ("src/apm_cli/commands/install.py", "install", "refusal_exit"),
 )
 # Callers that render a caught refusal themselves; every other command uses
 # require_current_cli, so all refusals share one renderer (#3967).

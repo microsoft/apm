@@ -118,6 +118,9 @@ def test_older_cli_refuses_every_lockfile_command_without_mutation(
         assert "apm self-update" in output
         assert "pip install --upgrade apm-cli" in output
         assert "Error installing dependencies" not in output
+        # One renderer, on stderr, for every command (#3967).
+        assert "Refusing" not in result.stdout, _evidence(result)
+        assert "[x] Refusing" in result.stderr, _evidence(result)
         assert project.state() == before, args
 
     for args in _WARNING:

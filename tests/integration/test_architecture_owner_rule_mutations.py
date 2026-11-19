@@ -4575,3 +4575,30 @@ def test_mcp_exclusion_guard_routes_project_scope_through_the_normalizer(
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "            refusal_exit(e).show()\n",
+            "            InstallLogger(verbose=verbose, dry_run=dry_run).error(str(e))\n",
+            id="install-renders-the-refusal-on-stdout",
+        ),
+    ],
+)
+def test_lockfile_refusal_guard_routes_install_through_the_renderer(
+    path: str, old: str, new: str
+) -> None:
+    """#3967: ``apm install`` renders its newer-lockfile refusal through the shared owner."""
+    rule_id = "contracts-tooling-lockfile-generator-gate"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

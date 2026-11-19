@@ -22,7 +22,11 @@ from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 # working without modification.
 from apm_cli.core.scope import InstallScope as _InstallScope
 from apm_cli.core.scope import get_apm_dir as _get_apm_dir
-from apm_cli.deps.lockfile_generator import check_current_cli
+from apm_cli.deps.lockfile_generator import (
+    LockfileGeneratorError,
+    check_current_cli,
+    refusal_exit,
+)
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -1602,13 +1606,14 @@ def install(  # noqa: PLR0913
             if transaction is not None
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
-    except InsecureDependencyPolicyError as e:
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except InstallFailureAlreadyRendered as e:
+    except (
+        InsecureDependencyPolicyError,
+        InstallFailureAlreadyRendered,
+        LockfileGeneratorError,
+    ) as e:
+        if isinstance(e, LockfileGeneratorError):
+            # The shared refusal renderer: [x] on stderr, like every other command.
+            refusal_exit(e).show()
         command_result = (
             transaction.fail(e)
             if transaction is not None
