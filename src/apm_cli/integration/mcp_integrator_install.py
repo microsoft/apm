@@ -1081,6 +1081,26 @@ def partition_user_scope_runtimes(
     return supported, skipped
 
 
+def user_scope_runtime_labels() -> list[str]:
+    """Display names of the runtimes whose adapters support user scope (S11, #3967).
+
+    Derived from each adapter's ``supports_user_scope`` and its remote-shape
+    label, so help and errors never keep a second list.
+    """
+    from apm_cli.adapters.client._remote_shapes import REMOTE_SHAPES
+    from apm_cli.factory import ClientFactory
+
+    labels: list[str] = []
+    for runtime, shape in REMOTE_SHAPES.items():
+        try:
+            client = ClientFactory.create_client(runtime)
+        except ValueError:
+            continue
+        if client.supports_user_scope and shape.label not in labels:
+            labels.append(shape.label)
+    return labels
+
+
 def unavailable_user_scope_targets_message(
     target_decision: EffectiveTargetDecision,
     scoped_targets: list[str] | None,
@@ -1428,7 +1448,8 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, JetBrains Copilot)"
+                "No runtimes support user-scope MCP installation "
+                f"(supported: {', '.join(user_scope_runtime_labels())})"
             )
             return None
 
