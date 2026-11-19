@@ -199,7 +199,8 @@ Kiro derives agent identity from the deployed path, not from a `name`
 field. Tools are permission-bearing for Kiro: each value must be a
 Kiro tool selector -- a category tag (`read`, `write`, `shell`, `web`,
 `subagent`), a built-in tool ID such as `read_file`, `grep_search`, or
-`web_fetch`, `@server` or `@server/tool`, `@builtin`, `@mcp`, or `*`
+`web_fetch`, `@server` or `@server/tool`, `subagent/<agent>`, `@builtin`,
+`@mcp`, or `*`
 ([Kiro built-in tools](https://kiro.dev/docs/tools/)). If any other
 value is present, that agent is not deployed -- APM fails closed and
 warns; other agents in the install still deploy. Kiro may warn and fall back if the specified

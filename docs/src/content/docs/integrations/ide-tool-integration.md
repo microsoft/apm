@@ -139,7 +139,8 @@ for Kiro IDE/CLI v3; identity derives from the relative path. Only
 `description`, `model`, and `tools` are emitted -- `name` and unknown
 frontmatter fields are stripped. Tools are permission-bearing: an agent
 whose `tools` holds anything other than a Kiro tool selector (category tag,
-built-in tool ID, `@server`, `@server/tool`, `@builtin`, `@mcp`, `*`) is
+built-in tool ID, `@server`, `@server/tool`, `subagent/<agent>`, `@builtin`,
+`@mcp`, `*`) is
 skipped with a warning; other agents still deploy. Skills are copied verbatim to
 `.kiro/skills/`, hooks become one JSON file per hook action in `.kiro/hooks/`,
 and MCP servers are written to `.kiro/settings/mcp.json` or

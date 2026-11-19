@@ -280,7 +280,7 @@ Kiro IDE and CLI V3 target layout.
     selector: category tags `read`, `write`, `shell`, `web`, `subagent`;
     built-in tool IDs such as `read_file`, `grep_search`, `web_fetch`,
     `execute_bash`, `invoke_sub_agent`; `@server` or `@server/tool`;
-    `@builtin`, `@mcp`, `*`. Other agents in the install still deploy.
+    `subagent/<agent>`; `@builtin`, `@mcp`, `*`. Other agents in the install still deploy.
     Kiro may warn and fall back if the specified `model` is
     unavailable; APM passes model values through without validation.
     Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)

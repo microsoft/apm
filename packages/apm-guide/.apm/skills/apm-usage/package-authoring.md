@@ -764,6 +764,7 @@ tools:
   - web_fetch         # built-in tool ID
   - "@git"            # all tools from MCP server 'git'
   - "@git/git_status" # one tool from MCP server 'git'
+  - subagent/reviewer # may start only the 'reviewer' sub-agent
 
 # Fails closed for this agent -- apm install warns, file is NOT written:
 # tools:
@@ -776,8 +777,8 @@ Accepted selectors: category tags `read`, `write`, `shell`, `web`,
 `grep_search`, `code`, `fs_write`, `fs_append`, `str_replace`, `delete_file`,
 `execute_bash`, `execute_pwsh`, `remote_web_search`, `web_fetch`,
 `invoke_sub_agent`, `disclose_context`, `introspect`, `knowledge`, and the
-IDE process, hook, and powers tools); `@server`, `@server/tool`, `@builtin`,
-`@mcp`, `*`. `context` and `todo_list` stay accepted for compatibility.
+IDE process, hook, and powers tools); `@server`, `@server/tool`,
+`subagent/<agent>`, `@builtin`, `@mcp`, `*`. `context` and `todo_list` stay accepted for compatibility.
 Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)
 (accessed 2026-11-19).
 

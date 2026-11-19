@@ -75,9 +75,12 @@ KIRO_AGENT_ALLOWED_TOOLS: frozenset[str] = (
     | KIRO_AGENT_TOOL_IDS
     | KIRO_AGENT_TOOL_COMPAT_VALUES
 )
-# ``@server`` or ``@server/tool``; ``@builtin`` and ``@mcp`` take no tool suffix.
-_KIRO_MCP_SELECTOR_RE = re.compile(
-    r"@(?!(?:builtin|mcp)/)[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,127})?"
+# ``@server`` or ``@server/tool`` (``@builtin`` and ``@mcp`` take no tool
+# suffix; tool names follow MCP SEP-986), or ``subagent/<agent>`` to limit
+# which sub-agents an agent may start.
+_KIRO_SELECTOR_RE = re.compile(
+    r"@(?!(?:builtin|mcp)/)[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?:/[A-Za-z0-9_.-]{1,128})?"
+    r"|subagent/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
 )
 _KIRO_TOOLS_HINT = (
     "Approved Kiro tool selectors: category tags ("
@@ -86,7 +89,7 @@ _KIRO_TOOLS_HINT = (
     + ", ".join(sorted(KIRO_AGENT_TOOL_IDS))
     + "); compatibility values ("
     + ", ".join(sorted(KIRO_AGENT_TOOL_COMPAT_VALUES))
-    + "); @server or @server/tool; "
+    + "); @server, @server/tool, or subagent/<agent>; "
     + ", ".join(sorted(KIRO_AGENT_TOOL_SPECIAL_VALUES))
     + "."
 )
@@ -94,7 +97,7 @@ _KIRO_TOOLS_HINT = (
 
 def is_kiro_agent_tool(value: str) -> bool:
     """Return True when *value* is a valid Kiro agent ``tools`` selector."""
-    return value in KIRO_AGENT_ALLOWED_TOOLS or bool(_KIRO_MCP_SELECTOR_RE.fullmatch(value))
+    return value in KIRO_AGENT_ALLOWED_TOOLS or bool(_KIRO_SELECTOR_RE.fullmatch(value))
 
 
 # Outcomes of :meth:`AgentIntegrator._deploy_rendered_agent`.

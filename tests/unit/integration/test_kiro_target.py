@@ -1151,13 +1151,17 @@ def test_kiro_prompt_resolves_body_links_and_preserves_copilot_source(
         "introspect",
         "@git",
         "@rust-analyzer/check_code",
+        "@git/_status",
+        "subagent/reviewer",
+        "subagent/data-analyst",
     ],
 )
 def test_kiro_agents_current_kiro_tool_identifiers_deploy(tmp_path: Path, tool: str) -> None:
     """Regression for #2671: current Kiro tool selectors must deploy the agent.
 
     Values come from https://kiro.dev/docs/custom-agents/configuration-reference/
-    (tools field) and https://kiro.dev/docs/tools/ (tool catalog).
+    (tools field), https://kiro.dev/docs/tools/ (tool catalog), and
+    https://kiro.dev/docs/custom-agents/subagents/ (subagent/<name>).
     """
     (tmp_path / ".kiro").mkdir()
     package_dir = tmp_path / "pkg"
@@ -1183,7 +1187,18 @@ def test_kiro_agents_current_kiro_tool_identifiers_deploy(tmp_path: Path, tool: 
 
 @pytest.mark.parametrize(
     "tool",
-    ["grep", "use_aws", "@builtin/read_file", "@mcp/tool", "@", "@git/", "@git/a/b", "@bad name"],
+    [
+        "grep",
+        "use_aws",
+        "@builtin/read_file",
+        "@mcp/tool",
+        "@",
+        "@git/",
+        "@git/a/b",
+        "@bad name",
+        "subagent/",
+        "subagent/a/b",
+    ],
 )
 def test_kiro_agents_reject_legacy_and_malformed_selectors(tmp_path: Path, tool: str) -> None:
     """CLI 2.x-only names and malformed @server selectors stay fail-closed."""
