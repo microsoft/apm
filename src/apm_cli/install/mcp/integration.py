@@ -55,6 +55,7 @@ def prepare_mcp_integration(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.executables import (
         filter_mcp_by_allow_executables,
+        is_executable_gated_mcp,
         resolve_project_exec_allow_map,
     )
 
@@ -79,7 +80,7 @@ def prepare_mcp_integration(
             logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
         mcp_deps = list(current_view.dependencies)
     allow_map = None
-    if any(dep.resolved_by is not None and dep.is_self_defined for dep in mcp_deps):
+    if any(is_executable_gated_mcp(dep) for dep in mcp_deps):
         allow_map = resolve_project_exec_allow_map(
             project_root or apm_package.package_path or Path.cwd(),
             apm_package,

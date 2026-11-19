@@ -90,6 +90,15 @@ def test_executables_gate_parks_server_with_audit_evidence(
     assert "tools-server" not in (chain.lock().get("mcp_omissions") or {})
     assert _audit(chain)["passed"]
 
+    chain.write_manifest([], apm=[_PACKAGE], targets=["claude"], executables={})
+    chain.ok("install", "--no-policy")
+    assert "tools-server" not in chain.servers("claude")
+    lock = chain.lock()
+    assert "tools-server" not in (lock.get("mcp_configs") or {})
+    assert "tools-server" not in (lock.get("mcp_servers") or [])
+    assert lock["mcp_omissions"]["tools-server"]["reason"] == "unapproved-executables"
+    assert _audit(chain)["passed"], "revoked approval must retire the server with evidence"
+
 
 def _transitive_chain(tmp_path: Path, binary: Path) -> Chain:
     chain = Chain(tmp_path / "world", binary, dirs=(".claude",))

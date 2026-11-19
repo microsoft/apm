@@ -50,6 +50,11 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
             "omissions = prepared.omissions(lockfile)",
             "omissions = dict(prepared.omission_view.omissions)",
         ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "if any(is_executable_gated_mcp(dep) for dep in mcp_deps):",
+            "if any(dep.resolved_by is not None and dep.is_self_defined for dep in mcp_deps):",
+        ),
     ],
 )
 def test_mcp_omission_owner_bypass_is_rejected(path: str, old: str, new: str) -> None:

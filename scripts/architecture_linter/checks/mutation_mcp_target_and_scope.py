@@ -56,6 +56,7 @@ _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 
 
 _MCP_SCOPE_OWNER = "src/apm_cli/integration/mcp_config_view.py"
+_EXECUTABLES_OWNER = "src/apm_cli/security/executables.py"
 
 
 _MCP_ADAPTER_BASE = "src/apm_cli/adapters/client/base.py"
@@ -413,6 +414,7 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             "return self.omission_view.omission_evidence(lockfile)",
             "omissions = prepared.omissions(lockfile)",
             "current_view = current_view.with_unapproved_executables(approved)",
+            "if any(is_executable_gated_mcp(dep) for dep in mcp_deps):",
             "current_view if should_install else None",
         ),
     }
@@ -440,6 +442,16 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
                 r"|with_unapproved_executables|_declaration_fingerprint)\("
             ),
             message="MCP omission selection and comparison belong to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_EXECUTABLES_OWNER,)),
+            pattern=r"resolved_by\b.*\bis not None\b.*\bis_self_defined\b",
+            message="The MCP executables-gate predicate belongs to is_executable_gated_mcp",
             exempt=False,
         )
     )
