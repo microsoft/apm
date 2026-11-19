@@ -27,7 +27,11 @@ from .executables import (
     ITEM_EXEC_TYPES,
     LAYER_DEFAULT_DENY,
     LAYER_GATE_DISABLED,
+    PLUGIN_GRANT_KEY,
+    PLUGIN_ITEM,
     TRUST_DENIED,
+    TRUST_DEPLOYED,
+    TRUST_GATED,
     ExecTrustContext,
     _is_content_bound_key,
     _strip_version,
@@ -38,6 +42,7 @@ from .trust_fingerprint import (
     hook_file_fingerprint,
     hook_item_key,
     mcp_definition_fingerprint,
+    native_plugin_fingerprint,
 )
 
 # Park reasons recorded as lockfile evidence (``mcp_omissions[*].reason``).
@@ -416,70 +421,118 @@ def parked_hook_message(package: str, item: str, reason: str) -> str:
     )
 
 
-@dataclass(frozen=True)
-class NativeHooksAdmission:
-    """Verdict for a live-loaded plugin's hooks.
+# -------------------------------------------------------------------
+# Native plugins: ONE approval item over the whole plugin root
+# -------------------------------------------------------------------
 
-    ``parked`` lists hook files whose pin does not admit them; ``stray`` lists
-    files under the plugin's ``hooks/`` directory that no hook file references.
-    """
-
-    allowed: bool
-    parked: tuple[tuple[str, str], ...] = ()
-    stray: tuple[str, ...] = ()
+_PLUGIN_MANIFESTS = ("plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
+_MANIFEST_EXEC_KEYS = {"hooks": EXEC_TYPE_HOOKS, "mcpServers": EXEC_TYPE_MCP, "lspServers": "lsp"}
 
 
-def native_hooks_admission(
+def native_plugin_exec_types(plugin_root: Path) -> tuple[str, ...]:
+    """Executable types a natively loaded plugin declares (hooks, MCP, LSP, bin, canvas)."""
+    import json
+
+    from .executables import scan_package_executables
+
+    root = Path(plugin_root)
+    found: dict[str, None] = dict.fromkeys(scan_package_executables(root, "", "").exec_types)
+    markers = {
+        "hooks": EXEC_TYPE_HOOKS,
+        ".mcp.json": EXEC_TYPE_MCP,
+        ".lsp.json": "lsp",
+        "lsp.json": "lsp",
+        "bin": "bin",
+        "extensions": "canvas",
+    }
+    for name, exec_type in markers.items():
+        if (root / name).exists():
+            found[exec_type] = None
+    for name in _PLUGIN_MANIFESTS:
+        manifest = root / name
+        if not manifest.is_file():
+            continue
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            for key, exec_type in _MANIFEST_EXEC_KEYS.items():
+                if data.get(key):
+                    found[exec_type] = None
+    return tuple(found)
+
+
+def plugin_pin(
+    ctx: ExecTrustContext | None, package_keys: tuple[str, ...]
+) -> tuple[str, str] | None:
+    """Return ``(layer, pin)`` of the package's whole-plugin approval, if any."""
+    return pinned_layer(ctx, TrustSubject(package_keys, PLUGIN_GRANT_KEY, PLUGIN_ITEM, None))
+
+
+def _trust_context(allow_executables: Any) -> ExecTrustContext | None:
+    if isinstance(allow_executables, ExecTrustContext):
+        return allow_executables
+    return getattr(allow_executables, "trust_context", None)
+
+
+def admit_native_plugin(
     allow_executables: Any,
     package_keys: tuple[str, ...],
-    install_path: Path,
-) -> NativeHooksAdmission | None:
-    """Admit a natively registered plugin's hooks file by file.
+    plugin_root: Path,
+) -> Admission:
+    """Decide whether a natively loaded plugin may run, as one unit.
 
-    A native plugin is loaded live from its install directory, so it is
-    registered only when EVERY hook file there is admitted by its own pin and
-    every file under the plugin's root ``hooks/`` directory is a hook file or
-    a script a hook file references. ``None`` means the package has no pinned
-    hook items and the type-level decision applies.
+    The harness loads the plugin directory intact, so approval binds ONE pin
+    (``executables.allow.<pkg>.plugin``) to :func:`native_plugin_fingerprint`
+    of *plugin_root* (the ``apm_modules`` source). *allow_executables* is an
+    ``EffectiveExecMap``, an :class:`ExecTrustContext`, or ``None`` (gate off).
+
+    - no declared executables              -> admitted, no pin needed
+    - gate off                             -> admitted
+    - org / user / project deny            -> parked ``denied``
+    - plugin pin matches                   -> admitted
+    - plugin pin differs (any byte/mode)   -> parked ``definition-changed``
+    - no pin, every declared type granted  -> admitted (legacy, warned)
+    - otherwise                            -> parked ``unapproved-executables``
     """
-    import logging
+    exec_types = native_plugin_exec_types(plugin_root)
+    if not exec_types:
+        return Admission(True, None, LAYER_NOT_GATED)
+    ctx = _trust_context(allow_executables)
+    if ctx is None or not ctx.gate_enabled:
+        return Admission(True, None, LAYER_GATE_DISABLED)
+    for exec_type in exec_types:
+        for key in package_keys:
+            decision = resolve_exec_decision(ctx, key, exec_type)
+            if decision.trust_state == TRUST_DENIED:
+                return Admission(False, REASON_DENIED, decision.deciding_layer)
+    pinned = plugin_pin(ctx, package_keys)
+    if pinned is not None:
+        layer, pin = pinned
+        try:
+            current = native_plugin_fingerprint(Path(plugin_root))
+        except (OSError, ValueError):
+            current = None
+        if current is not None and current == pin:
+            return Admission(True, None, layer)
+        return Admission(False, REASON_DEFINITION_CHANGED, layer)
+    decisions = [_type_decision(ctx, package_keys, exec_type) for exec_type in exec_types]
+    if all(decision.allowed for decision in decisions):
+        return Admission(True, None, decisions[0].deciding_layer)
+    return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY)
 
-    from apm_cli.integration.hook_integrator import HookIntegrator
-    from apm_cli.integration.hook_source_selection import (
-        _parse_hook_json,
-        _referenced_hook_source_files,
+
+def parked_plugin_message(package: str, reason: str) -> str:
+    """Return the warning for a native plugin the trust owner parked."""
+    why = {
+        REASON_DEFINITION_CHANGED: "content changed since approval",
+        REASON_DENIED: "denied by policy",
+    }.get(reason, "not approved")
+    return (
+        f"Parked native plugin {package}: {why}\n"
+        f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
     )
-
-    ctx = getattr(allow_executables, "trust_context", None)
-    if ctx is None or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
-        return None
-    # Deny wins before any file is considered, even with no hook file at all.
-    if any(
-        resolve_exec_decision(ctx, key, EXEC_TYPE_HOOKS).trust_state == TRUST_DENIED
-        for key in package_keys
-    ):
-        return NativeHooksAdmission(False, (("*", REASON_DENIED),))
-    root = install_path.resolve()
-    parked: list[tuple[str, str]] = []
-    known: set[Path] = set()
-    for hook_file in HookIntegrator().find_hook_files(root):
-        known.add(hook_file.resolve())
-        data = _parse_hook_json(hook_file, logger=logging.getLogger(__name__)) or {}
-        known |= {
-            path.resolve() for path in _referenced_hook_source_files(data, root, hook_file.parent)
-        }
-        verdict = admit(ctx, hook_subject(package_keys, root, hook_file))
-        if not verdict.allowed:
-            parked.append((hook_item_key(root, hook_file), str(verdict.reason)))
-    stray: list[str] = []
-    hooks_dir = root / "hooks"
-    if hooks_dir.is_dir():
-        stray = [
-            path.relative_to(root).as_posix()
-            for path in sorted(hooks_dir.rglob("*"))
-            if (path.is_file() or path.is_symlink()) and path.resolve() not in known
-        ]
-    return NativeHooksAdmission(not parked and not stray, tuple(parked), tuple(stray))
 
 
 def hooks_package_admissible(allow_executables: Any, package_keys: tuple[str, ...]) -> bool:
@@ -624,15 +677,30 @@ def package_type_verdicts(
     *,
     transitive: bool = False,
     registry_resolver: Callable[[Any], dict[str, Any] | None] | None = None,
+    native: bool = False,
 ) -> dict[str, TypeVerdict]:
     """Per-type verdicts for one package: the single reader for every status view.
 
     ``apm policy explain``, ``apm approve --list/--pending``, ``apm doctor``,
     the exec gate's lockfile ``exec_status`` and native plugin status all read
     this, so a pinned approval reads the same everywhere it is shown.
+
+    A whole-plugin pin decides every type at once. For a *native* plugin,
+    per-file item pins never admit: the harness loads the whole root.
     """
     from .executables import LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW
 
+    if install_path is not None and plugin_pin(ctx, package_keys) is not None:
+        verdict = admit_native_plugin(ctx, package_keys, install_path)
+        state = (
+            TRUST_DEPLOYED
+            if verdict.allowed
+            else (TRUST_DENIED if verdict.reason == REASON_DENIED else TRUST_GATED)
+        )
+        return {
+            exec_type: TypeVerdict(verdict.allowed, state, verdict.layer, pinned=True)
+            for exec_type in exec_types
+        }
     pinned = (
         pinned_exec_status(
             ctx,
@@ -642,13 +710,13 @@ def package_type_verdicts(
             transitive=transitive,
             registry_resolver=registry_resolver,
         )
-        if install_path is not None
+        if install_path is not None and not native
         else {}
     )
     result: dict[str, TypeVerdict] = {}
     for exec_type in exec_types:
         decision = _type_decision(ctx, package_keys, exec_type)
-        is_pinned = has_item_pins(ctx, package_keys, exec_type)
+        is_pinned = has_item_pins(ctx, package_keys, exec_type) and not native
         if decision.trust_state == TRUST_DENIED:
             shadowed = decision.shadowed_layers + ((LAYER_PROJECT_ALLOW,) if is_pinned else ())
             result[exec_type] = TypeVerdict(
@@ -683,6 +751,8 @@ def package_exec_status(
     package_keys: tuple[str, ...],
     install_path: Path | None,
     exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
 ) -> str | None:
     """Worst-case lockfile ``exec_status`` for a package's declared executables."""
     from .executables import more_severe_exec_status
@@ -690,7 +760,8 @@ def package_exec_status(
     if ctx is None or not exec_types or not ctx.gate_enabled:
         return None
     status: str | None = None
-    for verdict in package_type_verdicts(ctx, package_keys, install_path, exec_types).values():
+    verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    for verdict in verdicts.values():
         status = more_severe_exec_status(status, "deployed" if verdict.allowed else verdict.state)
     return status
 
@@ -747,7 +818,8 @@ PINNED_GRANTS_MIN_APM = "0.37"
 def has_any_pins(allow: dict[str, Any]) -> bool:
     """Whether a stored grant map already holds a pinned item map."""
     return any(
-        isinstance(entry, dict) and any(isinstance(value, dict) for value in entry.values())
+        isinstance(entry, dict)
+        and any(isinstance(value, dict) or key == PLUGIN_GRANT_KEY for key, value in entry.items())
         for entry in allow.values()
     )
 
@@ -851,6 +923,7 @@ def package_pins(
     *,
     transitive: bool,
     registry_resolver: Callable[[Any], dict[str, Any] | None] | None = None,
+    native: bool = False,
 ) -> list[PinnedItem]:
     """Return every hook file and gated MCP server a package brings, pinned.
 
@@ -863,6 +936,8 @@ def package_pins(
     from apm_cli.integration.hook_integrator import HookIntegrator
 
     root = install_path.resolve()
+    if native:
+        return [native_plugin_pin(root)]
     pins: list[PinnedItem] = []
     for hook_file in HookIntegrator().find_hook_files(root):
         try:
@@ -916,6 +991,24 @@ def package_pins(
     return pins
 
 
+def native_plugin_pin(plugin_root: Path) -> PinnedItem:
+    """The single whole-plugin item ``apm approve`` records for a native plugin."""
+    from apm_cli.utils.content_hash import native_plugin_files
+
+    types = native_plugin_exec_types(plugin_root)
+    try:
+        files = len(native_plugin_files(plugin_root))
+    except (OSError, ValueError):
+        files = 0
+    summary = f"whole plugin, {files} files" + (f" ({', '.join(types)})" if types else "")
+    try:
+        return PinnedItem(
+            PLUGIN_GRANT_KEY, PLUGIN_ITEM, native_plugin_fingerprint(plugin_root), summary
+        )
+    except (OSError, ValueError) as exc:
+        return PinnedItem(PLUGIN_GRANT_KEY, PLUGIN_ITEM, None, summary, str(exc))
+
+
 def installed_content_matches_lock(locked_dependency: Any, package_dir: Path) -> bool:
     """Return whether installed bytes still match the locked content hash.
 
@@ -956,6 +1049,12 @@ def record_pins(
             previous.update(entry)
     entry: dict[str, Any] = dict(previous)
     narrowed: list[str] = []
+    plugin = next((pin for pin in pins if pin.exec_type == PLUGIN_GRANT_KEY), None)
+    if plugin is not None and plugin.fingerprint is not None:
+        # One pin over the whole plugin covers every executable type it ships.
+        narrowed = [t for t in ITEM_EXEC_TYPES if previous.get(t) is True]
+        allow[identity] = {PLUGIN_GRANT_KEY: plugin.fingerprint}
+        return narrowed
     for exec_type in exec_types:
         if exec_type in ITEM_EXEC_TYPES:
             items = {

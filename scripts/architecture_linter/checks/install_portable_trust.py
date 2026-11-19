@@ -45,6 +45,8 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "def hook_file_filter(",
         "def record_pins(",
         "def package_type_verdicts(",
+        "def admit_native_plugin(",
+        "current = native_plugin_fingerprint(Path(plugin_root))",
     ),
     _EXECUTABLES: (
         "return entry.get(exec_type, False) is True",
@@ -54,23 +56,27 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
     "src/apm_cli/install/exec_gate.py": (
         "hooks_package_admissible(allow_executables, tuple(candidate_keys))",
         "return hook_file_filter(allow_executables, keys, Path(package_info.install_path))",
+        "verdict = admit_native_plugin(allow_executables, candidate_keys, install)",
     ),
-    "src/apm_cli/install/deployment_plan.py": ("hook_file_admitted=hook_filter,",),
+    "src/apm_cli/install/deployment_plan.py": (
+        "hook_file_admitted=hook_filter,",
+        '"hooks": hooks and hook_filter is None,',
+    ),
     "src/apm_cli/integration/hook_reintegration.py": ("hook_file_admitted=hook_file_admission(",),
     "src/apm_cli/commands/approve.py": (
         "narrowed = record_pins(allow, identity",
         "return package_type_verdicts(",
     ),
     "src/apm_cli/install/native_plugin_admission.py": (
-        "verdict = native_hooks_admission(allow_executables, keys",
-        "hooks_approved = native_hook_approval(",
+        "if hook_file_admission(package_name, package_info, allow_executables) is not None:",
+        "native=True,",
     ),
 }
 # Type-level resolvers cannot see pins; outside security/ every per-type
 # verdict comes from trust.package_type_verdicts.
 _PIN_BLIND = ("resolve_exec_decision(", "exec_status_for_declaration(")
 _SECURITY = "src/apm_cli/security/"
-# A live-loaded plugin's hooks are admitted per file, never by a bool lookup.
+# A live-loaded plugin is admitted as one whole-root item, never by a bool lookup.
 _NATIVE_ADMISSION = "src/apm_cli/install/native_plugin_admission.py"
 _BOOL_LOOKUPS = ("is_package_approved(", "_map_grants(", "allow_executables.get(")
 
@@ -90,6 +96,8 @@ _FINGERPRINT_ROUTES: dict[str, tuple[str, ...]] = {
         "def hook_file_fingerprint(",
         "def evidence_fingerprint(",
         "def local_bundle_digest(",
+        "def native_plugin_fingerprint(",
+        "return compute_native_plugin_hash(plugin_root)",
     ),
     _MCP_VIEW: ("return evidence_fingerprint(payload)",),
     _EXECUTABLES: ("digest = local_bundle_digest(source_dir, lockfile)",),

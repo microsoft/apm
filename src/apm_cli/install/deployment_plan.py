@@ -37,6 +37,24 @@ class PackageDeploymentPlan:
         return [] if self.codex_native is not None else list(self.target_selection.targets)
 
 
+def _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger):
+    """Name a whole-plugin pin that no longer matches, with the re-approve hint."""
+    from .exec_gate import plugin_admission, resolve_package_key
+
+    verdict = plugin_admission(package_name, package_info, allow_executables)
+    if verdict is None or verdict.allowed:
+        return
+    from apm_cli.security.executables import _strip_version
+    from apm_cli.security.trust import parked_plugin_message
+
+    package = _strip_version(resolve_package_key(package_info, package_name))
+    message = parked_plugin_message(package, str(verdict.reason))
+    if diagnostics is not None:
+        diagnostics.warn(message)
+    elif logger is not None:
+        logger.warning(message)
+
+
 def prepare_package_deployment(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -73,13 +91,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     from .exec_gate import hook_file_admission
 
     hook_filter = hook_file_admission(package_name, package_info, allow_executables)
-    native_codex_hooks = hooks
-    if hook_filter is not None:
-        from apm_cli.install.native_plugin_admission import native_hook_approval
-
-        native_codex_hooks = native_hook_approval(
-            hooks, allow_executables, package_info, package_name, None
-        )
+    _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger)
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
@@ -92,8 +104,9 @@ def prepare_package_deployment(  # noqa: PLR0913
         scope=scope,
         skill_subset=skill_subset,
         approvals={
-            # A native plugin loads every hook file live: each must match its pin.
-            "hooks": native_codex_hooks,
+            # A native plugin loads every hook file live: per-file pins never
+            # admit it; a whole-plugin pin (or a type-level grant) does.
+            "hooks": hooks and hook_filter is None,
             "mcp": mcp,
             "bin": bin_approved and not skip_bin,
             "canvas": canvas,

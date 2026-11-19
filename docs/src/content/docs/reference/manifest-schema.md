@@ -101,7 +101,7 @@ assign automatically to all `apm.yml` files.
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
-The `executables:` block holds `allow` and `deny` maps keyed by package. `hooks` and `mcp` map each hook file or server name to a `sha256:<64 hex>` fingerprint; `true` approves a type for any content. `apm approve` writes it; see [Store format](../cli/approve/#store-format).
+The `executables:` block holds `allow` and `deny` maps keyed by package. `hooks` and `mcp` map each hook file or server name to a `sha256:<64 hex>` fingerprint; `plugin` pins a native plugin's whole root to one fingerprint; `true` approves a type for any content. `apm approve` writes it; see [Store format](../cli/approve/#store-format).
 
 Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](../cli/init/) for the templates.
 

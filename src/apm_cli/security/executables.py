@@ -96,6 +96,8 @@ class ExecutableDeclaration:
     install_path: str | None = None
     depth: int = 1
     content_verified: bool = True
+    # A natively loaded plugin is approved as one item over its whole root.
+    native_plugin: bool = False
 
     @property
     def has_executables(self) -> bool:
@@ -1271,6 +1273,10 @@ def _filter_declared_services(
 
 # Executable types whose grants may pin individual items to a fingerprint.
 ITEM_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP)
+# A natively loaded plugin is approved as ONE item over its whole root:
+# ``executables.allow.<pkg>.plugin: sha256:<64 hex>`` (#3902).
+PLUGIN_GRANT_KEY = "plugin"
+PLUGIN_ITEM = "."
 
 
 def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
@@ -1322,6 +1328,16 @@ def _parse_grant_block(
         parsed: dict[str, Any] = {}
         for exec_type, value in entry.items():
             exec_type_str = str(exec_type)
+            if allow_items and exec_type_str == PLUGIN_GRANT_KEY:
+                from .trust_fingerprint import is_fingerprint
+
+                if not where.endswith(".allow") or not is_fingerprint(value):
+                    raise ValueError(
+                        f"apm.yml {where}.{pkg_key}.plugin: expected 'sha256:<64 hex>' under "
+                        f"executables.allow. Run 'apm approve {pkg_key}' to record it."
+                    )
+                parsed[exec_type_str] = value
+                continue
             if exec_type_str not in ALL_EXEC_TYPES:
                 raise ValueError(
                     f"{where}[{pkg_key!r}]: unknown exec type {exec_type_str!r} "
@@ -1358,6 +1374,10 @@ def split_item_grants(
         if not isinstance(pkg_key, str) or not isinstance(entry, dict):
             continue
         for exec_type, value in entry.items():
+            if exec_type == PLUGIN_GRANT_KEY:
+                if is_fingerprint(value):
+                    items.setdefault(pkg_key, {})[PLUGIN_GRANT_KEY] = {PLUGIN_ITEM: value}
+                continue
             if isinstance(value, bool):
                 types.setdefault(pkg_key, {})[str(exec_type)] = value
             elif isinstance(value, dict) and exec_type in ITEM_EXEC_TYPES:
@@ -1377,6 +1397,7 @@ def _deny_types(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, bool]]:
         pkg_key: {
             exec_type: (value is True or isinstance(value, dict))
             for exec_type, value in entry.items()
+            if exec_type != PLUGIN_GRANT_KEY
         }
         for pkg_key, entry in raw.items()
         if isinstance(entry, dict)

@@ -115,10 +115,12 @@ re-approve commands.
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
 `apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
-server. A Copilot or Codex native plugin loads its `hooks/` directory live, so
-it registers only when every hook file matches its pin and `hooks/` holds
-nothing else; otherwise the plugin is not registered and the parked file is
-named.
+server. A Copilot or Codex native plugin is loaded intact by the harness, so
+`apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over every
+file and executable bit in the plugin root (as installed in `apm_modules/`).
+Any byte or mode change parks the whole plugin: it is not registered, and
+install warns `Parked native plugin <pkg>: content changed since approval`
+with the re-approve command. Per-file hook pins never admit a native plugin.
 
 ### The gate opt-in
 
@@ -214,7 +216,8 @@ policy explain` for the per-package detail.
 identity `apm approve --pending` prints (`owner/repo`, `./pkgs/x`,
 `local:pkgs/leaf`). `hooks` and `mcp` map each item (package-relative hook
 file path, or server name) to its full `sha256:<64 hex>` fingerprint; other
-types are `true`:
+types are `true`. A native plugin gets one `plugin:` fingerprint over its
+whole root instead:
 
 ```yaml
 # apm.yml  (committed)
@@ -227,6 +230,8 @@ executables:
         kit-docs: sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d
     acme/tools:
       bin: true
+    acme/superpowers:
+      plugin: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
   deny:
     "evil/pkg":
       hooks: true

@@ -1598,8 +1598,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-trust-fingerprint",
         rule_id="install-deployment-trust-fingerprint",
         path="src/apm_cli/integration/mcp_config_view.py",
-        old="from collections.abc import Mapping\n",
-        new="import hashlib\nfrom collections.abc import Mapping\n",
+        old="from collections.abc import Callable, Mapping\n",
+        new="import hashlib\nfrom collections.abc import Callable, Mapping\n",
         intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(

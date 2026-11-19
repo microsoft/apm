@@ -252,7 +252,9 @@ The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
 `apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
-fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`:
+fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`. A native
+Copilot/Codex plugin, loaded intact, gets one `plugin:` pin over its whole
+root (every file plus executable bits); any byte or mode change parks it:
 
 ```yaml
 executables:
@@ -264,6 +266,8 @@ executables:
         kit-docs: sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d
     acme/tools:
       bin: true
+    acme/superpowers:
+      plugin: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 ```
 
 The MCP fingerprint covers transport, command, args, env, url, headers, cwd,

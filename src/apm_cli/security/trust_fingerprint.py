@@ -128,6 +128,19 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
     )
 
 
+def native_plugin_fingerprint(plugin_root: Path) -> str:
+    """Fingerprint a natively loaded plugin: path, exec bit and bytes per file.
+
+    Covers the native plugin file set (APM's root ``apm.yml`` and ``.apm/``
+    normalization output excluded), so the approved source and the deployed
+    copy compare equal. Raises ``OSError`` or ``PathTraversalError`` for
+    unreadable data or a symlink; callers treat that as "cannot verify".
+    """
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    return compute_native_plugin_hash(plugin_root)
+
+
 def evidence_fingerprint(payload: dict[str, Any]) -> str:
     """Lockfile omission evidence digest (byte-identical to 0.36 evidence)."""
     return canonical_digest(payload)

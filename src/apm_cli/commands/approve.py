@@ -326,6 +326,7 @@ def _verdicts(ctx, decl: ExecutableDeclaration):
         Path(decl.install_path) if decl.install_path else None,
         decl.exec_types,
         transitive=decl.depth > 1,
+        native=decl.native_plugin,
     )
 
 
@@ -378,6 +379,8 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
             mark = "+" if allowed else "x"
             states.append(f"{exec_type}[{mark}:{label}]")
         _rich_echo(f"  {decl.package_key}: {' '.join(states)}")
+        if decl.native_plugin:
+            _echo_pins(decl, _pins_for(decl))
     if blocked_count:
         _rich_info(
             "[x] = parked. Trust with 'apm approve <package>' or 'apm approve --recommended'.",
@@ -539,10 +542,14 @@ def _pins_for(decl: ExecutableDeclaration) -> list:
 
     if decl.install_path is None:
         return []
-    return package_pins(Path(decl.install_path), transitive=decl.depth > 1)
+    return package_pins(
+        Path(decl.install_path), transitive=decl.depth > 1, native=decl.native_plugin
+    )
 
 
 def _type_counts(decl: ExecutableDeclaration, pins: list) -> str:
+    if any(pin.exec_type == "plugin" for pin in pins):
+        return "whole plugin"
     parts = []
     hooks = sum(1 for pin in pins if pin.exec_type == "hooks")
     servers = sum(1 for pin in pins if pin.exec_type == "mcp")
@@ -567,6 +574,8 @@ def _echo_pins(decl: ExecutableDeclaration, pins: list, states: dict | None = No
         digest = short_fingerprint(pin.fingerprint) if pin.fingerprint else "--------"
         state = f"  [{states[(pin.exec_type, pin.item)]}]" if states else ""
         _rich_echo(f"      {pin.exec_type:<6} {pin.item:<{width}}  {pin.summary}  {digest}{state}")
+    if any(pin.exec_type == "plugin" for pin in pins):
+        return
     for exec_type, count, noun in (
         ("bin", decl.bin_count, "executable(s)"),
         ("lsp", decl.lsp_count, "LSP server(s)"),
@@ -604,9 +613,13 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> str | None:
     for exec_type in narrowed:
         count = sum(1 for pin in pins if pin.exec_type == exec_type)
         noun = {"hooks": "hook file", "mcp": "MCP server"}[exec_type]
+        pinned_to = (
+            "the whole plugin"
+            if decl.native_plugin
+            else f"{count} {noun}{'s' if count != 1 else ''}"
+        )
         _rich_info(
-            f"{identity} {exec_type}: was approved for any content; "
-            f"now pinned to {count} {noun}{'s' if count != 1 else ''}",
+            f"{identity} {exec_type}: was approved for any content; now pinned to {pinned_to}",
             symbol="info",
         )
     return f"Approved {identity} at these exact definitions ({_type_counts(decl, pins)})"
@@ -725,10 +738,20 @@ def _record_and_save(
 
 def _item_states(ctx, decl: ExecutableDeclaration, pins: list) -> dict[tuple[str, str], str]:
     """Per-item approval state for display: approved, changed or not approved."""
-    from ..security.trust import TrustSubject, admit, pinned_layer
+    from ..security.trust import TrustSubject, admit, admit_native_plugin, pinned_layer, plugin_pin
 
     keys = (decl.package_key, _identity(decl))
     states = {}
+    if decl.native_plugin and decl.install_path:
+        verdict = admit_native_plugin(ctx, keys, Path(decl.install_path))
+        if verdict.allowed:
+            state = "approved" if plugin_pin(ctx, keys) else "approved, any content"
+        else:
+            state = {
+                "definition-changed": "changed since approval",
+                "denied": "denied",
+            }.get(str(verdict.reason), "not approved")
+        return {(pin.exec_type, pin.item): state for pin in pins}
     for pin in pins:
         subject = TrustSubject(keys, pin.exec_type, pin.item, pin.fingerprint)
         verdict = admit(ctx, subject)
@@ -754,6 +777,13 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
         for decl in _scan_installed_packages(manifest)
         if any(not verdict.allowed for verdict in _verdicts(ctx, decl).values())
     ]
+
+
+def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
+    """A plugin a harness loads intact: an Agent Plugin or a Codex bundle."""
+    if package_type == "agent_plugin":
+        return True
+    return (package_dir / ".codex-plugin" / "plugin.json").is_file()
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:
@@ -830,6 +860,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         install_path=str(package_dir),
                         depth=locked.depth,
                         content_verified=installed_content_matches_lock(locked, package_dir),
+                        native_plugin=_is_native_plugin(locked.package_type, package_dir),
                     )
                 )
         return results
@@ -866,7 +897,13 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 manifest_data=manifest_data,
             )
             if decl.has_executables:
-                results.append(replace(decl, install_path=str(pkg_dir)))
+                results.append(
+                    replace(
+                        decl,
+                        install_path=str(pkg_dir),
+                        native_plugin=_is_native_plugin(None, pkg_dir),
+                    )
+                )
 
     _scan_dir(apm_modules)
     return results

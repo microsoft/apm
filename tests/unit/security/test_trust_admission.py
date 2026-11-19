@@ -7,6 +7,7 @@ decision for one dependency-declared MCP server or hook file.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -366,24 +367,21 @@ def test_org_deny_beats_a_pinned_registry_overlay_and_the_flag() -> None:
     assert admit(ctx, overlay, one_off=True).reason == "denied"
 
 
-def test_native_plugin_hooks_need_every_file_bound(tmp_path: Path) -> None:
-    from apm_cli.security.trust import native_hooks_admission
-
-    package = tmp_path / "pkg"
-    hooks = package / "hooks"
+def _superpowers_plugin(root: Path) -> Path:
+    """A plugin shaped like obra/superpowers: dispatcher, sibling, Cursor variant."""
+    hooks = root / "hooks"
     hooks.mkdir(parents=True)
-    (hooks / "lint.sh").write_text("echo lint\n", encoding="utf-8")
-    hook = hooks / "hooks.json"
-    hook.write_text(
+    (hooks / "hooks.json").write_text(
         json.dumps(
             {
                 "hooks": {
-                    "PostToolUse": [
+                    "SessionStart": [
                         {
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "${CLAUDE_PLUGIN_ROOT}/hooks/lint.sh",
+                                    "command": '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" '
+                                    "session-start",
                                 }
                             ]
                         }
@@ -393,34 +391,105 @@ def test_native_plugin_hooks_need_every_file_bound(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    pin = hook_file_fingerprint(package, hook)
-    ctx = build_exec_trust_context(
-        policy=None,
-        project_data={"executables": {"allow": {PKG: {"hooks": {"hooks/hooks.json": pin}}}}},
-    )
-    effective = materialize_exec_map(ctx)
-    assert native_hooks_admission(effective, (PKG,), package).allowed
-    (hooks / "stray.sh").write_text("x\n", encoding="utf-8")
-    verdict = native_hooks_admission(effective, (PKG,), package)
-    assert not verdict.allowed and verdict.stray == ("hooks/stray.sh",)
-    (hooks / "stray.sh").unlink()
-    (hooks / "lint.sh").write_text("curl evil\n", encoding="utf-8")
-    verdict = native_hooks_admission(effective, (PKG,), package)
-    assert verdict.parked == (("hooks/hooks.json", "definition-changed"),)
-    legacy = materialize_exec_map(_ctx({PKG: {"hooks": True}}))
-    assert native_hooks_admission(legacy, (PKG,), package) is None
+    (hooks / "run-hook.cmd").write_text('exec "$(dirname "$0")/$1"\n', encoding="utf-8")
+    (hooks / "session-start").write_text("echo hello\n", encoding="utf-8")
+    (hooks / "hooks-cursor.json").write_text('{"hooks": {}}', encoding="utf-8")
+    (root / "skills" / "brainstorm").mkdir(parents=True)
+    (root / "skills" / "brainstorm" / "SKILL.md").write_text("# brainstorm\n", encoding="utf-8")
+    return root
 
 
-def test_native_plugin_deny_wins_with_no_hook_files(tmp_path: Path) -> None:
-    from apm_cli.security.trust import native_hooks_admission
+def _plugin_grant(fingerprint: str) -> dict:
+    return {PKG: {"plugin": fingerprint}}
 
-    plugin = tmp_path / "plugin"
-    (plugin / "agents").mkdir(parents=True)
+
+def test_native_plugin_seam_admits_one_whole_root_pin(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    pin = native_plugin_fingerprint(plugin)
+    effective = materialize_exec_map(_ctx(_plugin_grant(pin)))
+    assert admit_native_plugin(effective, (PKG,), plugin).allowed
+    # The seam also accepts the trust context itself.
+    assert admit_native_plugin(effective.trust_context, (PKG,), plugin).allowed
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda root: (root / "hooks" / "session-start").write_text("curl evil\n"),
+        lambda root: (root / "hooks" / "hooks-cursor.json").write_text('{"x": 1}'),
+        lambda root: (root / "skills" / "brainstorm" / "SKILL.md").write_text("# changed\n"),
+        lambda root: (root / "hooks" / "new.sh").write_text("echo\n"),
+        lambda root: (root / "hooks" / "session-start").chmod(0o755),
+    ],
+    ids=["sibling-script", "cursor-variant", "skill", "added-file", "mode-change"],
+)
+def test_native_plugin_seam_parks_on_any_byte_or_mode_change(tmp_path: Path, change) -> None:
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    (plugin / "hooks" / "session-start").chmod(0o644)
+    effective = materialize_exec_map(_ctx(_plugin_grant(native_plugin_fingerprint(plugin))))
+    change(plugin)
+    verdict = admit_native_plugin(effective, (PKG,), plugin)
+    assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
+
+
+def test_native_plugin_seam_without_executables_needs_no_pin(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin
+
+    plugin = tmp_path / "skills-only"
+    (plugin / "skills" / "a").mkdir(parents=True)
+    (plugin / "skills" / "a" / "SKILL.md").write_text("# a\n", encoding="utf-8")
+    assert admit_native_plugin(materialize_exec_map(_ctx()), (PKG,), plugin).allowed
+
+
+def test_native_plugin_seam_deny_wins_over_a_matching_pin(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
     policy = ApmPolicy(executables=ExecutablesPolicy(deny=(PKG,)))
-    ctx = _ctx({PKG: {"hooks": {}}}, policy=policy)
-    verdict = native_hooks_admission(materialize_exec_map(ctx), (PKG,), plugin)
-    assert verdict is not None and not verdict.allowed
-    assert verdict.parked == (("*", "denied"),)
+    ctx = _ctx(_plugin_grant(native_plugin_fingerprint(plugin)), policy=policy)
+    verdict = admit_native_plugin(materialize_exec_map(ctx), (PKG,), plugin)
+    assert (verdict.allowed, verdict.reason) == (False, "denied")
+
+
+def test_native_plugin_seam_ignores_per_file_pins_and_reads_legacy_grants(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin, content_blind_grants
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    hook = plugin / "hooks" / "hooks.json"
+    per_file = _ctx({PKG: {"hooks": {"hooks/hooks.json": hook_file_fingerprint(plugin, hook)}}})
+    verdict = admit_native_plugin(materialize_exec_map(per_file), (PKG,), plugin)
+    assert (verdict.allowed, verdict.reason) == (False, "unapproved-executables")
+    legacy = _ctx({PKG: {"hooks": True}})
+    assert admit_native_plugin(materialize_exec_map(legacy), (PKG,), plugin).allowed
+    assert (PKG, "hooks") in content_blind_grants(legacy)
+    assert admit_native_plugin(None, (PKG,), plugin).allowed
+
+
+def test_plugin_grant_must_be_a_full_fingerprint_under_allow() -> None:
+    with pytest.raises(ValueError, match=r"apm approve"):
+        _ctx({PKG: {"plugin": True}})
+    with pytest.raises(ValueError, match=r"apm approve"):
+        _ctx({PKG: {"plugin": "sha256:abcd"}})
+    with pytest.raises(ValueError, match=r"executables.allow"):
+        _ctx(deny={PKG: {"plugin": "sha256:" + "a" * 64}})
+
+
+def test_record_pins_replaces_type_grants_with_one_plugin_item(tmp_path: Path) -> None:
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    pins = package_pins(plugin, transitive=False, native=True)
+    assert [(pin.exec_type, pin.item) for pin in pins] == [("plugin", ".")]
+    allow = {PKG: {"hooks": True}}
+    narrowed = record_pins(allow, PKG, ("hooks",), pins)
+    assert narrowed == ["hooks"]
+    assert allow == {PKG: {"plugin": pins[0].fingerprint}}
+    assert len(pins[0].fingerprint) == len("sha256:") + 64
 
 
 def test_type_verdicts_report_pins_as_allowed_and_legacy_as_any_content(tmp_path: Path) -> None:
@@ -468,3 +537,26 @@ def test_status_and_install_agree_on_a_changed_registry_overlay(tmp_path: Path) 
         ctx, (PKG,), package, ("mcp",), transitive=True, registry_resolver=lambda _d: entry
     )
     assert same == {"mcp": "deployed"}
+
+
+def test_native_plugin_pin_ignores_apm_normalization_output(tmp_path: Path) -> None:
+    """APM's synthesized root apm.yml and .apm/ copies are not publisher content."""
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plain = _superpowers_plugin(tmp_path / "plain")
+    normalized = _superpowers_plugin(tmp_path / "normalized")
+    (normalized / "apm.yml").write_text("name: superpowers\nversion: 1.0.0\n", encoding="utf-8")
+    shutil.copytree(normalized / "hooks", normalized / ".apm" / "hooks")
+    (normalized / ".apm" / "skills").mkdir()
+    (normalized / ".apm" / "skills" / "link").symlink_to(normalized / "skills")
+    pin = native_plugin_fingerprint(plain)
+    assert native_plugin_fingerprint(normalized) == pin
+
+    effective = materialize_exec_map(_ctx(_plugin_grant(pin)))
+    assert admit_native_plugin(effective, (PKG,), normalized).allowed
+    (normalized / ".apm" / "hooks" / "session-start").write_text("x\n", encoding="utf-8")
+    assert admit_native_plugin(effective, (PKG,), normalized).allowed
+    (normalized / "hooks" / "run-hook.cmd").chmod(0o755)
+    verdict = admit_native_plugin(effective, (PKG,), normalized)
+    assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
