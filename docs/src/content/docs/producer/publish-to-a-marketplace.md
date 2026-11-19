@@ -437,8 +437,8 @@ package in it. Use separate repositories when audiences need separate access.
   `gitlab`, `url`) and every locator key (`repo:`, `repository:`, `url:`).
   A locator that names the marketplace project itself is in-marketplace
   and is admitted under any key. A bare `owner/repo` is also admitted when
-  the consumer's `GITHUB_HOST` (or `apm.yml` `default_host:`) is the
-  marketplace host, because it then resolves to that host.
+  the consumer's `GITHUB_HOST` is the marketplace host, because it then
+  resolves to that host.
 
   ```yaml
   # Refused -- ambiguous bare form on enterprise marketplace:

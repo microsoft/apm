@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import dump_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
@@ -111,6 +111,17 @@ class _World:
             cwd=cwd or self.root,
             env=self.env,
         )
+
+    def locked_host(self, plugin: str) -> str:
+        """Return the ``host`` recorded in ``apm.lock.yaml`` for marketplace *plugin*."""
+        lock = load_yaml(self.root / "apm.lock.yaml") or {}
+        rows = [
+            row
+            for row in lock.get("dependencies", [])
+            if row.get("marketplace_plugin_name") == plugin
+        ]
+        assert len(rows) == 1, rows
+        return rows[0].get("host", "")
 
     def contacted_package(self) -> bool:
         """True when any Git process logged in ``trace`` named the staged repository."""
@@ -261,7 +272,7 @@ def test_host_qualified_or_in_marketplace_entry_still_installs(
     assert world.contacted_package() is (skill == "pwned")
     if skill == "internal":
         # In-marketplace entries resolve to the enterprise host (#1285, #3945).
-        assert "corp.ghe.com" in (world.root / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert world.locked_host(plugin) == "corp.ghe.com"
 
 
 @pytest.mark.parametrize("source_type", ["git-subdir", "github"])
@@ -283,6 +294,18 @@ def test_bare_entry_is_admitted_when_github_host_is_the_marketplace_host(
     assert list(world.root.rglob("trusted/SKILL.md"))
     assert not list(world.root.rglob("pwned"))
     assert not world.contacted_package(), "a Git request reached the github.com lookalike"
+    assert world.locked_host(entry["name"]) == "corp.ghe.com"
+
+    # The lock pins the enterprise host: replaying without GITHUB_HOST stays there.
+    del world.env["GITHUB_HOST"]
+    world.trace.unlink(missing_ok=True)
+    again = world.run("install", *_FLAGS)
+
+    output = " ".join(f"{again.stdout}\n{again.stderr}".split())
+    assert again.returncode == 0, output
+    assert world.locked_host(entry["name"]) == "corp.ghe.com"
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "lock replay reached the github.com lookalike"
 
 
 def test_bare_entry_is_still_refused_when_github_host_is_another_host(

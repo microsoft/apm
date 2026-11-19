@@ -1975,8 +1975,12 @@ class TestCrossRepoMisconfigRisk:
                 "corp.ghe.com/myorg/my-marketplace/plugins/x",
             ),
             ({"type": "url", "url": "myorg/my-marketplace"}, "corp.ghe.com/myorg/my-marketplace"),
+            (
+                {"type": "url", "url": "myorg/my-marketplace", "ref": "v1.2.0"},
+                "corp.ghe.com/myorg/my-marketplace#v1.2.0",
+            ),
         ],
-        ids=["github-repository", "git-subdir-url", "url"],
+        ids=["github-repository", "git-subdir-url", "url", "url-ref"],
     )
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -1999,8 +2003,9 @@ class TestCrossRepoMisconfigRisk:
             {"type": "github", "repo": "platform-team/shared-tool", "path": "plugins/x"},
             {"type": "git-subdir", "repo": "platform-team/shared-tool", "subdir": "plugins/x"},
             {"type": "url", "url": "platform-team/shared-tool"},
+            {"type": "url", "url": "platform-team/shared-tool", "ref": "v1.2.0"},
         ],
-        ids=["github", "git-subdir", "url"],
+        ids=["github", "git-subdir", "url", "url-ref"],
     )
     @pytest.mark.parametrize(
         ("github_host", "admitted"),
@@ -2038,31 +2043,28 @@ class TestCrossRepoMisconfigRisk:
         assert result.canonical.startswith("corp.ghe.com/platform-team/shared-tool")
         monkeypatch.delenv("GITHUB_HOST")
         # Host-qualified: later parsing routes to the marketplace host regardless of env.
-        assert DependencyReference.parse(result.canonical).host == "corp.ghe.com"
+        parsed = DependencyReference.parse(result.canonical)
+        assert parsed.host == "corp.ghe.com"
+        # The declared pin survives (the packed parse is skipped for these entries).
+        assert parsed.reference == plugin_source.get("ref")
 
-    @pytest.mark.parametrize(
-        "plugin_source",
-        [{"type": "github", "repo": "team/tool"}, {"type": "url", "url": "team/tool"}],
-        ids=["github", "url"],
-    )
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_bare_cross_repo_admitted_under_manifest_default_host(
-        self, mock_get, mock_fetch, ghe_marketplace_source, monkeypatch, plugin_source
+    def test_manifest_default_host_alone_does_not_admit(
+        self, mock_get, mock_fetch, ghe_marketplace_source, monkeypatch
     ):
-        """#3945: a manifest ``default_host:`` equal to the marketplace host also admits."""
+        """#3945 compares GITHUB_HOST only: install-time marketplace resolution runs
+        outside any manifest ``default_host:`` scope, so the scope must not decide."""
         from apm_cli.utils.github_host import manifest_default_host_scope
 
         monkeypatch.delenv("GITHUB_HOST", raising=False)
-        plugin = MarketplacePlugin(name="x", source=plugin_source)
+        plugin = MarketplacePlugin(name="x", source={"type": "github", "repo": "team/tool"})
         mock_get.return_value = ghe_marketplace_source
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
         with manifest_default_host_scope("corp.ghe.com"):
             result = resolve_marketplace_plugin("x", "my-marketplace")
-        assert result.cross_repo_misconfig_risk is None
-        assert result.canonical == "corp.ghe.com/team/tool"
-        assert DependencyReference.parse(result.canonical).host == "corp.ghe.com"
+        assert result.cross_repo_misconfig_risk is not None
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

@@ -39,11 +39,11 @@ from ..models.validation import InvalidVirtualPackageExtensionError
 from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
+    default_host,
     is_azure_devops_hostname,
     is_full_commit_sha,
     is_github_hostname,
     is_supported_git_host,
-    shorthand_default_host,
 )
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .client import fetch_or_cache
@@ -384,10 +384,14 @@ def _bare_dict_locator(source: dict) -> tuple[str, str] | None:
     return locator_field, bare
 
 
-def _shorthand_host_is(host: str) -> bool:
-    """True when bare ``owner/repo`` shorthand resolves to *host* (``GITHUB_HOST`` /
-    manifest ``default_host:``), so it never falls back to public ``github.com``."""
-    return shorthand_default_host().strip().lower() == host.strip().lower()
+def _default_host_is(host: str) -> bool:
+    """True when ``GITHUB_HOST`` makes bare ``owner/repo`` resolve to *host*, so it
+    never falls back to public ``github.com`` (#3945).
+
+    Uses :func:`default_host`, which every install path sees; a manifest
+    ``default_host:`` scope is not active during marketplace resolution.
+    """
+    return default_host().strip().lower() == host.strip().lower()
 
 
 def _bare_locator_means_marketplace_host(
@@ -396,8 +400,8 @@ def _bare_locator_means_marketplace_host(
     """True when a bare dict locator on a ``*.ghe.com`` marketplace names that host.
 
     Either it names the catalog repository itself (#1285; ``repo:`` and its
-    ``repository:`` / ``url:`` synonyms, #3945), or the effective shorthand host
-    is the marketplace host (#3945). The resolver then host-qualifies the
+    ``repository:`` / ``url:`` synonyms, #3945), or ``GITHUB_HOST`` is the
+    marketplace host (#3945). The resolver then host-qualifies the
     canonical so later parsing cannot route it anywhere else.
     """
     if not isinstance(plugin.source, dict) or _bare_dict_locator(plugin.source) is None:
@@ -405,7 +409,7 @@ def _bare_locator_means_marketplace_host(
     host = source.host.strip().lower()
     if not is_github_hostname(host) or host == "github.com":
         return False
-    return _is_in_marketplace_source(plugin, source) or _shorthand_host_is(host)
+    return _is_in_marketplace_source(plugin, source) or _default_host_is(host)
 
 
 def _compute_cross_repo_misconfig_risk(
@@ -429,8 +433,7 @@ def _compute_cross_repo_misconfig_risk(
       already host-qualified, URL, and SSH forms)
     - the locator (``repo`` and its per-type fallbacks) is a non-empty,
       non-host-qualified ``owner/repo`` shorthand
-    - the effective shorthand host (``GITHUB_HOST`` / manifest
-      ``default_host:``) is not the marketplace host (#3945)
+    - ``GITHUB_HOST`` is not the marketplace host (#3945)
 
     A structured reference built from a bare locator (``type: url``, packed
     ``git-subdir``) still defaults to ``github.com``, so it does not exempt the
@@ -445,7 +448,7 @@ def _compute_cross_repo_misconfig_risk(
     bare_locator = _bare_dict_locator(plugin.source)
     if bare_locator is None:
         return None
-    if _shorthand_host_is(source.host):
+    if _default_host_is(source.host):
         return None
     locator_field, bare = bare_locator
     return CrossRepoMisconfigRisk(
@@ -647,7 +650,8 @@ def _resolve_url_source(source: dict) -> str:
         raise ValueError(f"Cannot resolve URL source '{url}': {exc}") from exc
     if dep.is_local:
         raise ValueError(f"URL source '{url}' resolves to a local path, not a Git coordinate.")
-    pin = _source_pin({"sha": source.get("sha"), "ref": dep.reference or ""})
+    # A declared ``ref:`` wins over a ref embedded in the URL, as in the packed parse.
+    pin = _source_pin({"sha": source.get("sha"), "ref": source.get("ref") or dep.reference or ""})
     if pin:
         return f"{dep.repo_url}#{pin}"
     return dep.repo_url
@@ -1121,7 +1125,7 @@ def resolve_marketplace_plugin(
     # at the enterprise host instead of falling back to ``github.com``. Backfill the
     # host so the canonical self-routes, scoped to sources where the host is
     # unambiguously the registered marketplace host: in-marketplace sources
-    # (#1285) and bare locators whose shorthand host is the marketplace (#3945).
+    # (#1285) and bare locators when GITHUB_HOST is the marketplace host (#3945).
     if (
         dep_ref is None
         and (_is_in_marketplace_source(plugin, source) or names_marketplace_host)
@@ -1134,6 +1138,15 @@ def resolve_marketplace_plugin(
             plugin_name,
             marketplace_name,
         )
+        if not _is_in_marketplace_source(plugin, source):
+            logger.debug(
+                "%s@%s: bare cross-repo locator resolved to '%s' because GITHUB_HOST is"
+                " the marketplace host (#3945); host-qualify it as github.com/... for"
+                " public GitHub",
+                plugin_name,
+                marketplace_name,
+                source.host,
+            )
 
     # ---- Cross-repo misconfig sentinel (#1305) ----
     # PR #1292's host backfill only covers in-marketplace sources. A cross-repo
