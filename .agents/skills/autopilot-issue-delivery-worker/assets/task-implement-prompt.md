@@ -49,8 +49,10 @@ The lens defines the coverage discipline -- follow it exactly.
 4. Fold any docs the task itself requires (Starlight pages under docs/,
    and apm-usage resource files when CLI/flags/formats/auth/policy/
    primitive formats change). Whole-issue docs may be their own task.
-   For a user-visible change, add ONE line under `## [Unreleased]` in
-   `CHANGELOG.md` per `.github/instructions/changelog.instructions.md`:
+   Edit `CHANGELOG.md` ONLY if it is in your `files_hint` (the plan
+   assigns this shared file to exactly one task). That task adds ONE
+   line under `## [Unreleased]` per
+   `.github/instructions/changelog.instructions.md`:
    effect first, 25 words or fewer, ending with `(#PR)`; breaking
    changes go under `### Breaking changes and upgrade notes` with a
    one-line migration. If a line for this change already exists,

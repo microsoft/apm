@@ -164,7 +164,7 @@ and Fixed lines such as:
 ```
 - `apm uninstall` keeps a surviving package's `skills:` selection instead of redeploying all its skills. (#3784)
 - Repository names ending in `g`, `i`, `t` or `.`, such as `git/git`, install again. -- by @goranai (#3767)
-- Azure DevOps installs, ... use one chain: `ADO_APM_PAT`, `az`, then your Git credential helper; `az` errors show the real reason. Not yet verified against a live Azure DevOps organization. (closes #3752, #3753, #3758, #3790)
+- Azure DevOps installs fall back to `ADO_APM_PAT`, `az`, then your Git credential helper; not yet verified against a live organization. (closes #3752, #3753, #3758, #3790)
 ```
 
-The last line keeps its caveat and groups four refs into one line.
+The last line condenses the 0.36.1 Azure DevOps entry to one sentence, keeping its caveat and all four refs.
