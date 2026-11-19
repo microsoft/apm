@@ -21,7 +21,11 @@ from typing import Any
 
 import pytest
 
-from apm_cli.claude_plugins.admission import fingerprint_native_claude_source
+from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+from apm_cli.claude_plugins.admission import (
+    ClaudeNativePluginError,
+    fingerprint_native_claude_source,
+)
 from apm_cli.claude_plugins.registrar import (
     marketplace_binding,
     marketplace_name,
@@ -156,7 +160,10 @@ def test_lock_drives_deployment_of_exactly_the_plugin_root(
     assert paths == [str(home.plugins)]
     assert str(home.modules) not in json.dumps(declared)
     (deployed / "commands/status.md").write_text("drifted")
-    with pytest.raises(Exception, match=r"alpha.*expected sha256:[0-9a-f]{64}, observed sha256:"):
+    with pytest.raises(
+        AgentPluginDeploymentBoundaryError,
+        match=r"alpha.*expected sha256:[0-9a-f]{64}, observed sha256:",
+    ):
         verify_claude_native_cache(
             modules_dir=home.modules,
             locked=home.lock.dependencies["owner/alpha"],
@@ -297,7 +304,7 @@ def test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding
     home.settings.parent.mkdir(parents=True)
     foreign = {"extraKnownMarketplaces": {name: {"source": {"source": "directory", "path": "/x"}}}}
     home.settings.write_text(json.dumps(foreign))
-    with pytest.raises(Exception, match="another source"):
+    with pytest.raises(ClaudeNativePluginError, match="another source"):
         home.reconcile(None)
     assert json.loads(home.settings.read_text()) == foreign
 

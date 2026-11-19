@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 from apm_cli.claude_plugins.admission import (
     ClaudeNativePluginError,
     fingerprint_native_claude_source,
@@ -241,7 +242,7 @@ def test_audit_verifies_source_and_deployed_copy_against_the_lock(home) -> None:
         script = home.plugins / "alpha/commands/status.md"
         if os.name != "nt":
             script.chmod(0o755)
-            with pytest.raises(Exception, match="deployed copy differs"):
+            with pytest.raises(AgentPluginDeploymentBoundaryError, match="deployed copy differs"):
                 verify_claude_native_cache(
                     modules_dir=home.modules, locked=locked, source_root=source
                 )
