@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
+- On GitLab, GHES or Gitea, write `dependencies.require` entries with their host; `required-packages` and `required-packages-deployed` now agree and never skip an entry. (closes #3993, #4008)
 - **BREAKING:** Copilot project MCP servers move from `.github/mcp.json` and `.vscode/mcp.json` to root `.mcp.json`; run `apm install`, review static `env:` values, and commit the result. (#3875)
 - `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude; users of VS Code's deprecated Local mode should switch to the Copilot harness. (#3875)
 - Replace the deprecated `vscode` target with `copilot`; lockfiles that recorded `vscode` still install. (#3875)
