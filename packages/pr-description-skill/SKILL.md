@@ -199,7 +199,7 @@ in these inputs.
 | List of files changed | `git diff --name-status <base>...HEAD` | yes |
 | Actual diff | `git diff <base>...HEAD` | yes |
 | Commit messages on the branch | `git log --no-merges <base>..HEAD --oneline` | yes |
-| CHANGELOG entry, if any | inspect `CHANGELOG.md` Unreleased section | yes |
+| CHANGELOG entry, if any | inspect `CHANGELOG.md` Unreleased section; it must be one line per `.github/instructions/changelog.instructions.md` with no second line for the same change -- fix it before writing the body | yes |
 | Linked issue / motivation | user-provided or referenced in commits, plus whether this PR fully delivers the issue | yes |
 | Validation evidence | output of `apm audit --ci`, `uv run pytest`, or equivalent | yes |
 | Scenario-test mapping | author-supplied or derived from diff: per user-promise scenario the PR touches, the test path proving it, plus the APM principle the scenario serves (taxonomy in `assets/scenario-evidence-rubric.md`) | conditional (required for any behavior-change PR; may be skipped for docs-only / asset-bump / pure-refactor per the rubric's skip clause, with the skip case stated in trade-offs) |

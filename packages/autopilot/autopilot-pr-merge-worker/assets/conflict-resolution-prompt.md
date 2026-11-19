@@ -71,6 +71,9 @@ regression-trap test, `--force-with-lease` only (never bare
    - For CHANGELOG.md specifically, the canonical pattern is:
      keep BOTH entries; place yours in the section your PR targets
      (Unreleased / next semver bucket); never drop main's entry.
+     If both sides now describe the same change, merge them into
+     one line per
+     `.github/instructions/changelog.instructions.md`.
    - For code conflicts, prefer extracting both behaviors over
      dropping either. If both branches add a method with the same
      name and incompatible signatures, that is a SEMANTIC conflict
