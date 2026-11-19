@@ -48,13 +48,22 @@ _POLICY_HASH_MISMATCH_WARNING = (
 )
 
 
-def _find_manifest() -> Path:
-    """Return the project's ``apm.yml`` path or exit."""
+def _find_manifest(user_scope: bool = False) -> Path:
+    """Return the project's ``apm.yml`` path or exit.
+
+    ``--user`` writes only the user store, so outside a project it reads the
+    user-scope manifest (``APM_HOME/apm.yml``, which may not exist) and the
+    packages ``apm install -g`` installed next to it (#3957).
+    """
     manifest = Path.cwd() / "apm.yml"
-    if not manifest.is_file():
-        _rich_error("No apm.yml found in the current directory.")
-        sys.exit(1)
-    return manifest
+    if manifest.is_file():
+        return manifest
+    if user_scope:
+        from ..core.scope import InstallScope, get_manifest_path
+
+        return get_manifest_path(InstallScope.USER)
+    _rich_error("No apm.yml found in the current directory.")
+    sys.exit(1)
 
 
 def _load_store(
@@ -170,7 +179,7 @@ def approve_cmd(
     """
     logger = CommandLogger("approve")
     try:
-        manifest = _find_manifest()
+        manifest = _find_manifest(user_scope)
 
         if list_decisions:
             _list_decisions(manifest, logger=logger)
@@ -218,7 +227,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
 
         apm deny owner/repo
     """
-    manifest = _find_manifest()
+    manifest = _find_manifest(user_scope)
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
@@ -265,7 +274,7 @@ def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
     from ..models.manifest_io import load_manifest
     from ..security.executables import build_exec_trust_context
 
-    data = load_manifest(manifest)
+    data = load_manifest(manifest) if manifest.is_file() else None
     project_data = data if isinstance(data, dict) else {}
     policy = _load_org_policy(manifest.parent, logger=logger)
     return build_exec_trust_context(policy=policy, project_data=project_data)
@@ -483,7 +492,7 @@ def _approve_recommended(
     if not selected:
         _rich_info("No installed packages match the org-recommended set.", symbol="info")
         return
-    _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger)
+    _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger, bulk=True)
 
 
 def _approve_all_pending(
@@ -499,7 +508,7 @@ def _approve_all_pending(
     if not pending:
         _rich_success("All packages with executables are already approved.")
         return
-    _record_and_save(manifest, user_scope, allow, deny, pending, logger=logger)
+    _record_and_save(manifest, user_scope, allow, deny, pending, logger=logger, bulk=True)
 
 
 def _approve_packages(
@@ -715,23 +724,40 @@ def _record_and_save(
     declarations: list[ExecutableDeclaration],
     *,
     logger: CommandLogger,
+    bulk: bool = False,
 ) -> None:
     """Record pinned approvals for *declarations* and persist the store once.
 
-    Exits 1 when any requested package could not be pinned or the user
-    declined, so scripts never commit an approval that was not written.
+    Naming a package clears its deny in the same store, mirroring how
+    ``apm deny`` drops the matching allow; ``--all`` and ``--recommended``
+    (*bulk*) skip denied packages instead of lifting them. Exits 1 when any
+    requested package could not be pinned, the user declined, or another
+    layer still denies it, so an approval never reports success without
+    effect (#3957).
     """
     from ..security.trust import PINNED_GRANTS_MIN_APM, has_any_pins
 
     had_pins = has_any_pins(allow)
     successes: list[str] = []
     recorded: list[ExecutableDeclaration] = []
+    cleared: list[str] = []
     refused = 0
     for decl in declarations:
+        denied = _same_store_denies(deny, decl)
+        if denied and bulk:
+            _rich_info(
+                f"Skipped {_identity(decl)}: denied in {_store_label(user_scope)}. "
+                f"Lift the deny: apm approve {_user_flag(user_scope)}{_identity(decl)}",
+                symbol="info",
+            )
+            continue
         line = _record_declaration(allow, decl)
         if line is None:
             refused += 1
         else:
+            for key in denied:
+                deny.pop(key, None)
+            cleared.extend(denied)
             successes.append(line)
             recorded.append(decl)
     if successes and not user_scope:
@@ -741,8 +767,24 @@ def _record_and_save(
             sys.exit(1)
     if successes:
         _save_store(manifest, user_scope, allow, deny)
+        for key in cleared:
+            _rich_info(f"Cleared deny for {key} in {_store_label(user_scope)}.", symbol="info")
+        still_denied = _still_denied(manifest, recorded, logger=logger)
+        for decl, layer in still_denied:
+            _rich_error(
+                f"{_identity(decl)} is still denied ({layer}); the approval has no effect "
+                f"until that deny is lifted: {_lift_deny_hint(layer, _identity(decl))}"
+            )
+        still_ids = {id(decl) for decl, _layer in still_denied}
+        successes = [
+            line
+            for decl, line in zip(recorded, successes, strict=True)
+            if id(decl) not in still_ids
+        ]
+        refused += len(still_denied)
         for line in successes:
             _rich_success(line, symbol="check")
+    if successes:
         share = "" if user_scope else "; commit apm.yml to share"
         _rich_info(
             f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
@@ -756,6 +798,47 @@ def _record_and_save(
             )
     if refused:
         sys.exit(1)
+
+
+def _user_flag(user_scope: bool) -> str:
+    return "--user " if user_scope else ""
+
+
+def _same_store_denies(deny: dict, decl: ExecutableDeclaration) -> list[str]:
+    """Deny keys in the store being written that name *decl*'s package."""
+    from ..security.executables import _strip_version
+
+    keys = {decl.package_key, _identity(decl)}
+    return [key for key in deny if key in keys or _strip_version(key) in keys]
+
+
+def _still_denied(
+    manifest: Path, declarations: list[ExecutableDeclaration], *, logger: CommandLogger
+) -> list[tuple[ExecutableDeclaration, str]]:
+    """Recorded packages a deny in another layer still blocks, with its layer."""
+    from dataclasses import replace
+
+    from ..security.executables import TRUST_DENIED
+
+    if not declarations:
+        return []
+    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    blocked = []
+    for decl in declarations:
+        layers = [v.layer for v in _verdicts(ctx, decl).values() if v.state == TRUST_DENIED]
+        if layers:
+            blocked.append((decl, layers[0]))
+    return blocked
+
+
+def _lift_deny_hint(layer: str, identity: str) -> str:
+    from ..security.executables import LAYER_PROJECT_DENY, LAYER_USER_DENY
+
+    if layer == LAYER_USER_DENY:
+        return f"apm approve --user {identity}"
+    if layer == LAYER_PROJECT_DENY:
+        return f"apm approve {identity}"
+    return "the org policy denies it; ask its owner to change apm-policy.yml"
 
 
 def _item_states(ctx, decl: ExecutableDeclaration, pins: list) -> dict[tuple[str, str], str]:

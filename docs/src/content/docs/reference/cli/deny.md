@@ -16,8 +16,9 @@ apm deny [OPTIONS] PACKAGES...
 `apm deny` blocks executable primitives from one or more dependency packages.
 By default, it writes the decision to the project's committed
 `apm.yml` under `executables.deny`. Pass `--user` to write a machine-local
-decision to `$APM_HOME/config.json` (default `~/.apm/config.json`) instead. Run the command from an APM project:
-an `apm.yml` file is required for both scopes.
+decision to `$APM_HOME/config.json` (default `~/.apm/config.json`) instead. Without `--user`, run
+the command from an APM project. `--user` also works outside a project and
+reads the packages `apm install -g` installed.
 
 A deny takes precedence over an allow. For the full precedence model and the
 executable types covered by the gate, see
@@ -34,7 +35,8 @@ For an installed package that declares executable types, APM records those
 types. When no executable declaration is found -- because the package is not
 installed or declares no executables -- APM blocks all supported executable
 types for that reference. Writing a deny also removes a matching allow from the
-selected store.
+selected store. To lift a deny, run `apm approve <pkg>` against the same store
+(add `--user` for a `--user` deny).
 
 The next `apm install` stops deploying the denied package's hooks and removes
 the hook entries and scripts it deployed earlier from every harness config.
