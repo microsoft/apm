@@ -554,7 +554,8 @@ def locked_dependency_approval(dependency: Any, version: str | None = None) -> L
     A replaced row is keyed by its selected source, exactly as the install
     gate keys the resolved reference, so an upstream grant never unlocks the
     replacement and ``apm approve`` writes the key the gate checks. *version*
-    overrides the locked version for a row that was not replaced.
+    overrides the locked version for a row that was not replaced; ``apm
+    approve`` passes the package's ``apm.yml`` version there, as it always has.
     """
     if getattr(dependency, "replacement", None) is not None:
         return LockedApproval(
