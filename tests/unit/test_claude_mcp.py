@@ -636,18 +636,21 @@ class TestClaudeLegacyEntries(unittest.TestCase):
             "args": [
                 f"{root}/p/server.js?token=literal-sentinel",
                 f"{root}/m\u00fcnchen/server.js",
+                f"--url=https://u:prefix-sentinel@h/{root}/p/c.json",
             ],
         }
-        native = dict(expected, args=["/x/server.js", "/y/server.js"])
+        native = dict(expected, args=["/x/server.js", "/y/server.js", "--url=/z"])
         self.adapter.update_config({"synthdb": native})
         guidance = self.adapter.native_conflict_guidance("synthdb", expected)
 
         self.assertIn(
             "(args[0]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
-            "args[1]: a package path under ${CLAUDE_PROJECT_DIR:-.})",
+            "args[1]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
+            "args[2]: a package path under ${CLAUDE_PROJECT_DIR:-.})",
             guidance,
         )
         self.assertNotIn("literal-sentinel", guidance)
+        self.assertNotIn("prefix-sentinel", guidance)
         self.assertNotIn("rotate", guidance)
         self.assertTrue(guidance.isascii())
 
