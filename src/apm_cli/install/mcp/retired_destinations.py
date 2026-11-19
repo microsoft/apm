@@ -213,6 +213,48 @@ def heal_retired_project_mcp_destinations(
     return heal
 
 
+def preview_retired_mcp_moves(lockfile: Any, project_root: Path) -> dict[str, list[str]]:
+    """Retired file -> servers the next project install moves to ``.mcp.json``.
+
+    Read-only preview for ``install --dry-run`` (#3967). It reads the claims
+    through :func:`split_mcp_claims` and applies the heal's own proof, so it
+    names exactly what :func:`heal_retired_project_mcp_destinations` would remove.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    target_servers = {
+        runtime: set(names) for runtime, names in lockfile.mcp_target_servers.items()
+    }
+    claims = split_mcp_claims(
+        target_servers,
+        DeploymentLedgerCodec.mcp_native_hashes(lockfile),
+        apm_version=lockfile.apm_version,
+        project_root=project_root,
+        user_scope=False,
+        stored_configs=lockfile.mcp_configs,
+    )
+    preview: dict[str, list[str]] = {}
+    for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
+        names = claims.names.get(destination.runtime)
+        found = _read_retired(destination, project_root) if names else None
+        if found is None:
+            continue
+        servers = found[3]
+        client = destination.adapter(project_root)
+        hashes = claims.hashes.get(destination.runtime, {})
+        moving = []
+        for name in sorted(names):
+            stored = lockfile.mcp_configs.get(name)
+            key = _retired_key(name, stored, servers)
+            if key is not None and _written_by_apm(
+                client, name, servers[key], stored_config=stored, native_hash=hashes.get(name)
+            ):
+                moving.append(name)
+        if moving:
+            preview[destination.relative_path] = moving
+    return preview
+
+
 def _read_retired(
     destination: RetiredMcpDestination, project_root: Path
 ) -> tuple[Path, str, dict, dict] | None:

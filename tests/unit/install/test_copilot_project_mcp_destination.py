@@ -183,6 +183,26 @@ def test_heal_removes_only_proven_apm_entries_and_keeps_the_file(tmp_path: Path)
     assert set(remaining["mcpServers"]) == {"edited", "user"}
 
 
+def test_dry_run_preview_names_exactly_what_the_heal_moves(tmp_path: Path) -> None:
+    """``install --dry-run`` previews the .mcp.json move without writing (#3967)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves
+
+    edited = {**_LEGACY_COPILOT, "args": ["--mine"]}
+    retired = tmp_path / ".github/mcp.json"
+    _write(retired, {"mcpServers": {"echo": _LEGACY_COPILOT, "edited": edited}})
+    before = retired.read_bytes()
+    lock = LockFile()
+    lock.apm_version = "0.36.1"
+    lock.mcp_target_servers = {"copilot": ["echo", "edited"]}
+    lock.mcp_configs = {"echo": _ECHO, "edited": {**_ECHO, "name": "edited"}}
+
+    assert preview_retired_mcp_moves(lock, tmp_path) == {".github/mcp.json": ["echo"]}
+    assert retired.read_bytes() == before
+    lock.apm_version = "0.37.0"
+    assert preview_retired_mcp_moves(lock, tmp_path) == {}
+
+
 def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
     """.github/mcp.json is a copilot detection signal, so the heal never deletes it."""
     _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT}})

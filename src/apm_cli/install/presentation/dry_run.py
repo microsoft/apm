@@ -25,6 +25,7 @@ def render_and_exit(
     update: bool,
     apm_dir: Path,
     local_cleanup_pending: Callable[[LockFile], bool] | None = None,
+    project_root: Path | None = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -115,6 +116,14 @@ def render_and_exit(
                 logger.progress(f"  - {_orphan}")
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
+
+    if _dryrun_lock and plan.should_install_mcp and project_root is not None:
+        from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves
+
+        for retired, names in preview_retired_mcp_moves(_dryrun_lock, project_root).items():
+            logger.progress(f"MCP servers that would move from {retired} to .mcp.json:")
+            for name in names:
+                logger.progress(f"  - {name}")
 
     cleanup_pending = False
     if not selected_apm_dependencies and local_cleanup_pending and _dryrun_lock:

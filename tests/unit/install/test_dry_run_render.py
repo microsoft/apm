@@ -389,6 +389,33 @@ class TestOrphanPreview:
         details = [call.args[0] for call in logger.verbose_detail.call_args_list]
         assert details == ["unknown parent metadata"]
 
+    def test_retired_mcp_moves_are_previewed_for_project_scope(self, tmp_path: Path) -> None:
+        """A 0.36 project sees which servers move to .mcp.json (#3967)."""
+        logger = _make_logger()
+        plan = ProspectiveInstallPlan(
+            apm_dependencies=(),
+            dev_apm_dependencies=(),
+            selected_apm_dependencies=(),
+            mcp_dependencies=(),
+            should_install_apm=False,
+            should_install_mcp=True,
+            only_packages=None,
+        )
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
+            patch(
+                "apm_cli.install.mcp.retired_destinations.preview_retired_mcp_moves",
+                return_value={".github/mcp.json": ["echo"]},
+            ) as preview,
+        ):
+            render_and_exit(
+                logger=logger, plan=plan, update=False, apm_dir=tmp_path, project_root=tmp_path
+            )
+        preview.assert_called_once()
+        lines = [call.args[0] for call in logger.progress.call_args_list]
+        assert "MCP servers that would move from .github/mcp.json to .mcp.json:" in lines
+        assert "  - echo" in lines
+
     def test_orphan_preview_header_shown(self, tmp_path: Path) -> None:
         """Orphan preview header is printed when orphans are found (lines 64-81)."""
         logger = _make_logger()
