@@ -329,9 +329,10 @@ GitHub Copilot for JetBrains IDEs.
 - **Scope.** MCP configuration is user scope only. File primitives use the
   project or user scope selected for the Copilot profile. IntelliJ does not
   participate in plain `all` expansion.
-- **Selection.** `--target intellij` works per command, but `apm.yml`
-  `targets:` refuses it and `apm init`/`apm install` never record it; record
-  `copilot` for JetBrains projects.
+- **Selection.** `--target intellij` writes JetBrains MCP config once
+  `apm.yml` exists. `targets:` rejects it, and a command that would create
+  `apm.yml` (`apm init --target intellij`, or a first `apm install --target
+  intellij`) refuses before writing. Record `copilot` for JetBrains projects.
 
 ## agent-skills
 
