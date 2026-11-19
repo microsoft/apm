@@ -271,6 +271,9 @@ def preflight_agent_plugin_dry_run(
         targets = getattr(ctx, "targets", None)
     with native_registration_scope(targets):
         for dependency in dependencies:
+            if dependency.is_marketplace:
+                # Not resolved by the offline preview: nothing materialized to inspect.
+                continue
             if dependency.is_local and dependency.local_path:
                 package_path = Path(dependency.local_path).expanduser()
                 if not package_path.is_absolute():
