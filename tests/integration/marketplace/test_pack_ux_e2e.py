@@ -345,7 +345,7 @@ class TestVendorNeutralCatalog:
         with patch("apm_cli.commands.pack.BuildOrchestrator") as MockOrch:
             MockOrch.return_value.run.return_value = mock_result
             runner = CliRunner()
-            result = runner.invoke(pack_cmd, [], catch_exceptions=False)
+            result = runner.invoke(pack_cmd, [], catch_exceptions=False, env={"COLUMNS": "240"})
 
         out = result.output
         assert "[claude]" in out
@@ -353,9 +353,8 @@ class TestVendorNeutralCatalog:
         assert ".claude-plugin/marketplace.json" in out
         assert ".agents/plugins/marketplace.json" in out
         # Single docs pointer with the expected hostname + anchor path.
-        # Rich may line-wrap the URL in the CLI output; assert on canonical
-        # host + path (fragment is verified in the unit-level catalog test
-        # where Rich does not wrap).
+        # A wide COLUMNS keeps Rich from wrapping the URL; the fragment is
+        # verified in the unit-level catalog test.
         from urllib.parse import urlparse
 
         urls = [tok.strip("(),.;'\"") for tok in out.split() if "://" in tok.strip("(),.;'\"")]

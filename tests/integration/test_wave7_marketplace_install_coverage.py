@@ -1005,7 +1005,9 @@ class TestInstallAutoBootstrap:
                 ),
             ):
                 result = runner.invoke(
-                    cli, ["install", "--dry-run", "owner/new-pkg", "--target", "copilot"]
+                    cli,
+                    ["install", "--dry-run", "owner/new-pkg", "--target", "copilot"],
+                    env={"COLUMNS": "240"},
                 )
 
             assert result.exit_code == 0, result.output
