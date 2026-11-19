@@ -732,6 +732,26 @@ fail the PR for the same policy violation.
 `APM_POLICY` is reserved for a future override env var and is **not**
 equivalent to `APM_POLICY_DISABLE`.
 
+### Explicit policy source (`--policy`)
+
+`apm install --policy SOURCE` and `apm update --policy SOURCE` enforce a
+policy discovery cannot reach: plain git remotes, other hosts, air-gapped
+installs. SOURCE is a local path, `owner/repo`, or `https://` URL (same forms
+as `apm audit --policy`).
+
+- Tighten-only: it combines with any discovered org policy through the
+  inheritance merge and can never loosen it (no re-allowing a denied
+  dependency, no lowering `enforcement`).
+- A local path needs no network.
+- A source that cannot be loaded follows `policy.fetch_failure_default` in
+  `apm.yml`: `warn` reports it and continues, `block` fails closed.
+- Effective sources always print: `[i] Policy: org:contoso/.github + file:/repo/p.yml -- enforcement=block`.
+- `policy.hash` pins the discovered org policy only. Not valid with
+  `--global` or `--no-policy`.
+
+`apm audit --ci --policy SOURCE` differs: it audits against that one source
+instead of discovery and fails closed when it cannot be loaded.
+
 ### 9. Cache and offline behaviour
 
 Resolved effective policy is cached under the platform user cache at
