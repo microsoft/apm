@@ -138,10 +138,10 @@ def display_package_info(
             locked_ref, locked_commit, locked_source = _lookup_lockfile_ref(package, project_root)
 
         try:
-            from rich.console import Console
+            from apm_cli.utils.console import new_console
             from rich.panel import Panel
 
-            console = Console()
+            console = new_console()
 
             content_lines = []
             content_lines.append(f"[bold]Name:[/bold] {package_info['name']}")
@@ -297,10 +297,10 @@ def _display_marketplace_plugin(
         source_display = plugin.source
 
     try:
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
         from rich.panel import Panel
 
-        console = Console()
+        console = new_console()
         lines = []
         lines.append(f"[bold]Name:[/bold]        {plugin.name}")
         if plugin.version:
@@ -440,10 +440,10 @@ def _display_registry_versions(
         return
 
     try:
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
         from rich.table import Table
 
-        console = Console()
+        console = new_console()
         table = Table(
             title=f"Available versions: {package}",
             show_header=True,
@@ -627,10 +627,10 @@ def display_versions(
 
     # -- render with Rich table (fallback to plain text) ---------------
     try:
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
         from rich.table import Table
 
-        console = Console()
+        console = new_console()
         table = Table(
             title=f"Available versions: {package}",
             show_header=True,

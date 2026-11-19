@@ -158,7 +158,8 @@ def _option_targets_or_exit(target_flag, logger):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
 @_refuse_ide_target_first("init")
-@serialized_lifecycle_unless("discover_flag")
+# --apply implies --discover; discovery takes its own lock only when it writes.
+@serialized_lifecycle_unless("discover_flag", "write")
 def init(
     ctx: click.Context,
     project_name: str | None,
@@ -190,6 +191,8 @@ def init(
     --marketplace flags on 'apm init' are kept for backward
     compatibility and will be removed in v0.16.
     """
+    if write:
+        discover_flag = True
     if discover_flag:
         metadata_flags = (name, description, version, author)
         if (
@@ -208,7 +211,7 @@ def init(
         )
         return
     if write or global_ or output_format != "text":
-        raise click.UsageError("--apply, --write, --global and --format require --discover.")
+        raise click.UsageError("--global and --format require --discover.")
     _init_scaffold(
         ctx,
         project_name,
@@ -489,12 +492,12 @@ def _perform_init(
             console = _get_console()
             if console:
                 files_data = [
-                    ("*", APM_YML_FILENAME, "Project configuration"),
+                    (APM_YML_FILENAME, "Project configuration"),
                 ]
                 if plugin:
-                    files_data.append(("*", "plugin.json", "Plugin metadata"))
+                    files_data.append(("plugin.json", "Plugin metadata"))
                     if effective_plugin_mode == "agent":
-                        files_data.append(("*", "mcp.json", "MCP server configuration"))
+                        files_data.append(("mcp.json", "MCP server configuration"))
                 table = _create_files_table(files_data, title="Created Files")
                 console.print(table)
         except (ImportError, NameError):
@@ -523,7 +526,6 @@ def _perform_init(
         elif source == "init":
             next_steps = [
                 "Install a package:               apm install <owner>/<repo>",
-                "Run a script:                    apm run <script>",
                 "Build a plugin? Scaffold one:    apm plugin init",
                 "Publishing a marketplace?:       apm marketplace init",
             ]
@@ -685,10 +687,10 @@ def _interactive_project_setup(
     auto_version = version if version is not None else "1.0.0"
 
     try:
-        from rich.console import Console  # type: ignore
+        from apm_cli.utils.console import new_console
         from rich.prompt import Prompt  # type: ignore
 
-        console = _get_console() or Console()
+        console = _get_console() or new_console()
         console.print("\n[info]Setting up your APM project...[/info]")
         console.print("[muted]Press ^C at any time to quit.[/muted]\n")
 
@@ -733,11 +735,11 @@ def _confirm_setup_summary(config: dict, logger) -> None:
     targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
 
     try:
-        from rich.console import Console  # type: ignore
+        from apm_cli.utils.console import new_console
         from rich.panel import Panel  # type: ignore
         from rich.prompt import Confirm  # type: ignore
 
-        console = _get_console() or Console()
+        console = _get_console() or new_console()
         summary_content = (
             f"name: {config['name']}\n"
             f"version: {config['version']}\n"

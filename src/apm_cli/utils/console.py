@@ -61,6 +61,42 @@ STATUS_SYMBOLS = {
 }
 
 
+# ASCII-only Rich consoles ------------------------------------------------------
+_ascii_console_classes: dict[type, type] = {}
+
+
+def _ascii_console(base: Any, **kwargs: Any) -> Any:
+    """Build *base* so boxes, rules, and trees render in printable ASCII.
+
+    Rich picks ASCII box characters when the console encoding is not UTF.
+    Reporting ``ascii`` keeps tables and panels within the encoding rule on
+    every terminal. A non-class *base* (a test double) is called as is.
+    """
+    if not isinstance(base, type):
+        return base(**kwargs)
+    cls = _ascii_console_classes.get(base)
+    if cls is None:
+
+        class _AsciiConsole(base):  # type: ignore[misc, valid-type]
+            @property
+            def encoding(self) -> str:
+                return "ascii"
+
+        cls = _ascii_console_classes.setdefault(base, _AsciiConsole)
+    return cls(**kwargs)
+
+
+def new_console(**kwargs: Any) -> Any:
+    """Return a new Rich console that renders boxes and rules in ASCII.
+
+    The one constructor for Rich consoles in APM; ``kwargs`` pass through to
+    ``rich.console.Console``.
+    """
+    from rich import console as rich_console
+
+    return _ascii_console(rich_console.Console, **kwargs)
+
+
 # Thread-safe console singleton ------------------------------------------------
 _console_instance: Any | None = None
 _console_lock = threading.Lock()
@@ -82,7 +118,7 @@ def _get_stderr_console() -> Any | None:
     with _console_lock:
         if _stderr_console_instance is None:
             try:  # noqa: SIM105
-                _stderr_console_instance = Console(stderr=True)
+                _stderr_console_instance = _ascii_console(Console, stderr=True)
             except Exception:
                 pass
     return _stderr_console_instance
@@ -99,7 +135,7 @@ def _get_console() -> Any | None:
         if _console_instance is not None:
             return _console_instance
         try:  # noqa: SIM105
-            _console_instance = Console(stderr=_console_stderr)
+            _console_instance = _ascii_console(Console, stderr=_console_stderr)
         except Exception:
             pass
     return _console_instance

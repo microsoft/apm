@@ -230,6 +230,9 @@ class TestFinalizeUnpinnedWarning:
         messages = [d.message for d in diag._diagnostics]
         # Falls back to count-only message (no names list)
         assert any("1 dependency unpinned" in m for m in messages)
+        # The lockfile already pins the commit; the hint suggests #tag (#3994).
+        assert any("apm.lock.yaml pins the resolved commit" in m for m in messages)
+        assert not any("prevent drift" in m for m in messages)
 
     def test_pinned_packages_not_included_in_unpinned_names(self) -> None:
         diag = DiagnosticCollector()

@@ -715,7 +715,7 @@ def _check_deps_with_progress(
     total = len(checkable)
 
     try:
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
         from rich.progress import (
             BarColumn,
             Progress,
@@ -733,7 +733,7 @@ def _check_deps_with_progress(
             BarColumn(),
             TaskProgressColumn(),
             transient=True,
-            console=Console(),
+            console=new_console(),
         ) as progress:
             if parallel_checks > 0 and total > 1:
                 rows = _check_parallel(

@@ -36,6 +36,19 @@ def local_edit_hint(count: int, *, installing: bool = False) -> str:
     )
 
 
+def restore_locked_content_hint(subject: str) -> str:
+    """Return the hint naming the commands that restore edited managed files.
+
+    A plain ``apm install`` can keep a local edit to a managed file, so it is
+    not a restore command on its own.
+    """
+    return (
+        f"To restore the locked content, delete {subject} and rerun 'apm install', "
+        "or run 'apm install --force' (overwrites local edits). To keep the edits, "
+        "run 'apm export-patch' first"
+    )
+
+
 def rendering_change_hint(count: int) -> str:
     """Return the hint for drift whose on-disk bytes still match apm.lock.yaml."""
     return (

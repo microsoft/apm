@@ -730,6 +730,7 @@ def run(ctx: InstallContext) -> None:
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:
+            source.announce()
             deltas = terminal_deltas
         else:
             deltas = run_integration_template(

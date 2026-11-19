@@ -13,6 +13,7 @@ from apm_cli.install.local_edits import (
     count_exportable_findings,
     local_edit_hint,
     rendering_change_hint,
+    restore_locked_content_hint,
     unedited_modified_paths,
 )
 from apm_cli.utils.console import STATUS_SYMBOLS
@@ -146,10 +147,21 @@ def render_drift_text(
             "to restore content-integrity coverage."
         )
     else:
-        lines.append(
-            f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
-            "with the lockfile."
-        )
+        edited = [
+            finding
+            for finding in by_kind.get("modified", [])
+            if finding.path not in unedited
+        ]
+        if edited:
+            lines.append(
+                f"  {STATUS_SYMBOLS['info']} "
+                f"{restore_locked_content_hint('the modified files')}."
+            )
+        if len(edited) < len(findings):
+            lines.append(
+                f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
+                "with the lockfile."
+            )
     return "\n".join(lines).rstrip() + "\n"
 
 

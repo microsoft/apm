@@ -74,8 +74,7 @@ _CLI_EPILOG = (
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
-    "  apm doctor                     Diagnose environment problems\n"
-    "  apm run <script>               Execute a script from apm.yml"
+    "  apm doctor                     Diagnose environment problems"
 )
 
 

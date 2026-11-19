@@ -1398,7 +1398,7 @@ def _audit_content_scan(
     default=None,
     help=(
         f"Policy source. {POLICY_SOURCE_FORMS_HELP} "
-        "Used with --ci for policy checks. [experimental]"
+        "Used with --ci for policy checks."
     ),
 )
 @click.option(

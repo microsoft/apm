@@ -243,20 +243,21 @@ def run(ctx: InstallContext) -> InstallResult:
                 _unique_names.append(_n)
 
         noun = "dependency" if ctx.unpinned_count == 1 else "dependencies"
+        # apm.lock.yaml already pins the resolved commit; the ref in apm.yml
+        # decides what 'apm update' moves to.
+        _hint = (
+            "apm.lock.yaml pins the resolved commit; add #tag in apm.yml to "
+            "track releases on update"
+        )
         if _unique_names:
             _shown = _unique_names[:5]
             _suffix = ", ".join(_shown)
             _extra = len(_unique_names) - len(_shown)
             if _extra > 0:
                 _suffix += f", and {_extra} more"
-            ctx.diagnostics.warn(
-                f"{ctx.unpinned_count} {noun} unpinned: {_suffix} "
-                "-- add #tag or #sha to prevent drift"
-            )
+            ctx.diagnostics.warn(f"{ctx.unpinned_count} {noun} unpinned: {_suffix} -- {_hint}")
         else:
-            ctx.diagnostics.warn(
-                f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
-            )
+            ctx.diagnostics.warn(f"{ctx.unpinned_count} {noun} unpinned -- {_hint}")
 
     # Post-install hints: remind the user to run ``apm compile`` when
     # instructions land in deps but are not written to a per-file rules

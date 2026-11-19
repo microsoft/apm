@@ -1684,7 +1684,8 @@ class TestAllowInsecureFlag:
         assert "use --allow-insecure for http:// packages" in normalized
         assert "--allow-insecure-host HOSTNAME" in result.output
         assert "Git source, ref, host provider, transport, and MCP config state" in normalized
-        assert "Use 'apm audit' for on-disk integrity." in normalized
+        assert "deployed files do not match the hashes it records" in normalized
+        assert "Use 'apm audit' for on-disk integrity." not in normalized
 
     def test_allow_insecure_host_rejects_non_hostname(self):
         """The explicit transitive host option only accepts bare hostnames."""

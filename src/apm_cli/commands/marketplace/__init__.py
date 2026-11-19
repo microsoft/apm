@@ -775,36 +775,19 @@ def browse(name, verbose, offline=False):
             logger.warning(f"Marketplace '{name}' has no plugins")
             return
 
-        console = _get_console()
-        if not console:
-            # Colorama fallback
-            logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
-            for p in manifest.plugins:
-                desc = f" -- {p.description}" if p.description else ""
-                logger.tree_item(f"  {p.name}{desc}")
-            logger.progress(f"Install: apm install <plugin-name>@{name}", symbol="info")
-            return
+        # A list, not a table: install names run long, and a table squeezed
+        # to the terminal width truncates exactly the text users copy.
+        import shutil
+        import textwrap
 
-        from rich.table import Table
-
-        table = Table(
-            title=f"Plugins in '{name}'",
-            show_header=True,
-            header_style="bold cyan",
-            border_style="cyan",
-        )
-        table.add_column("Plugin", style="bold white", no_wrap=True)
-        table.add_column("Description", style="white", ratio=1)
-        table.add_column("Version", style="cyan", justify="center")
-        table.add_column("Install", style="green")
-
+        width = max(40, shutil.get_terminal_size((80, 24)).columns)
+        logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
         for p in manifest.plugins:
-            desc = p.description or "--"
-            ver = p.version or "--"
-            table.add_row(p.name, desc, ver, f"{p.name}@{name}")
-
-        console.print()
-        console.print(table)
+            version = f"  ({p.version})" if p.version else ""
+            click.echo(f"  {p.name}@{name}{version}")
+            if p.description:
+                for line in textwrap.wrap(p.description, width=width - 6):
+                    click.echo(f"      {line}")
         logger.progress(
             f"Install a plugin: apm install <plugin-name>@{name}",
             symbol="info",

@@ -106,6 +106,7 @@ def run_integration_template(
         materialization, terminal_deltas = prepare_integration_materialization(source)
         if terminal_deltas is not None:
             return terminal_deltas
+    source.announce()
     if materialization is None:
         return None
 

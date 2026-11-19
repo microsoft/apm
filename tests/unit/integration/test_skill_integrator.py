@@ -4210,6 +4210,33 @@ class TestPluginBinDeploy:
         assert result.bin_deployed == 0
         assert result.bin_skipped_reason == "project_scope"
 
+    def test_refused_bin_is_silent_for_plugin_without_bin(self, tmp_path: Path) -> None:
+        """A bin/ refusal is reported only when the plugin ships bin/ (#3994)."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+        with_bin = tmp_path / "apm_modules" / "withbin"
+        (with_bin / "bin").mkdir(parents=True)
+        (with_bin / "bin" / "tool").write_text("#!/bin/sh\necho hi\n")
+        without_bin = tmp_path / "apm_modules" / "nobin"
+        without_bin.mkdir(parents=True)
+
+        reasons = {
+            pkg_dir.name: SkillIntegrator()
+            .integrate_package_skill(
+                self._make_plugin_package(pkg_dir),
+                project_root,
+                scope=InstallScope.USER,
+                skip_bin=True,
+            )
+            .bin_skipped_reason
+            for pkg_dir in (with_bin, without_bin)
+        }
+
+        assert reasons == {"withbin": "not_approved", "nobin": None}
+
     def test_force_overwrites_identical_bin(self, tmp_path: Path) -> None:
         """force=True copies bin/ executables even when src and dest hashes match."""
         from apm_cli.core.scope import InstallScope
