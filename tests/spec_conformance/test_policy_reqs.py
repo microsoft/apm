@@ -1124,3 +1124,130 @@ def test_explicit_policy_ref_under_operator_disable_is_disclosed(tmp_path, monke
 
     assert "--policy policy.yml ignored" in result.stderr
     assert json.loads(result.stdout)["policy"]["enforced"] is False
+
+
+_REQ_PL_022_ORG = (
+    "name: org\nversion: '1.0'\nenforcement: block\ndependencies:\n  deny: [contoso/pkg-b]\n"
+)
+_REQ_PL_022_LOOSE = (
+    "name: loose\nversion: '1.0'\nenforcement: 'off'\ndependencies:\n  allow: ['contoso/*']\n"
+)
+
+
+def _req_pl_022_discover(root, explicit_ref, explicit_result=None):
+    """Compose *explicit_ref* with a discovered org policy that denies contoso/pkg-b."""
+    from apm_cli.policy import discovery
+    from apm_cli.policy.explicit_source import compose_explicit_policy, explicit_policy_scope
+    from apm_cli.policy.parser import load_policy
+
+    org_policy, _ = load_policy(_REQ_PL_022_ORG)
+    org = discovery.PolicyFetchResult(
+        policy=org_policy, source="org:contoso/.github", outcome="found"
+    )
+
+    def resolve(source):
+        if explicit_result is not None:
+            return explicit_result
+        return discovery.discover_policy(root, policy_override=source)
+
+    with explicit_policy_scope(explicit_ref):
+        return compose_explicit_policy(org, resolve)
+
+
+@pytest.mark.req("req-pl-022")
+def test_explicit_install_source_composes_tighten_only(tmp_path, monkeypatch):
+    from apm_cli.policy.matcher import check_dependency_allowed
+    from apm_cli.policy.outcome_routing import route_discovery_outcome
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    (tmp_path / "loose.yml").write_text(_REQ_PL_022_LOOSE, encoding="utf-8")
+
+    result = _req_pl_022_discover(tmp_path, "./loose.yml")
+
+    # (a) the explicit child cannot relax the discovered parent.
+    assert result.policy.enforcement == "block"
+    allowed, _ = check_dependency_allowed("contoso/pkg-b", result.policy.dependencies)
+    assert not allowed
+    # (d) every source in effect is reported.
+    assert result.source.startswith("org:contoso/.github + file:")
+
+    class _Logger:
+        resolved = None
+
+        def policy_resolved(self, **kwargs):
+            self.resolved = kwargs
+
+    logger = _Logger()
+    route_discovery_outcome(result, logger=logger, fetch_failure_default="warn")
+    assert logger.resolved["source"] == result.source
+    assert logger.resolved["explicit"] is True
+
+
+@pytest.mark.req("req-pl-022")
+def test_explicit_install_source_alone_when_nothing_discovered(tmp_path, monkeypatch):
+    from apm_cli.policy.discovery import discover_policy_with_chain
+    from apm_cli.policy.explicit_source import explicit_policy_scope
+    from apm_cli.policy.matcher import check_dependency_allowed
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    (tmp_path / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    (tmp_path / "org-policy.yml").write_text(_REQ_PL_022_ORG, encoding="utf-8")
+
+    # (b) no git remote: nothing is discovered, the explicit policy applies alone.
+    with explicit_policy_scope("./org-policy.yml"):
+        result = discover_policy_with_chain(tmp_path)
+
+    assert result.outcome == "found"
+    allowed, _ = check_dependency_allowed("contoso/pkg-b", result.policy.dependencies)
+    assert not allowed
+
+
+@pytest.mark.req("req-pl-022")
+@pytest.mark.parametrize("default", ["warn", "block"])
+def test_unloadable_explicit_install_source_follows_fetch_failure_default(
+    tmp_path, monkeypatch, default
+):
+    from apm_cli.install.errors import PolicyViolationError
+    from apm_cli.policy.discovery import PolicyFetchResult
+    from apm_cli.policy.outcome_routing import route_discovery_outcome
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    unreachable = PolicyFetchResult(
+        source="url:https://policy.invalid/apm-policy.yml",
+        outcome="cache_miss_fetch_fail",
+        error="connection refused",
+    )
+    result = _req_pl_022_discover(tmp_path, "https://policy.invalid/apm-policy.yml", unreachable)
+
+    class _Logger:
+        unavailable = None
+
+        def policy_source_unavailable(self, **kwargs):
+            self.unavailable = kwargs
+
+        def policy_resolved(self, **kwargs):
+            pass
+
+    logger = _Logger()
+    # (c) block terminates naming the source and cause; warn continues with discovery.
+    if default == "block":
+        with pytest.raises(PolicyViolationError, match=r"policy\.invalid"):
+            route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
+    else:
+        policy = route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
+        assert policy is not None and policy.enforcement == "block"
+    assert logger.unavailable["source"] == unreachable.source
+    assert logger.unavailable["error"] == "connection refused"
+
+
+@pytest.mark.req("req-pl-022")
+def test_spec_scopes_replacement_rules_and_names_composition():
+    assert_spec_contains(
+        "that replaces discovery",
+        "follows [req-pl-022](#req-pl-022) instead",
+        "as parent, and the explicit\npolicy, as child",
+        "a `warn` default fails\n> open",
+    )
