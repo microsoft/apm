@@ -1784,6 +1784,7 @@ def _cleanup_stale_mcp(
     user_scope: bool = False,
     scope=None,
     persist: bool = True,
+    logger=None,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
     managed_servers = set(old_mcp_servers or ())
@@ -1831,6 +1832,7 @@ def _cleanup_stale_mcp(
 
     from ...install.mcp.retired_destinations import (
         heal_retired_project_mcp_destinations,
+        report_retired_mcp_heal,
         restore_pending_retired_claims,
         split_mcp_claims,
     )
@@ -1858,11 +1860,16 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
-        heal_retired_project_mcp_destinations(
-            stale_retired,
-            stored_configs=lockfile.mcp_configs,
-            native_hashes=retired.hashes,
-            project_root=deploy_root,
+        # Report the heal like install does (C5d, #3967): removed servers,
+        # kept user-edited ones, and deleted files.
+        report_retired_mcp_heal(
+            heal_retired_project_mcp_destinations(
+                stale_retired,
+                stored_configs=lockfile.mcp_configs,
+                native_hashes=retired.hashes,
+                project_root=deploy_root,
+            ),
+            logger,
         )
         owned_servers = {
             server

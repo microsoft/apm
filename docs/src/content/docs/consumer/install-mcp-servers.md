@@ -387,8 +387,11 @@ was written by APM 0.36 or earlier, APM moves the entries it wrote to
 release rendered for the same self-defined declaration, proves APM wrote it
 unchanged. Entries you authored or edited stay where they are, and APM prints
 a [warning naming them](../../troubleshooting/common-errors/#-kept-mcp-server-name-in-githubmcpjson).
-APM deletes one of those files only if it created it: every server in it was
+APM deletes `.vscode/mcp.json` only if it created it: every server in it was
 APM's and nothing but empty scaffolding (such as `"inputs": []`) remains.
+`.github/mcp.json` is never deleted, only emptied of APM's entries, because
+Copilot CLI still reads it as your own file and it marks the project as a
+`copilot` project. `apm uninstall` reports the same moves as `apm install`.
 
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`

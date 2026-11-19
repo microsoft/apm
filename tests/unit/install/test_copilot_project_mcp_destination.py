@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -523,6 +524,7 @@ def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
         lock, {"copilot": ["echo"]}, native_hashes={"copilot": {"echo": github_hash}}
     )
 
+    logger = MagicMock()
     _cleanup_stale_mcp(
         APMPackage.from_apm_yml(tmp_path / "apm.yml"),
         lock,
@@ -531,11 +533,15 @@ def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
         modules_dir=tmp_path / "apm_modules",
         project_root=tmp_path,
         persist=False,
+        logger=logger,
     )
 
     assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"] == {"echo": user_root}
     assert json.loads((tmp_path / ".github/mcp.json").read_text())["mcpServers"] == {}
     assert not lock.mcp_target_servers
+    # Uninstall reports the heal exactly as install does (C5d).
+    progress = " ".join(str(call.args[0]) for call in logger.progress.call_args_list)
+    assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in progress
 
 
 def test_bundle_retarget_keeps_the_entry_the_new_runtime_owns(tmp_path: Path) -> None:
