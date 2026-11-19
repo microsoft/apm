@@ -768,20 +768,30 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     # #3927: a non-default port names another server, so both identity models
     # hand it to the one key builder and the builder qualifies the host with it.
     lockfile, lockfile_errors = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    executables, executables_errors = _facts_for(
+        provider, "src/apm_cli/security/executables.py", rule_id
+    )
     findings.extend(lockfile_errors)
+    findings.extend(executables_errors)
     key_method = re.compile(r"^    def get_unique_key\(")
     method_boundary = re.compile(r"^    def ")
-    if not lockfile_errors and (
+    deny_body = _awk_body(
+        executables, re.compile(r"^def canonical_exec_identity\("), re.compile(r"^def ")
+    )
+    if not (lockfile_errors or executables_errors) and (
         not _body_has(unique_key_body, "if port:")
         or not _body_has(_awk_body(reference, key_method, method_boundary), "port=self.port,")
         or not _body_has(_awk_body(lockfile, key_method, method_boundary), "port=self.port,")
+        or not _present(identity, "return replace(dependency, port=None).get_unique_key()")
+        or not _body_has(deny_body, "canonical = build_port_blind_dependency_key(reference)")
     ):
         findings.append(
             _summary(
                 rule_id,
                 _IDENTITY_OWNER,
                 "Dependency unique keys must carry the non-default port through "
-                "build_dependency_unique_key",
+                "build_dependency_unique_key; deny identity must drop it via "
+                "build_port_blind_dependency_key",
             )
         )
     embedded_subpath_body = _awk_body(

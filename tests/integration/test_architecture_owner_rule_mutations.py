@@ -201,6 +201,18 @@ def test_deploy_selection_cannot_bypass_owner(path: str, original: str, replacem
             "            host=self.host,\n            source=self.source,\n",
             id="lockfile-drops-port",
         ),
+        pytest.param(
+            "src/apm_cli/security/executables.py",
+            "canonical = build_port_blind_dependency_key(reference)",
+            "canonical = reference.get_unique_key()",
+            id="deny-keeps-port",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/identity.py",
+            "return replace(dependency, port=None).get_unique_key()",
+            "return dependency.get_unique_key()",
+            id="port-blind-key-keeps-port",
+        ),
     ],
 )
 def test_dependency_unique_key_cannot_drop_the_port(

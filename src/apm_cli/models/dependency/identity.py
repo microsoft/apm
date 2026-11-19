@@ -11,8 +11,10 @@ comparison identity. It must never be used as a display or filesystem path.
 """
 
 import re
+from dataclasses import replace
 from enum import Enum
 from functools import lru_cache
+from typing import Any
 
 from ...utils.github_host import default_host, is_github_hostname
 
@@ -275,6 +277,18 @@ def build_dependency_unique_key(
     if normalized_host and normalized_host != "github.com":
         return f"{normalized_host}/{key}"
     return key
+
+
+def build_port_blind_dependency_key(dependency: Any) -> str:
+    """Return *dependency*'s unique key with any port removed.
+
+    Deny matching ignores the port, like :func:`normalize_policy_host`, so a
+    deny cannot be bypassed by naming another port; grants compare the exact
+    ported key. Lockfiles written before ports entered the key (#3927) recorded
+    parents in this form. *dependency* is a dataclass with ``port`` and
+    ``get_unique_key`` (``DependencyReference`` or ``LockedDependency``).
+    """
+    return replace(dependency, port=None).get_unique_key()
 
 
 def build_canonical_dependency_string(
