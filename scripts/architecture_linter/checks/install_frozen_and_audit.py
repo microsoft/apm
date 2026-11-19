@@ -559,6 +559,8 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
 
 _AUDIT_REPLAY_OWNER = "src/apm_cli/install/audit_replay.py"
 _AUDIT_ROOTS_OWNER = "src/apm_cli/install/audit_target_roots.py"
+_LINK_RESOLVER_OWNER = "src/apm_cli/compilation/link_resolver.py"
+_LIVE_LINK_FRAME = "target_location = live_root / target_location.relative_to(replay_root)"
 _LOCKFILE_OWNER = "src/apm_cli/deps/lockfile.py"
 _SELF_ENTRY_CONSTRUCTOR = re.compile(r"""repo_url\s*=\s*["']<self>["']""")
 
@@ -636,24 +638,39 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
         return tuple(failures)
 
     findings.extend(
-        _unique_definitions(provider, rule_id, _AUDIT_ROOTS_OWNER, ("replay_modules_root",))
+        _unique_definitions(provider, rule_id, _AUDIT_ROOTS_OWNER, ("replay_deployment_frame",))
     )
     roots, roots_fail = _facts_for(provider, _AUDIT_ROOTS_OWNER, rule_id)
+    resolver, resolver_fail = _facts_for(provider, _LINK_RESOLVER_OWNER, rule_id)
     findings.extend(roots_fail)
+    findings.extend(resolver_fail)
     replay_calls = _name_calls_in(drift, "run_replay")
-    projection_calls = _name_calls_in(roots, "replay_modules_root")
+    frame_calls = _name_calls_in(roots, "replay_deployment_frame")
     if (
-        "replay_modules_root" not in replay_calls
+        "replay_deployment_frame" not in replay_calls
         or {"get_modules_dir", "get_deploy_root"} & replay_calls
-        # portable_link_relpath keeps an APM_HOME outside HOME projectable (#3901).
-        or not {"get_modules_dir", "get_deploy_root", "portable_link_relpath"} <= projection_calls
-        or not _present(roots, "InstallScope.USER if user_scope else InstallScope.PROJECT")
+        or not {"get_modules_dir", "get_deploy_root"} <= frame_calls
     ):
         findings.append(
             _summary(
                 rule_id,
                 _AUDIT_ROOTS_OWNER,
                 "Audit deployment modules must use the canonical scope projection",
+            )
+        )
+    # Replay renders links in live coordinates and verifies native images it
+    # materialized, wherever APM_HOME sits relative to HOME (#3901).
+    if not (
+        _present(drift, "package_info.deployment_frame = deployment_frame")
+        and _present(drift, "replay_path=install_path,")
+        and _present(resolver, _LIVE_LINK_FRAME)
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/drift.py",
+                "Audit replay must render dependency links in the live deployment frame "
+                "and verify native plugins against the materialized replay image",
             )
         )
 

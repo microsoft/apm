@@ -818,6 +818,32 @@ class TestReplayFrameTranslation:
 
         assert "[the manifesto](../../../apm_modules/_local/package/MANIFESTO.md)" in result
 
+    def test_dependency_replay_renders_links_in_live_deployment_frame(self, tmp_path):
+        """Replay links match install wherever apm_modules sits and scratch lands (#3901)."""
+        source_root = tmp_path / "source_package"
+        source_dir = source_root / ".apm" / "agents"
+        source_dir.mkdir(parents=True)
+        (source_root / "MANIFESTO.md").write_text("# Manifesto", encoding="utf-8")
+        source_file = source_dir / "helper.agent.md"
+        source_file.write_text("placeholder", encoding="utf-8")
+        # Scratch beside APM_HOME: a lexical scratch projection loses one "../".
+        live_home = tmp_path / "x" / "home"
+        live_package = tmp_path / "y" / "apm" / "apm_modules" / "_local" / "package"
+        scratch_root = tmp_path / "y" / "apm_drift_1"
+        content = "See [the manifesto](../../MANIFESTO.md)."
+
+        def render(deploy_root: Path, frame: tuple[Path, Path] | None) -> str:
+            resolver = UnifiedLinkResolver(deploy_root)
+            resolver.package_root = source_root
+            resolver.deployment_package_root = live_package
+            resolver.deployment_frame = frame
+            target_file = deploy_root / ".copilot" / "agents" / "helper.agent.md"
+            return resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        installed = render(live_home, None)
+        assert "(../../../../y/apm/apm_modules/_local/package/MANIFESTO.md)" in installed
+        assert render(scratch_root, (scratch_root, live_home)) == installed
+
     def test_normal_install_self_package_unchanged(self, tmp_path):
         """Sanity: normal install (base_dir == package_root parent) still
         rewrites correctly and the replay-frame branch does not regress it.

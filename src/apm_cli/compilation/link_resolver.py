@@ -49,6 +49,10 @@ class LinkResolutionContext:
     # Source package projected into the deployment output frame. Audit replay
     # points this at scratch while package_root remains the real source tree.
     deployment_package_root: Path | None = None
+    # (replay output root, live deploy root). Audit replay writes under the
+    # first but renders asset links as if the target lived under the second,
+    # matching install wherever apm_modules sits (#3901).
+    deployment_frame: tuple[Path, Path] | None = None
 
 
 class UnifiedLinkResolver:
@@ -80,6 +84,7 @@ class UnifiedLinkResolver:
         # the generalization safely.
         self.package_root: Path | None = None
         self.deployment_package_root: Path | None = None
+        self.deployment_frame: tuple[Path, Path] | None = None
 
     def register_contexts(self, primitives) -> None:
         """Build registry of all available context files.
@@ -143,6 +148,7 @@ class UnifiedLinkResolver:
             enable_asset_rewrite=self.package_root is not None,
             preserved_source_root=preserved_source_root,
             deployment_package_root=self.deployment_package_root,
+            deployment_frame=self.deployment_frame,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -533,10 +539,15 @@ class UnifiedLinkResolver:
             except (OSError, ValueError):
                 return None
 
+        target_location = ctx.target_location
+        if ctx.deployment_frame is not None:
+            replay_root, live_root = ctx.deployment_frame
+            if target_location.is_relative_to(replay_root):
+                target_location = live_root / target_location.relative_to(replay_root)
         try:
             relative_path = portable_link_relpath(
                 candidate_in_deployment,
-                ctx.target_location,
+                target_location,
             )
         except (OSError, ValueError):
             return None

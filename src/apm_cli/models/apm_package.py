@@ -1079,6 +1079,8 @@ class PackageInfo:
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
     root_local_project_root: Path | None = None
     deployment_package_root: Path | None = None  # Source root in the deployment output frame
+    # (replay output root, live deploy root): audit replay renders links live (#3901)
+    deployment_frame: tuple[Path, Path] | None = None
     local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)
     # Verbatim licence copies APM added after materialization (#3556); see
     # apm_cli.deps.carried_license. Empty when nothing was carried.
