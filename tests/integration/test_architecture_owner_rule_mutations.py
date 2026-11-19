@@ -811,6 +811,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Advisory evidence starts claiming implementation authority.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-generator-gate",
+        rule_id="contracts-tooling-lockfile-generator-gate",
+        path="src/apm_cli/commands/pack.py",
+        old='check_current_cli(project_root, command="apm pack")',
+        new="pass",
+        intent="apm pack stops refusing a lockfile written by a newer APM.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-read",
         rule_id="contracts-tooling-lockfile-read",
         path="src/apm_cli/deps/lockfile.py",
