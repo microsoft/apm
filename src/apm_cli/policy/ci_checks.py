@@ -718,6 +718,8 @@ def _check_content_integrity(
         ``scan_deployed_trees``).
       * SHA-256 drift between the on-disk content and the canonical deployment
         ledger hash recorded at install time.
+      * SHA-256 drift of local bundle compile staging (#3718), via
+        ``LockFile.staged_hash_drift``.
       * Missing canonical ownership metadata for a legacy deployed-file hash.
 
     Missing files are deliberately skipped here -- ``_check_deployed_files_present``
@@ -768,10 +770,12 @@ def _check_content_integrity(
     hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(
         project_root, lock, targets
     )
+    staged_drift = lock.staged_hash_drift(project_root)
 
     if (
         not critical_files
         and not hash_mismatches
+        and not staged_drift
         and not missing_ownership
         and not unresolved_hash_paths
         and not scan.incomplete
@@ -807,6 +811,12 @@ def _check_content_integrity(
         details.append(
             f"hash-drift: {rel_path} (dep={dep_label}, expected={exp_short}..., actual={act_short}...)"
         )
+    for rel_path, expected, actual in staged_drift:
+        exp_short = expected.split(":", 1)[-1][:12]
+        act_short = actual.split(":", 1)[-1][:12]
+        details.append(
+            f"hash-drift: {rel_path} (staged, expected={exp_short}..., actual={act_short}...)"
+        )
 
     parts: list[str] = []
     remedies: list[str] = []
@@ -823,6 +833,9 @@ def _check_content_integrity(
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
         remedies.append("'apm install' to restore drifted files")
+    if staged_drift:
+        parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
+        remedies.append("'apm install <bundle> --force' to restage drifted files")
     if missing_ownership:
         parts.append(f"{len(missing_ownership)} file(s) without deployment ownership")
         remedies.append("'apm install' to repair ownership metadata")

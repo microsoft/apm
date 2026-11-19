@@ -92,8 +92,10 @@ Steps APM runs:
 For Codex, Gemini and OpenCode, which have no native instructions folder,
 bundle instructions are staged under `apm_modules/<bundle>/.apm/instructions/`
 for `apm compile` to merge into `AGENTS.md`. Staged files are recorded in
-`local_staged_files`, not as deployed files, so `apm audit --ci` does not
-check them. `apm prune` removes the staging.
+`local_staged_files` with a content hash, not as deployed files. If a staged
+file is edited before `apm compile`, compile warns and `apm audit --ci` reports
+hash drift; `apm install <bundle> --force` restages it. `apm prune` removes the
+staging.
 
 `apm.yml` is never touched. Re-running the same command re-deploys (use
 `--force` to overwrite locally-edited files).

@@ -5,8 +5,8 @@ description: >-
   assess whether the cycle since the last tag warrants a patch or
   minor bump (semver discipline against the merged-since-last-tag
   diff), sanitize the [Unreleased] CHANGELOG block into a dated
-  version block with one concise "so what" entry per merged PR
-  (drop internal-only churn, consolidate duplicates), bump
+  version block with one short line per merged PR (dedupe,
+  condense, Highlights, upgrade notes, drop internal-only churn), bump
   pyproject.toml + uv.lock, run the CI-mirror lint chain, and open
   the release PR. Activate on "ship a release", "cut v0.x",
   "release prep", "bump and PR", "open release PR", "what kind of
@@ -125,20 +125,28 @@ Wait for the operator's confirm before continuing.
 
 ### Phase 3 -- sanitize the changelog (B10 CHECKPOINT 2)
 
-Load `assets/entry-sanitizer.md`. For each PR classified as
-user-facing in Phase 1:
+Load `assets/entry-sanitizer.md` and the format contract it
+points at (`.github/instructions/changelog.instructions.md`).
+Re-sanitize the WHOLE `[Unreleased]` block, not just new PRs --
+entries added PR by PR drift into duplicates and paragraphs:
 
-1. Choose its section: Added (new feature, new command, new spec),
-   Changed (behavior change in existing surface), Fixed (bug fix),
-   Deprecated, Removed, Security, Performance.
-2. Write ONE entry per PR. Two-sentence cap. "So what" framing.
-   PR number in parentheses at the end. Preserve `by @author` for
-   external contributors.
-3. Consolidate any pre-existing Unreleased entries that point at
-   the same PR.
-4. Drop INTERNAL PRs entirely (the script flagged most of them;
+1. Choose each user-facing PR's section: Added, Changed,
+   Deprecated, Removed, Fixed, Security.
+2. One line per change: user-visible effect first, 25 words or
+   fewer, ending with `(#PR)`. Keep `-- by @author` credits and
+   caveats that matter.
+3. DEDUPE: merge any two lines that describe the same change
+   (usually the same PR, one short and one long version).
+4. CONDENSE: rewrite any longer or multi-sentence line; group
+   related PRs into one line.
+5. Move breaking and must-act changes to `### Breaking changes and
+   upgrade notes`, one line each with its migration;
+   `**BREAKING:**` prefix for true breakings.
+6. Drop INTERNAL PRs entirely (the script flagged most of them;
    the rubric in entry-sanitizer.md confirms).
-5. Mark BREAKING entries with `**BREAKING:**` prefix.
+7. Write `### Highlights` (2-4 lines) last.
+8. Check that every user-facing `#NNNN` ref and `@user` credit in
+   the old block survives in the new one.
 
 Rewrite the CHANGELOG.md `[Unreleased]` block in place:
 
@@ -147,6 +155,10 @@ Rewrite the CHANGELOG.md `[Unreleased]` block in place:
 
 ## [X.Y.Z] - YYYY-MM-DD
 
+### Highlights
+...
+### Breaking changes and upgrade notes
+...
 ### Added
 ...
 ### Changed

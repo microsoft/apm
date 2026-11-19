@@ -1126,6 +1126,13 @@ def resolve_project_exec_allow_map(
     )
 
 
+def is_executable_gated_mcp(dependency: Any) -> bool:
+    """Return whether the executables gate decides this MCP server's deployment."""
+    return getattr(dependency, "resolved_by", None) is not None and bool(
+        getattr(dependency, "is_self_defined", False)
+    )
+
+
 def filter_mcp_by_allow_executables(
     mcp_deps: list,
     effective_allow_execs: dict | None,
@@ -1142,7 +1149,7 @@ def filter_mcp_by_allow_executables(
         logger,
         exec_type=EXEC_TYPE_MCP,
         service_label="MCP",
-        gated=lambda dependency: bool(getattr(dependency, "is_self_defined", False)),
+        gated=is_executable_gated_mcp,
     )
 
 
