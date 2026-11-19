@@ -634,12 +634,19 @@ function Test-SelfUpdateCommand {
         # here ensures the downloaded installer reuses our isolated prefix
         # instead of writing to %LOCALAPPDATA%\Programs\apm. self-update's
         # subprocess inherits these via os.environ -> external_process_env().
+        # The pinned $OlderVersion predates #3926, so its self-update leaks
+        # this pwsh host's PSModulePath into Windows PowerShell 5.1, which
+        # then loads PowerShell 7's Archive module and fails Expand-Archive.
+        # Current self-update drops PSModulePath itself; clear it here so the
+        # historical binary gets the same child environment.
         $savedTempDir    = $env:APM_TEMP_DIR
         $savedInstallDir = $env:APM_INSTALL_DIR
         $savedVersion    = $env:VERSION
+        $savedModulePath = $env:PSModulePath
         $env:APM_TEMP_DIR    = $prefix.TmpDir
         $env:APM_INSTALL_DIR = $prefix.BinDir
         $env:VERSION         = $PinnedVersion
+        Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
         try {
             $output = @()
             $selfUpdateExit = 1
@@ -662,6 +669,7 @@ function Test-SelfUpdateCommand {
             if ($null -ne $savedTempDir)    { $env:APM_TEMP_DIR = $savedTempDir }       else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
             if ($null -ne $savedInstallDir) { $env:APM_INSTALL_DIR = $savedInstallDir } else { Remove-Item Env:APM_INSTALL_DIR -ErrorAction SilentlyContinue }
             if ($null -ne $savedVersion)    { $env:VERSION = $savedVersion }            else { Remove-Item Env:VERSION -ErrorAction SilentlyContinue }
+            if ($null -ne $savedModulePath) { $env:PSModulePath = $savedModulePath }
         }
 
         Write-Info "self-update output (last 20 lines):"

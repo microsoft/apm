@@ -87,3 +87,17 @@ def test_windows_e2e_verifies_junction_resolution_after_upgrade() -> None:
     assert "junction temps at install root" in test_script
     assert "current.new-*" in test_script
     assert "current.old-*" in test_script
+
+
+def test_windows_self_update_e2e_clears_inherited_psmodulepath() -> None:
+    """The pinned pre-#3926 binary must not leak the pwsh module path to 5.1."""
+    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")
+
+    start = test_script.index("function Test-SelfUpdateCommand")
+    body = test_script[start : test_script.index("\n}\n", start)]
+    clear = "Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue"
+    invoke = 'cmd.exe /c "`"$shim`" self-update"'
+    restore = "$env:PSModulePath = $savedModulePath"
+
+    assert "$savedModulePath = $env:PSModulePath" in body
+    assert body.index(clear) < body.index(invoke) < body.index(restore)
