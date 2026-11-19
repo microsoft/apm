@@ -78,11 +78,13 @@ def test_reset_to_complete_skill_selection_is_not_a_subset(tmp_path: Path) -> No
     assert _plan(_plugin(tmp_path), skill_subset=()).name == "owned"
 
 
-def _trust(allow: dict):
+def _trust(allow: dict, deny: dict | None = None):
     from apm_cli.security.executables import build_exec_trust_context
 
     return build_exec_trust_context(
-        policy=None, project_data={"executables": {"allow": allow}}, include_user=False
+        policy=None,
+        project_data={"executables": {"allow": allow, "deny": deny or {}}},
+        include_user=False,
     )
 
 
@@ -122,17 +124,118 @@ def test_declared_plugin_dependencies_park_with_one_diagnostic(tmp_path: Path) -
     assert "plugin dependencies" in plan.parked
 
 
-@pytest.mark.parametrize("field", ["mcpServers", "lspServers", "experimental"])
-def test_unqualified_capabilities_fail_closed(tmp_path: Path, field: str) -> None:
+def test_unqualified_capabilities_fail_closed(tmp_path: Path) -> None:
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 
     info = _plugin(tmp_path)
     write_json(
         info.install_path / ".claude-plugin/plugin.json",
-        {"name": "owned", "commands": [], field: {"unsafe": True}},
+        {"name": "owned", "commands": [], "experimental": {"unsafe": True}},
     )
     with pytest.raises(ClaudeNativePluginError, match="capabilit"):
         _plan(info)
+
+
+_STDIO = {"mcpServers": {"tracker": {"command": "${CLAUDE_PLUGIN_ROOT}/bin/tracker"}}}
+_LSP = {"pyls": {"command": "pyls", "extensionToLanguage": {".py": "python"}}}
+
+
+def _with_mcp(tmp_path: Path, inline: bool = False) -> PackageInfo:
+    info = _plugin(tmp_path)
+    if inline:
+        write_json(info.install_path / ".claude-plugin/plugin.json", {"name": "owned", **_STDIO})
+    else:
+        write_json(info.install_path / ".mcp.json", _STDIO)
+    return info
+
+
+def _admit(info: PackageInfo, allow: dict, deny: dict | None = None):
+    from apm_cli.security.trust import admit_native_plugin
+
+    return lambda: admit_native_plugin(_trust(allow, deny), ("owner/plugin",), info.install_path)
+
+
+def test_mcp_file_is_admitted_under_the_whole_plugin_pin(tmp_path: Path) -> None:
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    info = _with_mcp(tmp_path)
+    assert "not approved" in _plan(info, admit=_admit(info, {})).parked
+    pin = {"owner/plugin": {"plugin": compute_native_plugin_hash(info.install_path)}}
+    assert _plan(info, admit=_admit(info, pin)).parked is None
+
+
+def test_inline_mcp_servers_are_gated_as_mcp(tmp_path: Path) -> None:
+    from apm_cli.security.trust import native_plugin_exec_types
+
+    info = _with_mcp(tmp_path, inline=True)
+    assert "mcp" in native_plugin_exec_types(info.install_path)
+    plan = _plan(info, admit=_admit(info, {}, deny={"owner/plugin": {"mcp": True}}))
+    assert plan.parked is not None and "denied" in plan.parked
+
+
+def test_lsp_file_is_admitted_and_an_lsp_deny_parks(tmp_path: Path) -> None:
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    info = _plugin(tmp_path)
+    write_json(info.install_path / ".lsp.json", _LSP)
+    pin = {"owner/plugin": {"plugin": compute_native_plugin_hash(info.install_path)}}
+    assert _plan(info, admit=_admit(info, pin)).parked is None
+    denied = _plan(info, admit=_admit(info, pin, deny={"owner/plugin": {"lsp": True}}))
+    assert denied.parked is not None and "denied" in denied.parked
+
+
+def _policy(enforcement: str = "block", **mcp):
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    return ApmPolicy(enforcement=enforcement, mcp=McpPolicy(**mcp))
+
+
+def test_org_mcp_deny_parks_the_whole_plugin(tmp_path: Path) -> None:
+    plan = _plan(_with_mcp(tmp_path, inline=True), policy=_policy(deny=("track*",)))
+    assert plan.parked is not None
+    assert "owner/plugin" in plan.parked and "'tracker'" in plan.parked
+    assert "mcp-denylist" in plan.parked
+
+
+def test_disallowed_mcp_transport_parks_the_whole_plugin(tmp_path: Path) -> None:
+    from apm_cli.policy.schema import McpTransportPolicy
+
+    policy = _policy(transport=McpTransportPolicy(allow=("http",)))
+    plan = _plan(_with_mcp(tmp_path), policy=policy)
+    assert plan.parked is not None and "mcp-transport" in plan.parked
+    assert "'stdio'" in plan.parked
+
+
+def test_warn_enforcement_reports_without_parking(tmp_path: Path) -> None:
+    plan = _plan(_with_mcp(tmp_path), policy=_policy("warn", deny=("tracker",)))
+    assert plan.parked is None
+    assert plan.warning is not None and "'tracker'" in plan.warning
+
+
+@pytest.mark.parametrize("field", ["mcpServers", "lspServers"])
+def test_server_file_outside_the_plugin_is_refused(tmp_path: Path, field: str) -> None:
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
+    info = _plugin(tmp_path)
+    write_json(
+        info.install_path / ".claude-plugin/plugin.json", {"name": "owned", field: "../x.json"}
+    )
+    with pytest.raises(ClaudeNativePluginError, match=field):
+        _plan(info)
+
+
+def test_native_claude_servers_are_not_expressed_for_claude() -> None:
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.models.dependency.lsp import LSPDependency
+
+    native = LSPDependency(
+        name="pyls",
+        command="pyls",
+        extension_to_language={".py": "python"},
+        native_runtimes=frozenset({"claude"}),
+    )
+    assert LSPIntegrator.expressible_server_names([native], "claude") == set()
+    assert LSPIntegrator.expressible_server_names([native], "copilot") == {"pyls"}
 
 
 def test_source_symlink_is_not_native_loadable(tmp_path: Path) -> None:

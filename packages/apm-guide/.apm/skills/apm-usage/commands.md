@@ -134,7 +134,10 @@ approved plugin root to `~/.agents/plugins/<plugin>/`, generates
 `~/.agents/plugins/.claude-plugin/marketplace.json`, and writes only
 `extraKnownMarketplaces` and `enabledPlugins` into Claude's `settings.json`. No
 `claude` CLI is needed. Plugins with unapproved hooks or declared plugin
-`dependencies` are not declared (warning, exit 0). An explicit `false` in
+`dependencies` are not declared (warning, exit 0). MCP and LSP servers the
+plugin ships are loaded by Claude from the plugin, not written by APM; the
+whole-plugin approval covers them, and a server org MCP policy blocks parks the
+plugin (`enforcement: block`). An explicit `false` in
 `enabledPlugins` is kept. `apm.lock.yaml` records each as `native_plugin`. See
 [admission limits](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 

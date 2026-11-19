@@ -137,6 +137,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
             active_package_keys=(
                 frozenset(complete_dep_keys) if complete_dep_keys is not None else None
             ),
+            claude_native_keys=frozenset(getattr(ctx, "claude_native_keys", ())),
         ),
         force=bool(getattr(ctx, "force", False)),
     )

@@ -76,6 +76,8 @@ class InstallContext:
     trust_transitive_mcp: bool = False
     transaction: Any = None  # InstallTransaction
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
+    # Dependency keys routed to native Claude this run, admitted or parked.
+    claude_native_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
 
     dry_run: bool = False

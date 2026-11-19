@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
 from apm_cli.core.scope import is_user_scope
 from apm_cli.deps.plugin_parser import (
+    declared_plugin_mcp_servers,
     has_normalized_plugin_skill_sources_receipt,
     parse_plugin_manifest,
 )
@@ -29,6 +30,7 @@ class ClaudeNativePlugin:
 
     A *parked* plugin stays out of loose Claude projection but is not declared
     to Claude either; ``parked`` carries the one diagnostic shown to the user.
+    ``warning`` reports an org MCP policy violation under ``enforcement: warn``.
     """
 
     dependency_key: str
@@ -36,6 +38,7 @@ class ClaudeNativePlugin:
     source_root: Path
     bundle_hash: str
     parked: str | None = None
+    warning: str | None = None
     target_name: ClassVar[str] = "claude"
 
 
@@ -64,11 +67,12 @@ _MANIFEST_FIELDS = frozenset(
         "agents",
         "skills",
         "hooks",
+        "mcpServers",
+        "lspServers",
     }
 )
+_COMPONENT_PATH_FIELDS = ("commands", "agents", "skills", "hooks", "mcpServers", "lspServers")
 _UNSUPPORTED_ROOTS = (
-    ".mcp.json",
-    ".lsp.json",
     "bin",
     ".apm/bin",
     ".apm/canvas",
@@ -81,7 +85,7 @@ _UNSUPPORTED_ROOTS = (
 def _refuse_escaping_component_paths(root: Path, manifest: dict[str, Any]) -> None:
     """A manifest path outside the plugin directory leaves no plugin root (req-na-002)."""
     resolved = root.resolve()
-    for field in ("commands", "agents", "skills", "hooks"):
+    for field in _COMPONENT_PATH_FIELDS:
         value = manifest.get(field)
         for entry in value if isinstance(value, list) else [value]:
             if isinstance(entry, str) and not (root / entry).resolve().is_relative_to(resolved):
@@ -89,6 +93,41 @@ def _refuse_escaping_component_paths(root: Path, manifest: dict[str, Any]) -> No
                     f"Native Claude plugin manifest field '{field}' points outside the plugin "
                     f"({entry}). Fix the manifest or exclude Claude from this dependency's targets."
                 )
+
+
+def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> str | None:
+    """Name the first declared MCP server org MCP policy rejects, else ``None``.
+
+    Claude loads the plugin's servers itself, so the checks the install gate
+    runs on loose servers (``policy_checks.mcp_policy_checks``) run here on
+    every server the plugin declares. LSP servers have no org policy schema
+    beyond ``executables``; the whole-plugin trust verdict is their policy.
+    """
+    mcp_policy = getattr(policy, "mcp", None)
+    if mcp_policy is None or getattr(policy, "enforcement", "warn") == "off":
+        return None
+    names, declarations = declared_plugin_mcp_servers(root, manifest)
+    if not names:
+        return None
+    from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.policy.policy_checks import mcp_policy_checks
+
+    expressible = {
+        entry["name"]: MCPDependency(
+            name=entry["name"],
+            transport=entry.get("transport"),
+            registry=False,
+            url=entry.get("url"),
+            command=entry.get("command"),
+        )
+        for entry in declarations
+    }
+    subjects = [expressible.get(name) or MCPDependency(name=name, registry=False) for name in names]
+    for check in mcp_policy_checks(subjects, policy):
+        if not check.passed:
+            subject = check.violation_subjects()[0]
+            return f"MCP server '{subject.ref}' violates org policy {check.name} ({subject.reason})"
+    return None
 
 
 def plan_native_claude_plugin(
@@ -100,11 +139,15 @@ def plan_native_claude_plugin(
     skill_subset: tuple[str, ...] | None,
     admit: Callable[[], Any],
     skip_bin: bool,
+    policy: Any = None,
 ) -> ClaudeNativePlugin | None:
     """Admit a complete, approved plugin without altering native selection.
 
     *admit* returns the trust owner's whole-plugin verdict on this source
     (``security.trust.admit_native_plugin``), or ``None`` when the gate is off.
+    That verdict covers the plugin's MCP and LSP servers too. *policy* is the
+    org policy: a declared MCP server it rejects parks the whole plugin under
+    ``enforcement: block`` (Claude cannot enable part of a plugin).
 
     Normalized virtual plugins in older locks can have SKILL_BUNDLE type.
     Only the parser-owned normalization receipt admits that compatibility
@@ -161,16 +204,48 @@ def plan_native_claude_plugin(
         raise ClaudeNativePluginError(
             "Native Claude plugin has unqualified capabilities: "
             + ", ".join(sorted(unknown) + unsupported)
-            + ". This route supports intact commands, skills, agents and approved hooks only."
+            + ". This route supports intact commands, skills, agents, approved hooks and "
+            "MCP and LSP servers only."
         )
     _refuse_escaping_component_paths(root, manifest)
+    violation = _mcp_policy_violation(root, manifest, policy)
+    if violation is not None and getattr(policy, "enforcement", None) == "block":
+        return ClaudeNativePlugin(
+            package_name,
+            name,
+            root.resolve(),
+            fingerprint,
+            parked=(
+                f"Parked native plugin {package_name}: {violation}\n    Ask your org policy "
+                "owner to allow the server, or remove this dependency"
+            ),
+        )
+    warning = None if violation is None else f"Native plugin {package_name}: {violation}"
     parked = None
     verdict = admit()
     if verdict is not None and not verdict.allowed:
         from apm_cli.security.trust import parked_plugin_message
 
         parked = parked_plugin_message(package_name, str(verdict.reason), verdict.detail)
-    return ClaudeNativePlugin(package_name, name, root.resolve(), fingerprint, parked=parked)
+    return ClaudeNativePlugin(
+        package_name, name, root.resolve(), fingerprint, parked=parked, warning=warning
+    )
+
+
+def native_service_runtimes(
+    package_key: str, locked: Any, run_keys: Collection[str] = ()
+) -> frozenset[str]:
+    """Runtimes that load a dependency's MCP and LSP servers from its native plugin.
+
+    Claude loads an admitted plugin's servers itself, so APM must not also
+    write them into Claude's config; a parked plugin is not deployed, so its
+    servers must not reach Claude loose either. *run_keys* are the plugins
+    this install routed natively (admitted or parked); the lock's
+    ``native_plugin`` record carries the admitted ones to every later reader.
+    """
+    if package_key in run_keys or getattr(locked, "native_plugin", None) is not None:
+        return frozenset({ClaudeNativePlugin.target_name})
+    return frozenset()
 
 
 def queue_native_claude(ctx: Any, package_name: str, plugin: Any, diagnostics: Any) -> None:
@@ -183,6 +258,11 @@ def queue_native_claude(ctx: Any, package_name: str, plugin: Any, diagnostics: A
     """
     if plugin is None or ctx is None:
         return
+    native_keys = getattr(ctx, "claude_native_keys", None)
+    if native_keys is not None:
+        native_keys.add(package_name)
+    if plugin.warning and diagnostics is not None:
+        diagnostics.warn(plugin.warning, package=package_name)
     if plugin.parked:
         from dataclasses import replace
 

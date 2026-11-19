@@ -1961,6 +1961,9 @@ def _install_apm_packages(ctx, outcome):
             active_package_keys=(
                 install_result.active_package_keys if install_result is not None else None
             ),
+            claude_native_keys=(
+                install_result.claude_native_keys if install_result is not None else frozenset()
+            ),
         )
     except PolicyBlockError:
         logger.error(

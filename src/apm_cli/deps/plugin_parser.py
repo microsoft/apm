@@ -826,6 +826,19 @@ def _extract_mcp_servers(
     return servers
 
 
+def declared_plugin_mcp_servers(
+    plugin_path: Path, manifest: dict[str, Any]
+) -> tuple[tuple[str, ...], list[dict[str, Any]]]:
+    """Every MCP server name a plugin declares, plus its expressible declarations.
+
+    Reads exactly what normalization reads (manifest ``mcpServers`` or the
+    root MCP file), without warnings: a name whose declaration cannot be
+    expressed still counts, so a policy check never skips it.
+    """
+    servers = _extract_mcp_servers(plugin_path, manifest, warn_on_invalid=False)
+    return tuple(servers), _mcp_servers_to_apm_deps(servers, plugin_path, warn_on_invalid=False)
+
+
 def _read_mcp_file(
     plugin_path: Path,
     rel_path: str,

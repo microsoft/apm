@@ -260,6 +260,21 @@ def test_native_guard_does_not_adopt_unrecorded_native_ownership(legacy: bool) -
     assert lock.mcp_target_servers == {}
 
 
+def test_native_guard_never_requires_a_claim_where_claude_loads_the_plugin() -> None:
+    """#3290: APM writes no Claude copy of a native plugin's server, so none is recorded."""
+    lock = LockFile(mcp_servers=["tracker"], mcp_target_servers={"copilot": ["tracker"]})
+    lock._mcp_target_servers_present = True
+    InstallService.enforce_frozen_services(
+        lock,
+        mcp_servers={"tracker"},
+        mcp_targets=["claude", "copilot"],
+        lsp_target_servers={},
+        current_mcp=None,
+        user_scope=True,
+        mcp_native_runtimes={"tracker": frozenset({"claude"})},
+    )
+
+
 def test_native_guard_requires_actual_source_evidence_even_without_claims() -> None:
     with pytest.raises(FrozenInstallError, match="cannot replay") as failure:
         InstallService.enforce_frozen_services(

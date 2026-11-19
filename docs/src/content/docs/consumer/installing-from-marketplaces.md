@@ -166,8 +166,15 @@ root, and one fingerprint over every file's path, bytes and executable bit.
 Reinstalling the same revision refuses changed bytes.
 
 The route needs `.claude-plugin/plugin.json` and accepts commands, skills,
-agents and approved hooks. It refuses partial skill subsets, symlinks, MCP/LSP
-servers, `bin/` scripts and other manifest capabilities; resolve the
+agents, hooks, and MCP and LSP servers (`.mcp.json`, `.lsp.json`, or
+`mcpServers` / `lspServers` in the manifest). Claude loads those servers from
+the plugin; APM does not write them into Claude's MCP or LSP config. They are
+covered by the same whole-plugin approval. Org MCP policy (allow, deny,
+transport, self-defined) applies to each declared MCP server: under
+`enforcement: block` a violating server parks the whole plugin, under `warn` it
+is reported. With other targets selected too, APM still writes the servers for
+those targets. The route refuses partial skill subsets, symlinks, server files
+outside the plugin, `bin/` scripts and other manifest capabilities; resolve the
 restriction or exclude Claude from that dependency's targets. If the package
 already owns loose Claude hooks, run `apm uninstall --global <package>` first,
 then reinstall to switch it to the native route.

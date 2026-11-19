@@ -249,6 +249,7 @@ class LSPIntegrator:
         lock_path: Path | None = None,
         logger=None,
         diagnostics=None,
+        claude_native_keys: frozenset[str] = frozenset(),
     ) -> list:
         """Collect LSP dependencies from resolved APM packages listed in apm.lock.
 
@@ -257,8 +258,11 @@ class LSPIntegrator:
         Falls back to scanning all apm.yml files if no lock file is available.
 
         Declaring-package provenance is attached so the install pipeline can
-        enforce executable approval before exposing transitive servers.
+        enforce executable approval before exposing transitive servers, with
+        the runtimes that load each server natively from its plugin.
         """
+        from apm_cli.claude_plugins.admission import native_service_runtimes
+
         if logger is None:
             logger = NullCommandLogger()
         if not apm_modules_dir.exists():
@@ -284,6 +288,7 @@ class LSPIntegrator:
                 pkg = APMPackage.from_apm_yml(apm_yml_path)
                 lsp = pkg.get_lsp_dependencies()
                 if lsp:
+                    native_runtimes: frozenset[str] = frozenset()
                     if locked_dependency is None:
                         owner = apm_yml_path.parent.relative_to(apm_modules_dir).as_posix()
                         approval_keys: tuple[str, ...] = ()
@@ -294,11 +299,15 @@ class LSPIntegrator:
 
                         owner = locked_dependency.get_unique_key()
                         approval_keys = locked_dependency_approval_keys(locked_dependency)
+                        native_runtimes = native_service_runtimes(
+                            owner, locked_dependency, claude_native_keys
+                        )
                     collected.extend(
                         replace(
                             dependency,
                             resolved_by=owner,
                             approval_keys=approval_keys,
+                            native_runtimes=native_runtimes,
                         )
                         for dependency in lsp
                     )
@@ -451,11 +460,16 @@ class LSPIntegrator:
         claimed, and later cleanup cannot delete a same-name user entry.
         """
         servers = LSPIntegrator._servers_for_target(
-            LSPIntegrator._base_server_entries(lsp_deps),
+            LSPIntegrator._base_server_entries(LSPIntegrator.deps_for_runtime(lsp_deps, runtime)),
             _LSP_TARGET_SPECS[runtime],
             warn=lambda _message: None,
         )
         return builtins.set(servers)
+
+    @staticmethod
+    def deps_for_runtime(lsp_deps: list, runtime: str) -> list:
+        """Drop servers *runtime* loads natively from their plugin (never APM's copy)."""
+        return [dep for dep in lsp_deps if runtime not in getattr(dep, "native_runtimes", ())]
 
     # ------------------------------------------------------------------
     # Target resolution
@@ -1049,15 +1063,12 @@ class LSPIntegrator:
             logger.warning("No LSP-compatible runtimes detected")
             return 0
 
-        base_servers = LSPIntegrator._base_server_entries(lsp_deps)
-        if not base_servers:
-            return 0
-
         prepared_targets: list[tuple[str, _LSPTargetSpec, _PreparedTargetConfig]] = []
         for runtime in runtimes:
             spec = _LSP_TARGET_SPECS[runtime]
+            runtime_deps = LSPIntegrator.deps_for_runtime(lsp_deps, runtime)
             servers = LSPIntegrator._servers_for_target(
-                base_servers,
+                LSPIntegrator._base_server_entries(runtime_deps),
                 spec,
                 warn=diagnostics.warn if diagnostics is not None else logger.warning,
             )
@@ -1065,7 +1076,7 @@ class LSPIntegrator:
                 continue
             servers = LSPIntegrator._render_plugin_roots(
                 servers,
-                lsp_deps,
+                runtime_deps,
                 spec,
                 project_root=project_root_path,
                 user_scope=user_scope,

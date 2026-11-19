@@ -370,3 +370,67 @@ def test_installed_hook_source_reinstall_and_removal(
     assert not deployed.exists()
     assert personal_skill.read_bytes() == personal_before
     assert not scenario.trap.exists()
+
+
+def test_native_plugin_mcp_server_is_loaded_by_claude_not_written_by_apm(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """#3290: Claude loads a native plugin's .mcp.json; APM writes it only for other targets."""
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("mcp-plugin")
+    source = repository.worktree / "plugins/tracker"
+    (source / ".claude-plugin").mkdir(parents=True)
+    (source / ".claude-plugin/plugin.json").write_text(
+        '{"name":"owned-mcp","version":"1.0.0"}', encoding="ascii"
+    )
+    server = {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"]}
+    (source / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"plugin-tracker": server}}), encoding="utf-8"
+    )
+    (source / "server.js").write_text("// inert\n", encoding="ascii")
+    revision = factory.commit(repository, message="Native MCP plugin fixture").sha
+    dependency = "fixture/native-mcp"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "mcp-consumer",
+        "version": "1.0.0",
+        "dependencies": {"apm": [{"git": dependency, "ref": revision, "path": "plugins/tracker"}]},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+
+    def install(target: str) -> None:
+        result = runner.run(
+            ("install", "--global", "--target", target),
+            scenario_id="claude-native-mcp",
+            cwd=isolated.work_root,
+            env=env,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def claude_mcp_names() -> set[str]:
+        names: set[str] = set()
+        for path in (isolated.home / ".claude.json", isolated.home / ".claude/.claude.json"):
+            if path.exists():
+                names |= set(json.loads(path.read_text(encoding="utf-8")).get("mcpServers", {}))
+        return names
+
+    install("claude")
+    deployed = scenario.plugins / "owned-mcp"
+    assert json.loads((deployed / ".mcp.json").read_text())["mcpServers"] == {
+        "plugin-tracker": server
+    }
+    assert "plugin-tracker" not in claude_mcp_names()
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    assert lock["dependencies"][0]["native_plugin"]["name"] == "owned-mcp"
+    assert "plugin-tracker" not in (lock.get("mcp_target_servers") or {}).get("claude", [])
+
+    # Mixed targets: Copilot still gets APM's copy; Claude keeps only the plugin's.
+    install("claude,copilot")
+    copilot = json.loads((isolated.home / ".copilot/mcp-config.json").read_text())
+    assert "plugin-tracker" in copilot["mcpServers"]
+    assert "plugin-tracker" not in claude_mcp_names()
+    assert (deployed / ".mcp.json").is_file()
+    assert not scenario.trap.exists()

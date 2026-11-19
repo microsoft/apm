@@ -143,6 +143,11 @@ def prepare_package_deployment(  # noqa: PLR0913
                 package_name, package_info, allow_executables, ctx=ctx
             ),
             skip_bin=skip_bin,
+            # The org policy the install gate fetched; callers that pass none
+            # (preflight) defer to it, as effective_allow_map does for trust.
+            policy=policy
+            if policy is not None
+            else getattr(getattr(ctx, "policy_fetch", None), "policy", None),
         )
     )
     projection_targets = PackageDeploymentPlan(

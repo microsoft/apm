@@ -168,6 +168,9 @@ class MCPDependency:
     # Another clone's root a pre-#3825 lock recorded, set only by a --frozen
     # replay so an unchanged native entry is kept; never rendered or written.
     recorded_plugin_root: str | None = field(default=None, compare=False)
+    # Runtimes that load this server natively from its declaring plugin, so
+    # APM never writes it there. Never serialized and not part of equality.
+    native_runtimes: frozenset[str] = field(default=frozenset(), compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":

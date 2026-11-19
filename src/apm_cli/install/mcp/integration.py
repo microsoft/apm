@@ -50,6 +50,7 @@ def prepare_mcp_integration(
     project_root: Path | None = None,
     executable_context: tuple[dict | None, bool] = (None, False),
     no_policy: bool = False,
+    claude_native_keys: frozenset[str] = frozenset(),
 ) -> PreparedMcpIntegration:
     """Collect and admit once, without native writes or ownership adoption.
 
@@ -86,6 +87,7 @@ def prepare_mcp_integration(
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
             include_dependency_mcp=should_install,
+            claude_native_keys=claude_native_keys,
         )
     if should_install and current_view is not None:
         root_count = len(apm_package.get_all_mcp_dependencies())
@@ -308,6 +310,7 @@ def run_mcp_integration(  # noqa: PLR0913
     executable_context: tuple[dict | None, bool] = (None, False),
     pre_install_lock: "LockFile | None" = None,
     frozen: bool = False,
+    claude_native_keys: frozenset[str] = frozenset(),
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -394,6 +397,7 @@ def run_mcp_integration(  # noqa: PLR0913
         project_root=project_root,
         executable_context=executable_context,
         no_policy=no_policy,
+        claude_native_keys=claude_native_keys,
     )
     mcp_deps, current_view = prepared.dependencies, prepared.current_view
     if frozen and current_view is not None:
@@ -407,10 +411,25 @@ def run_mcp_integration(  # noqa: PLR0913
     # MCPIntegrator writes runtime configs.  The caller is responsible
     # for catching PolicyBlockError and aborting the MCP write while
     # leaving already-installed APM packages in place.
-    if should_install and mcp_deps:
+    # A server every active runtime loads natively from its plugin is written
+    # nowhere by APM; native admission already applied org MCP policy to it.
+    active_runtimes = (
+        [runtime]
+        if runtime is not None
+        else target_decision.runtime_targets_for_scope(user_scope=user_scope)
+        if target_decision is not None
+        else None
+    )
+    policy_deps = [
+        dep
+        for dep in mcp_deps
+        if not active_runtimes
+        or not set(active_runtimes) <= getattr(dep, "native_runtimes", frozenset())
+    ]
+    if should_install and policy_deps:
         run_policy_preflight(
             project_root=project_root,
-            mcp_deps=mcp_deps,
+            mcp_deps=policy_deps,
             mcp_brought_in_by=(current_view.brought_in_by if current_view is not None else None),
             no_policy=no_policy,
             logger=logger,

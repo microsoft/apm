@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 - `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
+- Native Claude plugins can ship MCP and LSP servers; Claude loads them, whole-plugin approval covers them, and org MCP policy applies (#3290)
 
 ### Changed
 
