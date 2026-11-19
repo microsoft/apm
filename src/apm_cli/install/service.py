@@ -30,13 +30,14 @@ from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.models.results import InstallResult
 
@@ -418,6 +419,12 @@ class InstallService:
         manifest_deps = project_manifest_dependencies(request.apm_package, modules_dir=modules_dir)
         satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
 
+        from apm_cli.security.executables import (
+            mcp_executables_gate,
+            resolve_project_exec_allow_map,
+        )
+
+        project_root = request.apm_package.package_path or lockfile_path.parent
         reasons.extend(
             InstallService._frozen_mcp_reasons(
                 request.apm_package,
@@ -426,6 +433,11 @@ class InstallService:
                 trust_transitive_mcp=request.trust_transitive_mcp,
                 logger=request.logger,
                 allow_pending=allow_pending_mcp,
+                approve=mcp_executables_gate(
+                    lambda: resolve_project_exec_allow_map(
+                        project_root, request.apm_package, no_policy=request.no_policy
+                    )
+                ),
             )
         )
 
@@ -596,19 +608,26 @@ class InstallService:
         trust_transitive_mcp: bool,
         logger: InstallLogger | None,
         allow_pending: bool,
+        approve: Callable[[list[MCPDependency]], list[MCPDependency]],
         active_package_keys: frozenset[str] | None = None,
     ) -> list[str]:
-        """Compare actual declarations, deferring only unavailable source evidence."""
+        """Compare actual declarations, deferring only unavailable source evidence.
+
+        The view is gated by *approve* and checked against the recorded
+        omission evidence exactly as install and audit derive it (#3925).
+        """
         from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
         if allow_pending and not (
             package.get_all_mcp_dependencies() or lockfile.mcp_configs or lockfile.mcp_servers
         ):
             return []
-        current = CurrentMcpConfigView.derive(
+        current = CurrentMcpConfigView.select(
             package,
             lockfile,
             modules_dir,
+            approve=approve,
+            recorded=lockfile,
             trust_transitive_self_defined=trust_transitive_mcp,
             logger=logger,
             allow_pending=allow_pending,
@@ -635,6 +654,7 @@ class InstallService:
         *,
         trust_transitive_mcp: bool,
         logger: InstallLogger | None,
+        approve: Callable[[list[MCPDependency]], list[MCPDependency]],
         active_package_keys: frozenset[str] | None = None,
     ) -> None:
         """Reject restored MCP drift before a package can activate native configuration."""
@@ -647,6 +667,7 @@ class InstallService:
             trust_transitive_mcp=trust_transitive_mcp,
             logger=logger,
             allow_pending=False,
+            approve=approve,
             active_package_keys=active_package_keys,
         )
         if reasons:

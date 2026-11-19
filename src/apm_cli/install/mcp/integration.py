@@ -54,18 +54,30 @@ def prepare_mcp_integration(
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.executables import (
-        filter_mcp_by_allow_executables,
-        is_executable_gated_mcp,
+        mcp_executables_gate,
         resolve_project_exec_allow_map,
     )
 
+    gate = mcp_executables_gate(
+        lambda: resolve_project_exec_allow_map(
+            project_root or apm_package.package_path or Path.cwd(),
+            apm_package,
+            executable_context=executable_context,
+            no_policy=no_policy,
+            logger=logger,
+        ),
+        logger,
+    )
     current_view = None
     if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
         lockfile = LockFile.read(lock_path) if lock_path.exists() else None
-        current_view = CurrentMcpConfigView.derive(
+        # This run records new omission evidence, so none is verified here.
+        current_view = CurrentMcpConfigView.select(
             apm_package,
             lockfile,
             apm_modules_path,
+            approve=gate,
+            recorded=None,
             trust_transitive_self_defined=trust_transitive_mcp,
             diagnostics=diagnostics,
             logger=logger,
@@ -78,19 +90,9 @@ def prepare_mcp_integration(
         transitive_count = max(0, len(current_view.dependencies) - root_count)
         if transitive_count:
             logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
-        mcp_deps = list(current_view.dependencies)
-    allow_map = None
-    if any(is_executable_gated_mcp(dep) for dep in mcp_deps):
-        allow_map = resolve_project_exec_allow_map(
-            project_root or apm_package.package_path or Path.cwd(),
-            apm_package,
-            executable_context=executable_context,
-            no_policy=no_policy,
-            logger=logger,
-        )
-    approved = filter_mcp_by_allow_executables(mcp_deps, allow_map, logger)
-    if current_view is not None:
-        current_view = current_view.with_unapproved_executables(approved)
+        approved = list(current_view.dependencies)
+    else:
+        approved = gate(mcp_deps)
     return PreparedMcpIntegration(
         approved,
         current_view if should_install else None,

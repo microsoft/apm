@@ -81,6 +81,49 @@ class CurrentMcpConfigView:
     # only lets ``diff`` accept a lock recorded before that, already expanded.
     plugin_roots: Mapping[str, str] = field(default_factory=dict)
     project_root: Path | None = None
+    # True once this run's executables gate decided the view: ``omissions`` then
+    # holds exactly the evidence this run would record.
+    executables_gated: bool = False
+
+    @classmethod
+    def select(
+        cls,
+        root: APMPackage,
+        lockfile: LockFile | None,
+        modules_root: Path,
+        *,
+        approve: Callable[[list[MCPDependency]], list[MCPDependency]] | None,
+        recorded: LockFile | None,
+        trust_transitive_self_defined: bool,
+        diagnostics: DiagnosticCollector | None = None,
+        logger: _McpViewLogger | None = None,
+        include_dependency_mcp: bool = True,
+        allow_pending: bool | None = None,
+        active_package_keys: frozenset[str] | None = None,
+    ) -> CurrentMcpConfigView:
+        """Derive the view install, ``--frozen`` and audit compare with the lockfile.
+
+        ``approve`` is this run's executables gate; only audit passes None, as it
+        does not re-check approvals. ``recorded`` is the committed lockfile whose
+        omission evidence must justify every left-out server; only install,
+        which records new evidence, passes None.
+        """
+        view = cls.derive(
+            root,
+            lockfile,
+            modules_root,
+            trust_transitive_self_defined=trust_transitive_self_defined,
+            diagnostics=diagnostics,
+            logger=logger,
+            include_dependency_mcp=include_dependency_mcp,
+            allow_pending=allow_pending,
+            active_package_keys=active_package_keys,
+        )
+        if approve is not None:
+            view = view.with_unapproved_executables(approve(list(view.dependencies)))
+        if recorded is not None:
+            view = view.with_recorded_omissions(recorded)
+        return view
 
     @classmethod
     def derive(
@@ -180,9 +223,10 @@ class CurrentMcpConfigView:
             if is_executable_gated_mcp(dependency) and dependency.name not in kept
         }
         if not parked:
-            return self
+            return replace(self, executables_gated=True)
         return replace(
             self,
+            executables_gated=True,
             dependencies=tuple(d for d in self.dependencies if d.name not in parked),
             configs={name: c for name, c in self.configs.items() if name not in parked},
             provenance={name: p for name, p in self.provenance.items() if name not in parked},
@@ -201,7 +245,12 @@ class CurrentMcpConfigView:
         )
 
     def with_recorded_omissions(self, lockfile: LockFile) -> CurrentMcpConfigView:
-        """Apply exact install evidence for audit, never infer intent from empty state."""
+        """Apply exact install evidence, never infer intent from empty state.
+
+        After this run's executables gate decided the view, recorded evidence
+        must equal what this run would record. Otherwise (audit) any reason the
+        server's structure permits is accepted.
+        """
         configs = dict(self.configs)
         problems = list(self.problems)
         admitted = _admitted_names(lockfile)
@@ -221,20 +270,26 @@ class CurrentMcpConfigView:
         for name in sorted(candidates):
             evidence = lockfile.mcp_omissions.get(name)
             fingerprint = self.declaration_fingerprints.get(name)
-            valid = (
-                fingerprint is not None
-                and isinstance(evidence, dict)
-                and isinstance(evidence.get("reason"), str)
-                and evidence.get("reason") in structural
-                and evidence
-                == {
-                    "declaration": fingerprint,
-                    "reason": evidence.get("reason"),
-                }
-                and name in structural[evidence["reason"]]
-            )
+            if self.executables_gated:
+                valid = fingerprint is not None and evidence == self.omissions.get(name, False)
+            else:
+                valid = (
+                    fingerprint is not None
+                    and isinstance(evidence, dict)
+                    and isinstance(evidence.get("reason"), str)
+                    and evidence.get("reason") in structural
+                    and evidence
+                    == {
+                        "declaration": fingerprint,
+                        "reason": evidence.get("reason"),
+                    }
+                    and name in structural[evidence["reason"]]
+                )
             if valid and name not in admitted:
                 configs.pop(name, None)
+            elif self.executables_gated and evidence is None and name in configs:
+                # This run deploys it; the diff reports it missing from the lock.
+                continue
             elif name not in admitted or evidence is not None:
                 problems.append(
                     McpSourceProblem(
@@ -243,7 +298,8 @@ class CurrentMcpConfigView:
                         message=(
                             "MCP selection is unknown: omission evidence is missing, damaged "
                             "or stale. Repeat the intended install selection "
-                            "('--only apm' for skills-only); do not enable MCP just to pass audit"
+                            "('--only apm' for skills-only); do not enable MCP just to pass "
+                            "this check"
                         ),
                     )
                 )

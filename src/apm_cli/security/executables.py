@@ -21,6 +21,7 @@ import fnmatch
 import hashlib
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -1151,6 +1152,31 @@ def filter_mcp_by_allow_executables(
         service_label="MCP",
         gated=is_executable_gated_mcp,
     )
+
+
+class _SilentGateLogger:
+    """Swallow gate messages for a check that does not deploy (``--frozen``)."""
+
+    def verbose_detail(self, message: str) -> None:
+        """Discard a skip detail."""
+
+    def warning(self, message: str, symbol: str = "warning") -> None:
+        """Discard the filtered-servers summary."""
+
+
+def mcp_executables_gate(
+    allow_map: Callable[[], dict | None], logger: Any | None = None
+) -> Callable[[list], list]:
+    """Return this run's MCP executables gate; *allow_map* resolves only when needed."""
+
+    def approve(dependencies: list) -> list:
+        if not any(is_executable_gated_mcp(dependency) for dependency in dependencies):
+            return dependencies
+        return filter_mcp_by_allow_executables(
+            dependencies, allow_map(), logger if logger is not None else _SilentGateLogger()
+        )
+
+    return approve
 
 
 def filter_lsp_by_allow_executables(

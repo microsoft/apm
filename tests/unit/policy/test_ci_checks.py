@@ -2296,6 +2296,7 @@ def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -
         *,
         trust_transitive_self_defined,
         diagnostics=None,
+        **_options,
     ):
         calls.append(
             (

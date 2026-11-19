@@ -100,6 +100,73 @@ def test_executables_gate_parks_server_with_audit_evidence(
     assert _audit(chain)["passed"], "revoked approval must retire the server with evidence"
 
 
+def _rewrite_lock(chain: Chain, edit) -> None:
+    lock = chain.lock()
+    edit(lock)
+    (chain.project / "apm.lock.yaml").write_text(
+        yaml.safe_dump(lock, sort_keys=False), encoding="utf-8"
+    )
+
+
+def _frozen_fails(chain: Chain, *expected: str) -> None:
+    result = chain.run("install", "--frozen", "--no-policy")
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    for text in expected:
+        assert text in output, output
+
+
+def test_frozen_install_applies_executables_gate_and_omission_evidence(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3925: --frozen derives the MCP view like install and audit do."""
+    chain = Chain(tmp_path / "world", apm_binary_path, dirs=(".claude",))
+    _write(
+        chain.project / "pkgs" / "tools" / "apm.yml",
+        {
+            "name": "tools",
+            "version": "1.0.0",
+            "dependencies": {"mcp": [stdio_server("tools-server", "x")]},
+        },
+    )
+    chain.write_manifest([], apm=[_PACKAGE], targets=["claude"], executables={})
+    chain.ok("install", "--no-policy")
+    evidence = dict(chain.lock()["mcp_omissions"]["tools-server"])
+    assert evidence["reason"] == "unapproved-executables"
+
+    chain.ok("install", "--frozen", "--no-policy")
+    assert "tools-server" not in chain.servers("claude")
+
+    def stale(lock: dict) -> None:
+        lock["mcp_omissions"]["tools-server"]["declaration"] = "sha256:" + "0" * 64
+
+    _rewrite_lock(chain, stale)
+    _frozen_fails(chain, "selection is unknown")
+
+    _rewrite_lock(chain, lambda lock: lock["mcp_omissions"].pop("tools-server"))
+    _frozen_fails(chain, "selection is unknown")
+
+    def restored(lock: dict) -> None:
+        lock["mcp_omissions"] = {"tools-server": evidence}
+
+    _rewrite_lock(chain, restored)
+    chain.ok("install", "--frozen", "--no-policy")
+
+    chain.write_manifest(
+        [],
+        apm=[_PACKAGE],
+        targets=["claude"],
+        executables={"allow": {_PACKAGE: {"mcp": True}}},
+    )
+    _frozen_fails(chain, "'tools-server' is missing from apm.lock.yaml")
+    assert "tools-server" not in chain.servers("claude")
+
+    chain.ok("install", "--no-policy")
+    assert "tools-server" not in (chain.lock().get("mcp_omissions") or {})
+    chain.ok("install", "--frozen", "--no-policy")
+    assert "tools-server" in chain.servers("claude")
+
+
 def _transitive_chain(tmp_path: Path, binary: Path) -> Chain:
     chain = Chain(tmp_path / "world", binary, dirs=(".claude",))
     _write(

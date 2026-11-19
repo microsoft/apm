@@ -142,6 +142,7 @@ def test_active_missing_source_is_not_an_inactive_orphan(tmp_path: Path) -> None
             tmp_path / "apm_modules",
             trust_transitive_mcp=False,
             logger=None,
+            approve=list,
             active_package_keys=frozenset({"owner/plugin"}),
         )
     assert any(
@@ -195,13 +196,23 @@ def test_hydrated_comparison_reads_actual_source(tmp_path: Path, command: str | 
     clear_apm_yml_cache()
     if command == "inert":
         InstallService.enforce_hydrated_mcp(
-            root, lock, tmp_path / "apm_modules", trust_transitive_mcp=False, logger=None
+            root,
+            lock,
+            tmp_path / "apm_modules",
+            trust_transitive_mcp=False,
+            logger=None,
+            approve=list,
         )
         assert _view(root, lock, allow_pending=False).configs == lock.mcp_configs
     else:
         with pytest.raises(FrozenInstallError, match="restored MCP declarations differ") as failure:
             InstallService.enforce_hydrated_mcp(
-                root, lock, tmp_path / "apm_modules", trust_transitive_mcp=False, logger=None
+                root,
+                lock,
+                tmp_path / "apm_modules",
+                trust_transitive_mcp=False,
+                logger=None,
+                approve=list,
             )
         assert any("tool" in reason for reason in failure.value.reasons)
 
@@ -263,6 +274,11 @@ def test_empty_locked_mcp_state_still_verifies_hydrated_declarations(tmp_path: P
     )
     with pytest.raises(FrozenInstallError, match="restored MCP declarations differ") as failure:
         InstallService.enforce_hydrated_mcp(
-            root, lock, tmp_path / "apm_modules", trust_transitive_mcp=False, logger=None
+            root,
+            lock,
+            tmp_path / "apm_modules",
+            trust_transitive_mcp=False,
+            logger=None,
+            approve=list,
         )
     assert failure.value.reasons == ["  - MCP server 'tool' is missing from apm.lock.yaml"]

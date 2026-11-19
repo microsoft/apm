@@ -22,8 +22,8 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
     [
         (
             "src/apm_cli/policy/ci_checks.py",
-            ").with_recorded_omissions(lock)",
-            ")",
+            "recorded=lock,",
+            "recorded=None,",
         ),
         (
             "src/apm_cli/install/mcp/integration.py",
@@ -42,8 +42,33 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
         ),
         (
             "src/apm_cli/install/mcp/integration.py",
-            "current_view = current_view.with_unapproved_executables(approved)",
-            "pass",
+            "approve=gate,",
+            "approve=None,",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "    )\n    stored_configs = lock.mcp_configs or {}",
+            "    ).with_recorded_omissions(lock)\n    stored_configs = lock.mcp_configs or {}",
+        ),
+        (
+            "src/apm_cli/install/service.py",
+            "recorded=lockfile,",
+            "recorded=None,",
+        ),
+        (
+            "src/apm_cli/install/service.py",
+            "current = CurrentMcpConfigView.select(",
+            "current = CurrentMcpConfigView.derive(",
+        ),
+        (
+            "src/apm_cli/install/phases/integrate.py",
+            "approve=mcp_executables_gate(lambda: effective_allow_map(ctx)),",
+            "approve=list,",
+        ),
+        (
+            "src/apm_cli/integration/mcp_config_view.py",
+            "evidence == self.omissions.get(name, False)",
+            "evidence is not None",
         ),
         (
             "src/apm_cli/install/mcp/integration.py",
@@ -52,8 +77,8 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
         ),
         (
             "src/apm_cli/install/mcp/integration.py",
-            "if any(is_executable_gated_mcp(dep) for dep in mcp_deps):",
-            "if any(dep.resolved_by is not None and dep.is_self_defined for dep in mcp_deps):",
+            "approved = gate(mcp_deps)",
+            "approved = [d for d in mcp_deps if not (d.resolved_by is not None and d.is_self_defined)]",
         ),
     ],
 )
