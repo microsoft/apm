@@ -42,7 +42,7 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 
 | Argument | Description |
 | --- | --- |
-| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules` or canonical `owner/repo`). Omit to refresh everything. Unknown names exit non-zero with the available list. |
+| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules`, canonical `owner/repo`, or `plugin@marketplace`). Omit to refresh everything. Unknown names exit non-zero with the available list. |
 
 ## Options
 
@@ -109,6 +109,7 @@ apm update
   restoration is also denied, preserve the reported backups and follow
   [recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before rerunning `apm update`; the prior package may not be active.
+- **Marketplace catalogs are revalidated.** Each catalog behind a `name` + `marketplace` dependency is fetched once per run instead of trusting the cached copy. If it cannot be verified, the update fails with no changes. `plugin@marketplace` selects that dependency.
 - **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
 - **Registry deps.** Updates stay within the manifest constraint and use the configured registry. An exact `1.7.0` or `=1.7.0` pin remains **unchanged** even when `apm outdated` reports `Latest` as `1.8.0`. To take an outside-constraint release, [select it explicitly](../outdated/#registry-reporting). Unlike read-only `outdated`, `update` can write the manifest, lockfile, modules, and deployed files.
 - **Structured plan.** Output is grouped into four sections:

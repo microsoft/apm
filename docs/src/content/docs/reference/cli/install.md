@@ -115,7 +115,7 @@ you use the generated registration.
 | Flag | Default | Description |
 |---|---|---|
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
-| `--refresh` | off | Re-resolve dependency refs against upstream and bypass cached content. Unlike `--update`, which may reuse content at a freshly resolved SHA, `--refresh` fetches it again. |
+| `--refresh` | off | Re-resolve dependency refs against upstream and bypass cached content. Unlike `--update`, which may reuse content at a freshly resolved SHA, `--refresh` fetches it again. Marketplace catalogs used by the install are revalidated once per run; if one cannot be verified the install fails without changes instead of using the cached catalog. |
 | `--ssh` | off | Prefer SSH transport for shorthand (`owner/repo`) deps. Mutually exclusive with `--https`. |
 | `--https` | off | Prefer HTTPS transport for shorthand deps. Mutually exclusive with `--ssh`. |
 | `--allow-protocol-fallback` | off | Restore the legacy permissive HTTPS<->SSH fallback chain. Env: `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
