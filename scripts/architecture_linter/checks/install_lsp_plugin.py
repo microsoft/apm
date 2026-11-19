@@ -64,6 +64,9 @@ _TRUST_OWNER_CALLERS = frozenset(
     }
 )
 _MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")
+# approve/deny select a package by exact name: a partial name could grant or deny
+# execution for another package, so prefix matching on names is refused.
+_APPROVE_LOOSE_MATCH_TOKENS = ("package_name.startswith(",)
 # approve.py must not re-derive a locked row's trust principal (#3710).
 _APPROVE_PARALLEL_TRUST_TOKENS = (
     "approval_identity=locked.",
@@ -174,6 +177,23 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             for token in _APPROVE_PARALLEL_TRUST_TOKENS
             if _present(facts, token)
         )
+        findings.extend(
+            _summary(
+                GUARD_EXECUTABLE_TRUST,
+                _APPROVE_COMMAND,
+                f"approve/deny must match package names exactly; remove {token}",
+            )
+            for token in _APPROVE_LOOSE_MATCH_TOKENS
+            if _present(facts, token)
+        )
+        if not _present(facts, "matches more than one installed package"):
+            findings.append(
+                _summary(
+                    GUARD_EXECUTABLE_TRUST,
+                    _APPROVE_COMMAND,
+                    "approve/deny must refuse a name that matches more than one package",
+                )
+            )
     return tuple(findings)
 
 

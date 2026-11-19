@@ -841,6 +841,11 @@ def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, 
             "    if manifest_path.is_file():",
         ),
         (
+            "src/apm_cli/commands/approve.py",
+            "        lambda d: pkg == d.package_name,",
+            "        lambda d: pkg == d.package_name or d.package_name.startswith(pkg),",
+        ),
+        (
             "src/apm_cli/install/local_bundle_handler.py",
             "def _filter_bundle_executables(",
             "def _bypass_trust(root):\n"
@@ -938,6 +943,35 @@ def test_bundle_reinstall_reconciles_owned_mcp_servers() -> None:
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, "bool(bundle_mcp_deps)")
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/orphans.py",
+            "dep = locked_marketplace_form(dep, lockfile)",
+            "dep = dep",
+        ),
+        (
+            "src/apm_cli/install/dry_run_plan.py",
+            "locked = locked_marketplace_row(dependency, lockfile)",
+            "locked = None",
+        ),
+    ],
+)
+def test_object_form_declarations_map_to_their_locked_row(path: str, old: str, new: str) -> None:
+    """Prune and dry-run read an object-form declaration through its lock row (#3960)."""
+    rule_id = "marketplace-integrations-locked-evidence"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
     ast.parse(mutated, filename=path)
 
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
