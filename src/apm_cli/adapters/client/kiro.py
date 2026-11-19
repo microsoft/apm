@@ -107,7 +107,7 @@ class KiroClientAdapter(CopilotClientAdapter):
         if runtime_vars is None:
             runtime_vars = {}
 
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config: dict[str, Any] = {"command": raw["command"]}
             if raw.get("cwd") is not None:

@@ -1148,8 +1148,8 @@ class TestExtractMCPServers:
         result = _extract_mcp_servers(plugin_dir, manifest)
         assert result == {}
 
-    def test_plugin_root_substitution(self, tmp_path):
-        """${CLAUDE_PLUGIN_ROOT} replaced with absolute plugin path."""
+    def test_plugin_root_kept_authored(self, tmp_path):
+        """${CLAUDE_PLUGIN_ROOT} stays authored; target renders expand it (#3825)."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
         manifest = {
@@ -1163,8 +1163,7 @@ class TestExtractMCPServers:
         }
 
         result = _extract_mcp_servers(plugin_dir, manifest)
-        abs_root = str(plugin_dir.resolve())
-        assert result["local-srv"]["args"] == [f"{abs_root}/server.js"]
+        assert result["local-srv"]["args"] == ["${CLAUDE_PLUGIN_ROOT}/server.js"]
 
 
 _FLAT_MCP_SERVERS = {
@@ -1202,10 +1201,9 @@ class TestMCPJsonShapes:
 
         result, warnings = self._extract(plugin_dir, {"name": "flat"})
 
-        abs_root = str(plugin_dir.resolve())
         assert set(result) == {"linear", "local"}
         assert result["linear"] == self._FLAT["linear"]
-        assert result["local"]["args"] == [f"{abs_root}/server.js"]
+        assert result["local"]["args"] == ["${CLAUDE_PLUGIN_ROOT}/server.js"]
         assert warnings == []
 
     def test_flat_file_named_by_plugin_json(self, tmp_path):
@@ -1354,7 +1352,7 @@ class TestMCPJsonShapes:
         assert mcp["linear"]["transport"] == "http"
         assert mcp["linear"]["url"] == "https://mcp.linear.app/mcp"
         assert mcp["local"]["transport"] == "stdio"
-        assert mcp["local"]["args"] == [f"{plugin_dir.resolve()}/server.js"]
+        assert mcp["local"]["args"] == ["${CLAUDE_PLUGIN_ROOT}/server.js"]
 
 
 class TestMCPServersToDeps:

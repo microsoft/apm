@@ -90,7 +90,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         config = super()._format_server_config(server_info, env_overrides, runtime_vars)
         overlay = server_info.get("_apm_env_overlay")
         env = config.get("env")
-        if server_info.get("_raw_stdio") or not overlay or not isinstance(env, dict):
+        if self._self_defined_stdio(server_info) or not overlay or not isinstance(env, dict):
             return config
 
         # Only declared/emitted keys participate, as on the legacy registry path.

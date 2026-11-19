@@ -453,7 +453,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         # but route values through the env-var translation/resolution pipeline
         # so secrets are not baked into the persisted config when the harness
         # supports runtime substitution (Copilot CLI).
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["command"] = raw["command"]
             if raw.get("cwd") is not None:

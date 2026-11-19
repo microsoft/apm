@@ -200,6 +200,7 @@ def run_service_integrations(
             active_package_keys=active_package_keys,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             pre_install_lock=existing_lock,
+            frozen=getattr(ctx, "frozen", False) is True,
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

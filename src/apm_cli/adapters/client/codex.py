@@ -430,7 +430,7 @@ class CodexClientAdapter(MCPClientAdapter):
         # one case that must NOT be resolved and stored: Codex reads those from
         # the launching environment through ``env_vars`` at server start, so the
         # secret never lands in config.toml. See issue #3393.
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             forwarded_env: list[str] = []
             resolved_env_for_args: dict = {}

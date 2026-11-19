@@ -38,7 +38,6 @@ from apm_cli.deps.plugin_parser import (
     _mcp_servers_to_apm_deps,
     _read_mcp_file,
     _read_mcp_json,
-    _substitute_plugin_root,
     normalize_plugin_directory,
     parse_plugin_manifest,
     synthesize_plugin_json_from_apm_yml,
@@ -731,38 +730,6 @@ class TestReadMcpFile:
         plugin_root.mkdir()
         servers = _read_mcp_file(plugin_root, "nonexistent.json", logging.getLogger("test"))
         assert servers == {}
-
-
-class TestSubstitutePluginRoot:
-    def test_substitutes_placeholder_in_string_values(self, tmp_path: Path) -> None:
-        import logging
-
-        servers = {
-            "my-srv": {
-                "command": "node",
-                "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"],
-            }
-        }
-        result = _substitute_plugin_root(servers, "/abs/path", logging.getLogger("test"))
-        assert result["my-srv"]["args"][0] == "/abs/path/server.js"
-
-    def test_substitutes_in_nested_dict(self, tmp_path: Path) -> None:
-        import logging
-
-        servers = {
-            "srv": {
-                "env": {"MY_PATH": "${CLAUDE_PLUGIN_ROOT}/data"},
-            }
-        }
-        result = _substitute_plugin_root(servers, "/base", logging.getLogger("test"))
-        assert result["srv"]["env"]["MY_PATH"] == "/base/data"
-
-    def test_no_placeholder_unchanged(self) -> None:
-        import logging
-
-        servers = {"srv": {"command": "node"}}
-        result = _substitute_plugin_root(servers, "/base", logging.getLogger("test"))
-        assert result == servers
 
 
 class TestExtractMcpServers:
