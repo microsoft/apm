@@ -174,7 +174,8 @@ or runtime configuration.
 An APM older than the lockfile's `apm_version` refuses `install` (including
 `--frozen`, `--dry-run` and `-g`), `update`, `uninstall`, `prune`, `lock`,
 `audit` and `pack` before any change, naming both versions; read-only commands
-warn. Upgrade the CLI; there is no override.
+warn. Upgrade the CLI; there is no override. A local bundle whose embedded
+lockfile a newer APM wrote installs with a warning naming both versions.
 `apm update`, `apm install --update`, and `apm install --refresh` revalidate
 each marketplace catalog they resolve once per run and fail without changes if
 it cannot be verified; plain `apm install` keeps the cached catalog.
