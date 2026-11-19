@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
-from apm_cli.drift import locked_marketplace_row
+from apm_cli.drift import locked_marketplace_replay
 from apm_cli.install.package_selection import (
     selected_dependency_identity,
     selected_subtree_dependencies,
@@ -24,14 +24,23 @@ if TYPE_CHECKING:
     from apm_cli.install.command_context import InstallContext
 
 
-def _resolved_key(dependency: DependencyReference, lockfile: LockFile | None) -> str:
+def _resolved_key(
+    dependency: DependencyReference,
+    lockfile: LockFile | None,
+    *,
+    update: bool,
+    apm_modules_dir: Path,
+) -> str:
     """Return the key the resolver records for one manifest declaration.
 
-    A locked object-form ``{name, marketplace}`` declaration replays to its
-    lock row's coordinate (#3960), so the graph holds it under that key.
+    Asks the resolver's own replay owner: a replayed object-form
+    ``{name, marketplace}`` declaration sits in the graph under its lock
+    row's coordinate (#3960); any other declaration keeps its own key.
     """
-    locked = locked_marketplace_row(dependency, lockfile)
-    return (locked or dependency).get_unique_key()
+    decision = locked_marketplace_replay(
+        dependency, lockfile, update_refs=update, modules_dir=apm_modules_dir
+    )
+    return (decision.reference or dependency).get_unique_key()
 
 
 @dataclass(frozen=True)
@@ -175,7 +184,10 @@ class ProspectiveInstallPlan:
         dependencies += tuple(
             dependency
             for dependency in self.selected_apm_dependencies
-            if _resolved_key(dependency, lockfile) not in resolved_keys
+            if _resolved_key(
+                dependency, lockfile, update=update, apm_modules_dir=apm_modules_dir
+            )
+            not in resolved_keys
         )
         errors = list(graph.resolution_errors)
         if graph.circular_dependencies:

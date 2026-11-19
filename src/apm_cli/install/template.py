@@ -272,7 +272,9 @@ def preflight_agent_plugin_dry_run(
     with native_registration_scope(targets):
         for dependency in dependencies:
             if dependency.is_marketplace:
-                # Not resolved by the offline preview: nothing materialized to inspect.
+                # The read-only preview resolves a marketplace declaration only by
+                # lock replay; one left unresolved has no install path and its
+                # preview error is already reported.
                 continue
             if dependency.is_local and dependency.local_path:
                 package_path = Path(dependency.local_path).expanduser()
