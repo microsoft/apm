@@ -114,7 +114,9 @@ canonical targets validator will reject them).
 
 ## copilot
 
-GitHub Copilot (CLI and IDE).
+GitHub Copilot (CLI and IDE). `vscode` is a deprecated alias that selects
+`copilot`; replace it in `apm.yml` and `--target`. VS Code's deprecated Local
+mode no longer gets MCP servers; use the Copilot harness.
 
 - **Detection.** `.github/copilot-instructions.md`.
 - **Deploy directory.** `.github/` at project scope; `~/.copilot/` at user scope
@@ -129,6 +131,8 @@ GitHub Copilot (CLI and IDE).
   - skills: `.agents/skills/<name>/SKILL.md` at project scope and
     `~/.agents/skills/<name>/SKILL.md` at user scope
   - hooks: `.github/hooks/<name>.json`
+  - mcp: root `.mcp.json` (project, shared with Claude Code, which ignores
+    Copilot `tools` allow-lists) or `~/.copilot/mcp-config.json` (user)
   - generated: `.github/copilot-instructions.md` (compile output, project scope only)
 - **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
   `instructions` deploy individually under `~/.copilot/instructions/`, mirroring
@@ -204,6 +208,8 @@ OpenAI Codex CLI.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.codex/hooks.json`
 - **Compile output.** `AGENTS.md` only. Per-file instructions are not installed for Codex.
+- **Plugin manifest.** For `targets: [codex]`, `apm pack` writes
+  `.codex-plugin/plugin.json`; see [`apm pack`](../cli/pack/).
 
 ## gemini
 
@@ -323,6 +329,9 @@ GitHub Copilot for JetBrains IDEs.
 - **Scope.** MCP configuration is user scope only. File primitives use the
   project or user scope selected for the Copilot profile. IntelliJ does not
   participate in plain `all` expansion.
+- **Selection.** `--target intellij` works per command, but `apm.yml`
+  `targets:` refuses it and `apm init`/`apm install` never record it; record
+  `copilot` for JetBrains projects.
 
 ## agent-skills
 

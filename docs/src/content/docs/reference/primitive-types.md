@@ -224,7 +224,5 @@ python -m pytest tests/test_enhanced_discovery.py -v
 
 The enhanced discovery system is designed to support future features:
 
-- **Compilation Integration**: Source attribution in generated `AGENTS.md` files
-- **CLI Commands**: `apm deps list`, `apm compile --trace` commands
 - **Advanced Conflict Resolution**: User-configurable conflict resolution strategies
 - **Performance Optimization**: Caching and incremental discovery for large projects
