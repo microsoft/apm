@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING:** `copilot` moves project MCP servers to root `.mcp.json`, shared with Claude Code, which ignores Copilot `tools` allow-lists; run `apm install`, review static `env:` values, and commit. (#3875)
 - The `vscode` target is deprecated as an alias of `copilot`, and VS Code's Local mode no longer gets MCP servers; use the `copilot` target and the Copilot harness. Lockfiles that recorded `vscode` still install. (#3875)
-- Singular `target:` and the ignored `compilation.target` are deprecated and warn once per run; switch to the `targets:` value the warning prints. (#3801, #3875)
+- Singular `target:` and the ignored `compilation.target` are deprecated and warn once per run: replace `target:` with the `targets:` value its warning prints, and delete `compilation.target`. (#3801, #3875)
 - The `auto-integrate` config key is deprecated; it never had an effect, so remove it. (#3865)
 - `default_host:` in `apm.yml` now applies to shorthand dependencies in install, uninstall and audit (OpenAPM req-mf-019); write `github.com/owner/repo` for GitHub packages. (#3865)
 - Diamond dependencies deploy each skill only to the harnesses its own declaration selected; older lockfiles fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
