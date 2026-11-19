@@ -46,9 +46,13 @@ def integrate_local_bundle_hooks(
     logger: Any = None,
 ) -> BundleHookResult:
     """Register the bundle's plugin hooks for every hook-capable target."""
+    from .local_bundle_paths import bundle_pack_files, bundle_slug_validation_error
+
     result = BundleHookResult()
     hook_paths = sorted(rel for rel in pack_files if is_plugin_hook_path(rel))
     if not hook_paths:
+        if not dry_run and bundle_slug_validation_error(slug) is None:
+            _retire_bundle_hooks(project_root, targets, slug)
         return result
     if not hooks_approved:
         result.skipped = len(hook_paths)
@@ -69,7 +73,6 @@ def integrate_local_bundle_hooks(
     hook_targets = [target for target in targets if target.supports("hooks")]
     if not hook_targets:
         return result
-    from .local_bundle_paths import bundle_pack_files, bundle_slug_validation_error
 
     verified_files = bundle_pack_files(bundle_info)
     if not verified_files:
@@ -167,17 +170,43 @@ def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage
     )
 
 
+def _retire_bundle_hooks(project_root: Path, targets: Any, slug: str) -> None:
+    """Remove this bundle's merged hook entries when a reinstall ships no hooks."""
+    from ..integration.hook_integrator import HookIntegrator
+    from ..models.apm_package import APMPackage, PackageInfo
+
+    stage = Path(tempfile.gettempdir()) / slug
+    package_info = PackageInfo(
+        package=APMPackage(name=slug, version="0.0.0", package_path=stage),
+        install_path=stage,
+        local_bundle_id=slug,
+    )
+    hook_targets = [target for target in targets if target.supports("hooks")]
+    HookIntegrator().reconcile_package_target_restriction(package_info, project_root, hook_targets)
+
+
 def _prior_bundle_claims(project_root: Path) -> set[str]:
-    """Return paths a previous bundle install recorded, so reinstall replaces them."""
+    """Return unedited bundle claims, project-relative, that a reinstall may overwrite.
+
+    An edited claim is left out so the hook integrator's collision check keeps
+    the edit unless ``--force`` is passed, as the bundle file copy does.
+    """
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..utils.content_hash import compute_file_hash
 
     lockfile = LockFile.read(get_lockfile_path(project_root))
     if lockfile is None:
         return set()
-    return set(
-        DeploymentLedgerCodec.local_bundle_values(DeploymentLedgerCodec.from_lockfile(lockfile))
-    )
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    claims: set[str] = set()
+    for value in DeploymentLedgerCodec.local_bundle_values(ledger):
+        path = Path(value) if Path(value).is_absolute() else project_root / value
+        recorded = lockfile.local_deployed_file_hashes.get(value)
+        if not path.is_file() or recorded != compute_file_hash(path):
+            continue
+        claims.add(_record_path(path, project_root, user_scope=False))
+    return claims
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:

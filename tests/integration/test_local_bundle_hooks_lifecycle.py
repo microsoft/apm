@@ -10,6 +10,7 @@ dependency is installed or uninstalled.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -71,11 +72,30 @@ def _packed_bundle(world: MarketplacePackWorld, tmp_path: Path) -> tuple[Path, P
     return producer, bundle, key
 
 
+def _repack(
+    world: MarketplacePackWorld, producer: Path, tmp_path: Path, version: str, script: str | None
+) -> tuple[Path, str]:
+    """Repack *producer* as *version*; ``script=None`` drops its hooks."""
+    manifest = (producer / "apm.yml").read_text().replace("version: 1.0.0", f"version: {version}")
+    write(producer / "apm.yml", manifest)
+    if script is None:
+        shutil.rmtree(producer / ".apm" / "hooks")
+    else:
+        write(producer / ".apm" / "hooks" / "scripts" / "x.sh", script).chmod(0o755)
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / "out"))
+    bundle = tmp_path / "out" / f"hookpkg-{version}"
+    info = detect_local_bundle(bundle)
+    return bundle, local_bundle_approval_key(
+        info.package_id, str(info.plugin_json.get("version") or ""), info.source_dir, info.lockfile
+    )
+
+
 def _hook_entries(project: Path) -> dict[str, list[str]]:
     settings = json.loads((project / ".claude" / "settings.json").read_text())
     return {
         event: [entry["matcher"] for entry in entries]
-        for event, entries in settings["hooks"].items()
+        for event, entries in settings.get("hooks", {}).items()
     }
 
 
@@ -147,6 +167,14 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     world.apm(consumer, "install", str(bundle), "--no-policy")
     assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
 
+    # A locally edited hook script survives a reinstall unless --force is passed.
+    script = consumer / scripts[0]
+    script.write_text("#!/bin/sh\necho edited\n")
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert script.read_text() == "#!/bin/sh\necho edited\n"
+    world.apm(consumer, "install", str(bundle), "--no-policy", "--force")
+    assert script.read_text() == "#!/bin/sh\necho hookpkg\n"
+
     # An unrelated dependency with hooks neither sweeps nor drifts bundle hooks.
     dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
     _allow(consumer, key, f"{dep}#1.0.0")
@@ -157,6 +185,12 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
     assert _run_hook(world, consumer, "Bash") == "hookpkg\n"
     assert (consumer / ".claude" / "skills" / "hs" / "SKILL.md").is_file()
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+    # A newer bundle of the same package that ships no hooks retires its entries.
+    hookless, _ = _repack(world, producer, tmp_path, "1.0.1", None)
+    world.apm(consumer, "install", str(hookless), "--no-policy")
+    assert _hook_entries(consumer) == {}
     world.apm(consumer, "audit", "--ci", "--no-policy")
 
 
@@ -193,3 +227,9 @@ def test_bundle_hooks_register_for_copilot_and_user_scope(
     world.apm(world.isolated.work_root, "install", "-g", str(bundle), "--no-policy")
     assert _hook_entries(home) == {"PreToolUse": ["Bash"]}
     assert _run_hook(world, home, "Bash") == "hookpkg\n"
+
+    # An approved newer bundle updates its user-scope script without --force.
+    updated, updated_key = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
+    _allow(home / ".apm", key, updated_key)
+    world.apm(world.isolated.work_root, "install", "-g", str(updated), "--no-policy")
+    assert _run_hook(world, home, "Bash") == "v2\n"
