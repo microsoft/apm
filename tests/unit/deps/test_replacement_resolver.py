@@ -201,11 +201,28 @@ def test_actual_resolver_claims_only_the_selected_alias_destination(tmp_path: Pa
 
 def test_actual_resolver_rejects_ambiguous_original_identities(tmp_path: Path) -> None:
     factory = LocalPackageFactory(tmp_path)
-    other = "https://github.com:8443/example/base"
-    consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
+    # A registry-proxy key stays bare, so it shares the upstream original key.
+    other = "art.example.com/artifactory/github/example/base"
+    consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, other))
     _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
     with pytest.raises(ReplacementCollisionError, match="share one original package identity"):
         APMDependencyResolver().resolve_dependencies(consumer.root)
+
+
+def test_actual_resolver_rejects_port_distinct_package_on_shared_slot(tmp_path: Path) -> None:
+    # #3927: another port is another server, so it is not an ambiguous original
+    # identity; the #3696 slot owner rejects the shared directory by name.
+    factory = LocalPackageFactory(tmp_path)
+    other = "https://github.com:8443/example/base"
+    consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
+    _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert any(
+        "github.com/example/base and github.com:8443/example/base are different packages"
+        in error
+        and "would both install to apm_modules/example/base" in error
+        for error in graph.resolution_errors
+    )
 
 
 def test_actual_resolver_detects_logical_cycle_through_local_replacement(tmp_path: Path) -> None:

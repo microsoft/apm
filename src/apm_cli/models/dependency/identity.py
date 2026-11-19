@@ -221,6 +221,7 @@ def build_dependency_unique_key(
     repo_url: str,
     *,
     host: str | None = None,
+    port: int | None = None,
     source: str | None = None,
     local_path: str | None = None,
     is_virtual: bool = False,
@@ -238,6 +239,10 @@ def build_dependency_unique_key(
     This deliberately uses the literal ``github.com`` default rather than
     environment-specific host overrides, so lockfile keys stay portable across
     machines with different GitHub Enterprise defaults.
+
+    A non-default *port* names a different server, so it qualifies the host
+    segment (``host:port/owner/repo``), including on github.com. Parsing has
+    already dropped scheme-default ports, so port-less keys are unchanged.
 
     Registry-proxy deps (``registry_prefix`` set, e.g. an Artifactory mirror)
     keep the bare logical key: the proxy host is a transport detail, not the
@@ -264,8 +269,9 @@ def build_dependency_unique_key(
     if registry_prefix:
         return key
 
-    host_value = (host or "").strip()
-    normalized_host = host_value.lower()
+    normalized_host = (host or "").strip().lower()
+    if port:
+        return f"{normalized_host or 'github.com'}:{port}/{key}"
     if normalized_host and normalized_host != "github.com":
         return f"{normalized_host}/{key}"
     return key

@@ -437,14 +437,50 @@ class TestCustomPortParsing:
         assert locked.port is None
         assert "port" not in locked.to_dict()
 
-    def test_same_repo_different_ports_dedup_by_repo_url(self):
-        """Two refs to the same logical repo via different ports still collide on repo_url.
-
-        Port is a transport detail, not an identity component -- dedup stays on repo_url.
-        """
+    def test_same_repo_different_ports_are_distinct_identities(self):
+        """Two ports name two servers, so their identity keys differ (#3927)."""
         dep_a = DependencyReference.parse("ssh://git@bitbucket.domain.ext:7999/project/repo.git")
         dep_b = DependencyReference.parse("https://bitbucket.domain.ext:8443/project/repo")
-        assert dep_a.get_unique_key() == dep_b.get_unique_key()
+        assert dep_a.get_unique_key() == "bitbucket.domain.ext:7999/project/repo"
+        assert dep_b.get_unique_key() == "bitbucket.domain.ext:8443/project/repo"
+
+    @pytest.mark.parametrize(
+        ("spec", "expected"),
+        [
+            ("https://github.com:8443/acme/tool.git", "github.com:8443/acme/tool"),
+            ("https://GitHub.com:8443/Acme/Tool.git", "github.com:8443/acme/tool"),
+            ("github.com:8443/acme/tool", "github.com:8443/acme/tool"),
+            ("https://gitlab.example.com:8443/acme/tool.git", "gitlab.example.com:8443/acme/tool"),
+            ("acme/tool", "acme/tool"),
+            ("https://github.com:443/acme/tool.git", "acme/tool"),
+            ("ssh://git@github.com:22/acme/tool.git", "acme/tool"),
+            ("gitlab.example.com/acme/tool", "gitlab.example.com/acme/tool"),
+        ],
+    )
+    def test_unique_key_qualifies_only_non_default_ports(self, spec, expected):
+        """#3927: a non-default port qualifies the key; port-less keys are unchanged."""
+        dep = DependencyReference.parse(spec)
+        assert dep.get_unique_key() == expected
+        assert DependencyReference.parse(expected).get_unique_key() == expected
+
+    def test_port_distinct_entries_survive_lockfile_round_trip(self):
+        """#3927: two ports of one repository keep two lockfile entries."""
+        from src.apm_cli.deps.lockfile import LockFile
+
+        lock = LockFile()
+        for spec in ("acme/tool", "https://github.com:8443/acme/tool.git"):
+            lock.add_dependency(
+                LockedDependency.from_dependency_ref(
+                    DependencyReference.parse(spec),
+                    resolved_commit="a" * 40,
+                    depth=1,
+                    resolved_by=None,
+                )
+            )
+        restored = LockFile.from_yaml(lock.to_yaml())
+        assert {"acme/tool", "github.com:8443/acme/tool"} <= set(restored.dependencies)
+        assert restored.dependencies["github.com:8443/acme/tool"].port == 8443
+        assert restored.dependencies["acme/tool"].port is None
 
     def test_lockfile_rejects_garbage_port_string(self):
         restored = LockedDependency.from_dict({"repo_url": "owner/repo", "port": "not-a-number"})

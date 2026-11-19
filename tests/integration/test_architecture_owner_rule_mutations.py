@@ -181,6 +181,46 @@ def test_deploy_selection_cannot_bypass_owner(path: str, original: str, replacem
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/models/dependency/identity.py",
+            "    if port:\n",
+            "    if False:\n",
+            id="builder-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/reference.py",
+            "            host=self.host,\n            port=self.port,\n"
+            '            source="local" if self.is_local else self.source,\n',
+            "            host=self.host,\n"
+            '            source="local" if self.is_local else self.source,\n',
+            id="reference-drops-port",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "            host=self.host,\n            port=self.port,\n"
+            "            source=self.source,\n",
+            "            host=self.host,\n            source=self.source,\n",
+            id="lockfile-drops-port",
+        ),
+    ],
+)
+def test_dependency_unique_key_cannot_drop_the_port(
+    path: str, original: str, replacement: str
+) -> None:
+    """Both identity models key a non-default port through one builder (#3927)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "contracts-tooling-dependency-identity"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",

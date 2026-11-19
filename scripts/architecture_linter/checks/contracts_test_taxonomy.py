@@ -765,6 +765,25 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Package identity casing must route through is_github_hostname",
             )
         )
+    # #3927: a non-default port names another server, so both identity models
+    # hand it to the one key builder and the builder qualifies the host with it.
+    lockfile, lockfile_errors = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    findings.extend(lockfile_errors)
+    key_method = re.compile(r"^    def get_unique_key\(")
+    method_boundary = re.compile(r"^    def ")
+    if not lockfile_errors and (
+        not _body_has(unique_key_body, "if port:")
+        or not _body_has(_awk_body(reference, key_method, method_boundary), "port=self.port,")
+        or not _body_has(_awk_body(lockfile, key_method, method_boundary), "port=self.port,")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _IDENTITY_OWNER,
+                "Dependency unique keys must carry the non-default port through "
+                "build_dependency_unique_key",
+            )
+        )
     embedded_subpath_body = _awk_body(
         reference,
         re.compile(r"^    def _check_no_embedded_subpath\("),

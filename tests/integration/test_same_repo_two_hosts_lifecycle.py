@@ -5,7 +5,8 @@ another host would both install to ``apm_modules/test/tool``. Install and update
 reject the combination before anything is fetched, naming both declarations
 (and the declaring parent for a transitive one), instead of failing on a
 staging race. Giving one declaration its own ``alias:`` installs both; the same alias on
-two different packages is rejected the same way.
+two different packages is rejected the same way. Another port on the same host is
+another server, so it is a different package too (#3927).
 """
 
 from __future__ import annotations
@@ -27,10 +28,11 @@ from tests.integration._dependency_graph_world import (
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _OTHER = f"{GENERIC_HOST}/test/tool"
+_PORTED_HOST = "github.com:8443"
 _SHARED = "would both install to apm_modules/test/tool"
 
 
-def _world(tmp_path: Path, apm_binary_path: Path) -> World:
+def _world(tmp_path: Path, apm_binary_path: Path, other_host: str = GENERIC_HOST) -> World:
     world = World.create(tmp_path, apm_binary_path)
     world.publish("tool")
     world.publish("mid")
@@ -40,7 +42,7 @@ def _world(tmp_path: Path, apm_binary_path: Path) -> World:
     world.factory.commit(other, message="publish tool on another host")
     world.env = world.factory.url_rewrite_subprocess_env_many(
         [(repo, remote(name)) for name, repo in world.repos.items()]
-        + [(other, remote("tool", GENERIC_HOST))]
+        + [(other, remote("tool", other_host))]
     )
     return world
 
@@ -119,6 +121,30 @@ def test_alias_installs_both_packages(tmp_path: Path, apm_binary_path: Path) -> 
     world.apm("install", NO_POLICY)
     assert world.modules() == {"test/tool", "tool-other"}
     assert world.deployed() == {"tool.instructions.md", "tool-other.instructions.md"}
+    lock_after = world.lock_bytes()
+    world.apm("install", NO_POLICY)
+    assert world.lock_bytes() == lock_after
+
+
+def test_same_repo_on_another_port_is_a_different_package(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _world(tmp_path, apm_binary_path, other_host=_PORTED_HOST)
+    ported = remote("tool", _PORTED_HOST)
+
+    world.manifest(["test/tool", ported])
+    output = _output(world.apm("install", NO_POLICY, expect=1))
+    assert f"github.com/test/tool and {_PORTED_HOST}/test/tool are different packages" in output
+    assert _SHARED in output
+    assert world.modules() == set()
+    assert not (world.project / "apm.lock.yaml").exists()
+
+    world.manifest(["test/tool", {"git": ported, "alias": "tool-other"}])
+    world.apm("install", NO_POLICY)
+    assert world.modules() == {"test/tool", "tool-other"}
+    assert world.deployed() == {"tool.instructions.md", "tool-other.instructions.md"}
+    entries = {(dep.get("host"), dep.get("port")) for dep in world.lock()["dependencies"]}
+    assert {("github.com", None), ("github.com", 8443)} <= entries
     lock_after = world.lock_bytes()
     world.apm("install", NO_POLICY)
     assert world.lock_bytes() == lock_after

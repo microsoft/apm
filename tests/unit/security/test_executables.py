@@ -1031,6 +1031,35 @@ class TestCanonicalExecIdentityHostCase:
         )
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
 
+    def test_deny_cannot_be_bypassed_by_naming_another_port(self) -> None:
+        """#3927: ports enter the identity key, but deny matching stays port-blind."""
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import (
+            build_exec_trust_context,
+            canonical_exec_identity,
+            resolve_exec_decision,
+        )
+
+        assert canonical_exec_identity("https://github.com:8443/Evil/Pkg.git") == "evil/pkg"
+        key = "github.com:8443/evil/pkg"
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False,
+                deny=["evil/pkg"],
+                require=(),
+                recommend=(),
+                enforce=(),
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={"executables": {"allow": {key: {"hooks": True}}}},
+            migrate_user_legacy=False,
+        )
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
 
 def test_locked_replacement_keys_name_the_selected_source() -> None:
     """MCP/LSP views key a replaced row like the install gate, never upstream (#3710)."""
