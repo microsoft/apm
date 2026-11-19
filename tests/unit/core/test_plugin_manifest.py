@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -565,6 +566,78 @@ class TestApmManagedMcpExcludedFromPack:
         assert "mcpServers" not in codex
         assert "mcpServers" not in claude
         assert "apm.lock.yaml cannot be read" in logger.warning.call_args.args[0]
+
+    @pytest.mark.parametrize(
+        "lock",
+        [
+            "lockfile_version: '1'\nmcp_servers:\n  - {a: 1}\n",
+            "lockfile_version: '1'\nmcp_configs:\n  1: {}\n",
+        ],
+    )
+    def test_malformed_lock_entry_withholds_root_mcp(self, tmp_path: Path, lock: str) -> None:
+        apm = self._project(tmp_path, {"authored": {"command": "node"}}, lock)
+        logger = MagicMock()
+
+        codex = build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
+        claude = build_plugin_manifest(tmp_path, apm, "claude", logger=logger)
+
+        assert "mcpServers" not in codex
+        assert "mcpServers" not in claude
+        assert "apm.lock.yaml cannot be read" in logger.warning.call_args.args[0]
+
+    def test_registry_server_matches_its_native_config_key(self, tmp_path: Path) -> None:
+        # install writes registry ``acme/devsrv`` under key ``devsrv``; a
+        # self-defined ``acme/self`` keeps its declared name, so an authored
+        # ``self`` is not APM-managed.
+        apm = self._project(
+            tmp_path,
+            {
+                "devsrv": {"url": "https://x.test/mcp", "headers": {"Authorization": "Bearer t"}},
+                "self": {"command": "node"},
+            },
+            "lockfile_version: '1'\nmcp_servers: [acme/devsrv, acme/self]\n"
+            "mcp_configs:\n  acme/self: {name: acme/self, registry: false}\n"
+            "mcp_target_servers:\n  copilot: [acme/devsrv, acme/self]\n",
+        )
+
+        codex = build_plugin_manifest(tmp_path, apm, "codex", logger=MagicMock())
+        claude = build_plugin_manifest(tmp_path, apm, "claude")
+
+        assert "mcpServers" not in codex
+        assert claude["mcpServers"] == {"self": {"command": "node"}}
+
+    def test_deeply_nested_server_fails_closed(self, tmp_path: Path) -> None:
+        depth = sys.getrecursionlimit() + 100
+        nested = '{"a": ' * depth + "1" + "}" * depth
+        _write(tmp_path / ".mcp.json", '{"mcpServers": {"deep": ' + nested + "}}")
+
+        assert collect_mcp_servers(tmp_path, exclude_apm_managed=True) == {}
+
+    def test_bundle_drops_managed_servers_from_seeded_plugin_json(self, tmp_path: Path) -> None:
+        from apm_cli.bundle.plugin_exporter import export_plugin_bundle
+
+        _write(tmp_path / "apm.yml", "name: p\nversion: 1.0.0\ndependencies: {}\n")
+        _write(tmp_path / "apm.lock.yaml", "lockfile_version: '1'\nmcp_servers: [acme/devsrv]\n")
+        _write(
+            tmp_path / ".claude-plugin" / "plugin.json",
+            json.dumps(
+                {
+                    "name": "p",
+                    "version": "1.0.0",
+                    "mcpServers": {
+                        "devsrv": {"url": "https://x.test/mcp"},
+                        "authored": {"command": "node"},
+                    },
+                }
+            ),
+        )
+
+        result = export_plugin_bundle(
+            project_root=tmp_path, output_dir=tmp_path / "build", target="claude"
+        )
+
+        bundled = json.loads((result.bundle_path / "plugin.json").read_text(encoding="utf-8"))
+        assert bundled["mcpServers"] == {"authored": {"command": "node"}}
 
 
 # ---------------------------------------------------------------------------

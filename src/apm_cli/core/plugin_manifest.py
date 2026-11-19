@@ -265,33 +265,59 @@ def apm_managed_mcp_names(project_root: Path) -> frozenset[str] | None:
     APM's consumer render, which can carry the author's credentials. Pack reads
     only authored servers: every name the lockfile records as APM-managed
     (``mcp_servers``, ``mcp_configs``, ``mcp_target_servers`` for any target) is
-    excluded, so pack output is the same before and after ``apm install``.
-    Returns an empty set when there is no lockfile and ``None`` when it cannot
-    be read (ownership unknown; callers fail closed).
+    excluded, together with the native config key install writes for it
+    (registry ``owner/name`` -> ``name``), so pack output is the same before and
+    after ``apm install``. Returns an empty set when there is no lockfile and
+    ``None`` when it cannot be read or holds a malformed name (ownership
+    unknown; callers fail closed).
     """
+    from ..adapters.client.base import MCPClientAdapter
     from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 
     try:
         lock = LockFile.read(resolve_lockfile_path_for_read(project_root, read_only=True))
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError, AttributeError):
         return None
     if lock is None:
         return frozenset()
-    names = set(lock.mcp_servers) | set(lock.mcp_configs)
+    recorded = [*lock.mcp_servers, *lock.mcp_configs]
     for servers in lock.mcp_target_servers.values():
-        names.update(servers)
-    return frozenset(str(name) for name in names)
+        recorded.extend(servers)
+    names: set[str] = set()
+    for name in recorded:
+        if not isinstance(name, str) or not name:
+            return None
+        stored = lock.mcp_configs.get(name)
+        self_defined = isinstance(stored, dict) and stored.get("registry") is False
+        info = {"name": name, "is_self_defined": True} if self_defined else None
+        names.add(name)
+        names.add(MCPClientAdapter.determine_config_key(name, None, info))
+    return frozenset(names)
 
 
 def _warn_unknown_mcp_ownership(logger: Any) -> None:
     _emit(
         "warning",
-        "Root .mcp.json left out of the plugin: apm.lock.yaml cannot be read, so the "
-        "MCP servers APM installed there cannot be told apart from authored ones. "
+        "Project MCP servers left out of the plugin: apm.lock.yaml cannot be read, so the "
+        "servers 'apm install' manages cannot be told apart from authored ones. "
         "Fix or regenerate apm.lock.yaml with 'apm install', then run 'apm pack' again.",
         logger,
         "warning",
     )
+
+
+def without_apm_managed_mcp_servers(
+    project_root: Path, servers: dict, *, logger: Any = None
+) -> dict:
+    """Return *servers* minus those :func:`apm_managed_mcp_names` reports.
+
+    Returns an empty dict (and warns) when ownership is unknown.
+    """
+    managed = apm_managed_mcp_names(project_root)
+    if managed is None:
+        _warn_unknown_mcp_ownership(logger)
+        return {}
+    return {name: server for name, server in servers.items() if name not in managed}
 
 
 def collect_mcp_servers(
@@ -325,12 +351,13 @@ def collect_mcp_servers(
     if not servers:
         return {}
     if exclude_apm_managed:
-        managed = apm_managed_mcp_names(project_root)
-        if managed is None:
-            _warn_unknown_mcp_ownership(logger)
-            return {}
-        servers = {name: server for name, server in servers.items() if name not in managed}
-    return _sanitize_mcp_servers(servers, logger=logger)
+        servers = without_apm_managed_mcp_servers(project_root, servers, logger=logger)
+    try:
+        return _sanitize_mcp_servers(servers, logger=logger)
+    except RecursionError:
+        # A deeply nested but parseable server object overflows the recursive
+        # sanitizer; fail closed to an empty map rather than crash the pack.
+        return {}
 
 
 def _sanitize_mcp_servers(servers: dict, *, logger: Any = None) -> dict:

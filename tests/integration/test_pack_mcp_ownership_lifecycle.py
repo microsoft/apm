@@ -24,9 +24,14 @@ _MANIFESTS = (
 
 
 def _pack(runner: ApmLifecycleRunner, project: Path, env: dict[str, str]) -> dict[str, bytes]:
+    """Pack and return every manifest and ``build/`` file as {relative path: bytes}."""
     result = runner.run(("pack", "--force"), cwd=project, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
-    return {rel: (project / rel).read_bytes() for rel in _MANIFESTS}
+    output = {rel: (project / rel).read_bytes() for rel in _MANIFESTS}
+    for path in (project / "build").rglob("*"):
+        if path.is_file():
+            output[path.relative_to(project).as_posix()] = path.read_bytes()
+    return output
 
 
 def test_pack_output_is_identical_before_and_after_install(
@@ -57,15 +62,12 @@ def test_pack_output_is_identical_before_and_after_install(
     after = _pack(runner, project, env)
 
     assert after == before
-    for text in (data.decode("utf-8") for data in after.values()):
-        assert ".mcp.json" not in text
-        assert "devsrv" not in text
-        assert "Authorization" not in text
-        assert _FIXTURE_TOKEN not in text
-    bundles = list((project / "build").glob("*"))
-    assert bundles
-    for bundle in bundles:
-        assert not (bundle / ".mcp.json").exists()
-        for path in bundle.rglob("*"):
-            if path.is_file():
-                assert _FIXTURE_TOKEN not in path.read_text(encoding="utf-8", errors="replace")
+    assert any(rel.startswith("build/") for rel in after)
+    for rel, data in after.items():
+        text = data.decode("utf-8", errors="replace")
+        assert not rel.endswith(".mcp.json"), rel
+        assert _FIXTURE_TOKEN not in text, rel
+        if rel in _MANIFESTS:
+            assert ".mcp.json" not in text
+            assert "devsrv" not in text
+            assert "Authorization" not in text

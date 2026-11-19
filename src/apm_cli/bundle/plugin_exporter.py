@@ -962,6 +962,18 @@ def export_plugin_bundle(
         ),
         logger=logger,
     )
+    # A plugin.json seeded from disk may be one an earlier pack generated after
+    # 'apm install'; its inline servers follow the same ownership rule as root
+    # .mcp.json.
+    seeded_mcp = plugin_json.get("mcpServers")
+    if isinstance(seeded_mcp, dict) and seeded_mcp:
+        from ..core.plugin_manifest import without_apm_managed_mcp_servers
+
+        kept_mcp = without_apm_managed_mcp_servers(project_root, seeded_mcp, logger=logger)
+        if kept_mcp:
+            plugin_json["mcpServers"] = kept_mcp
+        else:
+            plugin_json.pop("mcpServers")
 
     # 4. devDependencies filtering
     dev_dep_urls = _get_dev_dependency_urls(apm_yml_path)
