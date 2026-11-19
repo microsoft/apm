@@ -661,7 +661,7 @@ With `--ci --policy <path|url|owner/repo>`, a policy that cannot be loaded (miss
 |---------|---------|-----------|
 | `apm lifecycle` | List all discovered lifecycle scripts across policy, user, and project sources | -- |
 | `apm lifecycle init` | Inject a starter `lifecycle:` block into `apm.yml` | `--force` (overwrite existing block) |
-| `apm lifecycle test EVENT` | Fire a synthetic event through all discovered scripts (dry-run) | `--verbose`, `--execute` (actually run scripts) |
+| `apm lifecycle test EVENT` | Fire a synthetic event through all discovered scripts (dry-run) | `--verbose`, `--execute` (actually run scripts, through the same trust and kill-switch gate as install) |
 | `apm lifecycle validate` | Check all discovered script files for schema errors, unknown events, missing fields, and non-HTTPS URLs | -- |
 | `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run | -- |
 | `apm lifecycle untrust` | Revoke trust for `apm.yml` `lifecycle:`; project scripts will stop running | -- |

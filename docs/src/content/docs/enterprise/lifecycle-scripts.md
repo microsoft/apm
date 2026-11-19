@@ -367,3 +367,6 @@ apm lifecycle untrust           # revoke trust; scripts stop running
 The `test` command defaults to a **dry-run** (no commands or HTTP requests run)
 and shows the trust status of the project lifecycle block. Add `--execute` to
 actually fire the event -- useful for verifying wiring before the first real install.
+`--execute` fires only what an install would fire: untrusted project scripts,
+`APM_NO_SCRIPTS` and org `executables.deny_all` withhold scripts exactly as they do
+for `apm install`.

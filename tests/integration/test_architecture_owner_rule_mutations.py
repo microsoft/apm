@@ -1010,6 +1010,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Advisory evidence starts claiming implementation authority.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lifecycle-script-gate",
+        rule_id="contracts-tooling-lifecycle-script-gate",
+        path="src/apm_cli/commands/lifecycle.py",
+        old="    runner = build_runner_from_context(verbose=verbose, project_root=project_root, events=(event,))",
+        new="    runner = LifecycleScriptRunner(scripts=matching, verbose=verbose, project_root=project_root)",
+        intent="lifecycle test --execute fires scripts the script gate would withhold.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-generator-gate",
         rule_id="contracts-tooling-lockfile-generator-gate",
         path="src/apm_cli/commands/pack.py",

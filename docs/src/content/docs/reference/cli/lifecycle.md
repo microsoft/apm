@@ -84,7 +84,9 @@ Exits `1` if any errors are found.
 
 Fire a synthetic lifecycle event through all discovered scripts. Dry-run by
 default: shows which scripts would run without executing them. Pass `--execute`
-to actually run them.
+to actually run them. `--execute` goes through the same gate as install:
+`APM_NO_SCRIPTS`, org `executables.deny_all` and project script trust, so run
+`apm lifecycle trust` first for project scripts.
 
 ```bash
 apm lifecycle test                        # dry-run post-install (default event)

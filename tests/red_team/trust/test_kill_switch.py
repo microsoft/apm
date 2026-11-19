@@ -4,9 +4,7 @@ Covers:
   * APM_NO_SCRIPTS with non-empty values ("1", "0", "false") -- all disable
     (safe direction), documenting the "0"/"false" footgun.
   * org executables.deny_all suppresses even TRUSTED project scripts.
-  * `apm lifecycle test --execute` intentionally bypasses the gate (the
-    user typed --execute in their own repo) -- asserted as intended design,
-    is_genuine_break=false.
+  * `apm lifecycle test --execute` fires through the same gate (#3983).
 """
 
 from __future__ import annotations
@@ -124,22 +122,23 @@ def test_org_deny_all_reaches_runner_through_real_chain_discovery(
 
 
 @pytest.mark.usefixtures("hermetic_sources")
-def test_lifecycle_test_execute_bypasses_gate_by_design(
+def test_lifecycle_test_execute_goes_through_the_gate(
     apm_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`apm lifecycle test --execute` builds the runner directly from
-    discover_scripts, deliberately bypassing both the trust gate and
-    APM_NO_SCRIPTS.  This is the documented design (explicit user intent in
-    their own repo), so we assert the bypass holds.  is_genuine_break=false.
-    """
+    """`apm lifecycle test --execute` fires through build_runner_from_context,
+    so APM_NO_SCRIPTS suppresses it like every other lifecycle command."""
+    from click.testing import CliRunner
+
+    from apm_cli.commands.lifecycle import lifecycle_test
+
     project = _project(tmp_path)
-    # No trust recorded; kill-switch set -- both would block build_runner_from_context.
+    trust_project_scripts(project / "apm.yml")
     monkeypatch.setenv("APM_NO_SCRIPTS", "1")
+    monkeypatch.chdir(project)
+    fired: list[str] = []
+    monkeypatch.setattr(LifecycleScriptRunner, "fire", lambda self, *a, **k: fired.append("x") or [])
 
-    # Mirror the exact two lines apm lifecycle test --execute runs.
-    all_scripts = discover_scripts(project_root=str(project))
-    runner = LifecycleScriptRunner(scripts=all_scripts, project_root=str(project))
+    result = CliRunner().invoke(lifecycle_test, ["post-install", "--execute"])
 
-    matching = runner.scripts_for_event("post-install")
-    assert matching, "lifecycle test --execute must see untrusted project scripts"
-    assert any(s.source == "project" for s in matching)
+    assert result.exit_code == 0, result.output
+    assert fired == [], "APM_NO_SCRIPTS must stop lifecycle test --execute"
