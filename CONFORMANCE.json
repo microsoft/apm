@@ -778,6 +778,17 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-027",
+      "keyword": "MUST",
+      "section": "4.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_shared_mcp_document_reqs.py::test_deactivating_one_target_keeps_entries_another_active_target_selects"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1968,7 +1979,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 104,
+      "active": 105,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1992,5 +2003,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 139
+  "total_requirements": 140
 }
