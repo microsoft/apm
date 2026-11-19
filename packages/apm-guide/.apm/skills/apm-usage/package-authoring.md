@@ -170,6 +170,8 @@ resolves it and anchored on the installed plugin root (for example
 `apm install <bundle>` registers these hooks through the same hook merge as a
 source install once the bundle's exact `name#version@sha256:<digest>` key is
 approved in `executables.allow`; otherwise they are skipped with one warning.
+A reinstall whose hooks, MCP or LSP servers are unapproved, denied, or no
+longer shipped removes the ones the bundle registered earlier.
 Packing never executes scripts or translates hook semantics between hosts.
 Quoted filenames and selected directory references retain their meaning after
 relocation. Selected files must materialize each referenced directory; empty

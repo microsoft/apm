@@ -106,7 +106,9 @@ merge into each target's hook config (for example `.claude/settings.json`)
 with the same events and commands as a source install. Reinstalling replaces
 them, and a reinstall whose hooks are not approved, or that ships none,
 removes them; Copilot's per-file `.github/hooks/<bundle>-hooks.json` stays
-until you delete it.
+until you delete it. Bundle MCP and LSP servers follow the same rule: a
+reinstall whose servers are not approved, are denied, or are no longer shipped
+removes the ones the bundle wired earlier.
 For centrally governed installs, warm the policy cache before distributing an
 offline bundle. See [APM policy](../../enterprise/apm-policy/).
 
