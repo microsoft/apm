@@ -513,7 +513,7 @@ jobs:
     # gate is preserved on the path that actually merges to main.
     - name: Run tests with coverage
       run: |
-        uv run python -m pytest tests/unit tests/test_console.py tests/red_team \
+        uv run python -m pytest tests/unit tests/test_console.py tests/red_team tests/fixtures/policy \
           -p scripts.ci_sharding --shard-count 2 --shard-index ${{ matrix.shard }} \
           --shard-durations .github/ci-durations/linux-unit.json \
           -n 2 --dist worksteal \

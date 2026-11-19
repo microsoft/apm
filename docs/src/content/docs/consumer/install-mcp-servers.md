@@ -348,7 +348,13 @@ active, they write one identical entry per server in Claude Code's shape
 never overwrite a server you authored, and each record ownership in
 `apm.lock.yaml`. Removing one of the two targets keeps an entry the other still
 uses. Claude Code writes `.mcp.json` only when `.claude/` exists; `copilot`
-always writes it.
+always writes it. Because the file is shared, Copilot's `tools` allow-list does
+not restrict Claude Code.
+
+VS Code's deprecated Local mode reads only `.vscode/mcp.json`. If you still use
+it, switch to the Copilot harness, which reads `.mcp.json`. See
+[Copilot CLI MCP servers](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers)
+and [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
 On the first `apm install` (including `--frozen`) of a project whose lockfile
 was written by APM 0.36 or earlier, APM moves the entries it wrote to
