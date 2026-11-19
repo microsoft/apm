@@ -60,7 +60,10 @@ def prepare_mcp_integration(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.trust import McpAdmission
 
-    project = project_root or apm_package.package_path or Path.cwd()
+    # Trust comes from the parsed manifest, as in effective_allow_map and
+    # --frozen: at user scope project_root is the home directory (#3954).
+    manifest_dir = getattr(apm_package, "package_path", None)
+    project = manifest_dir if isinstance(manifest_dir, Path) else project_root or Path.cwd()
     allow_map, _resolved = executable_context
     admission = McpAdmission.for_project(
         project,
