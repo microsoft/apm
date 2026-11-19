@@ -701,6 +701,8 @@ def run(ctx: InstallContext) -> None:
 
     if ctx.frozen and ctx.existing_lockfile is not None:
         from apm_cli.install.service import InstallService
+        from apm_cli.install.template import effective_allow_map
+        from apm_cli.security.executables import project_mcp_executables_gate
 
         InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
         InstallService.enforce_hydrated_mcp(
@@ -709,6 +711,13 @@ def run(ctx: InstallContext) -> None:
             apm_modules_dir,
             trust_transitive_mcp=ctx.trust_transitive_mcp,
             logger=ctx.logger,
+            # The pipeline's routed, cached allow map (already resolved for
+            # materialized packages) is the same one deployment uses.
+            approve=project_mcp_executables_gate(
+                ctx.project_root,
+                ctx.apm_package,
+                executable_context=(effective_allow_map(ctx), True),
+            ),
             active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
         )
 

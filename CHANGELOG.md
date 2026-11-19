@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The same `owner/repo` from two hosts (such as `acme/tool` and `gitlab.example.com/acme/tool`) now fails before download, naming both declarations; set `alias:` on one or remove one. (#3895)
 - A Claude or Copilot `.mcp.json` conflict on a plugin MCP path now names the `${CLAUDE_PROJECT_DIR:-.}/...` path to restore, instead of calling it an `apm.yml` environment reference and asking to rotate credentials. (#3930)
 - `apm audit --ci` no longer fails `config-consistency` for MCP servers that install left out on purpose (not yet approved by the executables gate, or untrusted transitive servers). (#3893)
+- `apm install --frozen` now accepts MCP servers the executables gate left out when `apm.lock.yaml` records matching omission evidence. (#3938)
 - `apm update`: hints name it instead of `apm install --update`, it accepts `--legacy-skill-paths`, and it works under `PROXY_REGISTRY_ONLY=1` with VCS-locked lockfiles. (#3865)
 - `apm audit PACKAGE` accepts the same forms as `apm uninstall` and exits 1 when nothing matches; `apm audit --ci` shows `[x]` for failed checks. (#3865)
 - `apm install <pkg> --dry-run` no longer creates `apm.yml`, and `apm compile --target` for a target with no compile output no longer writes `CLAUDE.md` or `AGENTS.md`. (#3865)
