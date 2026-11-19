@@ -412,6 +412,50 @@ class TestApproveCmd:
             assert "not found" in result.output
 
     @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
+    def test_partial_name_never_matches_an_installed_package(self, command) -> None:
+        """A prefix of a package name must not grant or deny that package."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+
+            result = runner.invoke(command, ["hook"])
+
+            from apm_cli.utils.yaml_io import load_yaml
+
+            store = load_yaml(Path("apm.yml")).get("executables", {})
+            assert "hook-pkg" not in str(store.get("allow", {}))
+            assert not any("hook-pkg" in key for key in store.get("deny", {}))
+            assert result.exit_code == 0, result.output
+
+    @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
+    def test_name_matching_two_installed_packages_is_refused(self, command) -> None:
+        """An ambiguous name refuses instead of picking one package."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            from apm_cli.deps.lockfile import LockFile
+
+            _write_manifest(".")
+            for owner in ("acme", "other"):
+                pkg = Path("apm_modules") / owner / "hooky"
+                (pkg / ".apm" / "hooks").mkdir(parents=True)
+                (pkg / ".apm" / "hooks" / "pre-tool-use.json").write_text("{}")
+                (pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0"}))
+            LockFile.from_yaml(
+                "lockfile_version: '3'\n"
+                "dependencies:\n"
+                "  - repo_url: acme/hooky\n    version: 1.0.0\n"
+                "  - repo_url: other/hooky\n    version: 1.0.0\n"
+            ).write(Path("apm.lock.yaml"))
+            before = Path("apm.yml").read_text()
+
+            result = runner.invoke(command, ["hooky"])
+
+            assert result.exit_code == 1, result.output
+            assert "matches more than one installed package" in result.output
+            assert Path("apm.yml").read_text() == before
+
+    @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
     def test_trust_command_reports_corrupt_local_dependency_ancestry(self, command) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
