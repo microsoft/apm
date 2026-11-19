@@ -933,6 +933,16 @@ def _audit_ci_gate(
             click.echo(output)
         _render_ci_failures_to_stderr(ci_result)
     else:
+        policy_report = _policy_enforcement_report(fetch_result)
+        if policy_report["source"]:
+            # Name the effective policy sources in text mode too (#1925).
+            chain = policy_report.get("chain") or []
+            chain_text = f" (chain: {' -> '.join(chain)})" if len(chain) > 1 else ""
+            click.echo(
+                f"{STATUS_SYMBOLS['info']} Policy: {policy_report['source']}{chain_text} "
+                f"-- enforcement={policy_report['enforcement']}",
+                err=True,
+            )
         _render_ci_results(ci_result)
         if drift_findings:
             from ..install.drift import render_drift_text
