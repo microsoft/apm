@@ -391,6 +391,8 @@ class TestOrphanPreview:
 
     def test_retired_mcp_moves_are_previewed_for_project_scope(self, tmp_path: Path) -> None:
         """A 0.36 project sees which servers move to .mcp.json (#3967)."""
+        from apm_cli.install.mcp.retired_destinations import RetiredMcpPreview
+
         logger = _make_logger()
         plan = ProspectiveInstallPlan(
             apm_dependencies=(),
@@ -405,7 +407,10 @@ class TestOrphanPreview:
             patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
             patch(
                 "apm_cli.install.mcp.retired_destinations.preview_retired_mcp_moves",
-                return_value={".github/mcp.json": ["echo"]},
+                return_value=RetiredMcpPreview(
+                    moves={".github/mcp.json": ["echo"]},
+                    removals={".vscode/mcp.json": ["gone"]},
+                ),
             ) as preview,
         ):
             render_and_exit(
@@ -415,6 +420,8 @@ class TestOrphanPreview:
         lines = [call.args[0] for call in logger.progress.call_args_list]
         assert "MCP servers that would move from .github/mcp.json to .mcp.json:" in lines
         assert "  - echo" in lines
+        assert "MCP servers that would be removed from .vscode/mcp.json:" in lines
+        assert "  - gone" in lines
 
     def test_orphan_preview_header_shown(self, tmp_path: Path) -> None:
         """Orphan preview header is printed when orphans are found (lines 64-81)."""

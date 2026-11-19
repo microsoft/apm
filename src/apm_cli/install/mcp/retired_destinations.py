@@ -26,7 +26,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -213,14 +213,38 @@ def heal_retired_project_mcp_destinations(
     return heal
 
 
-def preview_retired_mcp_moves(lockfile: Any, project_root: Path) -> dict[str, list[str]]:
-    """Retired file -> servers the next project install moves to ``.mcp.json``.
+@dataclass(frozen=True)
+class RetiredMcpPreview:
+    """Retired file -> APM-written servers the next project install takes out of it.
+
+    ``moves``: servers Copilot rewrites at ``.mcp.json``. ``removals``: servers
+    no longer declared, or no longer written there (another target, or Copilot
+    not selected). A declared server Copilot does not receive stays put and is
+    in neither.
+    """
+
+    moves: dict[str, list[str]] = field(default_factory=dict)
+    removals: dict[str, list[str]] = field(default_factory=dict)
+
+
+def preview_retired_mcp_moves(
+    lockfile: Any,
+    project_root: Path,
+    *,
+    declared: Collection[Any] = (),
+    target_runtimes: Collection[str] | None = None,
+) -> RetiredMcpPreview:
+    """Preview what the next project install heals out of the retired files.
 
     Read-only preview for ``install --dry-run`` (#3967). It reads the claims
-    through :func:`split_mcp_claims` and applies the heal's own proof, so it
-    names exactly what :func:`heal_retired_project_mcp_destinations` would remove.
+    through :func:`split_mcp_claims`, applies the heal's own proof and splits
+    the result with :func:`healable_names`, the install's own rule, given the
+    *declared* MCP dependencies and the MCP *target_runtimes* the install
+    would select.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
     target_servers = {runtime: set(names) for runtime, names in lockfile.mcp_target_servers.items()}
     claims = split_mcp_claims(
@@ -231,7 +255,7 @@ def preview_retired_mcp_moves(lockfile: Any, project_root: Path) -> dict[str, li
         user_scope=False,
         stored_configs=lockfile.mcp_configs,
     )
-    preview: dict[str, list[str]] = {}
+    provable: dict[str, set[str]] = {}
     for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
         names = claims.names.get(destination.runtime)
         found = _read_retired(destination, project_root) if names else None
@@ -240,16 +264,31 @@ def preview_retired_mcp_moves(lockfile: Any, project_root: Path) -> dict[str, li
         servers = found[3]
         client = destination.adapter(project_root)
         hashes = claims.hashes.get(destination.runtime, {})
-        moving = []
-        for name in sorted(names):
+        for name in names:
             stored = lockfile.mcp_configs.get(name)
             key = _retired_key(name, stored, servers)
             if key is not None and _written_by_apm(
                 client, name, servers[key], stored_config=stored, native_hash=hashes.get(name)
             ):
-                moving.append(name)
-        if moving:
-            preview[destination.relative_path] = moving
+                provable.setdefault(destination.runtime, set()).add(name)
+    declared_deps = list(declared)
+    copilot_claims = (
+        mcp_servers_for_runtime(declared_deps, "copilot")
+        if "copilot" in (target_runtimes or ())
+        else None
+    )
+    healable = healable_names(
+        provable,
+        declared=set(MCPIntegrator.get_server_names(declared_deps)),
+        copilot_claims=copilot_claims,
+    )
+    preview = RetiredMcpPreview()
+    for runtime, names in healable.items():
+        retired = _RETIRED_PATHS[runtime]
+        for name in sorted(names):
+            moved = copilot_claims is not None and name in copilot_claims
+            bucket = preview.moves if moved else preview.removals
+            bucket.setdefault(retired, []).append(name)
     return preview
 
 

@@ -120,8 +120,18 @@ def render_and_exit(
     if _dryrun_lock and plan.should_install_mcp and project_root is not None:
         from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves
 
-        for retired, names in preview_retired_mcp_moves(_dryrun_lock, project_root).items():
+        retired_preview = preview_retired_mcp_moves(
+            _dryrun_lock,
+            project_root,
+            declared=plan.selected_mcp_dependencies,
+            target_runtimes=plan.mcp_target_runtimes,
+        )
+        for retired, names in retired_preview.moves.items():
             logger.progress(f"MCP servers that would move from {retired} to .mcp.json:")
+            for name in names:
+                logger.progress(f"  - {name}")
+        for retired, names in retired_preview.removals.items():
+            logger.progress(f"MCP servers that would be removed from {retired}:")
             for name in names:
                 logger.progress(f"  - {name}")
 

@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm view plugin@marketplace` no longer suggests installing an entry `apm install` would refuse. (#3967, #3992)
 - Every command prints the newer-lockfile refusal with the same `[x]` prefix and names the user-scope lockfile by its path. (#3967, #3992)
 - `apm install --dry-run` shows apm.yml declaration errors install would refuse (such as two hosts sharing one `apm_modules` directory) without `--verbose`. (#3967, #3992)
-- `apm install --dry-run` previews which MCP servers move from `.github/mcp.json` or `.vscode/mcp.json` to `.mcp.json`. (#3967, #3992)
+- `apm install --dry-run` previews which MCP servers move from `.github/mcp.json` or `.vscode/mcp.json` to `.mcp.json`, and which are only removed there because they are no longer declared or another target now receives them. (#3967, #3992)
 - `apm approve owner/repo` on a package installed with a port names the `host:port/owner/repo` key to approve. (#3967, #3992)
 - `apm runtime setup codex` writes `wire_api = "chat"` for Codex v0.116 and later, which GitHub Models needs. (#3967, #3992)
 - The policy docs no longer call `apm-policy.yml` an experimental feature. (#3948, #3992)

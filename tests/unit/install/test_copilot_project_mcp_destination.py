@@ -197,10 +197,24 @@ def test_dry_run_preview_names_exactly_what_the_heal_moves(tmp_path: Path) -> No
     lock.mcp_target_servers = {"copilot": ["echo", "edited"]}
     lock.mcp_configs = {"echo": _ECHO, "edited": {**_ECHO, "name": "edited"}}
 
-    assert preview_retired_mcp_moves(lock, tmp_path) == {".github/mcp.json": ["echo"]}
+    declared = [MCPDependency.from_dict(_ECHO)]
+    preview = preview_retired_mcp_moves(
+        lock, tmp_path, declared=declared, target_runtimes=["copilot"]
+    )
+    assert preview.moves == {".github/mcp.json": ["echo"]}
+    assert preview.removals == {}
     assert retired.read_bytes() == before
+    # Copilot not selected: the heal still removes the entry, but nothing moves.
+    preview = preview_retired_mcp_moves(
+        lock, tmp_path, declared=declared, target_runtimes=["cursor"]
+    )
+    assert (preview.moves, preview.removals) == ({}, {".github/mcp.json": ["echo"]})
+    # No longer declared: removed, not moved.
+    preview = preview_retired_mcp_moves(lock, tmp_path, declared=[], target_runtimes=["copilot"])
+    assert (preview.moves, preview.removals) == ({}, {".github/mcp.json": ["echo"]})
     lock.apm_version = "0.37.0"
-    assert preview_retired_mcp_moves(lock, tmp_path) == {}
+    preview = preview_retired_mcp_moves(lock, tmp_path)
+    assert (preview.moves, preview.removals) == ({}, {})
 
 
 def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
