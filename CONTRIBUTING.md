@@ -105,6 +105,14 @@ merge, a particular implementation, or a release date. You may experiment in
 your own fork without approval, but an unsolicited PR does not oblige
 maintainers to review or adopt it.
 
+### Adding your organization to ADOPTERS.md
+
+Adding or updating your own organization's row in
+[ADOPTERS.md](ADOPTERS.md) needs no issue, scope record, or PR template
+sections. Either open a one-row PR, or fill in the
+[adopter form](https://github.com/microsoft/apm/issues/new?template=adopter.yml)
+and a maintainer will open the PR for you after you confirm the wording.
+
 ### Small corrections
 
 Typo fixes and broken documentation links have standing preapproval. Create
