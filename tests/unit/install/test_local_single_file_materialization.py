@@ -17,6 +17,7 @@ from apm_cli.install.validation import _local_path_failure_reason, _validate_loc
 from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
+from apm_cli.security.trust import McpAdmission
 from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
@@ -66,7 +67,9 @@ def test_mcp_view_reads_current_file_through_shared_admission(
     )
     manifest = APMPackage(name="consumer", version="1.0.0", package_path=root)
     before = ArtifactSnapshot.capture(tmp_path)
-    view = CurrentMcpConfigView.derive(manifest, lock, modules, trust_transitive_self_defined=True)
+    view = CurrentMcpConfigView.derive(
+        manifest, lock, modules, admission=McpAdmission(None, one_off=True)
+    )
     assert view.problems == ()
     assert view.dependencies == ()
     assert view.configs == {}
@@ -75,7 +78,7 @@ def test_mcp_view_reads_current_file_through_shared_admission(
     source.write_bytes(b"---\ndescription: [invalid\n---\n# Guidance\n")
     before = ArtifactSnapshot.capture(tmp_path)
     invalid = CurrentMcpConfigView.derive(
-        manifest, lock, modules, trust_transitive_self_defined=True
+        manifest, lock, modules, admission=McpAdmission(None, one_off=True)
     )
     assert len(invalid.problems) == 1
     assert "Invalid primitive content" in invalid.problems[0].message
@@ -83,7 +86,7 @@ def test_mcp_view_reads_current_file_through_shared_admission(
     source.unlink()
     before = ArtifactSnapshot.capture(tmp_path)
     missing = CurrentMcpConfigView.derive(
-        manifest, lock, modules, trust_transitive_self_defined=True
+        manifest, lock, modules, admission=McpAdmission(None, one_off=True)
     )
     assert len(missing.problems) == 1
     assert "not found" in missing.problems[0].message

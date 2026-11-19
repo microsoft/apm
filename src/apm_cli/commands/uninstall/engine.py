@@ -1796,13 +1796,14 @@ def _cleanup_stale_mcp(
     if not managed_servers:
         return
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.security.trust import McpAdmission
 
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission.admit_all(),
     )
     # Uninstall never admits a server: only previously managed servers survive.
     new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers

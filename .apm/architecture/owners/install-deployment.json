@@ -207,6 +207,20 @@
       "guards": ["install-deployment-executable-trust-context"]
     },
     {
+      "id": "executable-item-admission",
+      "decision": "Admission of one dependency-declared executable item (MCP server or hook file): org/user/project deny ladder AND manifest approval AND definition fingerprint match, for install, update, install --frozen, apm audit --ci, apm approve and the install prompt; the lockfile is evidence, never consent (#3902)",
+      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it",
+      "selectors": ["src/apm_cli/security/trust.py"],
+      "guards": ["install-deployment-executable-item-admission", "install-deployment-mcp-admission"]
+    },
+    {
+      "id": "executable-trust-fingerprint",
+      "decision": "Every executable-trust digest: approval pins for MCP servers and hook files, MCP omission evidence and local-bundle grants (full SHA-256 over canonical JSON)",
+      "owner": "security/trust_fingerprint.py (canonical_digest, mcp_definition_fingerprint, hook_file_fingerprint, evidence_fingerprint, local_bundle_digest)",
+      "selectors": ["src/apm_cli/security/trust_fingerprint.py"],
+      "guards": ["install-deployment-trust-fingerprint"]
+    },
+    {
       "id": "lsp-target-contract",
       "decision": "LSP target path, shape, and reserved Claude namespace",
       "owner": "integration/lsp_integrator.py (LSPIntegrator)",

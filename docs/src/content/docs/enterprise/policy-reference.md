@@ -832,7 +832,6 @@ $ apm install --trust-transitive-mcp
 [!] Policy: org:contoso/.github -- enforcement=block
   [+] ./packages/team-tools (local)
   [+] ../sketchy (local)
-[i] Trusting self-defined MCP server 'sketchy-mcp' from transitive package 'sketchy' (--trust-transitive-mcp)
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: sketchy-mcp -- transport 'streamable-http' not in allowed [stdio]
   Blocked by org policy at org:contoso/.github (mcp-transport) -- remove `./packages/team-tools` (it brings in `sketchy-mcp`) from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass

@@ -451,7 +451,7 @@ class TestApproveCmd:
             from apm_cli.utils.yaml_io import load_yaml
 
             stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
-            assert set(stored) == {"evil/repo#1.0"}
+            assert set(stored) == {"evil/repo"}
 
     def test_approve_replaced_dependency_local_path_grants_source_key(self) -> None:
         """apm approve for a replaced dependency grants the selected source key."""
@@ -711,7 +711,8 @@ dependencies:
             result = runner.invoke(approve_cmd, ["acme/hooky"])
             assert result.exit_code == 0, result.output
             stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
-            assert set(stored) == {"myfork/hooky#v1.2.0"}
+            # Pins bind content, so the key is the version-blind selected source.
+            assert set(stored) == {"myfork/hooky"}
 
     def test_approve_recommended_bulk_accepts_org_set(self) -> None:
         runner = CliRunner()

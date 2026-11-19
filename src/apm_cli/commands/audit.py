@@ -654,6 +654,7 @@ def _audit_ci_gate(
         ci_mode=True,
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
+        no_policy=no_policy,
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
