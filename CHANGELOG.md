@@ -28,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#3918)
 - `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#3918)
 - `apm lifecycle test --execute` now fires only what an install would: run `apm lifecycle trust` for project scripts; `APM_NO_SCRIPTS` and org `deny_all` apply. (#3988)
-- `apm pack` no longer ships MCP servers `apm install` writes to root `.mcp.json` (they can carry credentials); to ship one, write it in `.mcp.json`, not `apm.yml`. (closes #3966, #3988)
 
 ### Added
 
@@ -92,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `apm pack` builds plugin MCP servers from `apm.yml` and authored `.mcp.json` entries, never the copies `apm install` renders, so output matches before and after install without credentials. (closes #3966, #3988)
 - `apm approve` and `apm deny` match package names exactly and refuse names matching several packages; a partial name could approve another package's executables. (#3988)
 - `apm update` with no ref change and `apm audit --ci` honour the current executables decision, so hooks left after `apm deny` are retired or reported. (closes #3958, #3988)
 - Reinstalling a local bundle whose MCP server was revoked, denied or repacked away now removes that server. (closes #3956, #3988)

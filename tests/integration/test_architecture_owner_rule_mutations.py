@@ -4347,3 +4347,33 @@ def test_trust_owner_guard_rejects_root_derived_callers(path: str, old: str, new
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param(
+            "    servers.update(authored)\n",
+            "    del authored\n",
+            id="root-manifest-declarations-dropped",
+        ),
+        pytest.param(
+            "        if ClientFactory.project_destination_is_root_mcp_json(str(runtime)) is not False:\n",
+            "        if True:\n",
+            id="any-runtime-claim-hides-root-entries",
+        ),
+    ],
+)
+def test_pack_mcp_reads_only_authored_sources(old: str, new: str) -> None:
+    """#3966: pack ships apm.yml declarations; only root-destination claims hide root entries."""
+    path = "src/apm_cli/core/plugin_manifest.py"
+    rule_id = "marketplace-integrations-pack-plugin-manifests"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

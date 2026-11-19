@@ -2,7 +2,9 @@
 
 ``apm install`` renders the package's own MCP dependencies into root
 ``.mcp.json`` for copilot and claude. That render is APM's consumer output (it
-can carry the author's credential headers), so pack must never ship it.
+can carry the author's credential headers), so pack never reads it: the
+author's ``apm.yml`` declarations ship from ``apm.yml`` itself, credentials
+stripped, and the Codex manifest never references the rendered file.
 """
 
 import os
@@ -59,13 +61,17 @@ def test_pack_output_is_identical_before_and_after_install(
     assert after == before
     for text in (data.decode("utf-8") for data in after.values()):
         assert ".mcp.json" not in text
-        assert "devsrv" not in text
         assert "Authorization" not in text
+        assert "Bearer" not in text
         assert _FIXTURE_TOKEN not in text
     bundles = list((project / "build").glob("*"))
     assert bundles
     for bundle in bundles:
-        assert not (bundle / ".mcp.json").exists()
         for path in bundle.rglob("*"):
             if path.is_file():
                 assert _FIXTURE_TOKEN not in path.read_text(encoding="utf-8", errors="replace")
+        shipped = bundle / ".mcp.json"
+        if shipped.exists():
+            text = shipped.read_text(encoding="utf-8")
+            assert "devsrv" in text
+            assert "Authorization" not in text

@@ -173,9 +173,9 @@ approved in `executables.allow`; otherwise they are skipped with one warning.
 A reinstall whose hooks, MCP or LSP servers are unapproved, denied, or no
 longer shipped removes the ones the bundle registered earlier.
 Packing never executes scripts or translates hook semantics between hosts.
-Packing leaves out root `.mcp.json` servers that `apm install` manages
-(recorded in `apm.lock.yaml`) and warns; to ship a server, write it in
-`.mcp.json` yourself and do not declare it in `apm.yml`.
+A Claude plugin ships the self-defined MCP servers in `apm.yml` (read from
+`apm.yml`, credentials stripped) and the servers you wrote in `.mcp.json`;
+other servers `apm install` manages there are left out with a warning.
 Quoted filenames and selected directory references retain their meaning after
 relocation. Selected files must materialize each referenced directory; empty
 directories fail. Root scripts retain their Node module type without publishing

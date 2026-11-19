@@ -270,6 +270,7 @@ def apm_managed_mcp_names(project_root: Path) -> frozenset[str] | None:
     be read (ownership unknown; callers fail closed).
     """
     from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
+    from ..factory import ClientFactory
 
     try:
         lock = LockFile.read(resolve_lockfile_path_for_read(project_root, read_only=True))
@@ -277,10 +278,61 @@ def apm_managed_mcp_names(project_root: Path) -> frozenset[str] | None:
         return None
     if lock is None:
         return frozenset()
-    names = set(lock.mcp_servers) | set(lock.mcp_configs)
-    for servers in lock.mcp_target_servers.values():
-        names.update(servers)
+    # Only a claim whose destination is root .mcp.json shows APM wrote that
+    # entry; a claim held only by another runtime's file (.cursor/mcp.json)
+    # does not. Unknown runtimes count as root claims, and an aggregate name
+    # with no recorded placement stays managed (conservative).
+    placed: set[str] = set()
+    names: set[str] = set()
+    for runtime, servers in lock.mcp_target_servers.items():
+        placed.update(servers)
+        if ClientFactory.project_destination_is_root_mcp_json(str(runtime)) is not False:
+            names.update(servers)
+    names |= (set(lock.mcp_servers) | set(lock.mcp_configs)) - placed
     return frozenset(str(name) for name in names)
+
+
+def _authored_manifest_mcp_servers(project_root: Path) -> dict[str, dict]:
+    """Project the root ``apm.yml``'s self-defined MCP declarations to server entries.
+
+    Values come from ``apm.yml`` itself, never from the copy ``apm install``
+    renders into ``.mcp.json``, so pack output is identical before and after
+    install. Registry-resolved declarations need network resolution and are
+    not projected. Credential-bearing keys are removed later by
+    :func:`_sanitize_mcp_servers`.
+    """
+    from ..constants import APM_YML_FILENAME
+    from ..models.apm_package import APMPackage
+
+    manifest = project_root / APM_YML_FILENAME
+    if not manifest.is_file():
+        return {}
+    try:
+        dependencies = APMPackage.from_apm_yml(manifest).get_mcp_dependencies()
+    except (OSError, ValueError):
+        return {}
+    servers: dict[str, dict] = {}
+    for dep in dependencies:
+        if not dep.is_self_defined:
+            continue
+        transport = (dep.transport or "stdio").lower()
+        entry: dict[str, Any] = {"type": "http" if transport == "streamable-http" else transport}
+        if transport == "stdio":
+            if dep.command:
+                entry["command"] = dep.command
+            if dep.args:
+                entry["args"] = list(dep.args) if isinstance(dep.args, list | tuple) else dep.args
+            if dep.cwd:
+                entry["cwd"] = dep.cwd
+            if dep.env:
+                entry["env"] = dict(dep.env)
+        else:
+            if dep.url:
+                entry["url"] = dep.url
+            if dep.headers:
+                entry["headers"] = dict(dep.headers)
+        servers[dep.name] = entry
+    return servers
 
 
 def _warn_unknown_mcp_ownership(logger: Any) -> None:
@@ -321,27 +373,31 @@ def collect_mcp_servers(
     committed ``plugin.json`` would exfiltrate them into the distributed
     artefact. A loud warning is emitted for every key dropped or value redacted.
     """
-    servers = _read_root_mcp_servers(project_root)
-    if not servers:
-        return {}
-    if exclude_apm_managed:
+    servers = _read_root_mcp_servers(project_root) or {}
+    if not exclude_apm_managed:
+        return _sanitize_mcp_servers(servers, logger=logger) if servers else {}
+    authored = _authored_manifest_mcp_servers(project_root)
+    if servers:
         managed = apm_managed_mcp_names(project_root)
         if managed is None:
             _warn_unknown_mcp_ownership(logger)
-            return {}
-        dropped = sorted(name for name in servers if name in managed)
-        if dropped:
-            _emit(
-                "warning",
-                "Left out of the plugin: MCP servers 'apm install' manages in .mcp.json ("
-                + ", ".join(dropped)
-                + "). To ship one, write it in .mcp.json yourself and do not declare it "
-                "in apm.yml.",
-                logger,
-                "warning",
-            )
-        servers = {name: server for name, server in servers.items() if name not in managed}
-    return _sanitize_mcp_servers(servers, logger=logger)
+            servers = {}
+        else:
+            dropped = sorted(name for name in servers if name in managed and name not in authored)
+            if dropped:
+                _emit(
+                    "warning",
+                    "Left out of the plugin: .mcp.json servers that 'apm install' manages and "
+                    "apm.yml does not define itself (" + ", ".join(dropped) + "). Pack ships "
+                    "only servers you author in apm.yml or .mcp.json.",
+                    logger,
+                    "warning",
+                )
+            servers = {name: server for name, server in servers.items() if name not in managed}
+    # apm.yml declarations win over a same-named root entry, so a rendered or
+    # hand-edited copy never changes what ships.
+    servers.update(authored)
+    return _sanitize_mcp_servers(servers, logger=logger) if servers else {}
 
 
 def _sanitize_mcp_servers(servers: dict, *, logger: Any = None) -> dict:
