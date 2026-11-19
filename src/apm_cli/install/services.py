@@ -840,7 +840,8 @@ def integrate_local_bundle(
         Dict with keys ``deployed_files`` (list[str]),
         ``deployed_file_hashes`` (dict[str, str]), ``staged_files``
         (compile input under ``apm_modules/``, never a deployment claim),
-        ``staged_file_hashes`` (dict[str, str]), ``skipped`` (int), and per-primitive counters
+        ``staged_file_hashes`` (dict[str, str]), ``staged_file_fallback_hashes``
+        (bundle digests for staged files skipped on collision), ``skipped`` (int), and per-primitive counters
         (``skills``, ``agents``, ``commands``, ...).
     """
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
@@ -901,6 +902,7 @@ def integrate_local_bundle(
     deployed_hashes: dict[str, str] = {}
     staged_files: list[str] = []
     staged_hashes: dict[str, str] = {}
+    staged_fallback_hashes: dict[str, str] = {}
     skipped = 0
 
     # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
@@ -1131,6 +1133,12 @@ def integrate_local_bundle(
                     existing_hash = None
                 if existing_hash and existing_hash != desired_hash:
                     skipped += 1
+                    if _staged:
+                        # Bind an edited, unrestaged file to the bundle bytes so
+                        # it is drift even without a prior hash (#3718).
+                        staged_fallback_hashes[record] = (
+                            f"sha256:{desired_hash.removeprefix('sha256:')}"
+                        )
                     msg = (
                         f"Skipped {record}: file exists with different "
                         "content. Re-run with --force to overwrite."
@@ -1167,6 +1175,7 @@ def integrate_local_bundle(
         "deployed_file_hashes": deployed_hashes,
         "staged_files": staged_files,
         "staged_file_hashes": staged_hashes,
+        "staged_file_fallback_hashes": staged_fallback_hashes,
         "skipped": skipped,
         "skills": 0,
         "agents": 0,

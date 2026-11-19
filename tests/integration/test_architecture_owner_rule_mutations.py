@@ -267,6 +267,24 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
             "actual = hashlib.sha256(file_path.read_bytes()).hexdigest()",
             id="staged-drift-uses-second-hash-scheme",
         ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "staged_fallback_hashes[record] = (",
+            "_unused_fallback = (",
+            id="collision-skipped-staging-left-unhashed",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "lockfile.carry_local_staging_from(self.ctx.existing_lockfile)",
+            "lockfile.local_staged_files = list(self.ctx.existing_lockfile.local_staged_files)",
+            id="declarative-install-drops-staged-hashes",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "staged_drift = lock.staged_hash_drift(project_root)",
+            "lock.local_staged_file_hashes = {}; staged_drift = lock.staged_hash_drift(project_root)",
+            id="audit-writes-staged-hashes-outside-owner",
+        ),
     ],
 )
 def test_staged_compile_input_drift_routes_through_lockfile_owner(

@@ -879,6 +879,7 @@ class DeploymentLedgerCodec:
         *,
         staged: Collection[str] = (),
         staged_hashes: Mapping[str, str] | None = None,
+        staged_fallback_hashes: Mapping[str, str] | None = None,
     ) -> None:
         """Persist imperative bundle files without making them replayable source.
 
@@ -887,7 +888,8 @@ class DeploymentLedgerCodec:
         bundle-owned staging claim (pre-#3705 lockfiles) moves there too, even
         when this install skipped or no longer ships the file; bytes are kept.
         *staged_hashes* binds staged content for drift checks (#3718); a path
-        this install did not restage keeps its prior hash.
+        this install did not restage keeps its prior hash, else its
+        *staged_fallback_hashes* bundle digest.
         """
         from apm_cli.deps.lockfile import local_staging_slug
 
@@ -925,10 +927,12 @@ class DeploymentLedgerCodec:
             set(lockfile.local_staged_files).union(staged, retired_paths)
         )
         lockfile.local_staged_file_hashes = {
+            **(staged_fallback_hashes or {}),
             **retired_hashes,
             **lockfile.local_staged_file_hashes,
             **(staged_hashes or {}),
         }
+        lockfile.retain_staged_hashes()
         DeploymentLedgerCodec.apply_to_lockfile(lockfile.deployment_ledger, lockfile)
 
     @staticmethod

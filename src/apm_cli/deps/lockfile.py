@@ -1244,27 +1244,43 @@ class LockFile:
         self.local_staged_files = [
             path for path in self.local_staged_files if Path(path).parts[:2] not in removed
         ]
+        self.retain_staged_hashes()
+
+    def retain_staged_hashes(self) -> None:
+        """Keep only hashes whose path is still recorded staging (#3718)."""
+        staged = set(self.local_staged_files)
         self.local_staged_file_hashes = {
-            path: digest
-            for path, digest in self.local_staged_file_hashes.items()
-            if path in self.local_staged_files
+            path: digest for path, digest in self.local_staged_file_hashes.items() if path in staged
         }
+
+    def carry_local_staging_from(self, other: LockFile) -> None:
+        """Copy staging records and their hashes together from *other* (#3718)."""
+        self.local_staged_files = list(other.local_staged_files)
+        self.local_staged_file_hashes = dict(other.local_staged_file_hashes)
+        self.retain_staged_hashes()
 
     def staged_hash_drift(self, project_root: Path) -> list[tuple[str, str, str]]:
         """Return ``(path, expected, actual)`` for staged files changed since install (#3718).
 
         Hashes come from the deployed-file owner (``compute_file_hash``). A
         path without a recorded hash (pre-#3718 lockfiles), outside a staging
-        root, missing, or symlinked makes no drift claim: compile reads none.
+        root, resolving outside ``apm_modules``, missing, or symlinked makes no
+        drift claim: compile reads none.
         """
         from ..utils.content_hash import compute_file_hash
+        from ..utils.path_security import PathTraversalError, ensure_path_within
 
         drift: list[tuple[str, str, str]] = []
+        modules_root = project_root / "apm_modules"
         for path in sorted(self.local_staged_files):
             expected = self.local_staged_file_hashes.get(path)
             if expected is None or local_staging_slug(path) is None or ".." in Path(path).parts:
                 continue
             file_path = project_root / path
+            try:
+                ensure_path_within(file_path, modules_root)
+            except PathTraversalError:
+                continue
             if file_path.is_symlink() or not file_path.is_file():
                 continue
             actual = compute_file_hash(file_path)

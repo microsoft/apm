@@ -13,6 +13,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _present,
     _summary,
 )
+from scripts.architecture_linter.checks.lexical_shared import python_paths
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.models import Violation
 
@@ -25,6 +26,12 @@ DISCOVERY = "src/apm_cli/primitives/discovery.py"
 PRUNE = "src/apm_cli/commands/prune.py"
 AUDIT = "src/apm_cli/policy/ci_checks.py"
 COMPILE = "src/apm_cli/commands/compile/cli.py"
+PHASES = "src/apm_cli/install/phases/lockfile.py"
+_STAGED_HASH_WRITERS = frozenset({LOCKFILE, LEDGER})
+_STAGED_HASH_WRITE = re.compile(
+    r"\.local_staged_file_hashes(\s*\[[^\]]*\])?\s*=(?!=)"
+    r"|\.local_staged_file_hashes\.(update|setdefault|pop|clear)\("
+)
 
 _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
     LOCKFILE: (
@@ -42,6 +49,10 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "own staged drift verification",
         ),
         ("actual = compute_file_hash(file_path)", "verify with the deployed-file hash owner"),
+        (
+            "def carry_local_staging_from(self, other: LockFile) -> None:",
+            "carry staging records and hashes together",
+        ),
     ),
     LEDGER: (
         (
@@ -53,6 +64,7 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "record staging apart from claims",
         ),
         ("**(staged_hashes or {}),", "record staged content hashes"),
+        ("**(staged_fallback_hashes or {}),", "bind collision-skipped staging"),
     ),
     SERVICES: (
         (
@@ -63,6 +75,7 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "(staged_hashes if _staged else deployed_hashes)[record] = (",
             "hash staged output with the deployed-file hash owner",
         ),
+        ("staged_fallback_hashes[record] = (", "bind collision-skipped staging"),
     ),
     HANDLER: (
         ('staged_instructions = result.get("staged_files", [])', "read staging from the service"),
@@ -80,6 +93,12 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "lockfile.retire_local_staging([*removed_packages, *absent_staging])",
             "retire pruned and absent staging",
+        ),
+    ),
+    PHASES: (
+        (
+            "lockfile.carry_local_staging_from(self.ctx.existing_lockfile)",
+            "carry staging through the lockfile owner",
         ),
     ),
     AUDIT: (
@@ -122,4 +141,18 @@ def check_bundle_compile_staging(provider: FactsProvider) -> tuple[Violation, ..
                             "or the service result, not from path shape",
                         )
                     )
+    for path in python_paths(provider, under="src/apm_cli/"):
+        if path in _STAGED_HASH_WRITERS:
+            continue
+        facts = provider.file_facts(path)
+        for number, line in enumerate(getattr(facts, "lines", ()), start=1):
+            if _STAGED_HASH_WRITE.search(line):
+                findings.append(
+                    _summary(
+                        GUARD,
+                        path,
+                        f"line {number}: write local_staged_file_hashes only through "
+                        "the lockfile or deployment-ledger owner",
+                    )
+                )
     return tuple(findings)

@@ -67,6 +67,28 @@ def test_staging_is_retired_with_its_pruned_root() -> None:
     assert lock.local_staging_slugs() == ["other"]
 
 
+def test_staged_hashes_carry_with_their_records_and_bundle_fallback_never_wins() -> None:
+    other = "apm_modules/bundler/.apm/instructions/other.md"
+    prior = LockFile(
+        local_staged_files=[_STAGED], local_staged_file_hashes={_STAGED: _HASH, other: _HASH}
+    )
+    carried = LockFile()
+    carried.carry_local_staging_from(prior)
+    assert carried.local_staged_files == [_STAGED]
+    assert carried.local_staged_file_hashes == {_STAGED: _HASH}
+
+    bundle = "sha256:" + "b" * 64
+    DeploymentLedgerCodec.record_local_bundle_files(
+        carried, [], {}, staged_fallback_hashes={_STAGED: bundle, other: bundle}
+    )
+    assert carried.local_staged_file_hashes == {_STAGED: _HASH}
+    unhashed = LockFile(local_staged_files=[_STAGED])
+    DeploymentLedgerCodec.record_local_bundle_files(
+        unhashed, [], {}, staged_fallback_hashes={_STAGED: bundle}
+    )
+    assert unhashed.local_staged_file_hashes == {_STAGED: bundle}
+
+
 def test_staging_slugs_reject_unsafe_roots() -> None:
     unsafe = [
         "apm_modules/../.apm/instructions/x.md",
@@ -130,3 +152,15 @@ def test_staged_hash_drift_reports_only_hash_bound_staging(tmp_path: Path) -> No
     assert lock.staged_hash_drift(tmp_path) == [
         (_STAGED, digest, compute_file_hash(tmp_path / _STAGED))
     ]
+
+
+def test_staged_hash_drift_skips_staging_resolving_outside_modules(tmp_path: Path) -> None:
+    outside = tmp_path / "outside" / ".apm" / "instructions"
+    outside.mkdir(parents=True)
+    (outside / "glob.instructions.md").write_text("edited\n", encoding="ascii")
+    (tmp_path / "apm_modules").mkdir()
+    (tmp_path / "apm_modules" / "bundler").symlink_to(
+        tmp_path / "outside", target_is_directory=True
+    )
+    lock = LockFile(local_staged_files=[_STAGED], local_staged_file_hashes={_STAGED: _HASH})
+    assert lock.staged_hash_drift(tmp_path) == []

@@ -345,6 +345,7 @@ def install_local_bundle(
                 deployed_hashes,
                 staged=staged_instructions,
                 staged_hashes=result.get("staged_file_hashes", {}),
+                staged_fallback_hashes=result.get("staged_file_fallback_hashes", {}),
             )
 
             # Auto-migrate legacy per-client skill paths (#737).

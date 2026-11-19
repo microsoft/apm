@@ -133,9 +133,11 @@ def test_staged_instructions_are_compile_input_not_deployment_claims(
     assert "Always be global." in (project / "AGENTS.md").read_text(encoding="utf-8")
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
 
-    # A declarative install keeps the staging record it does not own.
+    # A declarative install keeps the staging record and its hash it does not own.
     world.apm(project, "install", _NO_POLICY)
-    assert load_yaml(project / "apm.lock.yaml")["local_staged_files"] == [_STAGED]
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert lock["local_staged_files"] == [_STAGED]
+    assert lock["local_staged_file_hashes"] == {_STAGED: compute_file_hash(project / _STAGED)}
     assert (project / _STAGED).is_file()
 
     # Prune clears the staging and its record; deployed bundle files stay claimed.
@@ -219,6 +221,10 @@ def test_staged_instruction_edits_are_reported_as_hash_drift(
     text = _output(audited)
     assert f"hash-drift: {_STAGED} (staged," in text, text
     assert "1 staged file(s) with hash drift" in text, text
+    # A plain reinstall skips the edited file and keeps its install-time hash.
+    assert f"Skipped {_STAGED}" in _output(world.apm(project, *install))
+    audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    assert f"hash-drift: {_STAGED} (staged," in _output(audited)
 
     # A forced reinstall restages the bundle bytes and clears the drift.
     world.apm(project, *install, "--force")
@@ -234,6 +240,10 @@ def test_staged_instruction_edits_are_reported_as_hash_drift(
     _write(staged, staged.read_text(encoding="ascii") + "Edited locally.\n")
     assert "hash-drift" not in _output(world.apm(project, "compile"))
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+    # Upgrading: the bundle reinstall skips the edit but binds it to the bundle bytes.
+    assert f"Skipped {_STAGED}" in _output(world.apm(project, *install))
+    audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
+    assert f"hash-drift: {_STAGED} (staged," in _output(audited)
 
 
 def test_prune_retires_staging_records_whose_root_is_gone(

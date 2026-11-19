@@ -191,7 +191,7 @@ deployments:
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256:<hex>` for `local_deployed_files`. |
 | `local_staged_files` | list | no | Local bundle instructions staged under `apm_modules/<bundle>/.apm/` as `apm compile` input for targets without native instructions (Codex, Gemini, OpenCode). Not deployment claims: `deployed-files-present` does not check them. `apm prune` removes the staging and these rows. |
-| `local_staged_file_hashes` | map | no | `path -> sha256:<hex>` for `local_staged_files`. `apm audit --ci` (`content-integrity`) fails and `apm compile` warns when staged content no longer matches. Paths without a hash (older lockfiles) make no drift claim. |
+| `local_staged_file_hashes` | map | no | `path -> sha256:<hex>` for `local_staged_files`. `apm audit --ci` (`content-integrity`) fails and `apm compile` warns when staged content no longer matches. Paths without a hash (older lockfiles) make no drift claim until the next bundle install records one; a locally edited file that install skips is recorded with the bundle's hash, so the edit shows as drift. |
 | `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
 
 ## Canonical deployment rows
