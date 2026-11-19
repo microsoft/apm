@@ -110,6 +110,37 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
+    @patch("apm_cli.commands.self_update.shutil.which", return_value="powershell.exe")
+    @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
+    def test_windows_update_does_not_forward_parent_psmodulepath(
+        self,
+        mock_latest,
+        mock_which,
+        mock_version,
+        mock_run,
+        mock_get,
+    ):
+        """A PowerShell 7 module path must not reach the installer host (#3926)."""
+        mock_response = Mock()
+        mock_response.text = "Write-Host 'install'"
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+        mock_run.return_value = Mock(returncode=0)
+
+        with (
+            patch.dict(os.environ, {"PSModulePath": r"C:\Program Files\PowerShell\7\Modules"}),
+            patch.object(update_module.sys, "platform", "win32"),
+        ):
+            result = self.runner.invoke(cli, ["self-update"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        env = mock_run.call_args.kwargs["env"]
+        self.assertFalse([key for key in env if key.upper() == "PSMODULEPATH"])
+        self.assertEqual(env["VERSION"], "v0.7.0")
+
+    @patch("requests.get")
+    @patch("subprocess.run")
+    @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
     @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_shell_installer_on_unix(

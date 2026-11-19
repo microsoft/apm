@@ -123,9 +123,10 @@ fallback enabled with `--allow-protocol-fallback`).
   percent-encoded userinfo is rejected. The user is presentation-only and
   not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
-  is set. Manifest identity includes `host:port`, while the lockfile dedup
-  key uses `host/repo`; the same repository reached through different
-  ports maps to one lockfile key.
+  is set. Manifest identity and the lockfile key both include `host:port`
+  (`host:port/owner/repo`), so the same repository path on two ports is two
+  packages; they share one `apm_modules/` directory, so install rejects the
+  pair unless one sets `alias:`.
 
 ## Transport selection (SSH vs HTTPS)
 
@@ -375,6 +376,12 @@ ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resoluti
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
+On a `*.ghe.com` marketplace, a `type: github` plugin source with a bare
+cross-repo `repo: owner/repo` is refused as a dependency-confusion risk (#1326)
+before APM contacts the package repository or writes any file. This applies to
+`apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
+`apm update`. Locked entries replay without the catalog; run `apm update` to
+re-check entries an older APM locked.
 
 Once the lockfile records an entry, `apm install` and `apm install --frozen`
 replay its locked commit without reading the catalog or needing the

@@ -39,6 +39,11 @@ _log = logging.getLogger(__name__)
 # Claude Code's reference syntax: ${VAR} or ${VAR:-default}.
 _CLAUDE_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}")
 
+# Literal text a conflict hint may print verbatim around the project-root
+# reference: plain ASCII path and flag characters, so no query string,
+# credential or JSON escape leaks.
+_PRINTABLE_PACKAGE_TEXT_RE = re.compile(r"[A-Za-z0-9._/=-]*")
+
 
 def _string_leaves(value: object) -> Iterator[str]:
     """Yield every string inside a rendered server entry."""
@@ -69,6 +74,13 @@ def _expanded_leaves(old: object, new: object) -> Iterator[tuple[str, str]]:
     for path, old_text, new_text in _paired_leaves(old, new):
         if old_text != new_text and "${" not in old_text and _CLAUDE_REFERENCE_RE.search(new_text):
             yield path, new_text
+
+
+def _holds(fields: list[str]) -> str:
+    """Name the conflicting *fields* as the subject of a guidance sentence."""
+    if len(fields) == 1:
+        return f"Field {fields[0]} holds a value"
+    return f"Fields {', '.join(fields)} hold values"
 
 
 def _expand_like_install_time(text: str, environ: Mapping[str, str]) -> str:
@@ -350,7 +362,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         return _legacy_equivalent(self.managed_server_config(native), expected, os.environ)
 
     def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
-        """Explain a preserved entry that holds values where apm.yml has references."""
+        """Explain a preserved entry where apm.yml has references or APM writes a path."""
         if self._is_user_scope():
             return None
         servers = self.get_current_config().get(self.mcp_servers_key) or {}
@@ -360,25 +372,44 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         expanded = sorted(_expanded_leaves(native, expected))
         if not expanded:
             return None
-        fields = [path for path, _text in expanded]
-        where = (
-            f"Field {fields[0]} holds a value"
-            if len(fields) == 1
-            else f"Fields {', '.join(fields)} hold values"
-        )
-        # Names only: show which reference belongs where, never a value or default.
-        mapping = "; ".join(
-            f"{path}: "
-            + ", ".join(
-                dict.fromkeys("${" + m.group(1) + "}" for m in _CLAUDE_REFERENCE_RE.finditer(text))
+        # APM's own project-root reference renders a package path (#3927): it
+        # is neither an apm.yml environment reference nor a credential, and is
+        # named verbatim so its ``:-.`` default survives.
+        root = self._plugin_root_reference()
+        names = {
+            path: list(
+                dict.fromkeys(
+                    "${" + m.group(1) + "}"
+                    for m in _CLAUDE_REFERENCE_RE.finditer(text)
+                    if m.group(0) != root
+                )
             )
             for path, text in expanded
+        }
+        paths = [(path, text) for path, text in expanded if root and root in text]
+        restore = "; ".join(
+            f"{path}: {text}"
+            if not names[path] and _PRINTABLE_PACKAGE_TEXT_RE.fullmatch(text.replace(root, ""))
+            else f"{path}: a package path under {root}"
+            for path, text in paths
         )
+        env_fields = [path for path, _text in expanded if names[path]]
+        if not env_fields:
+            return (
+                f"{_holds([path for path, _text in paths])} where APM writes a package "
+                f"path, and APM cannot confirm it wrote {'it' if len(paths) == 1 else 'them'}. "
+                f"Restore the package path APM writes ({restore}) or rename or remove the "
+                "connection yourself, then retry."
+            )
+        # Names only: show which reference belongs where, never a value or an
+        # environment default.
+        mapping = "; ".join(f"{path}: {', '.join(names[path])}" for path in env_fields)
+        restore_paths = f" and the package paths APM writes ({restore})" if paths else ""
         return (
-            f"{where} where apm.yml declares environment references, and APM cannot "
-            "confirm it wrote them. Put the references declared in apm.yml back "
-            f"yourself ({mapping}), then retry. If .mcp.json was committed, rotate "
-            "those credentials: editing the file does not erase them in Git history."
+            f"{_holds(env_fields)} where apm.yml declares environment references, and APM "
+            "cannot confirm it wrote them. Put the references declared in apm.yml back "
+            f"yourself ({mapping}){restore_paths}, then retry. If .mcp.json was committed, "
+            "rotate those credentials: editing the file does not erase them in Git history."
         )
 
     @classmethod

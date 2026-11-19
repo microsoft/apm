@@ -87,3 +87,20 @@ def test_windows_e2e_verifies_junction_resolution_after_upgrade() -> None:
     assert "junction temps at install root" in test_script
     assert "current.new-*" in test_script
     assert "current.old-*" in test_script
+
+
+def test_windows_self_update_e2e_clears_psmodulepath_only_for_pre_fix_binaries() -> None:
+    """Only a pre-#3926 pinned binary gets a cleared PSModulePath (#3926)."""
+    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")
+
+    assert '$PsModulePathFixVersion = [version]"0.37.0"' in test_script
+    start = test_script.index("function Test-SelfUpdateCommand")
+    body = test_script[start : test_script.index("\n}\n", start)]
+    guard = "if ($olderCore -lt $PsModulePathFixVersion) {"
+    clear = "Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue"
+    invoke = 'cmd.exe /c "`"$shim`" self-update"'
+    restore = "$env:PSModulePath = $savedModulePath"
+
+    assert "$savedModulePath = $env:PSModulePath" in body
+    assert body.count(clear) == 1
+    assert body.index(guard) < body.index(clear) < body.index(invoke) < body.index(restore)

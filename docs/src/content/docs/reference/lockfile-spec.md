@@ -344,7 +344,9 @@ use `local_path` directly. Virtual dependencies append `virtual_path` to the
 base repo key. Entries for non-default hosts prefix the key with the lowercased
 host (`host/owner/repo`), so `github.com/team/skills` and
 `gitea.myorg.com/team/skills` can coexist without overwriting each other, and
-host casing cannot create duplicate keys. Registry-proxy entries keep the bare
+host casing cannot create duplicate keys. A non-default `port` names another
+server, so it qualifies the host segment (`host:port/owner/repo`), on
+`github.com` too; port-less keys are unchanged. Registry-proxy entries keep the bare
 logical key because the proxy host is transport, not package identity.
 
 GitHub and package-registry owner/repository paths are lowercased before APM
