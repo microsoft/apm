@@ -163,17 +163,48 @@ def test_actual_resolver_inherits_fork_parent_coordinates_without_chaining(tmp_p
     assert len(resolver.replacement_index.unused_rules) == 1
 
 
-@pytest.mark.parametrize(
-    "other",
-    ["https://gitlab.com/example/base", "https://github.com:8443/example/base"],
-)
 def test_actual_resolver_rejects_ambiguous_original_materialization_slots(
-    tmp_path: Path, other: str
+    tmp_path: Path,
 ) -> None:
     factory = LocalPackageFactory(tmp_path)
+    other = "https://gitlab.com/example/base"
     consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
     _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
-    with pytest.raises(ReplacementCollisionError, match="share the existing materialization slot"):
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    # #3696: the materialization owner rejects the shared directory, naming the
+    # original (not the replacement) identity, whether or not rules exist.
+    assert graph.resolution_errors == [
+        "github.com/example/base and gitlab.com/example/base are different packages "
+        "that would both install to apm_modules/example/base. Remove one of them, "
+        "or set 'alias:' on one so it installs to its own directory."
+    ]
+
+
+def test_actual_resolver_claims_only_the_selected_alias_destination(tmp_path: Path) -> None:
+    """#3696: a discarded duplicate declaration's alias never claims a directory."""
+    factory = LocalPackageFactory(tmp_path)
+    tool = {"git": "https://github.com/acme/tool"}
+    other = {"git": "https://github.com/acme/other", "alias": "shared"}
+    consumer = factory.create(
+        "consumer",
+        dependencies=({**tool, "alias": "primary"}, {**tool, "alias": "shared"}, other),
+    )
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert not any("would both install" in error for error in graph.resolution_errors)
+
+    consumer = factory.create("clash", dependencies=({**tool, "alias": "shared"}, other))
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert any(
+        "would both install to apm_modules/shared" in error for error in graph.resolution_errors
+    )
+
+
+def test_actual_resolver_rejects_ambiguous_original_identities(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path)
+    other = "https://github.com:8443/example/base"
+    consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
+    _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
+    with pytest.raises(ReplacementCollisionError, match="share one original package identity"):
         APMDependencyResolver().resolve_dependencies(consumer.root)
 
 

@@ -597,6 +597,11 @@ Listing a harness the install did not select does not add it; omitting
 list `targets: []` is rejected at parse time -- omit the key to mean
 "all".
 
+`apm_modules/` paths do not include the host, so `acme/tool` and
+`gitlab.example.com/acme/tool` (or two dependencies with the same `alias:`)
+would share `apm_modules/acme/tool`. Install fails before fetching and names
+both declarations; remove one, or set `alias:` on one of them.
+
 When several manifests declare the same dependency (your `apm.yml` and one or
 more parent packages), APM installs it once. Each declaration's `skills:` reach
 only that declaration's `targets:`: a skill deploys to a harness only when one

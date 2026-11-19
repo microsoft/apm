@@ -12,6 +12,7 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.dependency.materialization import (
     CachedMaterializationPathReader,
     MaterializationPathCollisionError,
+    MaterializationSlots,
     find_case_equivalent_materialization_path,
     nested_materialization_pairs,
     prepare_materialization_path,
@@ -398,3 +399,29 @@ def test_repository_and_its_own_subdirectory_package_nest(tmp_path: Path) -> Non
 
     assert pairs == [(repo, child), (repo, sibling)]
     assert nested_materialization_pairs([child, sibling, other], tmp_path / "apm_modules") == []
+
+
+def test_distinct_packages_cannot_claim_one_directory(tmp_path: Path) -> None:
+    """#3696: one owner/repo from two hosts, or one alias twice, is rejected."""
+    slots = MaterializationSlots(tmp_path / "apm_modules")
+    mid = DependencyReference.parse("acme/mid")
+
+    assert slots.claim(DependencyReference.parse("acme/tool")) is None
+    assert slots.claim(DependencyReference.parse("Acme/Tool#v2")) is None
+    assert slots.claim(DependencyReference.parse("gitlab.example.com/acme/tool"), mid) == (
+        "github.com/acme/tool and gitlab.example.com/acme/tool (required by acme/mid) are "
+        "different packages that would both install to apm_modules/acme/tool. Remove one "
+        "of them, or set 'alias:' on one so it installs to its own directory."
+    )
+    first = DependencyReference.parse_from_dict({"git": "acme/one", "alias": "shared"})
+    second = DependencyReference.parse_from_dict({"git": "acme/two", "alias": "shared"})
+    assert slots.claim(first) is None
+    assert "would both install to apm_modules/shared" in (slots.claim(second) or "")
+
+
+def test_local_sources_keep_sharing_their_slot(tmp_path: Path) -> None:
+    """#3401: local sources sharing a ``_local/<name>`` slot are not a collision."""
+    slots = MaterializationSlots(tmp_path / "apm_modules")
+
+    assert slots.claim(DependencyReference.parse("./a/pkg")) is None
+    assert slots.claim(DependencyReference.parse("./b/pkg")) is None
