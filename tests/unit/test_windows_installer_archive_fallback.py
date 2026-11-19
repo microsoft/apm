@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 POWERSHELL_HOSTS = ("powershell", "pwsh")
 BROKEN_EXPAND_ARCHIVE = (
     "function Expand-Archive { throw [System.Management.Automation.MethodException]::new("
-    "'Cannot find an overload for \"ExtractToDirectory\" and the argument count: \"3\".') }"
+    '\'Cannot find an overload for "ExtractToDirectory" and the argument count: "3".\') }'
 )
 
 
@@ -86,9 +86,7 @@ def test_release_archive_extracts_with_expand_archive(host: str, tmp_path: Path)
 
 
 @pytest.mark.parametrize("host", POWERSHELL_HOSTS)
-def test_release_archive_falls_back_to_zipfile_when_expand_archive_fails(
-    host: str, tmp_path: Path
-):
+def test_release_archive_falls_back_to_zipfile_when_expand_archive_fails(host: str, tmp_path: Path):
     root, output = _expand(host, tmp_path, broken=True)
 
     assert root.parent == tmp_path / "apm-install"
