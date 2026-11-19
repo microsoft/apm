@@ -59,6 +59,7 @@ _TRUST_OWNER_CALLERS = frozenset(
         ("src/apm_cli/security/trust.py", "resolve"),
         ("src/apm_cli/security/trust.py", "pins"),
         (_EXEC_GATE, "_trust_ctx"),
+        (_EXEC_GATE, "lock_exec_decisions_stale"),
         (_EXEC_GATE, "_resolve"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
     }
