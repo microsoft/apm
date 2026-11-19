@@ -132,7 +132,7 @@ Controls which packages repositories can depend on.
 
 ### `allow`
 
-List of allowed dependency patterns. If non-empty, only matching dependencies are permitted.
+List of allowed dependency patterns. If set (not `null`), only matching dependencies are permitted; `[]` permits none.
 
 ```yaml
 dependencies:
@@ -1015,7 +1015,7 @@ Install prints one `Policy violation: <subject> -- <reason>` line per offending 
 | Class | Origin | Primary message | Remediation |
 |-------|--------|-----------------|-------------|
 | `denylist` | `dependencies.deny` match | `Policy violation: <dep> -- denied by pattern: <pattern>` | Remove the dep from `apm.yml`, request an org-policy update, or `--no-policy` for one-off local debugging. |
-| `allowlist` | Dep not in non-empty `dependencies.allow` | `Policy violation: <dep> -- not in allowed sources` | Add the dep to the org allowlist or switch to an approved package. |
+| `allowlist` | Dep not in a set `dependencies.allow` (`[]` allows nothing) | `Policy violation: <dep> -- not in allowed sources` | Add the dep to the org allowlist or switch to an approved package. |
 | `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <dep> -- required by org policy but not declared` (pin mismatch: `Policy violation: <dep> -- expected ref '<X>', got '<Y>'`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
 | `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <server> -- transport '<t>' not in allowed [<list>]` (or `<server> -- effective transport unknown (<reason>); ...`) | Switch the server to an allowed transport, pick one with `transport:` in `apm.yml` when the server offers several, make sure the MCP registry is reachable, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: compilation-target -- Target(s) ['<t>'] not in allowed list ['<allowed>']: ...` (or `Enforced target '<t>' not present in [...]: ...`) | Re-run with `--target <allowed>`, or update `targets:` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |

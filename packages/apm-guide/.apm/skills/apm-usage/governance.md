@@ -542,7 +542,9 @@ The `--policy <override>` flag is **audit-only today**  --  it works on
 
 ### 3. Inheritance and composition
 
-Policy resolves through the chain: enterprise hub -> org -> repo override.
+Policy resolves through the chain: enterprise hub -> org. A repo `apm-policy.yml`
+is not part of the discovered chain; it applies only when passed to
+`apm audit --ci --policy`.
 The merge follows "Inheritance rules" above (tighten-only; a child cannot remove inherited entries).
 
 **Multi-level extends:** install-time enforcement and `apm audit --ci` both
@@ -590,22 +592,22 @@ relax an ancestor that requires an explicit `includes:` list.
 
 ### 7. CLI examples
 
-Symbol legend: `[+]` success, `[!]` warning, `[x]` error, `[i]` info.
+Symbol legend: `[>]` progress, `[+]` success, `[!]` warning, `[x]` error, `[i]` info, `[*]` summary.
 
 Successful install (verbose) under `enforcement: block`:
 
 ```shell
 $ apm install --verbose
-[i] Resolving dependencies...
+[>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
-[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
+[*] Installed 4 APM dependencies, 2 MCP servers in 1.2s.
 ```
 
 Block: denied dependency aborts the install before integration:
 
 ```shell
 $ apm install
-[i] Resolving dependencies...
+[>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
   Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
@@ -616,39 +618,42 @@ Warn: same dep, `enforcement: warn` -- install succeeds, violation flows to summ
 
 ```shell
 $ apm install
-[i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
-
+[>] Installing dependencies from apm.yml...
   [!] 1 policy warning
     +- [dependency-denylist] 1 dependency(ies) match deny list: acme/evil-pkg: denied by pattern: acme/evil-pkg
+[*] Installed 4 APM dependencies, 2 MCP servers in 1.2s.
 ```
 
 Escape hatches (`--no-policy` flag and `APM_POLICY_DISABLE=1` env var) emit the same loud warning every invocation:
 
 ```shell
 $ apm install --no-policy
+[>] Installing dependencies from apm.yml...
 [!] Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
-[i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
+[*] Installed 4 APM dependencies, 2 MCP servers in 1.2s.
 ```
 
 `--dry-run` previews violations (capped at five per severity bucket; overflow collapses):
 
 ```shell
 $ apm install --dry-run
-[i] Resolving dependencies...
+[>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
 [!] Would be blocked by policy: github.com/acme/evil-pkg -- denied by pattern: acme/*
 [!] Would be blocked by policy: github.com/acme/banned -- denied by pattern: acme/*
-[!] ... and 4 more would be blocked by policy. Run `apm audit` for full report.
-[i] Dry-run: no files written
+[!] Would be blocked by policy: github.com/acme/old -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/legacy -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/tools -- denied by pattern: acme/*
+[!] ... and 2 more would be blocked by policy. Run `apm audit` for full report.
+[i] Dry run mode - showing what would change:
 ```
 
 `apm install <pkg>` blocked -- manifest restored:
 
 ```shell
 $ apm install acme/evil-pkg
-[i] Resolving dependencies...
+[*] Updated apm.yml with 1 new package(s)
+[>] Installing 1 new package...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
   Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
@@ -662,9 +667,8 @@ Transitive MCP server blocked -- APM packages stay installed, MCP configs are no
 
 ```shell
 $ apm install
-[i] Resolving dependencies...
+[>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[+] Installed 4 APM dependencies in 0.8s
 [x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
 ```
 
@@ -775,7 +779,7 @@ Violation classes:
 | Class | Triggers | Remediation |
 |-------|----------|-------------|
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
-| `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
+| `allowlist` | Dep not in a set `dependencies.allow` (`[]` allows nothing) | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
 | `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal tag (`vX.Y.Z`, or `{name}-vX.Y.Z` / `{name}--vX.Y.Z` for the dep's own package name), an exact package release tag (`name@X.Y.Z` / `@scope/name@X.Y.Z`), or a full SHA. Leading zeros or non-ASCII digits (`v01.2.3`) are not SemVer and fail as bare branches. The check judges declared release intent, not immutability (a tag can move; `apm install --frozen` replays the locked commit). The constraint is judged as declared in `apm.yml` (a `replace:` rule by the ref it selects), not the tag a range resolved to. Roll out enforcement with `warn` before `block`. |
 | `transport` | Effective MCP transport (the registry remote, package = stdio, or a self-defined server's declared transport) not in `mcp.transport.allow`, or the registry cannot resolve the server | Switch transport, pick one with `transport:` in apm.yml when the server offers several, check registry reachability, or request `mcp.transport.allow` update |
