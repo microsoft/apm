@@ -52,6 +52,16 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
         ),
         (
             "src/apm_cli/install/service.py",
+            "approve=approve,",
+            "approve=None,",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "approved = gate(mcp_deps)",
+            "approved = filter_mcp_by_allow_executables(mcp_deps, None, logger)",
+        ),
+        (
+            "src/apm_cli/install/service.py",
             "recorded=lockfile,",
             "recorded=None,",
         ),
@@ -62,8 +72,8 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
         ),
         (
             "src/apm_cli/install/phases/integrate.py",
-            "approve=mcp_executables_gate(lambda: effective_allow_map(ctx)),",
-            "approve=list,",
+            "executable_context=(effective_allow_map(ctx), True),",
+            "executable_context=(None, True),",
         ),
         (
             "src/apm_cli/integration/mcp_config_view.py",
@@ -101,6 +111,18 @@ def test_duplicate_mcp_omission_authority_is_rejected() -> None:
         source_overrides={
             path: source + "\ndef with_recorded_omissions(lock):\n    return lock.mcp_omissions\n"
         },
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == _RULE and item.path == path for item in report.violations)
+
+
+def test_raw_view_derivation_outside_known_consumers_is_rejected() -> None:
+    path = "src/apm_cli/commands/outdated.py"
+    source = (_ROOT / path).read_text(encoding="utf-8")
+    report = run_selected_rules(
+        _ROOT,
+        {_RULE},
+        source_overrides={path: source + "\nview = CurrentMcpConfigView.derive(pkg, lock, root)\n"},
     )
     assert report.failures == ()
     assert any(item.rule_id == _RULE and item.path == path for item in report.violations)

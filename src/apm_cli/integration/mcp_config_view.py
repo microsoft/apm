@@ -81,9 +81,10 @@ class CurrentMcpConfigView:
     # only lets ``diff`` accept a lock recorded before that, already expanded.
     plugin_roots: Mapping[str, str] = field(default_factory=dict)
     project_root: Path | None = None
-    # True once this run's executables gate decided the view: ``omissions`` then
-    # holds exactly the evidence this run would record.
-    executables_gated: bool = False
+    # True once ``select`` replayed this run's complete selection (executables
+    # gate, dependency inclusion, transitive trust): ``omissions`` then holds
+    # exactly the evidence this run would record, so recorded evidence must equal it.
+    selection_replayed: bool = False
 
     @classmethod
     def select(
@@ -223,10 +224,10 @@ class CurrentMcpConfigView:
             if is_executable_gated_mcp(dependency) and dependency.name not in kept
         }
         if not parked:
-            return replace(self, executables_gated=True)
+            return replace(self, selection_replayed=True)
         return replace(
             self,
-            executables_gated=True,
+            selection_replayed=True,
             dependencies=tuple(d for d in self.dependencies if d.name not in parked),
             configs={name: c for name, c in self.configs.items() if name not in parked},
             provenance={name: p for name, p in self.provenance.items() if name not in parked},
@@ -270,7 +271,7 @@ class CurrentMcpConfigView:
         for name in sorted(candidates):
             evidence = lockfile.mcp_omissions.get(name)
             fingerprint = self.declaration_fingerprints.get(name)
-            if self.executables_gated:
+            if self.selection_replayed:
                 valid = fingerprint is not None and evidence == self.omissions.get(name, False)
             else:
                 valid = (
@@ -287,7 +288,7 @@ class CurrentMcpConfigView:
                 )
             if valid and name not in admitted:
                 configs.pop(name, None)
-            elif self.executables_gated and evidence is None and name in configs:
+            elif self.selection_replayed and evidence is None and name in configs:
                 # This run deploys it; the diff reports it missing from the lock.
                 continue
             elif name not in admitted or evidence is not None:

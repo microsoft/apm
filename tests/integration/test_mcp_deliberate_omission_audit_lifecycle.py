@@ -109,11 +109,15 @@ def _rewrite_lock(chain: Chain, edit) -> None:
 
 
 def _frozen_fails(chain: Chain, *expected: str) -> None:
+    lock_path = chain.project / "apm.lock.yaml"
+    before = lock_path.read_bytes()
     result = chain.run("install", "--frozen", "--no-policy")
     output = result.stdout + result.stderr
     assert result.returncode == 1, output
     for text in expected:
         assert text in output, output
+    assert lock_path.read_bytes() == before, "a failed --frozen must not rewrite the lock"
+    assert "tools-server" not in chain.servers("claude")
 
 
 def test_frozen_install_applies_executables_gate_and_omission_evidence(
@@ -159,7 +163,6 @@ def test_frozen_install_applies_executables_gate_and_omission_evidence(
         executables={"allow": {_PACKAGE: {"mcp": True}}},
     )
     _frozen_fails(chain, "'tools-server' is missing from apm.lock.yaml")
-    assert "tools-server" not in chain.servers("claude")
 
     chain.ok("install", "--no-policy")
     assert "tools-server" not in (chain.lock().get("mcp_omissions") or {})

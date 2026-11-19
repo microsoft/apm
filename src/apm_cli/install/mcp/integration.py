@@ -53,20 +53,14 @@ def prepare_mcp_integration(
     """Collect and filter once, without native writes or ownership adoption."""
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
-    from apm_cli.security.executables import (
-        mcp_executables_gate,
-        resolve_project_exec_allow_map,
-    )
+    from apm_cli.security.executables import project_mcp_executables_gate
 
-    gate = mcp_executables_gate(
-        lambda: resolve_project_exec_allow_map(
-            project_root or apm_package.package_path or Path.cwd(),
-            apm_package,
-            executable_context=executable_context,
-            no_policy=no_policy,
-            logger=logger,
-        ),
-        logger,
+    gate = project_mcp_executables_gate(
+        project_root or apm_package.package_path or Path.cwd(),
+        apm_package,
+        executable_context=executable_context,
+        no_policy=no_policy,
+        logger=logger,
     )
     current_view = None
     if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():

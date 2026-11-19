@@ -1164,17 +1164,33 @@ class _SilentGateLogger:
         """Discard the filtered-servers summary."""
 
 
-def mcp_executables_gate(
-    allow_map: Callable[[], dict | None], logger: Any | None = None
+def project_mcp_executables_gate(
+    project_root: Path,
+    apm_package: Any,
+    *,
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
+    no_policy: bool = False,
+    logger: Any | None = None,
 ) -> Callable[[list], list]:
-    """Return this run's MCP executables gate; *allow_map* resolves only when needed."""
+    """Return this run's MCP executables gate for install and ``--frozen``.
+
+    The allow map resolves (through :func:`resolve_project_exec_allow_map`)
+    only when a gated server is present. Without *logger* the gate is silent,
+    so a check that does not deploy never repeats the filtered-servers warning.
+    """
+    quiet = logger if logger is not None else _SilentGateLogger()
 
     def approve(dependencies: list) -> list:
         if not any(is_executable_gated_mcp(dependency) for dependency in dependencies):
             return dependencies
-        return filter_mcp_by_allow_executables(
-            dependencies, allow_map(), logger if logger is not None else _SilentGateLogger()
+        allow_map = resolve_project_exec_allow_map(
+            project_root,
+            apm_package,
+            executable_context=executable_context,
+            no_policy=no_policy,
+            logger=logger,
         )
+        return filter_mcp_by_allow_executables(dependencies, allow_map, quiet)
 
     return approve
 

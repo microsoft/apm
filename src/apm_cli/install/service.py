@@ -419,10 +419,7 @@ class InstallService:
         manifest_deps = project_manifest_dependencies(request.apm_package, modules_dir=modules_dir)
         satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
 
-        from apm_cli.security.executables import (
-            mcp_executables_gate,
-            resolve_project_exec_allow_map,
-        )
+        from apm_cli.security.executables import project_mcp_executables_gate
 
         project_root = request.apm_package.package_path or lockfile_path.parent
         reasons.extend(
@@ -433,10 +430,8 @@ class InstallService:
                 trust_transitive_mcp=request.trust_transitive_mcp,
                 logger=request.logger,
                 allow_pending=allow_pending_mcp,
-                approve=mcp_executables_gate(
-                    lambda: resolve_project_exec_allow_map(
-                        project_root, request.apm_package, no_policy=request.no_policy
-                    )
+                approve=project_mcp_executables_gate(
+                    project_root, request.apm_package, no_policy=request.no_policy
                 ),
             )
         )
@@ -615,6 +610,9 @@ class InstallService:
 
         The view is gated by *approve* and checked against the recorded
         omission evidence exactly as install and audit derive it (#3925).
+        The pre-download check runs before the policy gate phase, so it
+        discovers policy itself; the hydrated check uses the pipeline's
+        routed allow map and is authoritative before anything deploys.
         """
         from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
