@@ -176,6 +176,16 @@
         "src/apm_cli/copilot_plugins/catalog.py"
       ],
       "guards": ["marketplace-integrations-copilot-ownership"]
+    },
+    {
+      "id": "pack-plugin-manifests",
+      "decision": "Pack-time targets-to-ecosystem plugin.json paths and per-ecosystem manifest shape (claude, copilot, codex)",
+      "owner": "core/plugin_manifest.py (PLUGIN_ECOSYSTEM_PATHS, build_plugin_manifest, write_plugin_manifest_with_outcome); codex_plugins/manifest.py derives CODEX_COMPAT_MANIFEST from it",
+      "selectors": [
+        "src/apm_cli/core/plugin_manifest.py",
+        "src/apm_cli/core/build_orchestrator.py"
+      ],
+      "guards": ["marketplace-integrations-pack-plugin-manifests"]
     }
   ]
 }

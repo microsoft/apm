@@ -243,6 +243,50 @@ remote entries to `source: url`, and remote subdirectory entries to
 `source: git-subdir`. Claude output also emits `category` on any
 package where it is set, even though only `codex` requires it.
 
+Each Codex entry points at a plugin directory, and Codex reads that
+directory's own manifest. Add `codex` to the package's `targets:` so
+`apm pack` writes `.codex-plugin/plugin.json` with the package's name,
+version, description and author, plus `skills/` and `.mcp.json`
+references when those exist at the package root. Codex does not see
+skills under `.apm/skills/` or MCP servers declared in `apm.yml`. See
+[Plugin manifests](../../reference/cli/pack/#plugin-manifests).
+Portable bundles from `apm pack --format agent-plugin` already work:
+Codex reads their schema-declared root `plugin.json`. Codex also reads
+`.claude-plugin/plugin.json` and `.cursor-plugin/plugin.json`. Only a
+directory with none of these manifests installs under the version
+`local`, with a Codex-built manifest holding just the name and category.
+
+```yaml
+# packages/hello/apm.yml
+name: hello
+version: 1.2.3
+description: Greeting workflow
+author: Acme
+targets: [claude, copilot, codex]
+
+# root apm.yml (marketplace my-project) also needs:
+#   marketplace.outputs: {codex: {}}
+#   marketplace.packages: [{name: hello, source: ./packages/hello, category: Productivity}]
+```
+
+```bash
+(cd packages/hello && apm pack)   # writes packages/hello/.codex-plugin/plugin.json
+apm pack                          # writes .agents/plugins/marketplace.json
+git add packages/hello/.codex-plugin/plugin.json .agents/plugins/marketplace.json
+git commit -m "Publish hello 1.2.3"   # push so consumers get both files
+codex plugin marketplace add .
+codex plugin add hello@my-project        # marketplace name from apm.yml; installs 1.2.3
+```
+
+`apm pack` keeps an existing `.codex-plugin/plugin.json`. After a
+version bump, re-run it in the package with `--force` so Codex installs
+the new version (see
+[Overwrite and dry-run](../../reference/cli/pack/#overwrite-and-dry-run)).
+
+Tested with Codex CLI 0.170.0 (CLI surface): installation, skills, and
+MCP server configuration. Desktop and hosted Codex, hooks, and agents
+are not covered. Codex keeps its own trust and MCP authentication steps.
+
 The `copilot` output targets the [GitHub Copilot CLI marketplace
 format](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#plugin-source-types)
 (`.github/plugin/marketplace.json` by default). It has no `category`
