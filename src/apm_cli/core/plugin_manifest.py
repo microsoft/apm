@@ -238,11 +238,73 @@ def _sanitize_value(value: Any, path: str, dropped: list[str]) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
+def _read_root_mcp_servers(project_root: Path) -> dict | None:
+    """Return the raw ``mcpServers`` map of root ``.mcp.json``, or ``None`` if unusable."""
+    mcp_file = project_root / ".mcp.json"
+    if not mcp_file.is_file() or mcp_file.is_symlink():
+        return None
+    try:
+        data = json.loads(mcp_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        # Untrusted .mcp.json: an oversized-int literal raises bare ValueError
+        # (int_max_str_digits), a deeply nested doc raises RecursionError --
+        # neither is a JSONDecodeError. Fail closed rather than crash the
+        # pack/plugin read on a hostile clone.
+        return None
+    if not isinstance(data, dict):
+        return None
+    servers = data.get("mcpServers", {})
+    return dict(servers) if isinstance(servers, dict) else None
+
+
+def apm_managed_mcp_names(project_root: Path) -> frozenset[str] | None:
+    """Return the MCP server names ``apm install`` manages for *project_root*.
+
+    ``apm install`` renders the project's own MCP dependencies into root
+    ``.mcp.json`` (copilot, claude), so that file mixes authored servers with
+    APM's consumer render, which can carry the author's credentials. Pack reads
+    only authored servers: every name the lockfile records as APM-managed
+    (``mcp_servers``, ``mcp_configs``, ``mcp_target_servers`` for any target) is
+    excluded, so pack output is the same before and after ``apm install``.
+    Returns an empty set when there is no lockfile and ``None`` when it cannot
+    be read (ownership unknown; callers fail closed).
+    """
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
+
+    try:
+        lock = LockFile.read(resolve_lockfile_path_for_read(project_root, read_only=True))
+    except (OSError, ValueError):
+        return None
+    if lock is None:
+        return frozenset()
+    names = set(lock.mcp_servers) | set(lock.mcp_configs)
+    for servers in lock.mcp_target_servers.values():
+        names.update(servers)
+    return frozenset(str(name) for name in names)
+
+
+def _warn_unknown_mcp_ownership(logger: Any) -> None:
+    _emit(
+        "warning",
+        "Root .mcp.json left out of the plugin: apm.lock.yaml cannot be read, so the "
+        "MCP servers APM installed there cannot be told apart from authored ones. "
+        "Fix or regenerate apm.lock.yaml with 'apm install', then run 'apm pack' again.",
+        logger,
+        "warning",
+    )
+
+
+def collect_mcp_servers(
+    project_root: Path, *, logger: Any = None, exclude_apm_managed: bool = False
+) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json`` with credentials stripped.
 
     Returns an empty dict when the file is absent, is a symlink, or cannot be
     parsed.
+
+    With *exclude_apm_managed* (pack reads of the author's own project root),
+    servers named by :func:`apm_managed_mcp_names` are dropped first, and the
+    whole file is withheld when the lockfile cannot be read.
 
     Each server object is sanitised before it is returned: any key that may
     carry a live credential (``env``/``environment``/``headers``/``authorization``
@@ -259,23 +321,16 @@ def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
     committed ``plugin.json`` would exfiltrate them into the distributed
     artefact. A loud warning is emitted for every key dropped or value redacted.
     """
-    mcp_file = project_root / ".mcp.json"
-    if not mcp_file.is_file() or mcp_file.is_symlink():
+    servers = _read_root_mcp_servers(project_root)
+    if not servers:
         return {}
-    try:
-        data = json.loads(mcp_file.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            servers = data.get("mcpServers", {})
-            if not isinstance(servers, dict):
-                return {}
-            return _sanitize_mcp_servers(dict(servers), logger=logger)
-    except (OSError, ValueError, RecursionError):
-        # Untrusted .mcp.json: an oversized-int literal raises bare ValueError
-        # (int_max_str_digits), a deeply nested doc raises RecursionError --
-        # neither is a JSONDecodeError. Fail closed to an empty server map
-        # rather than crash the pack/plugin read on a hostile clone.
-        pass
-    return {}
+    if exclude_apm_managed:
+        managed = apm_managed_mcp_names(project_root)
+        if managed is None:
+            _warn_unknown_mcp_ownership(logger)
+            return {}
+        servers = {name: server for name, server in servers.items() if name not in managed}
+    return _sanitize_mcp_servers(servers, logger=logger)
 
 
 def _sanitize_mcp_servers(servers: dict, *, logger: Any = None) -> dict:
@@ -372,13 +427,15 @@ def build_plugin_manifest(
     Per-ecosystem rules are then applied:
 
     * **claude**: author kept as ``{"name": ...}``; ``mcpServers`` included when
-      a ``.mcp.json`` is present (with credential-bearing keys stripped).
+      a ``.mcp.json`` is present (APM-managed servers excluded, credential-bearing
+      keys stripped).
     * **copilot**: author kept as ``{"name": ...}``; ``mcpServers`` omitted
       (not part of the Copilot plugin manifest schema).
     * **codex**: the documented Codex compatibility manifest. Declares
       ``skills: "./skills/"`` and ``mcpServers: "./.mcp.json"`` only when those
-      regular paths exist, so Codex reads the author's own MCP file natively
-      and no server data is copied or translated. No ``interface`` is
+      regular paths exist (and ``.mcp.json`` holds no APM-managed server), so
+      Codex reads the author's own MCP file natively and no server data is
+      copied or translated. No ``interface`` is
       generated, so Codex has no listing presentation metadata for it.
 
     Convention directories (``agents/``, ``skills/``, ``commands/``) are
@@ -397,7 +454,7 @@ def build_plugin_manifest(
         manifest.pop(key, None)
 
     if ecosystem == "claude":
-        mcp_servers = collect_mcp_servers(project_root, logger=logger)
+        mcp_servers = collect_mcp_servers(project_root, logger=logger, exclude_apm_managed=True)
         if mcp_servers:
             manifest["mcpServers"] = mcp_servers
     elif ecosystem == "codex":
@@ -416,12 +473,49 @@ def _is_regular(path: Path, *, directory: bool) -> bool:
     return path.is_dir() if directory else path.is_file()
 
 
+def _codex_may_reference_root_mcp(project_root: Path, *, logger: Any = None) -> bool:
+    """Whether Codex may read root ``.mcp.json`` as the author's own file.
+
+    Codex reads the referenced file verbatim, so it is referenced only when it
+    holds no server APM manages (see :func:`apm_managed_mcp_names`).
+    """
+    if not _is_regular(project_root / ".mcp.json", directory=False):
+        return False
+    managed = apm_managed_mcp_names(project_root)
+    if managed is None:
+        _warn_unknown_mcp_ownership(logger)
+        return False
+    if not managed:
+        return True
+    servers = _read_root_mcp_servers(project_root)
+    if servers is None:
+        return False
+    held = sorted(name for name in servers if name in managed)
+    if not held:
+        return True
+    authored = sorted(name for name in servers if name not in managed)
+    if authored:
+        _emit(
+            "warning",
+            "Codex plugin.json does not reference .mcp.json: it also holds MCP servers "
+            "'apm install' manages ("
+            + ", ".join(held)
+            + "), so authored servers ("
+            + ", ".join(authored)
+            + ") are not shipped to Codex either. Keep APM-managed servers out of a "
+            "Codex package's root .mcp.json.",
+            logger,
+            "warning",
+        )
+    return False
+
+
 def _apply_codex_components(project_root: Path, manifest: dict, *, logger: Any = None) -> None:
     """Shape *manifest* as the documented ``.codex-plugin/plugin.json``."""
     manifest.pop("mcpServers", None)
     if _is_regular(project_root / "skills", directory=True):
         manifest["skills"] = "./skills/"
-    if _is_regular(project_root / ".mcp.json", directory=False):
+    if _codex_may_reference_root_mcp(project_root, logger=logger):
         manifest["mcpServers"] = "./.mcp.json"
 
     author = manifest.get("author")

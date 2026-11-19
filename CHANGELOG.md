@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --refresh`, `apm update` and `apm marketplace update` revalidate marketplace catalogs and fail rather than use stale cached data; plain installs keep the cache. (#3910)
 - `apm self-update` on Windows no longer fails in `Expand-Archive` when run from PowerShell 7; the installer also falls back to .NET zip extraction. (#3931)
 
+### Security
+
+- `apm pack` no longer ships the MCP servers `apm install` writes to root `.mcp.json`, which can hold your credentials: the Codex `plugin.json` stops referencing that file, and Claude manifests and bundles leave those servers out. (#PRNUM)
+
 ## [0.36.1] - 2026-11-18
 
 ### Highlights

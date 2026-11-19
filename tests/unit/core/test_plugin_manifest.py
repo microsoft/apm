@@ -518,6 +518,55 @@ class TestBuildPluginManifest:
             assert token not in raw
 
 
+class TestApmManagedMcpExcludedFromPack:
+    """Root .mcp.json servers that ``apm install`` manages never reach pack output (#3966)."""
+
+    @staticmethod
+    def _project(tmp_path: Path, servers: dict, lock: str | None) -> Path:
+        apm = _minimal_apm_yml(tmp_path, author="Ann")
+        _write(tmp_path / ".mcp.json", json.dumps({"mcpServers": servers}))
+        if lock is not None:
+            _write(tmp_path / "apm.lock.yaml", lock)
+        return apm
+
+    def test_mixed_file_is_not_referenced_by_codex_and_filtered_for_claude(
+        self, tmp_path: Path
+    ) -> None:
+        apm = self._project(
+            tmp_path,
+            {"authored": {"command": "node"}, "devsrv": {"url": "https://x.test/mcp"}},
+            "lockfile_version: '1'\nmcp_target_servers:\n  copilot: [devsrv]\n",
+        )
+        logger = MagicMock()
+
+        codex = build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
+        claude = build_plugin_manifest(tmp_path, apm, "claude")
+
+        assert "mcpServers" not in codex
+        message = logger.warning.call_args.args[0]
+        assert "devsrv" in message and "authored" in message
+        assert claude["mcpServers"] == {"authored": {"command": "node"}}
+
+    def test_codex_references_file_without_managed_servers(self, tmp_path: Path) -> None:
+        apm = self._project(
+            tmp_path,
+            {"authored": {"command": "node"}},
+            "lockfile_version: '1'\nmcp_servers: [elsewhere]\n",
+        )
+        assert build_plugin_manifest(tmp_path, apm, "codex")["mcpServers"] == "./.mcp.json"
+
+    def test_unreadable_lock_withholds_root_mcp(self, tmp_path: Path) -> None:
+        apm = self._project(tmp_path, {"authored": {"command": "node"}}, "lockfile_version: [\n")
+        logger = MagicMock()
+
+        codex = build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
+        claude = build_plugin_manifest(tmp_path, apm, "claude", logger=logger)
+
+        assert "mcpServers" not in codex
+        assert "mcpServers" not in claude
+        assert "apm.lock.yaml cannot be read" in logger.warning.call_args.args[0]
+
+
 # ---------------------------------------------------------------------------
 # TestWritePluginManifest
 # ---------------------------------------------------------------------------
