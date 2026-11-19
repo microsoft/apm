@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 
 from .client import fetch_or_cache
+from .errors import MarketplaceNotCachedError
 from .registry import get_registered_marketplaces
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ def detect_shadows(
     primary_marketplace: str,
     *,
     auth_resolver: object | None = None,
+    skipped: list[str] | None = None,
 ) -> list[ShadowMatch]:
     """Check registered marketplaces for duplicate plugin names.
 
@@ -38,8 +40,8 @@ def detect_shadows(
     ``primary_marketplace`` and returns a :class:`ShadowMatch` for each
     one that contains a plugin with the same name (case-insensitive).
 
-    Uses :func:`fetch_or_cache` so cached manifests are reused and no
-    extra network round-trips are needed in the common case.
+    Uses an advisory :func:`fetch_or_cache` read so cached manifests are
+    reused, and an explicit refresh never revalidates unrelated catalogs.
 
     Args:
         plugin_name: The plugin name to search for.
@@ -47,6 +49,8 @@ def detect_shadows(
             (excluded from the scan).
         auth_resolver: Optional ``AuthResolver`` forwarded to
             :func:`fetch_or_cache`.
+        skipped: Optional list that receives the names of marketplaces not
+            checked because an explicit refresh found no cached catalog.
 
     Returns:
         A list of :class:`ShadowMatch` instances (may be empty).
@@ -56,7 +60,7 @@ def detect_shadows(
         if source.name.lower() == primary_marketplace.lower():
             continue
         try:
-            manifest = fetch_or_cache(source, auth_resolver=auth_resolver)
+            manifest = fetch_or_cache(source, auth_resolver=auth_resolver, advisory=True)
             match = manifest.find_plugin(plugin_name)
             if match is not None:
                 shadows.append(
@@ -65,6 +69,9 @@ def detect_shadows(
                         plugin_name=match.name,
                     )
                 )
+        except MarketplaceNotCachedError:
+            if skipped is not None:
+                skipped.append(source.name)
         except Exception as exc:
             logger.debug(
                 "Shadow check failed for marketplace '%s': %s",
