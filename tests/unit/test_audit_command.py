@@ -2,6 +2,7 @@
 
 import textwrap
 from pathlib import Path  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -366,6 +367,80 @@ class TestLockfileMode:
         result = runner.invoke(audit, ["test/typo-pkg"])
         assert result.exit_code == 1
         assert "not installed" in result.output
+
+    @staticmethod
+    def _uninstall_form_project(tmp_path, declarations, locked):
+        """Write apm.yml, apm.lock.yaml and one deployed file owned by *locked*."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.utils.yaml_io import dump_yaml
+
+        dump_yaml(
+            {"name": "project", "version": "1.0.0", "dependencies": {"apm": declarations}},
+            tmp_path / "apm.yml",
+        )
+        locked.deployed_files = [".github/prompts/x.md"]
+        LockFile(dependencies={locked.get_unique_key(): locked}).write(tmp_path / "apm.lock.yaml")
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
+        (tmp_path / ".github" / "prompts" / "x.md").write_text("Hidden\u200b\n", encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        ("declaration", "package"),
+        [
+            ({"name": "example-plugin", "marketplace": "company"}, "example-plugin@company"),
+            ({"name": "example-plugin", "marketplace": "company"}, "Example-Plugin@COMPANY"),
+            ("git.example.com/team/catalog/plugins/example-plugin", "example-plugin@company"),
+        ],
+    )
+    def test_package_filter_accepts_uninstall_marketplace_form(
+        self, runner, tmp_path, monkeypatch, declaration, package
+    ):
+        """#3953: ``plugin@marketplace`` selects the locked plugin offline, as uninstall does."""
+        from apm_cli.deps.lockfile import LockedDependency
+
+        locked = LockedDependency(
+            repo_url="team/catalog",
+            host="git.example.com",
+            virtual_path="plugins/example-plugin",
+            is_virtual=True,
+            resolved_commit="a" * 40,
+            discovered_via="company",
+            marketplace_plugin_name="example-plugin",
+        )
+        self._uninstall_form_project(tmp_path, [declaration], locked)
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=AssertionError("audit PACKAGE must stay offline"),
+        ):
+            result = runner.invoke(audit, [package])
+            unknown = runner.invoke(audit, ["other-plugin@company"])
+
+        assert result.exit_code == 2, result.output
+        assert "not installed" not in result.output
+        assert unknown.exit_code == 1, unknown.output
+        assert "not installed" in unknown.output
+
+    @pytest.mark.parametrize("package", ["_local/hooky", "./pkgs/hooky"])
+    def test_package_filter_accepts_deps_list_local_key(
+        self, runner, tmp_path, monkeypatch, package
+    ):
+        """#3953: the ``_local/<name>`` key ``apm deps list`` prints selects the local package."""
+        from apm_cli.deps.lockfile import LockedDependency
+
+        locked = LockedDependency(
+            repo_url="_local/hooky", source="local", local_path="./pkgs/hooky"
+        )
+        self._uninstall_form_project(tmp_path, ["./pkgs/hooky"], locked)
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(audit, [package])
+        unknown = runner.invoke(audit, ["_local/other"])
+
+        assert result.exit_code == 2, result.output
+        assert "not installed" not in result.output
+        assert unknown.exit_code == 1, unknown.output
+        assert "not installed" in unknown.output
 
     def test_dir_entries_scanned_recursively(
         self,

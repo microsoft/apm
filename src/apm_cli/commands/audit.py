@@ -983,50 +983,37 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     return bool(policy.security.audit.fail_on_drift)
 
 
-def _project_manifest_host_scope(project_root: Path, logger):
-    """Return the project apm.yml ``default_host:`` scope, or exit 1 if invalid.
+def _require_installed_package_key(
+    package: str, lockfile: LockFile | None, logger, project_root: Path
+) -> str:
+    """Return the ``apm.lock.yaml`` key for *package* or exit 1 (#3840, #3953).
 
-    No apm.yml means no override (req-mf-019, #3843).
+    Selection routes through the ``apm uninstall`` selector, offline, so every
+    form uninstall accepts (lock key, URL, ``host/owner/repo``,
+    ``owner/repo#ref``, ``plugin@marketplace``, ``_local/<name>``) resolves
+    exactly as install recorded it under the project manifest's
+    ``default_host:`` (req-mf-019, #3843). An unknown package fails so a typo
+    in a CI gate cannot pass silently.
     """
     from ..constants import APM_YML_FILENAME
     from ..models.dependency.manifest_host import manifest_host_scope_for
     from ..models.manifest_io import load_manifest
+    from .uninstall.engine import select_installed_lock_key
 
     manifest_path = project_root / APM_YML_FILENAME
     try:
-        data = load_manifest(manifest_path) if manifest_path.is_file() else None
+        manifest = load_manifest(manifest_path) if manifest_path.is_file() else None
     except Exception as e:
         logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)
     try:
-        return manifest_host_scope_for(data)
+        host_scope = manifest_host_scope_for(manifest)
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
-
-
-def _require_installed_package_key(
-    package: str, lockfile: LockFile | None, logger, project_root: Path
-) -> str:
-    """Return the ``apm.lock.yaml`` key for *package* or exit 1 (#3840).
-
-    Accepts the lockfile key itself or any form ``apm uninstall`` accepts
-    (URL, ``host/owner/repo``, ``owner/repo#ref``), normalized through the
-    dependency-selection owner under the project manifest's ``default_host:``,
-    exactly as install recorded it. An unknown package fails so a typo in a CI
-    gate cannot pass silently.
-    """
-    from ..models.dependency.selection import parse_dependency_entry
-
-    installed = lockfile.dependencies if lockfile is not None else {}
-    if package in installed:
-        return package
-    try:
-        with _project_manifest_host_scope(project_root, logger):
-            key = parse_dependency_entry(package).get_unique_key()
-    except (ValueError, TypeError, AttributeError, KeyError):
-        key = None
-    if key is not None and key in installed:
+    with host_scope:
+        key = select_installed_lock_key(package, manifest, lockfile)
+    if key is not None:
         return key
     logger.error(
         f"Package '{package}' is not installed: no matching dependency in apm.lock.yaml. "
