@@ -25,7 +25,8 @@ Marketplace-shadow drift -- the same plugin name appearing under more than
 one registered marketplace -- is reported inline by `apm install` when it
 happens; see [security model](../security/). A marketplace alias
 re-registered for a different repository than `apm.lock.yaml` recorded
-makes `apm update` fail, naming both origins.
+makes `apm update`, or any install that re-resolves the entry, fail, naming
+both origins.
 
 ## The local commands
 

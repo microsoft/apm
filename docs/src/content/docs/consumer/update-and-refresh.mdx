@@ -104,9 +104,11 @@ revalidate the marketplaces behind `name` + `marketplace` dependencies (and
 is seen at once. If a marketplace cannot be verified, the command fails and
 changes nothing. A plain `apm install` (or `--frozen`) replays locked
 marketplace dependencies from `apm.lock.yaml` without contacting the
-marketplace; only new or changed entries read its cache (refreshed hourly).
-If a marketplace name was re-registered to a different origin, `apm update`
-fails naming both origins. Exceptions and recovery:
+marketplace; only new or changed entries read its cache (refreshed hourly), as
+does a package whose MCP or LSP servers come from its marketplace entry when
+`apm_modules/` is empty. If a marketplace name was re-registered to a different
+origin, any command that re-resolves the entry (such as `apm update`) fails
+naming both origins. Exceptions and recovery:
 [Installing from marketplaces](../installing-from-marketplaces/).
 
 Use `apm lock --update` when you need the same upstream ref refresh but want to

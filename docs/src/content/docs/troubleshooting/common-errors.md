@@ -196,7 +196,11 @@ See also: [Install failures](../install-failures/)
 ### `Refusing to run '<command>' on apm.lock.yaml: it was written by APM <version>`
 
 ```
-Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.37.0, newer than this APM 0.36.1. An older APM can drop or misread what a newer one recorded. Nothing was changed.
+Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.38.0, newer than this APM 0.37.0. An older APM can drop or misread what a newer one recorded. Nothing was changed.
+Install APM 0.38.0 or newer. Upgrade, then retry:
+  apm self-update                            (installer script)
+  brew upgrade apm                           (Homebrew)
+  python3 -m pip install --upgrade apm-cli   (pip)
 ```
 
 Cause and fix: a newer APM wrote the lockfile. There is no override; upgrade APM and retry. See [Lockfile written by a newer APM](../install-failures/#lockfile-written-by-a-newer-apm).
@@ -207,7 +211,7 @@ Cause and fix: a newer APM wrote the lockfile. There is no override; upgrade APM
 marketplace 'company' now points at <new-origin>, but apm.lock.yaml recorded 'example-plugin' from <locked-origin>. Nothing was changed. To keep the locked catalog, run: apm marketplace add <locked-origin> --name company ...
 ```
 
-Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded, so `apm update` refuses to switch marketplaces silently.
+Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded. Any command that resolves the entry through the marketplace (`apm update`, `apm install --refresh`, or `apm install` for a new or changed entry) refuses to switch marketplaces silently.
 
 Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists.
 
@@ -229,7 +233,7 @@ refused (dependency-confusion risk #1326): bare `repo: acme/tool` on enterprise 
   - 'github.com/acme/tool' (declared cross-host dep on public github.com)
 ```
 
-Cause: a plugin on a `*.ghe.com` marketplace declares a bare cross-repo `repo:`, which would otherwise resolve to public `github.com`. APM refuses it on every path (CLI argument, `apm.yml` entry, transitive dependency, `apm update`) before any request.
+Cause: a plugin on a `*.ghe.com` marketplace declares a bare cross-repo `repo:`, which would otherwise resolve to public `github.com`. APM refuses it whenever it resolves the entry through the marketplace (CLI argument, `apm.yml` entry, transitive dependency, `apm update`), before downloading or probing the plugin repository.
 
 Fix: the marketplace maintainer host-qualifies `repo:` in `marketplace.json` as the message shows.
 
@@ -248,6 +252,7 @@ Fix: restore network access or credentials for the marketplace and retry.
 ```
 [x] --frozen: dependency selections differ from apm.lock.yaml.
   - selection for <owner>/<repo> changed: the skills and targets its declaring manifests request differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml
+[i] Tip: run 'apm install' without --frozen, retaining --root DIR or --global if specified, then commit apm.lock.yaml.
 ```
 
 Cause: several manifests narrow one dependency with different `skills:` or `targets:`, and `apm.lock.yaml` records another pairing (lockfiles from APM before 0.37 record the cross-product). `--frozen` refuses before deploying anything.
@@ -258,6 +263,7 @@ Fix: run `apm install` without `--frozen` once and commit `apm.lock.yaml`.
 
 ```
 [x] MCP server 'synthdb' conflicts with the existing claude connection in <project>/.mcp.json. Preserved that connection. Field args[0] holds a value where APM writes a package path, and APM cannot confirm it wrote it. Restore the package path APM writes (args[0]: ${CLAUDE_PROJECT_DIR:-.}/apm_modules/...) or rename or remove the connection yourself, then retry.
+    --force does not take ownership of user connections.
 ```
 
 Cause: an entry in `.mcp.json` (or another native MCP config) with the same name was not written by APM, or was edited after APM wrote it. `--force` does not take ownership of it.

@@ -200,8 +200,8 @@ APM is older, `apm install` (including `--frozen` and `-g`), `apm update`,
 changing anything and name both versions:
 
 ```text
-Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.37.0,
-newer than this APM 0.36.1. ...
+Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.38.0,
+newer than this APM 0.37.0. ...
 ```
 
 An older APM can drop or misread what a newer one recorded, so there is no

@@ -80,7 +80,9 @@ jobs:
 Use that default when CI needs to materialize deployed outputs.
 For a fail-closed install step, run `apm install --frozen`: it refuses
 when `apm.lock.yaml` is missing or out of sync with `apm.yml`, and
-replays locked marketplace dependencies without contacting the marketplace.
+replays locked marketplace dependencies from the lock. A package whose MCP or
+LSP servers come from its marketplace entry still reads the marketplace when
+`apm_modules/` is empty, as on a fresh CI checkout.
 Missing gitignored outputs do not fail `deployed-files-present`, so those
 repos can also use audit-only CI. Without committed deployed bytes, that
 pattern has reduced integrity and drift coverage.
