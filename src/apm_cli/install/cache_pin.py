@@ -210,15 +210,13 @@ def sync_markers_for_lockfile(
 def _copy_holds_locked_commit(dep: LockedDependency, install_path: Path) -> bool:
     """Whether the copy may carry a marker naming *dep*'s locked commit (#3884).
 
-    The resolver trusts the marker, so it is written only for a copy the
-    copy-validity owner proves, or for a legacy unmarked copy whose row has
-    no content hash to check. A copy left by an older lock stays unmarked.
+    The resolver trusts the marker, so the copy-validity owner decides: a
+    proven copy, or a legacy copy with no evidence against it. A copy left by
+    an older lock, or a checkout at another commit, stays unmarked.
     """
-    from apm_cli.drift import locked_copy_proof
+    from apm_cli.drift import locked_copy_is_stale
 
-    if locked_copy_proof(dep, install_path) is not None:
-        return True
-    return not getattr(dep, "content_hash", None) and not (install_path / MARKER_FILENAME).exists()
+    return not locked_copy_is_stale(dep, install_path)
 
 
 def _is_markable(dep: LockedDependency) -> bool:

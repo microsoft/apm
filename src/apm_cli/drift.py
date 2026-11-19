@@ -363,7 +363,7 @@ def _locked_commit(locked_dep: Any) -> str | None:
 
 
 def locked_copy_proof(
-    locked_dep: Any, package_path: Path, *, for_deployment: bool = False
+    locked_dep: Any, package_path: Path, *, trust_marker: bool = False
 ) -> str | None:
     """Return how the copy at *package_path* proves it holds *locked_dep*, else None.
 
@@ -372,8 +372,9 @@ def locked_copy_proof(
     its own; otherwise the ``.apm-pin`` marker naming the locked
     ``resolved_commit``, then the recorded ``content_hash`` (rows without a
     commit, or copies without a marker). The marker only catches honest
-    staleness, so it never proves bytes that are about to be deployed:
-    *for_deployment* needs the git HEAD or the verified content hash.
+    staleness, so by default only the git HEAD or the verified content hash
+    prove a copy whose bytes may be deployed; *trust_marker* admits the
+    marker for resolution freshness (:func:`locked_copy_is_stale`).
     """
     if locked_dep is None or not package_path.is_dir():
         return None
@@ -388,7 +389,7 @@ def locked_copy_proof(
                 head = None
             if head is not None:
                 return LOCKED_COPY_GIT_HEAD if head == commit else None
-        if not for_deployment:
+        if trust_marker:
             from apm_cli.install.cache_pin import CachePinError, verify_marker
 
             try:
@@ -413,7 +414,7 @@ def locked_copy_is_stale(locked_dep: Any, package_path: Path) -> bool:
     """
     if locked_dep is None or not package_path.is_dir():
         return False
-    if locked_copy_proof(locked_dep, package_path) is not None:
+    if locked_copy_proof(locked_dep, package_path, trust_marker=True) is not None:
         return False
     from apm_cli.install.cache_pin import MARKER_FILENAME
 

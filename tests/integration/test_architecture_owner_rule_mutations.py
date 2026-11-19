@@ -1208,7 +1208,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-locked-copy-validity",
         rule_id="install-deployment-locked-copy-validity",
         path="src/apm_cli/install/phases/integrate.py",
-        old="else locked_copy_proof(locked_dep, install_path, for_deployment=True)",
+        old="else locked_copy_proof(locked_dep, install_path)",
         new="else _should_skip_redownload(locked_dep, install_path) or None",
         intent="Integrate re-derives apm_modules copy validity outside drift.locked_copy_proof.",
     ),

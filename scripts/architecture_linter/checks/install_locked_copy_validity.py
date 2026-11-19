@@ -33,22 +33,25 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "keep the resolver gate behind the copy-validity owner",
         ),
     ),
-    DOWNLOAD: (
-        ("locked_copy_proof(_pd_locked_chk, _pd_path, for_deployment=True)", "consume the owner"),
-    ),
+    DOWNLOAD: (("locked_copy_proof(_pd_locked_chk, _pd_path)", "consume the owner"),),
     INTEGRATE: (
         (
-            "else locked_copy_proof(locked_dep, install_path, for_deployment=True)",
+            "else locked_copy_proof(locked_dep, install_path)",
             "consume the owner",
         ),
     ),
     CACHE_PIN: (
         ("if not _copy_holds_locked_commit(dep, install_path):", "stamp only proven copies"),
-        ("if locked_copy_proof(dep, install_path) is not None:", "prove copies via the owner"),
+        ("return not locked_copy_is_stale(dep, install_path)", "prove copies via the owner"),
     ),
 }
 
-_REDERIVATIONS = ("_should_skip_redownload(", "head.commit.hexsha", "verify_marker(")
+_REDERIVATIONS = (
+    "_should_skip_redownload(",
+    "head.commit.hexsha",
+    "verify_marker(",
+    "trust_marker=True",
+)
 
 
 def check_locked_copy_validity(provider: FactsProvider) -> tuple[Violation, ...]:

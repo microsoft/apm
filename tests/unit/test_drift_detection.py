@@ -582,7 +582,7 @@ def test_locked_copy_proof_branches(tmp_path, commit, hashed_as, marker, proof, 
     )
     path = _copy(tmp_path, marker=marker)
 
-    assert locked_copy_proof(locked, path) == proof
+    assert locked_copy_proof(locked, path, trust_marker=True) == proof
     assert locked_copy_is_stale(locked, path) is stale
     assert should_force_ref_recheck(_dep(), locked, update_refs=False, package_path=path) is stale
 
@@ -603,11 +603,16 @@ def test_locked_copy_proof_lets_a_readable_git_head_decide(tmp_path) -> None:
     ).stdout.strip()
 
     assert locked_copy_proof(_LockedDep(resolved_commit=head), path) == LOCKED_COPY_GIT_HEAD
+    assert locked_copy_is_stale(_LockedDep(resolved_commit=head), path) is False
+    # An unmarked, unhashed checkout at another commit is refreshed first.
+    other = _LockedDep(resolved_commit=_LOCKED)
+    assert locked_copy_is_stale(other, path) is True
+    assert should_force_ref_recheck(_dep(), other, update_refs=False, package_path=path) is True
     # A matching marker never outranks a readable HEAD naming another commit.
     from apm_cli.install.cache_pin import write_marker
 
     write_marker(path, _LOCKED)
-    assert locked_copy_proof(_LockedDep(resolved_commit=_LOCKED), path) is None
+    assert locked_copy_proof(_LockedDep(resolved_commit=_LOCKED), path, trust_marker=True) is None
 
 
 def test_pin_never_proves_bytes_for_deployment(tmp_path) -> None:
@@ -615,6 +620,6 @@ def test_pin_never_proves_bytes_for_deployment(tmp_path) -> None:
     unhashed = _LockedDep(resolved_commit=_LOCKED)
     hashed = _LockedDep(resolved_commit=_LOCKED, content_hash=_hash_of(tmp_path, "v2"))
 
-    assert locked_copy_proof(unhashed, path) == LOCKED_COPY_PIN
-    assert locked_copy_proof(unhashed, path, for_deployment=True) is None
-    assert locked_copy_proof(hashed, path, for_deployment=True) == LOCKED_COPY_CONTENT_HASH
+    assert locked_copy_proof(unhashed, path, trust_marker=True) == LOCKED_COPY_PIN
+    assert locked_copy_proof(unhashed, path) is None
+    assert locked_copy_proof(hashed, path) == LOCKED_COPY_CONTENT_HASH
