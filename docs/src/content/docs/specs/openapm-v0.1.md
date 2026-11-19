@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **147 normative statements (142 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **148 normative statements (143 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -4424,6 +4424,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 23| Partial native deployment with false successful-state persistence | [req-pr-008](#req-pr-008) | Consumer-default |
 | 24| Manifest-directed dependency redirection via a root replacement table | [req-rpl-001](#req-rpl-001), [req-rpl-002](#req-rpl-002), [req-rpl-004](#req-rpl-004) | Consumer-default when capability is provided |
 | 25| Native activation of unlocked or unapproved plugin content, or of settings the consumer does not own | [req-na-001](#req-na-001), [req-na-002](#req-na-002), [req-na-003](#req-na-003), [req-na-004](#req-na-004), [req-na-005](#req-na-005), [req-na-006](#req-na-006), [req-na-007](#req-na-007), [req-sc-015](#req-sc-015) | Consumer-default when native activation is provided |
+| 26| Transitive MCP server trusted by a lockfile edit, a persisted one-off opt-in or a changed definition | [req-sc-016](#req-sc-016), [req-sc-011](#req-sc-011) | Consumer-default |
 
 For Codex conversion metadata diagnostics, [req-tg-015](#req-tg-015)
 separately constrains field-name display and excludes dropped values.
@@ -4449,7 +4450,9 @@ modes; and the registry HTTP wire envelope (alongside
 **Threat.** A dependency package deploys executable code --
 hooks, bin executables, MCP server configurations, or canvas
 extensions -- that runs on the developer's machine without
-explicit consent.
+explicit consent. A transitive dependency's MCP server can also be
+trusted through lockfile state, a persisted one-off opt-in, or an
+approval that survives a change to the server definition.
 
 **Mitigations.**
 
@@ -4473,6 +4476,56 @@ by version control alongside project files by default. The consumer
 MUST NOT write interactive approval decisions into the project
 `apm.yml`, so that one developer's approval cannot propagate
 implicitly to other developers who clone or share the project.
+
+<a id="req-sc-016"></a>
+**[req-sc-016]** A conforming **consumer** implementation MUST admit an
+MCP server declared by a transitive dependency (a package that is not a
+direct dependency of the consuming project) whose declaration is
+self-defined (`registry: false`, see [req-mf-012](#req-mf-012)), names
+its own registry (sets `registry` to a registry location), or overlays
+configuration (sets any of `command`, `args`, `env`, `headers`, `url`,
+`cwd` or an extension field on a registry reference), only
+when (a) the consuming project's manifest re-declares the server, in
+which case the consumer deploys the consuming manifest's declaration,
+and a grant bound to the dependency's declaration does not apply;
+(b) a grant in the consuming project's manifest, or in the per-user
+approval location of [req-sc-010](#req-sc-010), binds the declaring
+package, the server name and a
+fingerprint of the server definition that matches the current
+definition, the manifest grant deciding when both bind the same server;
+or (c) the operator opts in for that invocation. A grant in a
+dependency's own manifest MUST NOT satisfy (b). The fingerprint MUST be
+a full-length `sha256:<64 lowercase hex>` digest compared in full, never
+by prefix, computed from the declaration in the declaring package's
+installed source (never from the lockfile) over the server name and
+every field that determines what runs or where it connects: at least
+`transport`, `command`, `args`, `env` and `headers` (placeholders kept
+unresolved), `url`, `cwd`, `registry`, `version`, `package`, `tools`
+and extension fields, plus the resolved registry entry when the
+declaration names its own registry or overlays configuration. A consumer
+MUST treat a fingerprint it cannot compute or does not recognize as not
+matching. A consumer
+MUST NOT derive that consent from the lockfile, MUST NOT persist a
+per-invocation opt-in, and MUST NOT deploy the server when a bound
+fingerprint no longer matches, even under (c); in that case it MUST
+emit a default-visible diagnostic that names
+the declaring package and the server. A grant that binds a fingerprint,
+a re-declaration and an opt-in are each evaluated after the organization
+denial of [req-sc-011](#req-sc-011) and never override it. An audit of
+committed project state MAY disregard the per-user approval location.
+
+A grant under (b) recorded in the consuming manifest by an explicit
+operator command is an authored, reviewable manifest edit that is meant
+to propagate with the project; it is not an interactive approval
+decision under [req-sc-010](#req-sc-010). At this revision,
+content-bound grants are normative only for MCP servers; other
+executable types remain governed by [req-sc-009](#req-sc-009) and
+[req-sc-010](#req-sc-010). At this revision the manifest key that
+records a (b) grant and the byte construction of the fingerprint input
+are implementation-defined and documented by the implementation; a grant
+therefore travels with the project between users of one implementation
+but is not guaranteed to be recognized by another, which treats it as
+not matching.
 
 ### 10.14 Executable trust precedence and audit fidelity
 
@@ -4498,10 +4551,11 @@ precedence relation in which an organization policy denial (an
 overrides any project-level or user-level grant for the same package
 and executable type. A consumer MUST reach the identical allow-or-deny
 outcome for identical inputs whether the decision gates deployment at
-install time or classifies an already-installed primitive at audit
-time. A consumer MUST NOT allow a project `apm.yml` grant or a
-user-local approval to re-enable an executable primitive that an
-applicable organization policy denies.
+install time, is verified by a frozen install against the lockfile, or
+classifies an already-installed primitive at audit time. A consumer MUST
+NOT allow a project `apm.yml` grant or a user-local approval to
+re-enable an executable primitive that an applicable organization
+policy denies.
 
 <a id="req-sc-012"></a>
 **[req-sc-012]** A conforming **consumer** implementation that
@@ -4729,6 +4783,7 @@ conformance statement identifying:
 [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
 [req-sc-012](#req-sc-012), [req-sc-013](#req-sc-013),
 [req-sc-014](#req-sc-014), [req-sc-015](#req-sc-015),
+[req-sc-016](#req-sc-016),
 [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
@@ -5268,6 +5323,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-sc-013](#req-sc-013)                | MUST    | 10.3    | consumer    |
 | [req-sc-014](#req-sc-014)                | MUST    | 10.15   | consumer    |
 | [req-sc-015](#req-sc-015)                | MUST    | 10.16   | consumer    |
+| [req-sc-016](#req-sc-016)                | MUST    | 10.13   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
@@ -5276,7 +5332,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 147** (142 MUST, 5 SHOULD).
+**Total normative statements: 148** (143 MUST, 5 SHOULD).
 
 ---
 
@@ -5346,13 +5402,14 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.61  | 2026-11-19 | Amendment for issues #3762, #3866 and #3868, introduced in PR #3801, corrected in PR #3851 (issue #3860) and revised in PR #3875 for #3866 and #3868; the earlier proposed text of this amendment, which preserved `vscode` on rewrite and gave it an MCP configuration destination of its own, is withdrawn. Revised Section 4.2.1 in place: `vscode` is a deprecated alias of `copilot`, admitted under `target:` and `targets:`; it has no MCP configuration destination of its own, a consumer treats it exactly as `copilot` (including the [req-tg-008](#req-tg-008) effective target intersection and recorded lockfile state), a lock writer records it as `copilot` and a lock reader reads a recorded `vscode` as `copilot` before [req-rs-018](#req-rs-018) comparisons, and a manifest rewrite replaces it in place with `copilot`, dropping a resulting duplicate; `agents` still normalises to `copilot` and is not admitted under `targets:`. Revised the Section 4.2 `targets` row and [req-tg-008](#req-tg-008) in place to admit `vscode` as that alias, and added `hermes` and `grok-bot` to the Section 4.2.1 canonical-set block to match its explicit-only enumeration. Under Section 9.2 this is not behavior-neutral errata: a consumer that gave `vscode` a distinct MCP configuration destination, preserved it on rewrite, or recorded it in lock state no longer conforms, and `targets:` values containing `vscode`, `hermes` or `grok-bot`, and `target:` values `hermes` and `grok-bot`, that previously had to be rejected are now accepted. Deprecation announcements under Section 9.5: the `vscode` alias and the singular `target:` field (in favor of `targets:`) are deprecated from the adoption date, 2026-11-19, on which the Section 9.5 migration window starts. The window stays open until a later revision removes the deprecated form, subject to the Section 9.5 minimum of 90 days; this amendment sets no removal date and none is scheduled. The non-normative Section 4.2.1 note records that the Target Registry companion now lists the workspace-root `.mcp.json` as the `copilot` project MCP configuration destination, replacing `.github/mcp.json` and `.vscode/mcp.json`; this changes an existing companion entry rather than adding one, and cleanup of entries a consumer wrote at the retired destinations is implementation-defined under the existing ownership rules, including [req-mf-026](#req-mf-026). Manifest JSON Schema bytes are unchanged because the `targets` pattern already admits these tokens. Proposed 2026-11-18; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. Adoption does not change the status of amendment 0.1.60, which still proposes [req-rs-018](#req-rs-018) and the `subset_pairings` lock field, or of amendment 0.1.45, whose explicit-only enumeration the `hermes` and `grok-bot` canonical-set addition matches. Statement count remains 139 (134 MUST, 5 SHOULD). |
 | 0.1.62  | 2026-11-19 | Amendment for issue #3847. Revised the `fetch_failure` row of the [req-pl-006](#req-pl-006) merge table (Section 6.4, governance MUST) from "Child overrides if set" to stricter wins (`block` > `warn`, an unset value being the `warn` default per Section 6.2), so a child policy can tighten but never relax the parent's fail-closed choice, matching the tighten-only inheritance principle of Section 6.4 and the `enforcement` row. Under Section 9.2 this changes an evaluation already defined by a normative statement, so it is an amendment, not behavior-neutral errata: the only verdict class that changes is a chain whose parent sets `fetch_failure: block` and whose child sets `warn` (or leaves it unset), which now merges to `block` and fails closed on a policy fetch failure instead of warning. Chains where the child is at least as strict as the parent are unchanged. The reference implementation already merges this way. No statement is added or removed; the statement count is unchanged. Proposed 2026-11-18; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. |
 | 0.1.63  | 2026-11-19 | Amendment for issue #3880 (shared MCP document attribution, deferred from the 0.1.61 review). Added [req-mf-027](#req-mf-027) (Section 4.5, consumer MUST): when two or more targets write project-scoped MCP servers to the same configuration file (at this revision `claude` and `copilot` share the workspace-root `.mcp.json`), each entry the consumer wrote there is attributed to the file, not only to the target that selected the server; an entry recorded for one of those targets is not foreign to another that selects the same server, subject to the same recorded-write checks; when one of those targets stops selecting the server, for example because it is deactivated, the entry is kept and owned, retaining a recorded write hash, for any other active target that writes the file and still selects it, and is removable, under the consumer's other ownership rules including [req-mf-026](#req-mf-026), only once no such target selects it. Entries the consumer did not write and distinct (including user-scoped) configuration files are outside the requirement. The non-normative Section 4.2.1 note now points to the new requirement instead of deferring it. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: the only verdict class that changes is a consumer that removes, or treats as foreign, a shared-file entry another active target sharing that file still selects, which no longer conforms. The reference implementation already behaves this way. Sections 1.3, 4.2.1, 4.5, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Proposed 2026-11-19; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. Adoption does not change the status of [req-mf-026](#req-mf-026), which amendment 0.1.57 still proposes. Adds one MUST. Statement count: 139 -> 140 (135 MUST, 5 SHOULD). |
+| 0.1.64 (proposed) | 2026-11-19 | Amendment for accepted issue #3902 (portable, content-bound approval for transitive MCP servers). Added [req-sc-016](#req-sc-016) (Section 10.13, consumer MUST): a consumer admits a transitive dependency's self-defined, registry-naming or overlaying MCP server only when the consuming manifest re-declares it, a manifest grant binds the declaring package, the server name and a matching definition fingerprint, or the operator opts in for that invocation; consent is never derived from the lockfile, a per-invocation opt-in is never persisted, a no-longer-matching fingerprint withholds the server with a diagnostic naming the package and server even under the opt-in, and an organization denial still wins over every path. The grant may live in the consuming manifest or the per-user approval location of [req-sc-010](#req-sc-010) (the manifest deciding); a dependency's own manifest never grants. The fingerprint is a full-length `sha256` digest over the declaration as installed, covering every field that determines what runs plus any resolved registry entry; an unrecognized fingerprint does not match. Revised [req-sc-011](#req-sc-011) (Section 10.14) in place so the identical-outcome clause also covers a frozen install. Under Section 9.2 both change verdicts: a consumer that keeps a server only because the lockfile lists it, persists the opt-in, deploys a server whose bound definition changed, admits such a transitive server on a package-level or type-level grant alone, or reaches a frozen-install verdict different from install, no longer conforms; such projects re-declare the server or record a fingerprint grant. The reference implementation behaves this way. Sections 1.3, 10.11 (row 26), 10.13, 10.14, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Adds one MUST. Statement count: 147 -> 148 (143 MUST, 5 SHOULD), counted after the adopted 0.1.65 amendment, which landed first. |
 | 0.1.65  | 2026-11-19 | Amendment for issue #3919 (native plugin activation profile), from the #3094 design record accepted on 2026-11-19. Added Section 8.5.11 with seven consumer MUSTs. Part A (normative) defines target criteria A1 to A5: documented user and project settings files with precedence, an in-place local directory marketplace with relative paths at project scope, a declarative per-plugin enable switch that needs no install command once declared and trusted, no automatic update of directory sources, and documented precedence when a target reads another target's files. [req-na-001](#req-na-001) permits native activation only for a target, scope and client version that meets A1 to A5 by published documentation, with a conformance-statement disclosure. Part B (normative): [req-na-002](#req-na-002) the lockfile is the source of truth, only the approved plugin root is deployed to `.agents/plugins/<plugin>/` or `~/.agents/plugins/<plugin>/` with a generated `.claude-plugin/marketplace.json`, plugin names are safe path segments, and the lock records one root digest whose construction is pinned; [req-na-003](#req-na-003) only the documented activation entries are written, never private target state, and no target binary, CLI or RPC is called; [req-na-004](#req-na-004) ownership comes from the previous and next lockfile with no receipt file, preserving unrelated keys and explicit `false`; [req-na-005](#req-na-005) a plugin is enabled only when an implementation-defined approval bound to the root digest covers it and the [req-tg-013](#req-tg-013) admission gates admit it, and is otherwise neither deployed nor declared; [req-na-006](#req-na-006) a target that does not qualify gets explicit split install or refusal with a default-visible diagnostic, never silent; [req-na-007](#req-na-007) generated marketplace names are unique per project and per scope. Part C (informative) records Claude Code as native-eligible, GitHub Copilot as native-eligible at user scope with project scope unknown under A5, Codex as split (fails A3; A2 also not met; Codex 0.170.0, 2026-11-19) with schema-bearing Agent Plugins v1 dependencies opaque under [req-tg-011](#req-tg-011), and every other catalog target as unknown. [req-tg-013](#req-tg-013) is unchanged; a Section 8.5.7 editorial note identifies the two clauses, [req-na-002](#req-na-002) and [req-na-004](#req-na-004), that substitute for its placement and ledger clauses for a profile-activated dependency. Under Section 9.2 this adds an optional capability: the requirements bind only a consumer that natively activates plugins as Section 8.5.11 defines it, so no existing verdict changes and registrations made under [req-tg-013](#req-tg-013) alone are unaffected. No schema or lockfile-version change; the lock records the root and digest as additive entry data. Sections 1.3, 8.5.7, 8.7, 10.11, 10.18 (new), 11.2, 11.3.2, 12.4, Appendix C, the requirements manifest, a reconciliation oracle and conformance coverage are updated. Version 0.1.64 is reserved for the concurrent proposal for issue #3902; this amendment does not adopt proposed amendment 0.1.64. Proposed and adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3919, without the Section 9.3 reviewer-panel approval and public comment period. Adds seven MUSTs. Statement count: 140 -> 147 (142 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63 and 0.1.65 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals and the adopted 0.1.63 amendment each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 amendment and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
 working draft
-contains 147 statements (142 MUST, 5 SHOULD). Combining the proposals does not establish
+contains 148 statements (143 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), and amendment 0.1.65 on the same date by editor decision (issue #3919), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
 
 Errata:

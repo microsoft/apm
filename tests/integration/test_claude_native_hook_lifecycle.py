@@ -98,10 +98,8 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
                 for label in ("alpha", "beta")
             ]
         },
-        "allowExecutables": {
-            f"{dependency}/plugins/{label}#{revision}": {"hooks": True}
-            for label in ("alpha", "beta")
-        },
+        # Pinned approval (#3902): the gate is on and nothing is approved yet.
+        "executables": {"allow": {}},
     }
     (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
     runner = ApmLifecycleRunner(apm_engine_command)
@@ -122,6 +120,16 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
         json.dumps({"theme": "dark", "enabledPlugins": {mine: True}}), encoding="utf-8"
     )
 
+    # Unapproved: parked, neither deployed nor declared, and install succeeds.
+    run("install", "--global", "--target", "claude", "--only", "apm")
+    assert scenario.declared()["enabledPlugins"] == {mine: True}
+    assert not scenario.plugins.exists()
+    approve = runner.run(
+        ("approve", "--all"), scenario_id="claude-native-approve", cwd=isolated.config_root, env=env
+    )
+    assert approve.returncode == 0, approve.stdout + approve.stderr
+    pins = load_yaml(isolated.config_root / "apm.yml")["executables"]["allow"]
+    assert len(pins) == 2 and all(grant["plugin"].startswith("sha256:") for grant in pins.values())
     run("install", "--global", "--target", "claude", "--only", "apm")
     declared = scenario.declared()
     assert declared["theme"] == "dark"
@@ -253,9 +261,7 @@ def test_installed_hook_source_reinstall_and_removal(
                 else {"git": dependency, "ref": revision, "path": "plugins/context"}
             ]
         },
-        "allowExecutables": {
-            str(source) if local else f"{dependency}/plugins/context#{revision}": {"hooks": True}
-        },
+        "executables": {"allow": {}},
     }
     (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
     runner = ApmLifecycleRunner(apm_engine_command)
@@ -279,7 +285,14 @@ def test_installed_hook_source_reinstall_and_removal(
         scenario.settings.write_text('{"enabledPlugins": []}', encoding="utf-8")
         return scenario.settings.read_bytes()
 
+    run("install", "--global", "--target", "claude", "--only", "apm")
+    assert not deployed.exists()
+    approved = runner.run(
+        ("approve", "--all"), scenario_id="claude-native-approve", cwd=isolated.config_root, env=env
+    )
+    assert approved.returncode == 0, approved.stdout + approved.stderr
     if failure == "install":
+        (isolated.config_root / "apm.lock.yaml").unlink(missing_ok=True)
         before = corrupt_settings()
         output = run("install", "--global", "--target", "claude", "--only", "apm", expected=1)
         assert "Claude native plugin declaration failed" in output

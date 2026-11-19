@@ -636,6 +636,7 @@ install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-drift-claim-classification
 install-deployment-effective-selection
+install-deployment-executable-item-admission
 install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
@@ -659,6 +660,7 @@ install-deployment-manifest-inheritance-includes
 install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
+install-deployment-mcp-admission
 install-deployment-mcp-native-comparison
 install-deployment-mcp-ownership-migration
 install-deployment-mcp-registry-resolution
@@ -685,6 +687,7 @@ install-deployment-single-file-materialization
 install-deployment-skills-root-derivation
 install-deployment-source-plan
 install-deployment-target-file-contraction
+install-deployment-trust-fingerprint
 install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-update-plan-ref-annotation

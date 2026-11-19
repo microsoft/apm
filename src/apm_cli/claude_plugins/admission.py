@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -97,10 +98,13 @@ def plan_native_claude_plugin(
     targets: list[Any],
     scope: Any,
     skill_subset: tuple[str, ...] | None,
-    hooks_approved: bool,
+    admit: Callable[[], Any],
     skip_bin: bool,
 ) -> ClaudeNativePlugin | None:
     """Admit a complete, approved plugin without altering native selection.
+
+    *admit* returns the trust owner's whole-plugin verdict on this source
+    (``security.trust.admit_native_plugin``), or ``None`` when the gate is off.
 
     Normalized virtual plugins in older locks can have SKILL_BUNDLE type.
     Only the parser-owned normalization receipt admits that compatibility
@@ -146,9 +150,9 @@ def plan_native_claude_plugin(
             root.resolve(),
             fingerprint,
             parked=(
-                "it declares plugin dependencies, which APM cannot resolve yet. Install "
-                "each required plugin as its own dependency, or exclude Claude from "
-                "this dependency's targets."
+                f"Parked native plugin {package_name}: it declares plugin dependencies, "
+                "which APM cannot resolve yet\n    Install each required plugin as its "
+                "own dependency, or exclude Claude from this dependency's targets"
             ),
         )
     unknown = set(manifest) - _MANIFEST_FIELDS - {"dependencies"}
@@ -160,13 +164,12 @@ def plan_native_claude_plugin(
             + ". This route supports intact commands, skills, agents and approved hooks only."
         )
     _refuse_escaping_component_paths(root, manifest)
-    has_hooks = "hooks" in manifest or (root / "hooks").exists()
     parked = None
-    if has_hooks and not hooks_approved:
-        parked = (
-            "its executables are not approved for this content. "
-            f"Review: apm approve --pending  |  Re-approve: apm approve {package_name}"
-        )
+    verdict = admit()
+    if verdict is not None and not verdict.allowed:
+        from apm_cli.security.trust import parked_plugin_message
+
+        parked = parked_plugin_message(package_name, str(verdict.reason), verdict.detail)
     return ClaudeNativePlugin(package_name, name, root.resolve(), fingerprint, parked=parked)
 
 
@@ -174,15 +177,24 @@ def queue_native_claude(ctx: Any, package_name: str, plugin: Any, diagnostics: A
     """Hand an admitted plugin to native declaration; report a parked one.
 
     A parked plugin is neither projected loose nor declared to Claude
-    (OpenAPM req-na-005): it is not deployed and the user sees why.
+    (OpenAPM req-na-005): it is not deployed and the user sees why. Any
+    pending-approval entry for it is marked native, so approving pins the
+    whole plugin rather than per-file items its native route never reads.
     """
     if plugin is None or ctx is None:
         return
     if plugin.parked:
+        from dataclasses import replace
+
+        blocked = getattr(ctx, "blocked_executables", None)
+        if blocked:
+            blocked[:] = [
+                replace(decl, native_plugin=True)
+                if decl.install_path and Path(decl.install_path).resolve() == plugin.source_root
+                else decl
+                for decl in blocked
+            ]
         if diagnostics is not None:
-            diagnostics.warn(
-                f"Native Claude plugin '{plugin.name}' was not declared: {plugin.parked}",
-                package=package_name,
-            )
+            diagnostics.warn(plugin.parked, package=package_name)
         return
     ctx.claude_native_plugins[package_name] = plugin

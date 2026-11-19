@@ -43,6 +43,30 @@ class PackageDeploymentPlan:
         return [target for target in targets if target.name not in native_target_names]
 
 
+def _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx):
+    """Name why the trust owner parked a native plugin, with the next step.
+
+    A plugin that is merely not approved yet is reported by the registrar's
+    own refusal, so only changed, denied, transitive and APM-owned-path
+    parking is named here.
+    """
+    from .exec_gate import plugin_admission, resolve_package_key
+
+    verdict = plugin_admission(package_name, package_info, allow_executables, ctx=ctx)
+    if verdict is None or verdict.allowed or verdict.reason == "unapproved-executables":
+        return verdict
+    from apm_cli.security.executables import _strip_version
+    from apm_cli.security.trust import parked_plugin_message
+
+    package = _strip_version(resolve_package_key(package_info, package_name))
+    message = parked_plugin_message(package, str(verdict.reason), verdict.detail)
+    if diagnostics is not None:
+        diagnostics.warn(message)
+    elif logger is not None:
+        logger.warning(message)
+    return verdict
+
+
 def prepare_package_deployment(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -79,6 +103,10 @@ def prepare_package_deployment(  # noqa: PLR0913
         return PackageDeploymentPlan(selection)
     approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
     hooks, bin_approved, mcp, canvas, lsp = approvals
+    from .exec_gate import hook_file_admission, native_plugin_verdict
+
+    hook_filter = hook_file_admission(package_name, package_info, allow_executables)
+    _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
@@ -91,6 +119,8 @@ def prepare_package_deployment(  # noqa: PLR0913
         scope=scope,
         skill_subset=skill_subset,
         approvals={
+            # A native plugin loads every hook file live: per-file pins never
+            # admit it; a whole-plugin pin (or a type-level grant) does.
             "hooks": hooks,
             "mcp": mcp,
             "bin": bin_approved and not skip_bin,
@@ -109,7 +139,9 @@ def prepare_package_deployment(  # noqa: PLR0913
             targets=list(selection.targets),
             scope=InstallScope.USER if native_claude_user_scope else scope,
             skill_subset=skill_subset,
-            hooks_approved=hooks,
+            admit=lambda: native_plugin_verdict(
+                package_name, package_info, allow_executables, ctx=ctx
+            ),
             skip_bin=skip_bin,
         )
     )
@@ -122,6 +154,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         projection_targets,
         skill_subset=skill_subset,
         hooks_approved=hooks,
+        hook_file_admitted=hook_filter,
         canvas_approved=canvas or is_first_party,
         skip_bin=skip_bin,
         diagnostics=diagnostics,
@@ -136,6 +169,19 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=skip_bin,
         ),
     )
+    if hook_filter is not None and hook_filter.parked:
+        from apm_cli.security.executables import _strip_version
+        from apm_cli.security.trust import parked_hook_message
+
+        from .exec_gate import resolve_package_key
+
+        package = _strip_version(resolve_package_key(package_info, package_name))
+        for item, parked_reason in hook_filter.parked:
+            message = parked_hook_message(package, item, parked_reason)
+            if diagnostics is not None:
+                diagnostics.warn(message)
+            elif logger is not None:
+                logger.warning(message)
     return PackageDeploymentPlan(
         selection, approvals, skip_bin, reason, codex_native, source_plan, native_claude_plugin
     )

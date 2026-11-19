@@ -78,6 +78,8 @@ from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.install.replay_transport import DeclaredTransportIndex
 
@@ -104,6 +106,8 @@ class ReplayConfig:
     scratch_root: Path | None = None
     modules_root: Path | None = None
     user_scope: bool = False
+    # Returns the audit's already-fetched org policy for the replayed gate.
+    policy_provider: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -636,6 +640,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_start()
     replayed_count = 0
+    from apm_cli.install.exec_gate import ReplayExecAllowMap
+
+    gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)
     local_parent_index = build_local_parent_index(lock)
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
@@ -715,6 +722,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the
                             # replay does not write to targets excluded by the consumer (#1923).
                             dep_target_subset=selection.target_subset,
+                            # Withhold what the install gate withheld (#3924).
+                            allow_executables=gated_allow_map.for_dependency(lock_dep),
                         )
                     except AgentPluginTargetExcludedError:
                         continue
@@ -850,6 +859,7 @@ def diff_scratch_against_project(
     # is compared through hook_ownership; sidecars compare all owned content
     # while ignoring JSON object-key ordering from the live merge.
     from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
+    from apm_cli.integration.hook_ownership import apm_owned_hook_entries_remain
 
     merge_config_specs = merge_hook_config_projection_specs(targets)
     merge_sidecar_paths = {sidecar_path for sidecar_path, _ in merge_config_specs.values()}
@@ -998,6 +1008,11 @@ def diff_scratch_against_project(
                     package=tracked.get(rel, ""),
                 )
             )
+        elif (spec := merge_config_specs.get(rel)) and apm_owned_hook_entries_remain(
+            project_root / rel, project_root / spec[0], spec[1]
+        ):
+            # Replay deploys no hooks here, yet APM-owned entries remain (#3924).
+            findings.append(DriftFinding(path=rel, kind="modified", package=""))
         # else: untracked governed file -- ignore (user authored).
 
     return findings

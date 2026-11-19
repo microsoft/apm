@@ -35,7 +35,7 @@ def _plan(info: PackageInfo, **overrides):
         "targets": [SimpleNamespace(name="claude")],
         "scope": InstallScope.USER,
         "skill_subset": None,
-        "hooks_approved": True,
+        "admit": lambda: None,
         "skip_bin": True,
     }
     args.update(overrides)
@@ -78,15 +78,37 @@ def test_reset_to_complete_skill_selection_is_not_a_subset(tmp_path: Path) -> No
     assert _plan(_plugin(tmp_path), skill_subset=()).name == "owned"
 
 
-def test_unapproved_hooks_park_the_plugin_instead_of_declaring_it(tmp_path: Path) -> None:
-    """req-na-005: no approval means not deployed, not declared, with a diagnostic."""
+def _trust(allow: dict):
+    from apm_cli.security.executables import build_exec_trust_context
+
+    return build_exec_trust_context(
+        policy=None, project_data={"executables": {"allow": allow}}, include_user=False
+    )
+
+
+def test_whole_plugin_pin_admits_and_any_change_parks(tmp_path: Path) -> None:
+    """req-na-005: one pin over the plugin root; unapproved or changed is parked."""
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
     info = _plugin(tmp_path)
     (info.install_path / "hooks").mkdir()
     write_json(info.install_path / "hooks/hooks.json", {"hooks": {}})
-    plan = _plan(info, hooks_approved=False)
-    assert plan.parked is not None
-    assert "apm approve" in plan.parked
-    assert _plan(info, hooks_approved=True).parked is None
+    keys = ("owner/plugin",)
+
+    def plan_with(allow: dict):
+        return _plan(
+            info, admit=lambda: admit_native_plugin(_trust(allow), keys, info.install_path)
+        )
+
+    unapproved = plan_with({})
+    assert unapproved.parked is not None and "not approved" in unapproved.parked
+    assert "apm approve" in unapproved.parked
+    pin = compute_native_plugin_hash(info.install_path)
+    assert plan_with({"owner/plugin": {"plugin": pin}}).parked is None
+    (info.install_path / "hooks/hooks.json").write_text('{"hooks": {"changed": []}}')
+    changed = plan_with({"owner/plugin": {"plugin": pin}})
+    assert changed.parked is not None and "content changed since approval" in changed.parked
 
 
 def test_declared_plugin_dependencies_park_with_one_diagnostic(tmp_path: Path) -> None:

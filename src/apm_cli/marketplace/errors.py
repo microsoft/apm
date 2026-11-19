@@ -69,9 +69,9 @@ class DependencyConfusionError(MarketplaceError, ValueError):
             "\n".join(
                 [
                     f"refused (dependency-confusion risk #1326): bare"
-                    f" `repo: {risk.bare_repo_field}` on enterprise"
+                    f" `{risk.locator_field}: {risk.bare_repo_field}` on enterprise"
                     f" marketplace '{risk.marketplace_host}' is ambiguous."
-                    f" Host-qualify the plugin `repo` field in"
+                    f" Host-qualify the plugin `{risk.locator_field}` field in"
                     f" marketplace.json to one of:",
                     f"  - '{risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
                     f"  - 'github.com/{risk.bare_repo_field}' (declared cross-host dep on public github.com)",

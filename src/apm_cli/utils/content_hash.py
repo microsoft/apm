@@ -2,7 +2,7 @@
 
 import hashlib
 import stat
-from collections.abc import Callable, Collection
+from collections.abc import Collection
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
@@ -78,13 +78,15 @@ def compute_package_hash(package_path: Path, *, exclude: Collection[str] = ()) -
     return f"sha256:{hasher.hexdigest()}"
 
 
-def _package_files(package_path: Path, *, native: bool = False) -> list[Path]:
+def _package_files(
+    package_path: Path, *, native: bool = False, skip_roots: tuple[str, ...] = ()
+) -> list[Path]:
     """Select canonical payload paths without following publisher symlinks."""
     regular_files: list[Path] = []
     excluded = {".git"} if native else _EXCLUDED_DIRS
     for item in package_path.rglob("*"):
         rel = item.relative_to(package_path)
-        if any(part in excluded for part in rel.parts):
+        if any(part in excluded for part in rel.parts) or rel.parts[0] in skip_roots:
             continue
         if item.is_symlink():
             if native:
@@ -101,44 +103,72 @@ def compute_native_bundle_hash(package_path: Path) -> str:
     This opt-in contract excludes only Git transport and the root APM pin.
     Existing package/lockfile fingerprints retain their historical semantics.
     """
-    return _native_digest(
-        package_path, lambda package_path: _package_files(package_path, native=True)
-    )
-
-
-def _native_digest(package_path: Path, list_files: Callable[[Path], list[Path]]) -> str:
     if package_path.is_symlink():
         raise PathTraversalError(f"Native bundle integrity refuses symlink: {package_path}")
+    return _hash_native_files(package_path, _package_files(package_path, native=True))
+
+
+# APM's own normalization output in a materialized plugin, never publisher content.
+_APM_NORMALIZATION_ROOTS = ("apm.yml", ".apm")
+
+
+def native_plugin_files(plugin_root: Path) -> list[Path]:
+    """Relative paths of the native plugin file set a harness loads.
+
+    The native bundle files minus APM's root ``apm.yml`` and root ``.apm/``,
+    which legacy-plugin normalization synthesizes under ``apm_modules``.
+    """
+    return _package_files(plugin_root, native=True, skip_roots=_APM_NORMALIZATION_ROOTS)
+
+
+def compute_native_plugin_hash(plugin_root: Path) -> str:
+    """Fingerprint the native plugin file set: path, exec bit and bytes."""
+    if plugin_root.is_symlink():
+        raise PathTraversalError(f"Native plugin integrity refuses symlink: {plugin_root}")
+    return _hash_native_files(plugin_root, native_plugin_files(plugin_root))
+
+
+def unpinned_apm_copy(plugin_root: Path) -> str | None:
+    """Name a root ``.apm/`` file that is not a byte copy of a native plugin file.
+
+    APM's normalization only copies plugin files into ``.apm/``, so every
+    file there must equal some file :func:`native_plugin_files` covers;
+    anything else is content the plugin pin would not bind. The one exception
+    is the parser-owned skill-source receipt normalization writes beside the
+    copies: APM metadata, never executable and never deployed (#3290).
+    """
+    from apm_cli.deps.plugin_parser import _PLUGIN_SKILL_SOURCES_FILE
+
+    apm_dir = plugin_root / ".apm"
+    if not apm_dir.exists():
+        return None
+    receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+    try:
+        pinned = {
+            hashlib.sha256((plugin_root / relative).read_bytes()).digest()
+            for relative in native_plugin_files(plugin_root)
+        }
+        for path in sorted(apm_dir.rglob("*")):
+            label = path.relative_to(plugin_root).as_posix()
+            if path.is_symlink():
+                return f"'{label}' is a symlink"
+            if path == receipt and path.is_file():
+                continue
+            if path.is_file() and hashlib.sha256(path.read_bytes()).digest() not in pinned:
+                return f"'{label}' is not a copy of a pinned plugin file"
+    except (OSError, ValueError):
+        return "'.apm/' cannot be read"
+    return None
+
+
+def _hash_native_files(root: Path, files: list[Path]) -> str:
     hasher = hashlib.sha256()
-    for relative in list_files(package_path):
-        path = package_path / relative
+    for relative in files:
+        path = root / relative
         hasher.update(relative.as_posix().encode("utf-8") + b"\0")
         hasher.update(b"x" if path.stat().st_mode & stat.S_IXUSR else b"-")
         hasher.update(hashlib.sha256(path.read_bytes()).digest())
     return f"sha256:{hasher.hexdigest()}"
-
-
-# APM's own normalization output inside a materialized legacy plugin; never
-# part of the publisher's plugin root that a harness loads.
-_APM_NORMALIZATION_ROOTS = frozenset({"apm.yml", ".apm"})
-
-
-def native_plugin_files(plugin_root: Path) -> list[Path]:
-    """Return the publisher plugin files a harness loads from *plugin_root*.
-
-    These are the native bundle files minus APM's root ``apm.yml`` and ``.apm/``
-    normalization output (OpenAPM req-na-002: deploy only the plugin root).
-    """
-    return [
-        path
-        for path in _package_files(plugin_root, native=True)
-        if path.parts[0] not in _APM_NORMALIZATION_ROOTS
-    ]
-
-
-def compute_native_plugin_hash(plugin_root: Path) -> str:
-    """Digest of every plugin file's path, bytes and executable bit (req-na-002/005)."""
-    return _native_digest(plugin_root, native_plugin_files)
 
 
 def _canonical_hash_bytes(raw: bytes) -> bytes:

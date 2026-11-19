@@ -196,11 +196,14 @@ metadata.
 verbatim. Kiro receives `description`, `model`, and `tools` only;
 unknown frontmatter fields (including `name`) are stripped because
 Kiro derives agent identity from the deployed path, not from a `name`
-field. Tools are permission-bearing for Kiro: each value must be one
-of the supported capability tags (`read`, `write`, `shell`, `web`,
-`subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
-`*`). If any unsupported tag is present, the agent is not deployed at
-all -- APM fails closed. Kiro may warn and fall back if the specified
+field. Tools are permission-bearing for Kiro: each value must be a
+Kiro tool selector -- a category tag (`read`, `write`, `shell`, `web`,
+`subagent`), a built-in tool ID such as `read_file`, `grep_search`, or
+`web_fetch`, `@server` or `@server/tool`, `subagent/<agent>`, `@builtin`,
+`@mcp`, or `*`
+([Kiro built-in tools](https://kiro.dev/docs/tools/)). If any other
+value is present, that agent is not deployed -- APM fails closed and
+warns; other agents in the install still deploy. Kiro may warn and fall back if the specified
 `model` is unavailable; APM passes the value through without
 validation.
 

@@ -31,7 +31,6 @@ from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
-from .target_warnings import log_hooks_skip as _log_hooks_skip
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -449,9 +448,19 @@ def integrate_package_primitives(  # noqa: PLR0913
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
-        # Executable approval gate: skip hooks if not approved.
+        # Executable approval gate: skip hooks if not approved, and retire
+        # the hooks this package deployed before it was gated (#3924).
         if _prim_name == "hooks" and not _hooks_approved:
-            _log_hooks_skip(package_name, package_info, targets, logger)
+            from apm_cli.install.exec_gate import log_hooks_skip
+
+            log_hooks_skip(package_name, package_info, logger, ctx)
+            if callable(reconcile_package_targets):
+                _warn_target_reconcile_failure(
+                    diagnostics,
+                    package_name,
+                    reconcile_package_targets(package_info, project_root, targets),
+                    "Could not fully remove hooks the executables gate no longer deploys",
+                )
             continue
         # Executable approval gate: skip canvas if not approved.
         # First-party (is_first_party=True) always deploys.

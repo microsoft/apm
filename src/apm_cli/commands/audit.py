@@ -10,6 +10,7 @@ Exit codes:
 """
 
 import dataclasses
+import functools
 import os
 import sys
 from pathlib import Path
@@ -626,7 +627,23 @@ def _audit_ci_gate(
 
     fail_fast = not no_fail_fast
 
-    materialization = resolve_ci_audit_materialization(cfg.project_root, verbose=cfg.verbose)
+    from ..policy.discovery import discover_policy_with_chain
+
+    # One policy discovery per run, shared by drift replay and policy checks.
+    fetch_policy = functools.cache(
+        lambda: discover_policy_with_chain(
+            cfg.project_root, policy_override=policy_source or None, no_cache=no_cache
+        )
+    )
+
+    def replay_policy():
+        if no_policy and not policy_source:
+            return None
+        return getattr(fetch_policy(), "policy", None)
+
+    materialization = resolve_ci_audit_materialization(
+        cfg.project_root, verbose=cfg.verbose, policy_provider=replay_policy
+    )
     prepared_replay = materialization.prepared_replay
     prepared_replay_error = materialization.error
 
@@ -637,12 +654,12 @@ def _audit_ci_gate(
         ci_mode=True,
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
+        no_policy=no_policy,
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
     # files via unmanaged-files checks. --no-policy skips discovery.
-    from ..policy.discovery import discover_policy_with_chain
     from ..policy.project_config import (
         read_project_fetch_failure_default,
     )
@@ -652,11 +669,7 @@ def _audit_ci_gate(
     # Explicit --policy and auto-discovery (mirror install path) share one
     # discovery call so --no-cache forces a fresh fetch for both (#3659).
     if (policy_source or not no_policy) and (not fail_fast or ci_result.passed):
-        fetch_result = discover_policy_with_chain(
-            cfg.project_root,
-            policy_override=policy_source or None,
-            no_cache=no_cache,
-        )
+        fetch_result = fetch_policy()
 
     # An explicit --policy <source> names the exact policy the caller wants
     # enforced, so failing to load it fails closed regardless of
@@ -802,6 +815,7 @@ def _audit_ci_gate(
                         cache_only=prepared_replay is None,
                         verbose=cfg.verbose,
                         prepared_replay=prepared_replay,
+                        policy_provider=replay_policy,
                     )
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":

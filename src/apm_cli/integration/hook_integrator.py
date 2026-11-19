@@ -1727,7 +1727,7 @@ class HookIntegrator(BaseIntegrator):
         *,
         dry_run: bool = False,
     ) -> HookTargetReconcileStats:
-        """Remove excluded hooks, or count planned removals without writes."""
+        """Remove hooks from targets the package no longer deploys to, or count them (#3924)."""
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,

@@ -218,7 +218,7 @@ def test_hook_denial_does_not_register_a_commands_only_subset(tmp_path: Path) ->
     assert ctx.claude_native_plugins == {}
     assert not (tmp_path / ".claude/settings.json").exists()
     assert not (tmp_path / ".claude/commands").exists()
-    assert any("was not declared" in d.message for d in diagnostics._diagnostics)
+    assert any("Parked native plugin" in d.message for d in diagnostics._diagnostics)
 
 
 def test_standalone_inline_hook_keeps_loose_behavior(tmp_path: Path) -> None:

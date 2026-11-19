@@ -24,6 +24,7 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.policy.ci_checks import _check_lockfile_exists
+from apm_cli.security.trust import McpAdmission
 
 MCP_ONLY_APM_YML = """\
 name: jira
@@ -178,7 +179,7 @@ dependencies:
             self.manifest,
             None,
             self.root / APM_MODULES_DIR,
-            trust_transitive_self_defined=True,
+            admission=McpAdmission(None, one_off=True),
         )
         return dict(view.configs)
 

@@ -268,11 +268,15 @@ def test_enable_requires_content_bound_approval(tmp_path: Path) -> None:
     ctx = SimpleNamespace(claude_native_plugins={})
     diagnostics = DiagnosticCollector()
     parked = ClaudeNativePlugin(
-        "owner/alpha", "alpha", tmp_path, "sha256:" + "0" * 64, parked="not approved"
+        "owner/alpha",
+        "alpha",
+        tmp_path,
+        "sha256:" + "0" * 64,
+        parked="Parked native plugin owner/alpha: not approved",
     )
     queue_native_claude(ctx, "owner/alpha", parked, diagnostics)
     assert ctx.claude_native_plugins == {}
-    assert any("was not declared" in d.message for d in diagnostics._diagnostics)
+    assert any("Parked native plugin" in d.message for d in diagnostics._diagnostics)
 
 
 @pytest.mark.req("req-na-006")

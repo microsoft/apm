@@ -471,6 +471,84 @@ class TestCheckExecutableApprovalIntegration:
         assert len(ctx.blocked_executables) == 1
         assert ctx.blocked_executables[0].package_name == "risky"
 
+    @pytest.mark.parametrize(
+        ("denied_type", "denied"),
+        [
+            (EXEC_TYPE_HOOKS, frozenset({EXEC_TYPE_HOOKS})),
+            (EXEC_TYPE_BIN, frozenset({EXEC_TYPE_BIN})),
+        ],
+        ids=["hooks-denied-bin-approvable", "bin-denied-hooks-approvable"],
+    )
+    def test_hard_denied_types_do_not_hide_approvable_ones(
+        self, tmp_path: Path, denied_type: str, denied: frozenset
+    ) -> None:
+        """A one-type deny keeps the package parked for its approvable type (#3924)."""
+        from apm_cli.security.executables import ExecTrustContext
+
+        (tmp_path / ".apm" / "hooks").mkdir(parents=True)
+        (tmp_path / ".apm" / "hooks" / "hook.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "tool").write_text("#!/bin/sh\n", encoding="utf-8")
+        pkg_info = self._make_pkg_info(tmp_path, "risky", "1.0")
+        trust = ExecTrustContext(
+            gate_enabled=True,
+            org_deny_all=False,
+            org_deny=frozenset(),
+            org_require=frozenset(),
+            org_recommend=frozenset(),
+            org_enforce=frozenset(),
+            org_bin_deny_all=False,
+            org_bin_deny=frozenset(),
+            project_allow={},
+            project_deny={"risky#1.0": {denied_type: True}},
+            user_allow={},
+            user_deny={},
+        )
+        ctx = SimpleNamespace(
+            blocked_executables=[],
+            exec_trust_ctx=trust,
+            package_exec_status={},
+            package_denied_exec_types={},
+        )
+
+        check_executable_approval("risky", pkg_info, {}, ctx=ctx)
+
+        assert [d.package_name for d in ctx.blocked_executables] == ["risky"]
+        assert ctx.package_denied_exec_types == {"risky": denied}
+
+    def test_only_hard_denied_types_are_not_parked(self, tmp_path: Path) -> None:
+        """Approving cannot lift a deny, so an all-denied package is not parked (#3924)."""
+        from apm_cli.security.executables import ExecTrustContext
+
+        (tmp_path / ".apm" / "hooks").mkdir(parents=True)
+        (tmp_path / ".apm" / "hooks" / "hook.json").write_text("{}", encoding="utf-8")
+        pkg_info = self._make_pkg_info(tmp_path, "risky", "1.0")
+        trust = ExecTrustContext(
+            gate_enabled=True,
+            org_deny_all=False,
+            org_deny=frozenset(),
+            org_require=frozenset(),
+            org_recommend=frozenset(),
+            org_enforce=frozenset(),
+            org_bin_deny_all=False,
+            org_bin_deny=frozenset(),
+            project_allow={},
+            project_deny={"risky#1.0": {EXEC_TYPE_HOOKS: True}},
+            user_allow={},
+            user_deny={},
+        )
+        ctx = SimpleNamespace(
+            blocked_executables=[],
+            exec_trust_ctx=trust,
+            package_exec_status={},
+            package_denied_exec_types={},
+        )
+
+        check_executable_approval("risky", pkg_info, {}, ctx=ctx)
+
+        assert ctx.blocked_executables == []
+        assert ctx.package_denied_exec_types == {"risky": frozenset({EXEC_TYPE_HOOKS})}
+
 
 # -------------------------------------------------------------------
 # resolve_package_key integration
@@ -792,7 +870,9 @@ class TestApproveDenyCommandsIntegration:
 
         data = load_yaml(project / "apm.yml")
         assert "executables" in data
-        assert "risky-pkg#2.0.0" in data["executables"]["allow"]
+        # Pins bind content, so the stored key is version-blind (#3902).
+        grant = data["executables"]["allow"]["risky-pkg"]
+        assert all(pin.startswith("sha256:") for pin in grant["hooks"].values())
 
     def test_approve_all(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -812,8 +892,8 @@ class TestApproveDenyCommandsIntegration:
 
         data = load_yaml(project / "apm.yml")
         allow = data["executables"]["allow"]
-        assert "risky-pkg#2.0.0" in allow
-        assert "tool-pkg#1.0.0" in allow
+        assert "risky-pkg" in allow
+        assert allow["tool-pkg"] == {"bin": True}
 
     def test_approve_nonexistent_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

@@ -72,6 +72,7 @@ def warn_target_reconcile_failure(
     diagnostics: DiagnosticCollector,
     package_name: str,
     reconcile_stats: dict,
+    message: str = "Could not fully reconcile hooks excluded by target restrictions",
 ) -> None:
     """Report incomplete hook cleanup alongside target restriction diagnostics."""
     if not reconcile_stats.get("errors", 0):
@@ -83,7 +84,7 @@ def warn_target_reconcile_failure(
     if not isinstance(failed_paths, list):
         failed_paths = ["unknown"]
     diagnostics.warn(
-        "Could not fully reconcile hooks excluded by target restrictions",
+        message,
         package=package_name,
         detail=(
             f"targets: [{', '.join(failed_targets)}]; "
