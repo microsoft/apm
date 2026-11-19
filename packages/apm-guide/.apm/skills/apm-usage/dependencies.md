@@ -388,7 +388,9 @@ Once the lockfile records an entry, `apm install` and `apm install --frozen`
 replay its locked commit without reading the catalog or needing the
 marketplace registration; catalog edits do not move it. New entries, entries
 whose `name`, `marketplace` or `version` changed, and `apm update` resolve
-through the catalog, and `--frozen` fails for an unlocked entry. Exceptions
+through the catalog, and `--frozen` fails for an unlocked entry.
+`apm install --refresh`, `apm update` and `apm marketplace update` revalidate
+the marketplace and fail rather than use stale cached data. Exceptions
 until 0.38 (#2903): registry-routed catalog entries still resolve through the
 catalog (the lockfile has no registry binding), and the lockfile does not
 record catalog-inline MCP/LSP servers, so a package with locked servers and no
@@ -401,6 +403,8 @@ The `marketplace` value names a marketplace registered with
 list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
 `apm install -g`). Dependencies and
 project manifests cannot declare `marketplaces:`.
+`apm uninstall name@marketplace` removes an object-form entry offline, with
+its lock row and deployed files.
 
 For object-form declarations, `apm audit --ci` uses recorded
 `discovered_via` + `marketplace_plugin_name` to find one locked coordinate.
@@ -638,7 +642,9 @@ lives in `docs/src/content/docs/reference/manifest-schema.md` section
 
 When your `apm.yml` and one or more parent packages declare the same
 dependency, APM installs it once with the sorted union of every declaration's
-`skills:` and of every declaration's `targets:`. A declaration that omits the
+`skills:` and of every declaration's `targets:`, but each skill deploys only to
+the targets of the declaration that selected it (`subset_pairings`, see the
+object-form section). A declaration that omits the
 field selects everything. Declaration order does not matter. `apm uninstall`
 of one parent narrows the union to the remaining declarations, and
 `apm audit --ci` checks the lockfile against that union. If the declarations
@@ -973,18 +979,22 @@ enterprise security guide for the threat model.
 ## What the lockfile pins
 
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
-of the ref format in apm.yml. Running `apm install` without `--update` reuses
+of the ref format in apm.yml. Plain `apm install` reuses
 the locked SHA when the dependency identity, declared ref and effective host
 provider match. An unseeded mutable ref resolves upstream even when another
 package or sibling path has a lock entry.
-`apm install --update`, `apm install --refresh`, `apm update` (including
-`--force`), `apm lock --update`, and `apm outdated` establish mutable refs from
+`apm update` (including `--force`), `apm install --refresh`,
+`apm lock --update`, `apm outdated`, and the deprecated `apm install --update`
+(use `apm update`) establish mutable refs from
 upstream instead of using a persistent bare-cache ref as current-state evidence.
 
 `--frozen` checks declared refs, full commit pins, host providers and HTTP/HTTPS
 transport against the lock, including transport changes under an unchanged
 semver range. It does not check whether an upstream branch moved. Review an
 intentional declaration change and run `apm update` to refresh the lock.
+
+APM refuses to change, replay, audit or pack a lockfile written by a newer
+APM, naming both versions; upgrade APM (there is no override).
 
 For local `.agent.md`, `.instructions.md`, and `.prompt.md` dependencies, the
 locked content hash covers the ordinary materialized package, including its

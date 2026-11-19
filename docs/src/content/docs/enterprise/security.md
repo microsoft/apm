@@ -320,7 +320,7 @@ On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not vi
 
 **Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
 
-**Marketplace entries replay their lock row.** A `{name, marketplace}` dependency names no repository in `apm.yml`; once locked, install takes its `repo_url`, `host` and `resolved_commit` from `apm.lock.yaml` without asking the catalog. A lock diff can therefore change where it comes from while `apm.yml` stays unchanged, so review those rows too. Org policy still checks the replayed source, and `apm update` resolves the catalog again.
+**Marketplace entries replay their lock row.** A `{name, marketplace}` dependency names no repository in `apm.yml`; once locked, install takes its `repo_url`, `host` and `resolved_commit` from `apm.lock.yaml` without asking the catalog. A lock diff can therefore change where it comes from while `apm.yml` stays unchanged, so review those rows too. Org policy still checks the replayed source, and `apm update` resolves the catalog again. The lock row also records the marketplace's Git origin, so `apm update` fails, naming both, if the marketplace alias now points somewhere else.
 
 See the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity) for field details.
 
@@ -632,6 +632,7 @@ See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-
 | Version substitution | Malicious version replaces legitimate one | Lock file pins exact commit SHA; content hash detects post-download tampering |
 | Post-install scripts | Arbitrary code runs after install | Dependency packages cannot run install scripts; only [lifecycle scripts](../lifecycle-scripts/) from policy, user, or explicitly trusted project sources run |
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
+| Dependency confusion | Same name resolves from an unintended host | The same `owner/repo` from two hosts fails before download, naming both; `*.ghe.com` marketplaces refuse bare cross-repo sources |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
 | Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
@@ -647,10 +648,10 @@ For an org standardizing on APM:
 - Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
 - Treat insecure transport as a separate CI control. `apm-policy.yml` has no
   dedicated `allow_insecure` field: `dependencies.allow` and
-  `dependencies.deny` match scheme-blind, host-blind canonical package identities
-  (for example `owner/repo`, not `github.com/owner/repo`). Policy patterns cannot
-  restrict host identity and cannot distinguish `http://` from `https://` for the
-  same package path. Reject committed
+  `dependencies.deny` can name a host (see
+  [Host-qualified patterns](../policy-reference/#host-qualified-patterns)) but
+  match scheme-blind, so they cannot distinguish `http://` from `https://` for
+  the same package. Reject committed
   `allow_insecure: true` entries and prohibit `--allow-insecure` and
   `--allow-insecure-host` in standard CI; review both explicit gates for any
   air-gapped exception. `registry_source.allow_non_registry` is a separate

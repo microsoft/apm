@@ -61,7 +61,8 @@ apm install
 ```
 
 Supported reference forms: `owner/repo` shorthand (with optional
-`#ref` for a tag, branch, or commit), full HTTPS or SSH git URLs,
+`#ref` for a tag, branch, or commit; resolved against `default_host:` when
+`apm.yml` sets one), full HTTPS or SSH git URLs,
 virtual subdirectory paths into a monorepo, single-file references,
 and local paths starting with `./`, `../`, or `/`. For private hosts
 and tokens, see [Authentication](../authentication/).
@@ -177,12 +178,14 @@ same bytes. Commit the lockfile.
 
 :::note[Lockfile replay]
 Plain `apm install` and `apm install --frozen` replay locked commits for
-unchanged dependencies, including transitive packages, and reuse matching
+unchanged dependencies, including transitive packages and marketplace entries
+(without contacting the marketplace), and reuse matching
 [cached package content](../../reference/cli/cache/) when available. This keeps
 mutable branches and tags pinned to their recorded commits.
 
 Run [`apm update`](../../reference/cli/update/) or `apm install --refresh` to
-establish current upstream mutable refs. `apm outdated` checks the same current
+establish current upstream mutable refs; both revalidate marketplaces and fail
+rather than use stale cached data. `apm outdated` checks the same current
 state without changing the lockfile. See the
 [lockfile specification](../../reference/lockfile-spec/) for the replay
 contract.
@@ -281,6 +284,8 @@ and the full flag reference, or run `apm install --help`.
 - **Drift between `apm_modules/` and the lockfile.** Run
   `apm audit --ci` locally to reproduce the CI gate; see
   [Update and refresh](../update-and-refresh/) to recover.
+- **Lockfile written by a newer APM.** APM refuses to change or replay it,
+  naming both versions. Upgrade APM; there is no override.
 - **Skipped symlinked agent source.** `apm install` warns and skips agent
   files or directories that are symlinks (for example
   `.apm/agents -> ../agents`). Fix by shipping real files and directories in
