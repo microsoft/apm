@@ -237,10 +237,11 @@ def locked_marketplace_replay(
     ``apm update`` / ``--refresh`` (*update_refs*) is ``update``; both
     resolve through the marketplace.
 
-    ``catalog-metadata`` keeps today's behavior for one case: catalog entries
-    may define MCP or LSP servers inline, and the lock cannot rebuild that
-    metadata, so a row whose package owns locked servers replays only while
-    its materialized copy under *modules_dir* exists.
+    ``catalog-metadata`` covers one case: catalog entries may define MCP or
+    LSP servers inline, and the lock cannot rebuild that metadata, so a row
+    whose package owns locked servers replays only while its materialized
+    copy under *modules_dir* exists. A cold copy reads the catalog for that
+    metadata only; :func:`catalog_metadata_refusal` keeps the lock's pin.
     """
     if update_refs:
         return MarketplaceReplay(MARKETPLACE_UPDATE)
@@ -267,6 +268,38 @@ def frozen_marketplace_refusal(decision: MarketplaceReplay) -> ValueError | None
         "--frozen replays marketplace dependencies from apm.lock.yaml only, and "
         "no locked entry matches this declaration. Run 'apm install' without "
         "--frozen, then commit apm.lock.yaml"
+    )
+
+
+def catalog_metadata_refusal(
+    dep_ref: DependencyReference,
+    resolved: DependencyReference,
+    lockfile: LockFile | None,
+) -> ValueError | None:
+    """Refuse a ``catalog-metadata`` re-read whose catalog no longer pins the lock row.
+
+    The catalog is read only for the server definitions the lock cannot
+    rebuild; the locked commit still pins the download. A catalog that now
+    selects another source or ref would silently re-pin the package, so only
+    ``apm update`` may move it.
+    """
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if (
+        locked_dep is not None
+        and resolved.get_unique_key() == locked_dep.get_unique_key()
+        and not detect_ref_change(resolved, locked_dep)
+    ):
+        return None
+    locked = (
+        f"{locked_dep.get_unique_key()}#{locked_dep.resolved_ref or locked_dep.resolved_commit}"
+        if locked_dep is not None
+        else "another selection"
+    )
+    current = f"{resolved.get_unique_key()}#{resolved.reference or 'HEAD'}"
+    return ValueError(
+        f"the catalog now selects {current}, but apm.lock.yaml pins {locked}. "
+        "Catalog edits do not change what installs; run "
+        f"'apm update {dep_ref.get_display_name()}' to move to the catalog's selection"
     )
 
 

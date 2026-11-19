@@ -4750,3 +4750,43 @@ def test_bundle_trust_guard_rejects_scope_blind_grants(path: str, old: str, new:
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/deps/apm_resolver.py",
+            "            refusal = catalog_metadata_refusal(dep_ref, resolved, "
+            "self._existing_lockfile)\n",
+            "            refusal = None\n",
+            id="catalog-metadata-re-read-skips-the-lock-pin",
+        ),
+        pytest.param(
+            "src/apm_cli/drift.py",
+            "        and not detect_ref_change(resolved, locked_dep)\n",
+            "        and resolved.reference == locked_dep.resolved_ref\n",
+            id="pin-comparison-bypasses-the-ref-change-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/plan.py",
+            "def lockfile_satisfies_manifest(",
+            "from apm_cli.drift import MARKETPLACE_CATALOG_METADATA as _METADATA\n\n\n"
+            "def lockfile_satisfies_manifest(",
+            id="second-catalog-metadata-consumer",
+        ),
+    ],
+)
+def test_catalog_metadata_guard_keeps_the_lock_pin(path: str, old: str, new: str) -> None:
+    """#3989: a catalog edit cannot silently re-pin a locked server-owning package."""
+    rule_id = "marketplace-integrations-locked-evidence"
+    assert not run_selected_rules(ROOT, (rule_id,)).violations
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

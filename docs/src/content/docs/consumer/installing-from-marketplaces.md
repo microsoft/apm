@@ -256,7 +256,9 @@ downloaded source has no package manifest. APM validates these
 before deployment. The lockfile does not record those inline definitions, so
 when a package with locked servers has no copy in `apm_modules/` (a fresh
 checkout or cold CI runner), install, including `--frozen`, reads the catalog
-for it. If the lockfile records none of its servers (for example after
+for those server definitions only; the locked commit still pins the download.
+If the catalog now selects another source or commit, install fails; run
+`apm update <name>@<marketplace>` to move to it. If the lockfile records none of its servers (for example after
 `apm install --only=apm`, or when a root `mcp:` entry overrides the server),
 a cold copy cannot be rebuilt and fails its content-hash check; run
 `apm update` for that package. Lockfile-only replay for these packages is
