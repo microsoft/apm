@@ -239,25 +239,47 @@ class CurrentMcpConfigView:
             self.configs, stored_configs, equivalent=self._legacy_equivalent
         )
 
-    def normalize_stored_configs(
-        self, stored_configs: Mapping[str, Mapping[str, Any]]
-    ) -> dict[str, Any]:
-        """Read a pre-#3825 baseline in the placeholder form of the same declaration.
+    def replay_recorded_roots(
+        self, dependencies: list[Any], stored_configs: Mapping[str, Mapping[str, Any]]
+    ) -> list[Any]:
+        """Return *dependencies* with a pre-#3825 recorded root replayed (``--frozen``).
 
-        Native ownership checks then render the stored baseline per target the
-        way the current declaration renders, so an entry APM rewrote in its
-        portable form stays provably APM-managed.
+        A lock written before #3825 holds ``${CLAUDE_PLUGIN_ROOT}`` already
+        expanded. A frozen install replays that recorded declaration, so native
+        files and their lock receipts stay as recorded; the next ordinary
+        install migrates both to the portable form.
         """
-        normalized = dict(stored_configs)
-        for name, current in self.configs.items():
-            stored = stored_configs.get(name)
-            if (
-                stored is not None
-                and stored != current
-                and self._legacy_equivalent(name, current, stored)
-            ):
-                normalized[name] = dict(current)
-        return normalized
+        from apm_cli.deps.plugin_root_render import (
+            legacy_absolute_root,
+            with_absolute_plugin_root,
+        )
+
+        replayed: list[Any] = []
+        for dependency in dependencies:
+            name = getattr(dependency, "name", None)
+            current = self.configs.get(name) if isinstance(name, str) else None
+            stored = stored_configs.get(name) if current is not None else None
+            root = (
+                legacy_absolute_root(
+                    current,
+                    stored,
+                    plugin_root=self.plugin_roots.get(name),
+                    project_root=self.project_root,
+                )
+                if stored is not None and stored != current
+                else None
+            )
+            if root is not None:
+                dependency = replace(
+                    with_absolute_plugin_root(dependency, _ROOT_FIELDS, root=root),
+                    plugin_root=None,
+                )
+            replayed.append(dependency)
+        return replayed
+
+
+# Declaration fields that may carry an authored ``${CLAUDE_PLUGIN_ROOT}``.
+_ROOT_FIELDS = ("command", "args", "env", "url", "headers", "cwd", "extra")
 
 
 @dataclass(frozen=True)

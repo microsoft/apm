@@ -52,6 +52,8 @@ def test_legacy_absolute_lock_is_equivalent_here_and_in_another_clone(
     [
         _expanded("/elsewhere/apm_modules/acme/other"),
         _expanded("relative/apm_modules/acme/synth"),
+        _expanded("/ci/clone/../../tmp/apm_modules/acme/synth"),
+        _expanded("/ci//apm_modules/acme/synth"),
         {**_expanded("/x/apm_modules/acme/synth"), "command": "python"},
         {
             **_AUTHORED,

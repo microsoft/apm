@@ -461,7 +461,7 @@ def _check_plugin_root_render(provider: FactsProvider) -> Iterable[Violation]:
             "def __init_subclass__(",
         ),
         _MCP_SCOPE_OWNER: ("legacy_absolute_equivalent(", "equivalent=self._legacy_equivalent"),
-        _MCP_INTEGRATION: ("current_view.normalize_stored_configs(old_mcp_configs)",),
+        _MCP_INTEGRATION: ("current_view.replay_recorded_roots(mcp_deps, old_mcp_configs)",),
         "src/apm_cli/integration/lsp_integrator.py": ("LSPIntegrator._render_plugin_roots(",),
     }
     facts_by_path, failures = _read_required(provider, rule_id, tuple(required))

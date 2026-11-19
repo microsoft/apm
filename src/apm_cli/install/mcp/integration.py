@@ -279,6 +279,7 @@ def run_mcp_integration(  # noqa: PLR0913
     active_package_keys: frozenset[str] | None = None,
     executable_context: tuple[dict | None, bool] = (None, False),
     pre_install_lock: "LockFile | None" = None,
+    frozen: bool = False,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -318,6 +319,7 @@ def run_mcp_integration(  # noqa: PLR0913
             package phase may already have rewritten *lock_path* with the
             running version, so retired-destination heal eligibility is read
             from this snapshot.
+        frozen: ``--frozen`` replay; recorded pre-#3825 plugin roots are kept.
 
     Returns:
         Tuple of ``(mcp_count, mcp_apm_config)``. ``mcp_apm_config`` is the
@@ -363,8 +365,8 @@ def run_mcp_integration(  # noqa: PLR0913
         no_policy=no_policy,
     )
     mcp_deps, current_view = prepared.dependencies, prepared.current_view
-    if current_view is not None:
-        old_mcp_configs = current_view.normalize_stored_configs(old_mcp_configs)
+    if frozen and current_view is not None:
+        mcp_deps = current_view.replay_recorded_roots(mcp_deps, old_mcp_configs)
 
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP

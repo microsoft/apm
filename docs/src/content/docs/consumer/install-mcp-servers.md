@@ -293,8 +293,13 @@ gets its own project-root form for a package under `apm_modules/`:
 
 In `.mcp.json`, the default `.` resolves from the directory you start Claude
 Code or Copilot CLI in, so start them from the project root. A lockfile from an
-earlier release that holds the absolute path still passes `--frozen`; the next
-`apm install` rewrites it in the portable form.
+earlier release that holds the absolute path still passes `--frozen`, which
+replays that recorded path and leaves the target configs unchanged; the next
+`apm install` rewrites the lockfile and the configs in the portable form.
+
+`apm pack --format agent-plugin` refuses an MCP server that uses
+`${CLAUDE_PLUGIN_ROOT}`: Agent Plugins do not resolve it and the bundle does not
+include that plugin's files.
 
 ## Resolve a connection name conflict
 
