@@ -43,7 +43,7 @@ from __future__ import annotations
 import builtins
 import contextlib
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
@@ -346,6 +346,20 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                 )
         else:
             _trace(f"Preflight: {host_display} -- accepted")
+
+
+def _fail_before_integration(ctx: InstallContext, diagnostics: Any) -> None:
+    """Raise before integration when a direct dependency failed to resolve or download."""
+    direct_keys = {dep.get_unique_key() for dep in ctx.all_apm_deps}
+    failed = sorted(set(ctx.callback_failures) & direct_keys)
+    if not failed:
+        return
+    if diagnostics is not None and diagnostics.has_diagnostics:
+        diagnostics.render_summary()
+    raise DirectDependencyError(
+        f"{len(failed)} direct dependency(ies) failed to resolve or download "
+        f"({', '.join(failed)}); nothing was integrated. Fix or remove them and retry."
+    )
 
 
 @transactional_pipeline
@@ -804,6 +818,11 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ctx.registry_config = registry_config
         ctx.managed_files = managed_files
         ctx.installed_packages = installed_packages
+
+        # Apply barrier (#3874): every requested package resolves and downloads
+        # before any is integrated, so a failed direct dependency never leaves
+        # untracked files deployed by the packages that succeeded.
+        _fail_before_integration(ctx, diagnostics)
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         materialization_session = _run_integration_phase(ctx)

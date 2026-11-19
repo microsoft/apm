@@ -1032,6 +1032,22 @@ def test_audit_and_install_share_one_copy_validity_owner(path: str, old: str, ne
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_failed_direct_dependency_stops_before_integration() -> None:
+    """Dropping the apply barrier lets a failed install deploy untracked files (#3874)."""
+    rule_id = "install-deployment-outcome"
+    path = "src/apm_cli/install/pipeline.py"
+    old = "        _fail_before_integration(ctx, diagnostics)\n"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "")
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.
