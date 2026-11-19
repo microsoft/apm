@@ -642,7 +642,9 @@ For Claude Code at project scope, the next `apm install` replaces values in
 exact entry or because the entry matches the declaration expanded from the
 current environment. It prints the affected variable names. An entry APM
 cannot confirm it wrote is kept, and install exits with an error that names
-each field holding a value and the reference it should hold.
+each field holding a value and the reference it should hold. A field where APM
+writes a package path, such as `${CLAUDE_PROJECT_DIR:-.}/apm_modules/...`,
+instead names the path to restore (the exact value when it is a plain ASCII path).
 Replace those yourself with `${NAME}` references, for example
 `Bearer ${GITHUB_TOKEN}`. Export the variables before starting `claude`.
 Claude Code still asks you to approve project servers; APM does not change

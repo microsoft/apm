@@ -123,9 +123,10 @@ fallback enabled with `--allow-protocol-fallback`).
   percent-encoded userinfo is rejected. The user is presentation-only and
   not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
-  is set. Manifest identity includes `host:port`, while the lockfile dedup
-  key uses `host/repo`; the same repository reached through different
-  ports maps to one lockfile key.
+  is set. Manifest identity and the lockfile key both include `host:port`
+  (`host:port/owner/repo`), so the same repository path on two ports is two
+  packages; they share one `apm_modules/` directory, so install rejects the
+  pair unless one sets `alias:`.
 
 ## Transport selection (SSH vs HTTPS)
 

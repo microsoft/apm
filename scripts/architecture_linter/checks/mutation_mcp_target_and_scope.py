@@ -59,6 +59,9 @@ _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 
 _MCP_SCOPE_OWNER = "src/apm_cli/integration/mcp_config_view.py"
 _EXECUTABLES_OWNER = "src/apm_cli/security/executables.py"
+# Uninstall only intersects with managed servers and never admits one.
+_MCP_RAW_VIEW_CONSUMER = "src/apm_cli/commands/uninstall/engine.py"
+_MCP_AUDIT_CONSUMER = "src/apm_cli/policy/ci_checks.py"
 
 
 _MCP_ADAPTER_BASE = "src/apm_cli/adapters/client/base.py"
@@ -409,15 +412,39 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             "def with_unapproved_executables(",
             '"reason": "unapproved-executables"',
             '"unapproved-executables": gated,',
+            "def select(",
+            "approve: Callable[[list[MCPDependency]], list[MCPDependency]] | None,",
+            "recorded: LockFile | None,",
+            "view = view.with_unapproved_executables(approve(list(view.dependencies)))",
+            "view = view.with_recorded_omissions(recorded)",
+            "selection_replayed=True",
+            "evidence == self.omissions.get(name, False)",
         ),
-        "src/apm_cli/policy/ci_checks.py": (").with_recorded_omissions(lock)",),
+        _EXECUTABLES_OWNER: (
+            "def project_mcp_executables_gate(",
+            "if not any(is_executable_gated_mcp(dependency) for dependency in dependencies):",
+        ),
+        "src/apm_cli/policy/ci_checks.py": ("CurrentMcpConfigView.select(", "recorded=lock,"),
         "src/apm_cli/install/mcp/integration.py": (
             "include_dependency_mcp=should_install",
             "return self.omission_view.omission_evidence(lockfile)",
             "omissions = prepared.omissions(lockfile)",
-            "current_view = current_view.with_unapproved_executables(approved)",
-            "if any(is_executable_gated_mcp(dep) for dep in mcp_deps):",
+            "gate = project_mcp_executables_gate(",
+            "current_view = CurrentMcpConfigView.select(",
+            "approve=gate,",
+            "approved = gate(mcp_deps)",
             "current_view if should_install else None",
+        ),
+        # #3925: both --frozen MCP checks gate and verify recorded evidence.
+        "src/apm_cli/install/service.py": (
+            "current = CurrentMcpConfigView.select(",
+            "approve=approve,",
+            "recorded=lockfile,",
+            "approve=project_mcp_executables_gate(",
+        ),
+        "src/apm_cli/install/phases/integrate.py": (
+            "approve=project_mcp_executables_gate(",
+            "executable_context=(effective_allow_map(ctx), True),",
         ),
     }
     facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
@@ -444,6 +471,50 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
                 r"|with_unapproved_executables|_declaration_fingerprint)\("
             ),
             message="MCP omission selection and comparison belong to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
+            pattern=r"\.with_(?:recorded_omissions|unapproved_executables)\(",
+            message="Lockfile comparisons derive the MCP view through CurrentMcpConfigView.select",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _MCP_RAW_VIEW_CONSUMER)
+            ),
+            pattern=r"CurrentMcpConfigView\.derive\(",
+            message="Lockfile comparisons must not skip the executables gate or evidence",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _MCP_AUDIT_CONSUMER)
+            ),
+            pattern=r"\bapprove=None\b",
+            message="Only audit skips the executables gate (it does not re-check approvals)",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_EXECUTABLES_OWNER,)),
+            pattern=r"\bfilter_mcp_by_allow_executables\(",
+            message="MCP executables approval routes through project_mcp_executables_gate",
             exempt=False,
         )
     )

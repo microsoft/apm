@@ -21,6 +21,7 @@ import fnmatch
 import hashlib
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -309,9 +310,10 @@ def canonical_exec_identity(package_key: object) -> str:
 
     Shorthand, host-qualified, and URL spellings of one package map to its
     lockfile identity; GitHub-family and Azure DevOps identities are
-    case-folded because those hosts resolve owner/repo case-insensitively. Glob
-    wildcards survive normalization; content-bound keys and spellings that do
-    not parse are returned unchanged.
+    case-folded because those hosts resolve owner/repo case-insensitively. The
+    port is dropped (``build_port_blind_dependency_key``), so a deny cannot be
+    bypassed by naming another port. Glob wildcards survive normalization;
+    content-bound keys and spellings that do not parse are returned unchanged.
     """
     name = _strip_version(str(package_key or "").strip())
     if not name or _is_content_bound_key(name):
@@ -321,10 +323,11 @@ def canonical_exec_identity(package_key: object) -> str:
         probe = probe.replace(char, token)
     try:
         from apm_cli.models.apm_package import DependencyReference
+        from apm_cli.models.dependency.identity import build_port_blind_dependency_key
         from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
         reference = DependencyReference.parse(probe)
-        canonical = reference.get_unique_key()
+        canonical = build_port_blind_dependency_key(reference)
     except ValueError:
         return name
     if is_github_hostname(reference.host) or is_azure_devops_hostname(reference.host):
@@ -1151,6 +1154,47 @@ def filter_mcp_by_allow_executables(
         service_label="MCP",
         gated=is_executable_gated_mcp,
     )
+
+
+class _SilentGateLogger:
+    """Swallow gate messages for a check that does not deploy (``--frozen``)."""
+
+    def verbose_detail(self, message: str) -> None:
+        """Discard a skip detail."""
+
+    def warning(self, message: str, symbol: str = "warning") -> None:
+        """Discard the filtered-servers summary."""
+
+
+def project_mcp_executables_gate(
+    project_root: Path,
+    apm_package: Any,
+    *,
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
+    no_policy: bool = False,
+    logger: Any | None = None,
+) -> Callable[[list], list]:
+    """Return this run's MCP executables gate for install and ``--frozen``.
+
+    The allow map resolves (through :func:`resolve_project_exec_allow_map`)
+    only when a gated server is present. Without *logger* the gate is silent,
+    so a check that does not deploy never repeats the filtered-servers warning.
+    """
+    quiet = logger if logger is not None else _SilentGateLogger()
+
+    def approve(dependencies: list) -> list:
+        if not any(is_executable_gated_mcp(dependency) for dependency in dependencies):
+            return dependencies
+        allow_map = resolve_project_exec_allow_map(
+            project_root,
+            apm_package,
+            executable_context=executable_context,
+            no_policy=no_policy,
+            logger=logger,
+        )
+        return filter_mcp_by_allow_executables(dependencies, allow_map, quiet)
+
+    return approve
 
 
 def filter_lsp_by_allow_executables(
