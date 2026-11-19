@@ -216,31 +216,10 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
-    decl_key_map = {d.package_key: d for d in declarations}
-    decl_name_map = {d.package_name: d for d in declarations}
-    decl_orig_map = {d.original_identity: d for d in declarations if d.original_identity}
 
     changed = 0
     for pkg in packages:
-        decl = decl_key_map.get(pkg) or decl_name_map.get(pkg) or decl_orig_map.get(pkg)
-        if decl is None:
-            for d in declarations:
-                if (
-                    d.package_key.startswith(pkg + "#")
-                    or d.package_name.startswith(pkg)
-                    or (
-                        d.original_identity
-                        and (
-                            d.original_identity == pkg
-                            or d.original_identity.startswith(pkg + "#")
-                            or d.original_identity.startswith(pkg)
-                            or pkg.startswith(d.original_identity + "@")
-                            or pkg.startswith(d.original_identity + "#")
-                        )
-                    )
-                ):
-                    decl = d
-                    break
+        decl = _find_declaration(declarations, pkg)
         if decl is None:
             # Allow denying a package that is not (or no longer) installed.
             from ..security.executables import ALL_EXEC_TYPES
@@ -289,29 +268,7 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
 
     ctx = _effective_trust_context(manifest, logger=logger)
 
-    declarations = _scan_installed_packages(manifest)
-    decl = None
-    for d in declarations:
-        if package in (d.package_key, d.package_name) or (
-            d.original_identity and package == d.original_identity
-        ):
-            decl = d
-            break
-        if (
-            d.package_key.startswith(package + "#")
-            or d.package_name.startswith(package)
-            or (
-                d.original_identity
-                and (
-                    d.original_identity.startswith(package + "#")
-                    or d.original_identity.startswith(package)
-                    or package.startswith(d.original_identity + "@")
-                    or package.startswith(d.original_identity + "#")
-                )
-            )
-        ):
-            decl = d
-            break
+    decl = _find_declaration(_scan_installed_packages(manifest), package)
 
     if decl is None:
         _rich_warning(f"{package}: not found among installed packages with executables.")
@@ -390,6 +347,24 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
             "[x] = parked. Trust with 'apm approve <package>' or 'apm approve --recommended'.",
             symbol="info",
         )
+
+
+def _find_declaration(declarations: list, pkg: str):
+    """Return the installed declaration that *pkg* names, or None.
+
+    Matches the approval key, the package name, or the locked identity a
+    ``replace:`` rule redirected (exact, then ``pkg#...`` prefix forms).
+    """
+    for decl in declarations:
+        if pkg in (decl.package_key, decl.package_name, decl.original_identity):
+            return decl
+    for decl in declarations:
+        if decl.package_key.startswith(pkg + "#") or decl.package_name.startswith(pkg):
+            return decl
+        original = decl.original_identity
+        if original and (original.startswith(pkg + "#") or pkg.startswith(original + "#")):
+            return decl
+    return None
 
 
 def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str | None:
@@ -499,31 +474,10 @@ def _approve_packages(
 ) -> None:
     """Approve specific packages by name."""
     declarations = _scan_installed_packages(manifest)
-    decl_map = {d.package_name: d for d in declarations}
-    decl_key_map = {d.package_key: d for d in declarations}
-    decl_orig_map = {d.original_identity: d for d in declarations if d.original_identity}
 
     count = 0
     for pkg in packages:
-        decl = decl_key_map.get(pkg) or decl_map.get(pkg) or decl_orig_map.get(pkg)
-        if decl is None:
-            for d in declarations:
-                if (
-                    d.package_key.startswith(pkg + "#")
-                    or d.package_name.startswith(pkg)
-                    or (
-                        d.original_identity
-                        and (
-                            d.original_identity == pkg
-                            or d.original_identity.startswith(pkg + "#")
-                            or d.original_identity.startswith(pkg)
-                            or pkg.startswith(d.original_identity + "@")
-                            or pkg.startswith(d.original_identity + "#")
-                        )
-                    )
-                ):
-                    decl = d
-                    break
+        decl = _find_declaration(declarations, pkg)
 
         if decl is None:
             _rich_warning(f"{pkg}: not found in installed packages")
@@ -544,7 +498,11 @@ def _approve_packages(
 
 def scan_installed_executable_packages(manifest: Path) -> list:
     """Scan all installed packages under apm_modules/ for executables."""
-    from ..security.executables import ExecutableDeclaration, scan_package_executables
+    from ..security.executables import (
+        ExecutableDeclaration,
+        locked_dependency_approval_identity,
+        scan_package_executables,
+    )
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
@@ -592,26 +550,16 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         version = str(manifest_data.get("version", version))
                 except Exception:
                     manifest_data = {}
-
-            if locked.replacement is not None:
-                from ..security.executables import dependency_approval_key
-
-                dep_ref = locked.to_dependency_ref()
-                appr_id = dependency_approval_key(dep_ref)
-                version_for_scan = ""
-                orig_id = locked.get_unique_key()
-            else:
-                appr_id = locked.get_unique_key()
-                version_for_scan = version
-                orig_id = None
-
+            # A replaced row is granted under its selected source, the key the
+            # install gate checks; the original identity only helps lookup.
+            replaced = locked.replacement is not None
             declaration = scan_package_executables(
                 package_dir,
                 name,
-                version_for_scan,
-                approval_identity=appr_id,
+                "" if replaced else version,
+                approval_identity=locked_dependency_approval_identity(locked),
                 manifest_data=manifest_data,
-                original_identity=orig_id,
+                original_identity=locked.get_unique_key() if replaced else None,
             )
             if declaration.has_executables:
                 results.append(declaration)

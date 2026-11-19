@@ -62,6 +62,9 @@ class ExecutableDeclaration:
         is_transitive: Whether this package is a transitive dependency.
         parent_name: Name of the direct dependency that pulled this in
             (only set when *is_transitive* is True).
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            so commands can find the package by its declared name while the
+            grant names the selected source.
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
         lsp_count: Number of LSP server entries discovered.
@@ -523,9 +526,23 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
+def locked_dependency_approval_identity(dependency: Any) -> str:
+    """Return the trust principal for a locked dependency.
+
+    A replaced row is keyed by its selected source, exactly as the install
+    gate keys the resolved reference, so an upstream grant never unlocks the
+    replacement and ``apm approve`` writes the key the gate checks.
+    """
+    if getattr(dependency, "replacement", None) is not None:
+        return dependency_approval_key(dependency.to_dependency_ref())
+    return dependency.get_unique_key()
+
+
 def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     """Return trust keys derived only from a locked package identity."""
-    identity = dependency.get_unique_key()
+    identity = locked_dependency_approval_identity(dependency)
+    if getattr(dependency, "replacement", None) is not None:
+        return tuple(dict.fromkeys((identity, _strip_version(identity))))
     versioned = build_approval_key(identity, dependency.version or "")
     return tuple(dict.fromkeys((identity, versioned)))
 

@@ -1030,3 +1030,35 @@ class TestCanonicalExecIdentityHostCase:
             migrate_user_legacy=False,
         )
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+
+def test_locked_replacement_keys_name_the_selected_source() -> None:
+    """MCP/LSP views key a replaced row like the install gate, never upstream (#3710)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.security.executables import locked_dependency_approval_keys
+
+    lock = LockFile.from_yaml(
+        """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+    )
+    (locked,) = lock.get_package_dependencies()
+
+    assert locked_dependency_approval_keys(locked) == ("./local-hooky",)
