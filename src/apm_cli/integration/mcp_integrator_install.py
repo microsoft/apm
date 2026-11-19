@@ -477,6 +477,8 @@ def _install_registry_group(  # noqa: PLR0913
                             NativeMcpConnectionState.MATCHING_FOREIGN,
                         }:
                             if state is NativeMcpConnectionState.MATCHING_MANAGED:
+                                if managed_target_servers is not None:
+                                    managed_target_servers.setdefault(rt, set()).add(dep)
                                 retain_native_receipt(
                                     native_hashes,
                                     rt,
@@ -1607,6 +1609,8 @@ def _install_self_defined_deps(
                     NativeMcpConnectionState.MATCHING_FOREIGN,
                 }:
                     if state is NativeMcpConnectionState.MATCHING_MANAGED:
+                        if managed_target_servers is not None:
+                            managed_target_servers.setdefault(rt, set()).add(dep.name)
                         retain_native_receipt(
                             native_hashes, rt, client, dep.name, requested_info=synthetic_info
                         )
