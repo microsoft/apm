@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `targets: [codex]` makes `apm pack` write `.codex-plugin/plugin.json`, so Codex installs the package's real version plus root `skills/` and `.mcp.json`. (#3906)
+- Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 
 ### Deprecated
 
