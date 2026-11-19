@@ -120,12 +120,13 @@ def run_owned_mcp_integration(
         restore_pending_retired_claims,
         split_mcp_claims,
     )
+    from apm_cli.integration.mcp_config_view import bundle_mcp_owner_token
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
 
     lockfile = LockFile.read(lock_path) or LockFile()
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
     old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
-    owner_token = f"bundle:{owner}"
+    owner_token = bundle_mcp_owner_token(owner)
     old_owned = {
         name
         for name, provenance in lockfile.mcp_config_provenance.items()
@@ -469,7 +470,9 @@ def run_mcp_integration(  # noqa: PLR0913
             stored_configs=old_mcp_configs,
         )
 
-    if should_install and mcp_deps:
+    # Recorded local-bundle servers stay owned by their bundle install (#3955).
+    bundle_owned = current_view.bundle_owned if current_view is not None else frozenset()
+    if should_install and (mcp_deps or bundle_owned):
         from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
 
         old_mcp_target_servers = resolve_mcp_target_servers(
@@ -506,28 +509,32 @@ def run_mcp_integration(  # noqa: PLR0913
         adoptable = retired_owned.moved_unrecorded & MCPIntegrator.get_server_names(mcp_deps)
         try:
             with adoptable_root_mcp_entries(frozenset(adoptable)):
-                mcp_count = MCPIntegrator.install(
-                    mcp_deps,
-                    runtime,
-                    exclude,
-                    verbose,
-                    stored_mcp_configs=old_mcp_configs,
-                    apm_config=mcp_apm_config,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    explicit_target=explicit_target,
-                    target_decision=target_decision,
-                    fail_on_write_error=True,
-                    diagnostics=diagnostics,
-                    scope=scope,
-                    managed_target_servers=managed_target_servers,
-                    native_hashes=native_hashes,
+                mcp_count = (
+                    MCPIntegrator.install(
+                        mcp_deps,
+                        runtime,
+                        exclude,
+                        verbose,
+                        stored_mcp_configs=old_mcp_configs,
+                        apm_config=mcp_apm_config,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        explicit_target=explicit_target,
+                        target_decision=target_decision,
+                        fail_on_write_error=True,
+                        diagnostics=diagnostics,
+                        scope=scope,
+                        managed_target_servers=managed_target_servers,
+                        native_hashes=native_hashes,
+                    )
+                    if mcp_deps
+                    else 0
                 )
         except MCPNativeConflictError as exc:
             if not exc.wrote_connections:
                 raise
             conflict = exc
-        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
+        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps) | bundle_owned
         new_mcp_configs = dict(current_view.configs) if current_view is not None else {}
         new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
 
