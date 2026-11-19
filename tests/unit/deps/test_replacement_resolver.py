@@ -163,17 +163,29 @@ def test_actual_resolver_inherits_fork_parent_coordinates_without_chaining(tmp_p
     assert len(resolver.replacement_index.unused_rules) == 1
 
 
-@pytest.mark.parametrize(
-    "other",
-    ["https://gitlab.com/example/base", "https://github.com:8443/example/base"],
-)
 def test_actual_resolver_rejects_ambiguous_original_materialization_slots(
-    tmp_path: Path, other: str
+    tmp_path: Path,
 ) -> None:
     factory = LocalPackageFactory(tmp_path)
+    other = "https://gitlab.com/example/base"
     consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
     _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
-    with pytest.raises(ReplacementCollisionError, match="share the existing materialization slot"):
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    # #3696: the materialization owner rejects the shared directory, naming the
+    # original (not the replacement) identity, whether or not rules exist.
+    assert graph.resolution_errors == [
+        "github.com/example/base and gitlab.com/example/base are different packages "
+        "that would both install to apm_modules/example/base. Remove one of them, "
+        "or set 'alias:' on one so it installs to its own directory."
+    ]
+
+
+def test_actual_resolver_rejects_ambiguous_original_identities(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path)
+    other = "https://github.com:8443/example/base"
+    consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
+    _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
+    with pytest.raises(ReplacementCollisionError, match="share one original package identity"):
         APMDependencyResolver().resolve_dependencies(consumer.root)
 
 

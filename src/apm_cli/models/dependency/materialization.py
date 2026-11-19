@@ -264,13 +264,14 @@ class MaterializationSlots:
 
 def _declaration_label(dependency: DependencyReference, parent: DependencyReference | None) -> str:
     """Return a host-qualified declaration label with its declaring parent."""
+    dependency = dependency.ownership_reference
     label = dependency.get_identity()
-    if not dependency.ownership_reference.is_local:
+    if not dependency.is_local:
         host = (dependency.host or default_host()).lower()
         if not label.lower().startswith((f"{host}/", f"{host}:")):
             label = f"{host}/{label}"
     if parent is not None:
-        label = f"{label} (required by {parent.get_identity()})"
+        label = f"{label} (required by {parent.ownership_reference.get_identity()})"
     return label
 
 

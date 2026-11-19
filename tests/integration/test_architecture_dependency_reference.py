@@ -294,6 +294,12 @@ def test_nested_root_declarations_route_through_materialization_owner(
             "collision = slots.claim(dep_ref, parent)",
             "collision = None",
         ),
+        (
+            "src/apm_cli/models/dependency/replacement.py",
+            "        identity = dep.get_identity()\n",
+            "        identity = dep.get_identity()\n"
+            "        self._slots.setdefault(dep.get_install_path(modules_dir).as_posix(), identity)\n",
+        ),
     ],
 )
 def test_shared_install_directories_route_through_materialization_owner(
