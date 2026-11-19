@@ -4441,8 +4441,8 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
         ),
         pytest.param(
             "src/apm_cli/install/mcp/integration.py",
-            "                mcp_deps, owned_target, named_only=True\n",
-            "                [], owned_target, named_only=True\n",
+            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned",
+            "mcp_servers_for_runtime([], owned_target, named_only=True) | bundle_owned",
             id="target-scoped-install-retires-other-targets",
         ),
         pytest.param(
@@ -4731,4 +4731,46 @@ def test_pack_mcp_reads_only_authored_sources(old: str, new: str) -> None:
     assert report.failures == ()
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "    trust_ctx = exec_trust_context_for_project(\n        manifest_path,\n",
+            "    trust_ctx = exec_trust_context_for_project(\n        project_root,\n",
+            id="registered-caller-passes-a-root",
+        ),
+        pytest.param(
+            "src/apm_cli/security/executables.py",
+            "            project_manifest_path(project_root),\n",
+            "            Path(project_root),\n",
+            id="registered-caller-passes-a-path-built-from-a-root",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "            manifest, policy=policy, migrate_user_legacy=False\n",
+            "            self._project_root, policy=policy, migrate_user_legacy=False\n",
+            id="registered-method-passes-its-root-attribute",
+        ),
+    ],
+)
+def test_trust_owner_guard_requires_a_manifest_argument(path: str, old: str, new: str) -> None:
+    """A8: a registered caller handing the trust owner a directory fails the guard."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    clean = run_selected_rules(ROOT, (rule_id,))
+    assert not [v for v in clean.violations if v.rule_id == rule_id]
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id
+        and violation.path == path
+        and "not a directory" in violation.message
+        for violation in report.violations
     )

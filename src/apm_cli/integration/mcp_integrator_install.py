@@ -61,7 +61,7 @@ class _PrevalidatedRegistryServers(dict[str, dict]):
 
 
 CHOOSING_MCP_REGISTRY_DOCS_URL = (
-    "https://microsoft.github.io/apm/consumer/choosing-an-mcp-registry/"
+    "https://microsoft.github.io/apm/consumer/install-mcp-servers/#choosing-an-mcp-registry"
 )
 
 # Precedence layers a direct ``apm install --mcp NAME`` can resolve from. The

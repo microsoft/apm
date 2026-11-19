@@ -301,7 +301,7 @@ and an executed effective HTTPS attempt matching the API's normalized
 scheme/host/port. HTTP is not upgraded; HTTPS rewritten to SSH/local does
 not qualify. Opt-in alternate protocol reuses the declared custom port and
 warns, without mapping SSH aliases to web hostnames. See the
-[GitLab fetch policy](https://microsoft.github.io/apm/consumer/authentication/#gitlab-saas-or-self-managed)
+[GitLab fetch policy](https://microsoft.github.io/apm/getting-started/authentication/#gitlab-saas-and-self-managed)
 and [GitLab hosts](#gitlab-hosts) for token trust.
 
 ## GHE Cloud data residency (*.ghe.com)

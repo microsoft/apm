@@ -572,6 +572,18 @@ def run_mcp_integration(  # noqa: PLR0913
             if not exc.wrote_connections:
                 raise
             conflict = exc
+        # The dependency install manages declared servers only; a bundle-owned
+        # server keeps its claim and receipt on every target this run selects,
+        # so a later bundle reinstall can still retire it (#3955).
+        for owned_target, owned in old_mcp_target_servers.items():
+            kept_bundle = builtins.set(owned) & bundle_owned
+            if not kept_bundle or owned_target not in managed_target_servers:
+                continue
+            managed_target_servers[owned_target] |= kept_bundle
+            for name in kept_bundle:
+                receipt = old_native_hashes.get(owned_target, {}).get(name)
+                if receipt is not None:
+                    native_hashes.setdefault(owned_target, {}).setdefault(name, receipt)
         new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps) | bundle_owned
         new_mcp_configs = dict(current_view.configs) if current_view is not None else {}
         new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
@@ -633,9 +645,10 @@ def run_mcp_integration(  # noqa: PLR0913
                     owned, new_mcp_servers - bundle_owned, admitted
                 )
                 continue
-            # A runtime this run does not select keeps the servers that name it.
-            kept = builtins.set(owned) & mcp_servers_for_runtime(
-                mcp_deps, owned_target, named_only=True
+            # A runtime this run does not select keeps the servers that name it,
+            # and the servers a local bundle wired there (#3955).
+            kept = builtins.set(owned) & (
+                mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned
             )
             if manifest_runtimes is not None and owned_target not in manifest_runtimes:
                 kept = builtins.set()

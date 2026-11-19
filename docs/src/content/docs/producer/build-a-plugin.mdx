@@ -1,0 +1,146 @@
+---
+title: Build a plugin
+description: Ship your package as a native plugin for Claude Code, GitHub Copilot and Codex, and keep its dependencies declared and locked with APM.
+---
+
+import { Steps, FileTree, Badge, Aside, LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+Use this page when people should be able to install your work as a plugin, a
+folder with a `plugin.json` that Claude Code, GitHub Copilot CLI and Codex load
+natively, without APM. You keep authoring with APM: your plugin's own
+dependencies stay in `apm.yml`, locked, and `apm pack` writes the manifest each
+tool expects.
+
+<Steps>
+
+1. **Scaffold the plugin.**
+
+   ```bash frame="terminal"
+   apm plugin init review-plugin -y --target claude,copilot,codex
+   cd review-plugin
+   ```
+
+   This creates `apm.yml` (with `targets:` and an empty `devDependencies:`) and a
+   `plugin.json` with the name, version, description and author.
+
+2. **Add primitives at the plugin root.**
+
+   <FileTree>
+   - review-plugin/
+     - apm.yml
+     - plugin.json
+     - skills/review/SKILL.md
+     - agents/reviewer.agent.md
+     - commands/release-notes.md
+   </FileTree>
+
+   Plugins use top-level `skills/`, `agents/` and `commands/` folders, which is
+   what the harnesses (the agent tools that load the plugin) read. Do not also create `.apm/`: when it exists, APM packs
+   from `.apm/` and skips the root folders with a warning.
+
+3. **Declare what your plugin depends on.**
+
+   ```bash frame="terminal"
+   apm install microsoft/apm-sample-package#v1.0.0
+   ```
+
+   The dependency goes into `apm.yml` and its commit into `apm.lock.yaml`.
+
+4. **Build the plugin.**
+
+   ```bash frame="terminal"
+   apm pack
+   ```
+
+   ```text frame="none"
+   [!] No 'license:' field in apm.yml; the SBOM will record NOASSERTION for this
+   package. Add a 'license:' field to apm.yml (an SPDX expression such as MIT or
+   Apache-2.0, or UNLICENSED) to declare it.
+   [+] Generated plugin manifest: .../review-plugin/.claude-plugin/plugin.json
+   [+] Generated plugin manifest: .../review-plugin/.codex-plugin/plugin.json
+   [i] Writing generated plugin manifest under .github/: .../review-plugin/.github/plugin/plugin.json
+   [+] Generated plugin manifest: .../review-plugin/.github/plugin/plugin.json
+   [*] Packed 13 file(s) -> build/review-plugin-0.1.0
+   [i] Claude plugin bundle ready -- contains plugin.json, plugin-native
+   directories, and an embedded apm.lock.yaml for integrity verification.
+   [i] Share with: apm install build/review-plugin-0.1.0
+   ```
+
+   Add `license: MIT` (or your license) to `apm.yml` to clear the warning.
+
+</Steps>
+
+## What `apm pack` writes
+
+One run produces a manifest per harness named in `targets:`, plus a bundle:
+
+| Output | For |
+|---|---|
+| `.claude-plugin/plugin.json` | Claude Code |
+| `.github/plugin/plugin.json` | GitHub Copilot CLI |
+| `.codex-plugin/plugin.json` <Badge text="New in 0.37" variant="note" /> | Codex; references root `skills/` and `.mcp.json` when they exist |
+| `build/<name>-<version>/` | A self-contained plugin folder with your primitives, your dependencies' primitives and an embedded `apm.lock.yaml` |
+
+Each manifest takes `name`, `version`, `description`, `author` and `license`
+from `apm.yml`. Commit the three manifests so the repository itself works as a
+plugin. The bundle is a build output: attach it to a release or install it from
+disk.
+
+Codex sees the root `skills/` folder and a root `.mcp.json`, nothing else.
+Skills under `.apm/skills/` and MCP servers declared in `apm.yml` are not
+referenced.
+
+## Bundle formats
+
+| Command | Produces |
+|---|---|
+| `apm pack` | Claude plugin bundle; the help text labels it "Legacy Claude plugin bundle (current default)" |
+| `apm pack --format agent-plugin` | Portable [Agent Plugins v1](https://github.com/agentplugins/agent-plugins-spec) bundle: `plugin.json`, `skills/` and MCP servers, nothing else. Fails if the source has agents, commands, instructions, hooks or LSP servers it cannot represent |
+| `apm pack --format apm` | Legacy APM bundle layout |
+| `apm pack --archive` | Any of the above as one `.zip` (`--archive-format tar.gz` for older pipelines) |
+
+`apm pack --dry-run` lists what would be packed without writing.
+
+## Keep dependencies through APM
+
+Native plugin systems do not lock a plugin's dependencies to a commit and file
+hashes. APM covers that in two ways:
+
+- **Consumers who use APM** install your repository
+  (`apm install you/review-plugin#v1.0.0`). APM resolves your `dependencies:`
+  as separate packages, locks each one, and keeps them updatable on their own.
+- **Consumers who do not use APM** load the bundle. It already contains your
+  dependencies' files, copied from what your lockfile recorded, and each file is
+  checked against its locked hash before it is packed.
+
+`devDependencies` stay out of the bundle.
+
+<Aside type="caution" title="Bump the version, then repack with --force">
+`apm pack` keeps an existing `.claude-plugin/plugin.json`,
+`.github/plugin/plugin.json` or `.codex-plugin/plugin.json` and prints
+`[!] ... already exists; skipping plugin.json generation`. After you change
+`version:` in `apm.yml`, run `apm pack --force` so the manifests carry the new
+version; Codex installs by that version.
+</Aside>
+
+## Test the plugin
+
+`apm install` inside the plugin repository deploys your dependencies, not your
+root `skills/`, `agents/` and `commands/` folders. To see your own primitives
+land, install the plugin from a separate consumer repository by path:
+
+```bash frame="terminal"
+apm install ../review-plugin
+```
+
+To check the bundle the way a non-APM consumer receives it, install it from
+disk: `apm install ./build/review-plugin-0.1.0`. APM rejects the bundle if any
+file differs from the hashes embedded in its lockfile. More in
+[Test a package locally](../test-packages/).
+
+## Next
+
+<CardGrid>
+  <LinkCard title="Publish to a marketplace" description="List the plugin so Claude Code, Copilot CLI, Codex and APM users install it by name." href="../publish-to-a-marketplace/" />
+  <LinkCard title="Install plugins" description="What consumers see when they install your plugin." href="../../consumer/install-plugins/" />
+</CardGrid>

@@ -611,7 +611,7 @@ class TestPackageRegistryFlagRegistration:
         parsed = urlparse(urls[0])
         assert parsed.scheme == "https"
         assert parsed.hostname is not None
-        assert parsed.path.endswith("/guides/registries/")
+        assert parsed.path.endswith("/reference/registries/")
 
     def test_package_registry_key_equals_name(self) -> None:
         from apm_cli.core.experimental import FLAGS

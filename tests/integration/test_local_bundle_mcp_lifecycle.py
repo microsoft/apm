@@ -100,6 +100,44 @@ def test_bundle_mcp_is_recorded_baseline_and_survives_unrelated_installs(
     world.apm(consumer, "install", "--frozen", "--no-policy")
 
 
+def test_bundle_mcp_claims_survive_unrelated_mcp_installs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A dependency MCP install on the same or another target keeps the bundle's claim."""
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = _mcp_package(world.isolated.work_root / "mcppkg", "mcppkg")
+    bundle = _pack(world, producer, tmp_path / "out", "1.0.0")
+    consumer = world.consumer("bundle-consumer", targets=("claude",))
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["dependencies"] = {
+        "mcp": [{"name": "dep-server", "registry": False, "transport": "stdio", "command": "x"}]
+    }
+    dump_yaml(manifest, consumer / "apm.yml")
+
+    # Same target: the dependency server joins; the bundle server and its claim stay.
+    world.apm(consumer, "install", "--no-policy")
+    assert _servers(consumer) == ["bundle-server", "dep-server"]
+    assert _SERVER in world.lock(consumer)["mcp_target_servers"]["claude"]
+
+    # Another target: the skipped claude runtime keeps the bundle server.
+    world.apm(consumer, "install", "--target", "cursor", "--no-policy")
+    assert _SERVER in _servers(consumer)
+    assert _SERVER in world.lock(consumer)["mcp_target_servers"]["claude"]
+
+    # The kept claim lets a bundle that drops the server retire it.
+    world.apm(consumer, "install", "--no-policy")
+    mcpless = _mcp_package(world.isolated.work_root / "mcppkg", "mcppkg", "1.0.1", mcp=False)
+    world.apm(
+        consumer, "install", str(_pack(world, mcpless, tmp_path / "out", "1.0.1")), "--no-policy"
+    )
+    assert _servers(consumer) == ["dep-server"]
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
 def test_user_scope_bundle_mcp_is_recorded_in_the_user_lock(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

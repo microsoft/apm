@@ -430,7 +430,7 @@ def install_local_bundle(
                 f"Bundle staged {len(staged_instructions)} instruction(s) "
                 f"for compile (target: {target_names}). Run 'apm compile' "
                 "to merge them into AGENTS.md / GEMINI.md / equivalent. "
-                "Reference: https://microsoft.github.io/apm/guides/compilation/"
+                "Reference: https://microsoft.github.io/apm/consumer/choose-harnesses/#compiled-outputs"
             )
 
         # Issue #1207 D2.c: route bundle ``mcp.json`` / ``.mcp.json`` (Anthropic plugin
