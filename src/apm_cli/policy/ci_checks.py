@@ -525,10 +525,12 @@ def _check_config_consistency(
     *,
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
+    no_policy: bool = False,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
     from ..constants import APM_MODULES_DIR
     from ..integration.mcp_config_view import CurrentMcpConfigView
+    from ..security.trust import McpAdmission
 
     project_root = manifest.package_path or Path.cwd()
     if prepared_replay_error is not None:
@@ -538,26 +540,58 @@ def _check_config_consistency(
             message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
-    # Audit trusts recorded approval evidence; it does not re-check approvals.
+    # Consent is re-evaluated from apm.yml and org policy, never from the
+    # lockfile or personal config, so CI and laptops reach one verdict. Audit
+    # accepts structural omission evidence and re-checks consent.
+    admission = McpAdmission.for_project(project_root, include_user=False, no_policy=no_policy)
     view = CurrentMcpConfigView.select(
         manifest,
         lock,
         prepared_replay.modules_root
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR,
-        approve=None,
+        admission=admission,
         recorded=lock,
-        trust_transitive_self_defined=True,
+        exact=False,
+    )
+    policy_note = (
+        f" Org policy unavailable ({admission.policy_unavailable}); consent was "
+        "evaluated without org deny."
+        if admission.policy_unavailable
+        else ""
     )
     stored_configs = lock.mcp_configs or {}
     diff = view.diff(stored_configs)
 
+    # A server parked because its definition changed since approval stays
+    # visible in a passing audit (for example after a bot bumps a ref).
+    changed = sorted(
+        name
+        for name, evidence in (lock.mcp_omissions or {}).items()
+        if isinstance(evidence, dict) and evidence.get("reason") == "definition-changed"
+    )
+    changed_notice = (
+        CheckResult(
+            name="config-consistency",
+            passed=True,
+            message=(
+                f"MCP configs match lockfile baseline; {len(changed)} server(s) parked "
+                "because the definition changed since approval: "
+                f"{', '.join(changed)}. Review: apm approve --pending{policy_note}"
+            ),
+        )
+        if changed
+        else None
+    )
+
     # No MCP deps at all -- nothing to check
     if not view.configs and not stored_configs and not view.problems:
+        if changed_notice is not None:
+            return changed_notice
         return CheckResult(
             name="config-consistency",
             passed=True,
-            message="No MCP configs to check",
+            message=f"No MCP configs to check{policy_note}",
         )
 
     details = [f"{problem.package_key}: {problem.message}" for problem in view.problems]
@@ -577,10 +611,12 @@ def _check_config_consistency(
         details.append(f"{name}: in manifest but not in lockfile")
 
     if not details:
+        if changed_notice is not None:
+            return changed_notice
         return CheckResult(
             name="config-consistency",
             passed=True,
-            message="MCP configs match lockfile baseline",
+            message=f"MCP configs match lockfile baseline{policy_note}",
         )
     return CheckResult(
         name="config-consistency",
@@ -588,7 +624,7 @@ def _check_config_consistency(
         message=(
             f"{len(details)} MCP config inconsistenc(ies) -- "
             "repeat 'apm install' with the intended selection "
-            "('--only apm' for skills-only) to reconcile"
+            f"('--only apm' for skills-only) to reconcile{policy_note}"
         ),
         details=details,
     )
@@ -1078,6 +1114,7 @@ def run_baseline_checks(
     ci_mode: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
+    no_policy: bool = False,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
@@ -1207,6 +1244,7 @@ def run_baseline_checks(
             lock,
             prepared_replay=prepared_replay,
             prepared_replay_error=prepared_replay_error,
+            no_policy=no_policy,
         )
     ):
         return result

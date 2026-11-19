@@ -1762,9 +1762,10 @@
       "keyword": "MUST",
       "section": "10.14",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_frozen_install_reaches_the_install_verdict"
       ]
     },
     {
@@ -1820,6 +1821,21 @@
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_fixture_oracle_covers_symlinked_content",
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_limits_scanning_and_skill_materialization",
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_requirement_covers_reintegration_and_symlinks"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-016",
+      "keyword": "MUST",
+      "section": "10.13",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_changed_definition_is_withheld_with_a_named_diagnostic",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_lockfile_state_never_grants_transitive_consent",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_organization_denial_still_wins_over_a_pin",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_per_user_pin_admits_and_the_opt_in_never_overrides_a_stale_pin",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_transitive_mcp_consent_comes_from_a_pinned_manifest_grant"
       ]
     },
     {
@@ -1939,9 +1955,10 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt"
+        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt",
+        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings"
       ]
     },
     {
@@ -2079,7 +2096,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 105,
+      "active": 106,
       "skipped": 8,
       "unbound": 0,
       "xfail": 0
@@ -2103,5 +2120,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 147
+  "total_requirements": 148
 }

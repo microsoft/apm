@@ -141,7 +141,7 @@ mcp:
 
 Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`. With no `mcp.transport.allow` set, all transports are permitted by default; the example above shows how to restrict.
 
-> **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced — the actual gate is the `--trust-transitive-mcp` CLI flag (defaults to deny). See [Governance Guide §5a](../governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
+> **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced -- consent is a pinned [`apm approve`](../../reference/cli/approve/#pinned-approvals) grant in `apm.yml`, or the one-run `--trust-transitive-mcp` flag (defaults to deny). See [Governance Guide section 5a](../governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
 
 ---
 

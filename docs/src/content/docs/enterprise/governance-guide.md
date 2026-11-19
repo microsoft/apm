@@ -88,7 +88,7 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Explicit manifest includes | `manifest.require_explicit_includes` | `explicit-includes` | Yes | Yes |
 | Unmanaged files in governed dirs | `unmanaged_files.action`, `.directories` | `unmanaged-files` | `[i] audit-only` | Yes |
 | Cache freshness | `cache.ttl` | -- | Honored -- the cache reader uses the cached effective policy's `cache.ttl` (default `3600` seconds); entries older than the 7-day `MAX_STALE_TTL` ceiling are never served | Same |
-| Transitive MCP trust (policy field) | `mcp.trust_transitive` | -- | `[!] parsed but not enforced` (gate is the `--trust-transitive-mcp` CLI flag) | -- |
+| Transitive MCP trust (policy field) | `mcp.trust_transitive` | -- | `[!] parsed but not enforced` (consent is a pinned `apm approve` grant in `apm.yml`, or the one-run `--trust-transitive-mcp` flag) | -- |
 | Manifest content types | `manifest.content_types` | -- | `[!] parsed but not enforced` | -- |
 
 The full schema and the canonical baseline and policy check enumeration live in the [Policy Reference](../policy-reference/). The baseline lockfile checks (lockfile presence, ref consistency, deployment-ledger owners, deployed files present, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, includes consent) run on every `apm audit --ci` regardless of policy and are non-bypassable -- they are covered in section 7.
@@ -280,7 +280,7 @@ This is the certitude section. Read it twice if you are deciding whether `apm au
 | Manual edit to deployed file post-install | Local file content until next audit | Audit baseline `content-integrity` (re-hashes deployed files); hidden-Unicode scan in `apm audit` content mode | git diff of the deployed file in PR |
 | Direct `git clone` of an APM package, bypassing install | Everything; nothing detects out-of-band file drops | Audit baseline `no-orphaned-packages` and audit-only `unmanaged-files` | git diff |
 | Fork repo to a personal org | Org policy auto-discovery (resolves to fork's `.github`) | Whatever your CI requires on the canonical repo | branch protection on canonical repo |
-| `--trust-transitive-mcp` CLI flag | The transitive MCP preflight (second pass) | Direct MCP preflight; baseline content scan; audit MCP checks | CI command lines and Actions logs |
+| `--trust-transitive-mcp` CLI flag | The transitive MCP trust check, for this run only | The executables gate; `mcp.*` policy preflight; baseline content scan; audit `config-consistency` (fails a lockfile that admitted a server `apm.yml` does not approve) | CI command lines and Actions logs |
 | `--allow-insecure` CLI flag | The HTTP-MCP refusal (lets a `http://` MCP through) | All `mcp.*` policy rules; audit MCP checks | CI command lines and Actions logs |
 | `apm install --force` | On-disk collision detection AND content-scan blocks | The 21 policy checks; baseline checks at next audit | CI command lines; PR diff of overwritten files |
 
@@ -307,7 +307,7 @@ When `apm install` returns exit code 0 and the effective org policy is in `enfor
 - Every APM dependency declared in `apm.yml` matches `dependencies.allow` and is not matched by `dependencies.deny`.
 - Every package in `dependencies.require` is present and at the required version (with one nuance: `require_resolution: project-wins` downgrades version mismatches to warnings, by design).
 - Every direct MCP server matches `mcp.allow`, is not matched by `mcp.deny`, uses an allowed transport, and respects the `mcp.self_defined` rule.
-- Every transitive MCP server discovered from APM packages was re-checked against the same `mcp.*` rules in a second pass (unless `--trust-transitive-mcp` was passed).
+- Every transitive MCP server discovered from APM packages was re-checked against the same `mcp.*` rules in a second pass.
 - The effective target selection (`--target`, `apm.yml`, `apm config target`, or auto-detection) includes `compilation.target.enforce` when it is set; otherwise every selected target is in `compilation.target.allow`. `enforce` takes precedence, so `allow` is not checked when both are set. Targets compare after aliases resolve (`vscode` is `copilot`).
 - The fetched policy file matched any `policy.hash` pin in `apm.yml`. If the hash did not match, install failed closed regardless of `fetch_failure_default` -- hash-mismatch is unconditionally fail-closed in non-dry-run install paths. (`apm install --dry-run` logs the mismatch but does not exit non-zero -- see section 14 gap.)
 - The lockfile (`apm.lock.yaml`) was regenerated from the resolved, gated set.
@@ -499,7 +499,7 @@ We publish this list because silent gaps are worse than known ones. Every item b
 
 These are the sharp edges. Plan around them; do not assume they are solved.
 
-- **`mcp.trust_transitive` policy field is parsed but not enforced.** The transitive-MCP gate is the `--trust-transitive-mcp` CLI flag, NOT the policy field. Operational mitigation: govern transitive MCP trust through CI command lines and code review of workflow files, not through policy YAML.
+- **`mcp.trust_transitive` policy field is parsed but not enforced.** Transitive MCP consent is a pinned `apm approve` grant in `apm.yml` (or the one-run `--trust-transitive-mcp` flag), NOT the policy field. Operational mitigation: review `executables.allow` changes in `apm.yml`, lint workflow files for the flag, and require `apm audit --ci`, which fails servers `apm.yml` does not approve.
 - **`manifest.content_types` field is parsed but no check enforces it.** Operational mitigation: do not advertise this field as a control to stakeholders.
 - **Audit-only checks are not enforced at install.** `compilation-strategy`, `source-attribution`, `required-manifest-fields`, `scripts-policy`, and `unmanaged-files` only run under `apm audit --ci --policy <scope>`. Operational mitigation: make `apm audit --ci` a required status check in branch protection. Without that, these rules are advisory only.
 - **`apm compile` and `apm run` do not re-check policy.** They trust install. Operational mitigation: ensure that no compile or run step in CI is reachable without a preceding `apm install` that ran the gate.

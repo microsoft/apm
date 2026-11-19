@@ -24,11 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `default_host:` in `apm.yml` now applies to shorthand dependencies in install, uninstall and audit (OpenAPM req-mf-019); write `github.com/owner/repo` for GitHub packages. (#3865)
 - Diamond dependencies deploy each skill only to the harnesses its own declaration selected; older lockfiles fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
 - `mcp.transport.allow` checks the transport install actually writes, in install, update and `apm audit --ci`; disallowed or unresolvable registry servers are now blocked, so set `transport:` or update the policy. (#3788)
+- **BREAKING:** `apm audit --ci` fails MCP servers the lockfile admits but `apm.yml` does not approve; if CI used `--trust-transitive-mcp`, run `apm approve <pkg>` and commit `apm.yml`. (#3918)
+- Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#3918)
+- `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#3918)
 
 ### Added
 
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
+- `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
 
 ### Changed
 
@@ -37,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
 - `apm install` removes hooks a package deployed earlier once `apm deny` or a removed approval gates them, and names a denied package as denied. (#3944)
 - `apm uninstall plugin@marketplace` removes object-form `{name, marketplace}` entries from `apm.yml`, offline, with their lock row and files. (closes #3928, #3933)
 - Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)

@@ -89,7 +89,8 @@ def test_org_deny_all_keeps_package_mcp_server_out(tmp_path: Path, apm_binary_pa
     chain.ok("install")
 
     assert "tools-server" not in chain.servers("claude")
-    assert chain.lock()["mcp_omissions"]["tools-server"]["reason"] == "unapproved-executables"
+    # Org deny wins over the project grant and is recorded as such (#3902).
+    assert chain.lock()["mcp_omissions"]["tools-server"]["reason"] == "denied"
 
     # #3925: --frozen with org policy active replays the same gate and evidence.
     chain.ok("install", "--frozen")
