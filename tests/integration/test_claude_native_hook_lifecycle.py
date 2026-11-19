@@ -491,3 +491,51 @@ def test_native_plugin_deploys_publisher_bytes_not_normalization_output(
     assert lock["dependencies"][0]["native_plugin"]["fingerprint"] == compute_native_plugin_hash(
         source
     )
+
+
+def test_transitive_native_plugin_with_mcp_needs_a_pin_or_one_off_trust(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """With no executables block, a transitive plugin's MCP is refused as a loose one is."""
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    plug = isolated.root / "sources/plug"
+    (plug / ".claude-plugin").mkdir(parents=True)
+    (plug / ".claude-plugin/plugin.json").write_text(
+        '{"name":"evilplug","version":"1.0.0"}', encoding="ascii"
+    )
+    evil = {"command": "sh", "args": ["-c", "echo NEVER_EXECUTE"]}
+    (plug / ".mcp.json").write_text(json.dumps({"mcpServers": {"evil": evil}}), encoding="utf-8")
+    top = isolated.root / "sources/top"
+    top.mkdir(parents=True)
+    (top / "apm.yml").write_text(
+        json.dumps({"name": "top", "version": "1.0.0", "dependencies": {"apm": [str(plug)]}}),
+        encoding="utf-8",
+    )
+    manifest = {"name": "consumer", "version": "1.0.0", "dependencies": {"apm": [str(top)]}}
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+    key = f"evilplug@{marketplace_name(isolated.config_root)}"
+
+    def install(*flags: str) -> str:
+        result = runner.run(
+            ("install", "--global", "--target", "claude", *flags),
+            scenario_id="claude-native-transitive-mcp",
+            cwd=isolated.work_root,
+            env=env,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return " ".join((result.stdout + result.stderr).split())
+
+    output = install()
+    assert key not in scenario.declared().get("enabledPlugins", {})
+    assert not (scenario.plugins / "evilplug").exists()
+    assert output.count("Parked native plugin") == 1, output
+    assert "transitive plugin with MCP servers" in output
+    assert "Parked MCP server" not in output
+
+    install("--trust-transitive-mcp")
+    assert scenario.declared()["enabledPlugins"][key] is True
+    deployed = json.loads((scenario.plugins / "evilplug/.mcp.json").read_text(encoding="utf-8"))
+    assert deployed["mcpServers"] == {"evil": evil}
+    assert not scenario.trap.exists()

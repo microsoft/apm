@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 
 from apm_cli.core.scope import is_user_scope
 from apm_cli.deps.plugin_parser import (
-    declared_plugin_mcp_servers,
+    claude_native_mcp_servers,
     has_normalized_plugin_skill_sources_receipt,
     parse_plugin_manifest,
 )
@@ -72,6 +72,12 @@ _MANIFEST_FIELDS = frozenset(
     }
 )
 _COMPONENT_PATH_FIELDS = ("commands", "agents", "skills", "hooks", "mcpServers", "lspServers")
+# Plugin-root entries Claude loads as a capability that this route does not
+# model, so APM can neither vet nor pin their effect: refuse the plugin. A
+# full allow-list of root entries would refuse the inert data directories
+# (scripts/, resources/) that hooks and commands reference, which the
+# whole-plugin pin already covers. monitors/ and workflows/ run commands
+# (also gated as executables by security.trust.native_root_exec_types).
 _UNSUPPORTED_ROOTS = (
     "bin",
     ".apm/bin",
@@ -79,6 +85,8 @@ _UNSUPPORTED_ROOTS = (
     "settings.json",
     "output-styles",
     "rules",
+    "monitors",
+    "workflows",
 )
 
 
@@ -96,33 +104,35 @@ def _refuse_escaping_component_paths(root: Path, manifest: dict[str, Any]) -> No
 
 
 def _mcp_policy_violation(root: Path, manifest: dict[str, Any], policy: Any) -> str | None:
-    """Name the first declared MCP server org MCP policy rejects, else ``None``.
+    """Name the first MCP server org MCP policy rejects, else ``None``.
 
     Claude loads the plugin's servers itself, so the checks the install gate
     runs on loose servers (``policy_checks.mcp_policy_checks``) run here on
-    every server the plugin declares. LSP servers have no org policy schema
-    beyond ``executables``; the whole-plugin trust verdict is their policy.
+    every server Claude's loader would start (``claude_native_mcp_servers``).
+    An entry APM cannot read never passes a policy that restricts anything.
+    LSP servers have no org policy schema beyond ``executables``; the
+    whole-plugin trust verdict is their policy.
     """
-    mcp_policy = getattr(policy, "mcp", None)
-    if mcp_policy is None or getattr(policy, "enforcement", "warn") == "off":
+    if getattr(policy, "mcp", None) is None or getattr(policy, "enforcement", "warn") == "off":
         return None
-    names, declarations = declared_plugin_mcp_servers(root, manifest)
-    if not names:
+    servers, unmodeled = claude_native_mcp_servers(root, manifest)
+    if not servers and not unmodeled:
         return None
     from apm_cli.models.dependency.mcp import MCPDependency
-    from apm_cli.policy.policy_checks import mcp_policy_checks
+    from apm_cli.policy.policy_checks import mcp_policy_checks, mcp_policy_restricts
 
-    expressible = {
-        entry["name"]: MCPDependency(
-            name=entry["name"],
-            transport=entry.get("transport"),
+    if unmodeled and mcp_policy_restricts(policy):
+        return f"MCP {unmodeled[0]} cannot be checked against org MCP policy (APM cannot read it)"
+    subjects = [
+        MCPDependency(
+            name=server["name"],
+            transport=server["transport"],
             registry=False,
-            url=entry.get("url"),
-            command=entry.get("command"),
+            url=server["url"],
+            command=server["command"],
         )
-        for entry in declarations
-    }
-    subjects = [expressible.get(name) or MCPDependency(name=name, registry=False) for name in names]
+        for server in servers
+    ]
     for check in mcp_policy_checks(subjects, policy):
         if not check.passed:
             subject = check.violation_subjects()[0]
@@ -144,8 +154,9 @@ def plan_native_claude_plugin(
     """Admit a complete, approved plugin without altering native selection.
 
     *admit* returns the trust owner's whole-plugin verdict on this source
-    (``security.trust.admit_native_plugin``), or ``None`` when the gate is off.
-    That verdict covers the plugin's MCP and LSP servers too. *policy* is the
+    (``security.trust.admit_native_plugin``), or ``None`` for local content.
+    That verdict covers the plugin's MCP and LSP servers too, including the
+    default refusal of a transitive plugin's MCP servers with the gate off. *policy* is the
     org policy: a declared MCP server it rejects parks the whole plugin under
     ``enforcement: block`` (Claude cannot enable part of a plugin).
 

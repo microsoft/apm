@@ -147,17 +147,19 @@ def test_trust_bin_none_deploys_with_warning(tmp_path: Path) -> None:
     assert any("adds executables to Claude Code's PATH" in msg for msg in logger.warning_messages)
 
 
-def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path) -> None:
-    """The canonical install service blocks a hostile authorized plugin bin."""
+def test_service_refuses_user_scope_claude_plugin_bin_before_target_write(tmp_path: Path) -> None:
+    """A user-scope Claude plugin shipping bin/ is refused before any write.
+
+    Claude at user scope takes the native plugin route (#3290), which does not
+    model plugin bin/ yet, so a hostile authorized bin never reaches a target.
+    """
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
     project_root = tmp_path / "home"
     (project_root / ".claude").mkdir(parents=True)
-    clean_info, _clean_bin = _write_marketplace_plugin(
-        tmp_path / "packages" / "clean-tool",
-        manifest_name="MyOwner/CleanTool",
-    )
     package_info, source_bin = _write_marketplace_plugin(
         tmp_path / "packages" / "hostile-tool",
-        manifest_name="MyOwner/HostileTool",
+        manifest_name="hostile-tool",
     )
     source_bin.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
     dispatch = get_dispatch_table()
@@ -171,40 +173,23 @@ def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path)
         hook=integrators["hooks"],
         canvas=integrators["canvas"],
     )
-    clean_result = integrate_package_primitives(
-        clean_info,
-        project_root,
-        skill_subset=None,
-        targets=[KNOWN_TARGETS["claude"]],
-        integrators=bundle,
-        force=False,
-        managed_files=None,
-        diagnostics=DiagnosticCollector(),
-        package_name="owner/clean-tool",
-        scope=InstallScope.USER,
-        trust_bin=True,
-    )
-    clean_deployed = project_root / ".claude" / "skills" / "clean-tool" / "bin" / "tool"
-    assert clean_deployed.is_file()
-    assert ".claude/skills/clean-tool/bin/tool" in clean_result["deployed_files"]
+    with pytest.raises(ClaudeNativePluginError, match="bin"):
+        integrate_package_primitives(
+            package_info,
+            project_root,
+            skill_subset=None,
+            targets=[KNOWN_TARGETS["claude"]],
+            integrators=bundle,
+            force=False,
+            managed_files=None,
+            diagnostics=DiagnosticCollector(),
+            package_name="owner/hostile-tool",
+            scope=InstallScope.USER,
+            trust_bin=True,
+        )
 
-    result = integrate_package_primitives(
-        package_info,
-        project_root,
-        skill_subset=None,
-        targets=[KNOWN_TARGETS["claude"]],
-        integrators=bundle,
-        force=False,
-        managed_files=None,
-        diagnostics=DiagnosticCollector(),
-        package_name="owner/hostile-tool",
-        scope=InstallScope.USER,
-        trust_bin=True,
-    )
-
-    deployed = project_root / ".claude" / "skills" / "hostile-tool" / "bin" / "tool"
-    assert result["deployed_files"] == []
-    assert not deployed.exists()
+    assert not (project_root / ".claude" / "skills").exists()
+    assert not (project_root / ".agents").exists()
 
 
 def test_trust_bin_none_non_tty_skips() -> None:

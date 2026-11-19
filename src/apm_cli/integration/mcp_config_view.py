@@ -1004,11 +1004,16 @@ def _collect_locked_dependencies(
                 approval_keys,
             )
             verdict = admission.admit(subject)
+            native_runtimes = native_service_runtimes(package_key, dependency, claude_native_keys)
             if not verdict.allowed:
                 omissions.setdefault(
                     mcp_dependency.name,
                     {"declaration": fingerprint, "reason": str(verdict.reason)},
                 )
+                if native_runtimes and verdict.reason == REASON_UNTRUSTED_TRANSITIVE:
+                    # The native plugin verdict applies the same refusal to
+                    # the plugin Claude loads; its diagnostic is the one shown.
+                    continue
                 message = parked_mcp_message(
                     mcp_dependency,
                     target,
@@ -1037,9 +1042,7 @@ def _collect_locked_dependencies(
                     mcp_dependency,
                     resolved_by=declarer,
                     approval_keys=approval_keys,
-                    native_runtimes=native_service_runtimes(
-                        package_key, dependency, claude_native_keys
-                    ),
+                    native_runtimes=native_runtimes,
                 )
             )
             roots = direct_index.roots(package_key)

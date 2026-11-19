@@ -668,6 +668,22 @@ def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
     ]
 
 
+def mcp_policy_restricts(policy: ApmPolicy) -> bool:
+    """Whether checks 7-10 can reject some self-defined server.
+
+    A server APM cannot read can only be shown to comply with a policy that
+    restricts nothing; any allow, deny, transport or self-defined rule makes
+    it fail closed.
+    """
+    mcp = policy.mcp
+    return bool(
+        mcp.allow is not None
+        or mcp.deny
+        or mcp.transport.allow is not None
+        or mcp.self_defined == "deny"
+    )
+
+
 def _check_compilation_target(
     targets: tuple[str, ...] | None,
     policy: CompilationPolicy,

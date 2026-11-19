@@ -170,11 +170,16 @@ agents, hooks, and MCP and LSP servers (`.mcp.json`, `.lsp.json`, or
 `mcpServers` / `lspServers` in the manifest). Claude loads those servers from
 the plugin; APM does not write them into Claude's MCP or LSP config. They are
 covered by the same whole-plugin approval. Org MCP policy (allow, deny,
-transport, self-defined) applies to each declared MCP server: under
-`enforcement: block` a violating server parks the whole plugin, under `warn` it
-is reported. With other targets selected too, APM still writes the servers for
+transport, self-defined) applies to every MCP server Claude would load (root
+`.mcp.json` plus every `mcpServers` form): under `enforcement: block` a
+violating server, or an entry APM cannot read (a `.mcpb`/`.dxt` bundle, a URL,
+an unreadable file), parks the whole plugin; under `warn` it is reported. A
+transitive plugin that ships MCP servers is parked unless it is pinned
+(`apm approve`) or you pass `--trust-transitive-mcp`, even without an
+`executables` block. With other targets selected too, APM still writes the servers for
 those targets. The route refuses partial skill subsets, symlinks, server files
-outside the plugin, `bin/` scripts and other manifest capabilities; resolve the
+outside the plugin, `bin/` scripts, `monitors/` and `workflows/` (Claude runs
+their commands; APM cannot vet them) and other manifest capabilities; resolve the
 restriction or exclude Claude from that dependency's targets. If the package
 already owns loose Claude hooks, run `apm uninstall --global <package>` first,
 then reinstall to switch it to the native route.
