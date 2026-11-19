@@ -24,6 +24,7 @@ _ROUTES = (
     ("src/apm_cli/commands/prune.py", "prune", "require_current_cli"),
     ("src/apm_cli/commands/lock.py", "_run_lock", "require_current_cli"),
     ("src/apm_cli/commands/pack.py", "pack_cmd", "check_current_cli"),
+    ("src/apm_cli/bundle/local_bundle.py", "_read_bundle_lockfile", "warn_if_newer"),
     ("src/apm_cli/commands/audit.py", "audit", "require_current_cli"),
     ("src/apm_cli/commands/deps/cli.py", "update", "require_current_cli"),
 )

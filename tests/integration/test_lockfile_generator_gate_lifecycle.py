@@ -202,6 +202,37 @@ def test_flow_style_and_legacy_lockfiles_are_guarded(tmp_path: Path, apm_binary_
         (project.root / name).unlink()
 
 
+def test_bundle_from_newer_apm_installs_with_a_warning(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A bundle whose embedded lock a newer APM wrote installs, but says so (#3963)."""
+    from tests.integration._dependency_graph_world import NO_POLICY, World
+
+    world = World.create(tmp_path, apm_binary_path)
+    world.publish("tool")
+    world.manifest(["test/tool"])
+    world.apm("install", NO_POLICY)
+    current = re.search(r"(?m)^apm_version: (.*)$", world.lock_bytes().decode()).group(1)
+    major = int(current.split(".", 1)[0])
+    newer = f"{major + 1}.0.0"
+    world.apm("pack")
+    bundle = next(iter(sorted((world.project / "build").iterdir())))
+    embedded = bundle / "apm.lock.yaml"
+    embedded.write_text(
+        re.sub(r"(?m)^apm_version: .*$", f"apm_version: {newer}", embedded.read_text("utf-8")),
+        encoding="utf-8",
+    )
+    world.project = world.isolated.work_root / "consumer"
+    world.project.mkdir()
+    world.manifest([])
+
+    result = world.apm("install", str(bundle), NO_POLICY)
+    output = _output(result)
+    assert f"written by APM {newer}, newer than this APM {current}" in output, output
+    assert "brew upgrade apm" in output
+    assert (world.project / "apm.lock.yaml").exists()
+
+
 def test_dependency_failure_is_not_a_version_refusal(tmp_path: Path, apm_binary_path: Path) -> None:
     """A real dependency failure on a current lockfile never reads as a version refusal."""
     project = _Project(tmp_path, apm_binary_path)
