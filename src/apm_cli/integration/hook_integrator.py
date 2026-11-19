@@ -65,6 +65,7 @@ from apm_cli.integration.hook_ownership import (
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
+    read_hook_object,
     read_merged_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
@@ -1723,8 +1724,10 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         excluded_targets,
+        *,
+        dry_run: bool = False,
     ) -> HookTargetReconcileStats:
-        """Remove this package's merged hooks from targets it no longer deploys to (#3924)."""
+        """Remove hooks from targets the package no longer deploys to, or count them (#3924)."""
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
@@ -1732,7 +1735,7 @@ class HookIntegrator(BaseIntegrator):
             package_name,
         )
         markers = frozenset({source_marker, *legacy_source_markers})
-        return self._retire_source_markers(project_root, excluded_targets, markers)
+        return self._retire_source_markers(project_root, excluded_targets, markers, dry_run)
 
     def retire_local_bundle_hooks(self, bundle_id: str, project_root: Path, targets):
         """Remove one local bundle's merged hooks; its next install ships none (#3700)."""
@@ -1740,7 +1743,7 @@ class HookIntegrator(BaseIntegrator):
         return self._retire_source_markers(project_root, targets, marker)
 
     def _retire_source_markers(
-        self, project_root: Path, excluded_targets, source_markers: frozenset[str]
+        self, project_root: Path, excluded_targets, source_markers: frozenset[str], dry_run=False
     ) -> HookTargetReconcileStats:
         stats: HookTargetReconcileStats = {
             "files_removed": 0,
@@ -1761,6 +1764,7 @@ class HookIntegrator(BaseIntegrator):
                 stats,
                 container=config.event_container_key,
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                dry_run=dry_run,
             )
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
@@ -1775,26 +1779,14 @@ class HookIntegrator(BaseIntegrator):
         *,
         container: str,
         sidecar_path: Path,
+        dry_run: bool = False,
     ) -> None:
         """Remove one package owner while preserving user and sibling entries."""
         if not json_path.exists() and not sidecar_path.exists():
             return
         try:
-            data: dict = {}
-            if json_path.exists():
-                with open(json_path, encoding="utf-8") as handle:
-                    raw_data = json.load(handle)
-                if not isinstance(raw_data, dict):
-                    raise TypeError("native hook config must contain an object")
-                data = raw_data
-
-            sidecar_data: dict = {}
-            if sidecar_path.exists():
-                with open(sidecar_path, encoding="utf-8") as handle:
-                    raw_sidecar = json.load(handle)
-                if not isinstance(raw_sidecar, dict):
-                    raise TypeError("hook sidecar must contain an object")
-                sidecar_data = raw_sidecar
+            data = read_hook_object(json_path)
+            sidecar_data = read_hook_object(sidecar_path)
 
             hooks = data.get(container)
             native_modified = False
@@ -1846,6 +1838,12 @@ class HookIntegrator(BaseIntegrator):
                     event_name: entries for event_name, entries in sidecar_out.items() if entries
                 }
 
+            if dry_run:
+                # Match the config and sidecar writes that a real cleanup would make.
+                stats["files_removed"] += int(native_modified) + int(
+                    native_modified or sidecar_had_source
+                )
+                return
             if native_modified:
                 atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
