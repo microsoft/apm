@@ -154,9 +154,10 @@ and exits 1. `--user` never turns the gate on.
 Naming a package lifts its deny in the store you write (`apm.yml`, or
 `$APM_HOME/config.json` with `--user`), the mirror of `apm deny` dropping the
 matching allow: approve prints `Cleared deny for <pkg>`. `--all` and
-`--recommended` skip denied packages instead. When a deny in another layer
-still blocks the package (a `--user` deny, or org policy), approve exits 1 and
-names that layer and how to lift it.
+`--recommended` skip a package that any layer denies (project, `--user` or org
+policy), say why, write no approval for it, and approve the rest. When a named
+package is still blocked by a deny in another layer, approve exits 1 and names
+that layer and how to lift it.
 
 ## Options
 

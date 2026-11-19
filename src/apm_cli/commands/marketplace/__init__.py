@@ -336,7 +336,7 @@ Examples:
     metavar="PATH",
     help=(
         "Repository-relative path to the marketplace JSON file, for "
-        "catalogs outside the default locations. Skips auto-discovery."
+        "files outside the default locations. Skips auto-discovery."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -817,7 +817,14 @@ def browse(name, verbose, offline=False):
         sys.exit(1)
 
 
-@marketplace.command(help="Refresh marketplace cache")
+@marketplace.command(
+    short_help="Refresh marketplace cache (all, or NAME)",
+    help=(
+        "Revalidate cached marketplace data for NAME, or for every registered "
+        "marketplace if NAME is omitted. Exits 1 if any marketplace fails to "
+        "revalidate; its last valid cached copy is kept."
+    ),
+)
 @click.argument("name", required=False, default=None)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @serialized_lifecycle

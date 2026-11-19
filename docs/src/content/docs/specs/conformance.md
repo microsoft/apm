@@ -28,10 +28,10 @@ uv run --extra dev python -m tests.spec_conformance.gen_statement
 git diff -- CONFORMANCE.md CONFORMANCE.json  # compare to the in-repo copies
 ```
 
-The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from those results; the final command shows whether the generated artifacts still match the checked-in copies.
+The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from the requirement markers that run collected; the final command shows whether the generated artifacts still match the checked-in copies.
 
 ## What conformance does NOT cover
 
-Per req-cf-001, a conformance statement covers the normative statements declared in the spec; it does not certify implementation quality, performance, or operational fitness. The statement currently records `req-mf-016` as skipped, with rationale in the statement itself -- an explicit, audited decision rather than silent drift.
+A conformance statement covers the normative statements declared in the spec; it does not certify implementation quality, performance, or operational fitness. The statement currently records `req-mf-016` and the native plugin activation profile (`req-na-001`-`007`; no APM route natively activates plugins yet) as skipped, with rationale in the statement itself -- an explicit, audited decision rather than silent drift.
 
 For the broader drift-detection story (how the spec authors prevent the spec from rotting relative to the only implementation), see [`CONTRIBUTING.md` -- Spec amendment workflow](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#spec-amendment-workflow).

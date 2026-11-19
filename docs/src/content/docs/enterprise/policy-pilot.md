@@ -111,6 +111,6 @@ Roll back when:
 
 - A violation surge reveals a category of legitimate use you missed.
 - A transitive MCP dependency that you cannot patch on your timeline starts blocking installs.
-- The policy file itself fails to fetch in a way that interacts badly with `fetch_failure: block` -- see [Enforce in CI](../enforce-in-ci/) for the failure-mode matrix.
+- The policy file itself fails to fetch in a way that interacts badly with `fetch_failure: block` -- see [Governance deep-dive](../governance-guide/#10-failure-semantics) for the failure-mode matrix.
 
 A rollback is cheap. A blocked org is not. If you are debating, roll back, fix forward, escalate again.

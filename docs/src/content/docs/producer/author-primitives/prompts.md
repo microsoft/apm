@@ -171,5 +171,6 @@ the parameter bound and invokes the harness. See
   filename in `.apm/prompts/` and at the package root collide; the
   later writer wins on copilot and the transform fails on
   Claude/Cursor. Pick a location and stick to it.
-- **`apm compile` does not re-scan for hidden Unicode.** Edits
-  between installs are not gated. Run `apm audit` before publishing.
+- **`apm compile` does not scan prompts.** It scans only the root
+  context files it writes, so prompt edits between installs are not
+  gated. Run `apm audit` before publishing.

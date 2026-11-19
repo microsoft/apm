@@ -355,7 +355,11 @@ def expand_all(command: str) -> tuple[str, ...]:
 
 def target_help_fragment(command: str) -> str:
     """Return the generated accepted-values fragment for command help."""
-    return f"Values: {', '.join(sorted(accepted_target_values(command)))}."
+    deprecated = "".join(
+        f" '{alias}' is a deprecated alias of '{target}'."
+        for alias, target in sorted(DEPRECATED_TARGET_ALIASES.items())
+    )
+    return f"Values: {', '.join(sorted(accepted_target_values(command)))}.{deprecated}"
 
 
 def target_all_exclusion_help() -> str:

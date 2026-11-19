@@ -23,10 +23,10 @@ This is APM refusing to claim success when zero files were written. The compile 
 apm targets
 ```
 
-If the active list is empty, no harness was detected and no `target:` was pinned. APM has nothing to write against. Either:
+If the active list is empty, no harness was detected and no `targets:` was pinned. APM has nothing to write against. Either:
 
 - Create one of the canonical signals (`.claude/` or `CLAUDE.md`, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.cursor/` or legacy `.cursorrules`, `.codex/`, `.gemini/` or `GEMINI.md`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`).
-- Pin targets in `apm.yml` (`target: [claude, copilot]`) or pass `--target` to `apm compile`.
+- Pin targets in `apm.yml` (`targets: [claude, copilot]`) or pass `--target` to `apm compile`.
 
 See [`apm targets`](../../reference/cli/targets/) and the [manifest schema](../../reference/manifest-schema/).
 
@@ -84,7 +84,7 @@ apm targets        # what will be written to?
 apm deps list      # is the skill counted?
 ```
 
-If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps list` shows the skill but compile still emits nothing, that is expected: `apm compile` does not write skills; `apm install` deploys them to each target's skills directory.
+If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `targets:` in `apm.yml`. If `apm deps list` shows the skill but compile still emits nothing, that is expected: `apm compile` does not write skills; `apm install` deploys them to each target's skills directory.
 
 ### "I targeted `cursor` but my command files don't appear"
 
@@ -98,7 +98,7 @@ Dropped keys are surfaced via diagnostics at install time -- check `apm install`
 
 ### "All targets resolve, but only some integrations land"
 
-Expected when targets and primitive types don't intersect uniformly. Example: a project with `target: [claude, gemini]` shipping `instructions` + `commands` writes:
+Expected when targets and primitive types don't intersect uniformly. Example: a project with `targets: [claude, gemini]` shipping `instructions` + `commands` writes:
 
 - `claude`: instructions (as rules) + commands -- both land.
 - `gemini`: commands only -- Gemini has no per-file `rules/` slot; its instructions reach `GEMINI.md` through `apm compile`.

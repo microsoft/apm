@@ -39,6 +39,7 @@ from ..models.validation import InvalidVirtualPackageExtensionError
 from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
+    default_host,
     is_azure_devops_hostname,
     is_full_commit_sha,
     is_github_hostname,
@@ -243,10 +244,16 @@ def _is_in_marketplace_source(plugin: MarketplacePlugin, source: MarketplaceSour
     if not isinstance(s, dict):
         return False
     source_type = _coerce_dict_plugin_type(s)
-    if source_type in ("github", "git-subdir", "gitlab"):
-        return _repo_field_matches_marketplace(
-            s.get("repo", ""), source.owner, source.repo, source.host
-        )
+    if source_type in ("github", "git-subdir", "gitlab", "url"):
+        # Same locator synonyms the resolvers and the #1326 sentinel read (#3945).
+        _field, locator = _dict_source_locator(s)
+        if _repo_field_matches_marketplace(locator, source.owner, source.repo, source.host):
+            return True
+        if source_type == "url" and is_github_hostname(source.host):
+            # A ``url:`` locator embeds its path; GitHub-family repositories are
+            # always ``owner/repo``, so the catalog slug is an exact prefix.
+            path = _normalize_repo_field_for_match(locator.split("#", 1)[0], source.host)
+            return path.startswith(f"{_marketplace_project_slug(source.owner, source.repo)}/")
     return False
 
 
@@ -349,6 +356,68 @@ def _dict_source_locator(source: dict) -> tuple[str, str]:
     return "", ""
 
 
+def _bare_dict_locator(source: dict) -> tuple[str, str] | None:
+    """Return ``(field, owner/repo)`` when a dict source's locator names no host.
+
+    URL, SCP shorthand, and host-qualified shorthand (``github.com/owner/repo``)
+    declare explicit intent and return ``None``; so does a locator without ``/``.
+    """
+    locator_field, locator = _dict_source_locator(source)
+    bare = locator.strip().lstrip("/")
+    if "/" not in bare:
+        return None
+    # #1326: an already-host-qualified locator declares explicit intent (e.g.
+    # ``repo: github.com/owner/repo`` on a ``*.ghe.com`` marketplace is an
+    # unambiguous declared cross-host dependency). Only the truly-bare
+    # ``owner/repo`` form is ambiguous. Extract the host from URL and SCP
+    # shorthand forms too: a bare ``split("/", 1)[0]`` would classify
+    # ``https://...`` as having a ``https:`` first segment (not a host).
+    bare_lower = bare.lower()
+    if bare_lower.startswith(("https://", "http://", "ssh://")):
+        explicit_host = (urlparse(bare).hostname or "").strip()
+    elif scp := _SCP_LOCATOR_RE.match(bare):
+        # SCP shorthand with any user: ``git@host:owner/repo``
+        explicit_host = scp.group(1).strip()
+    else:
+        explicit_host = bare.split("/", 1)[0]
+    # ``is_supported_git_host`` accepts any valid FQDN, not an allowlist: the
+    # goal is to distinguish "looks like a hostname" (explicit intent) from
+    # "bare owner/repo" (ambiguous). Restricting to known hosts would refuse
+    # legitimate self-hosted Git servers; the real protection is the
+    # fail-closed refusal of the bare form.
+    if is_supported_git_host(explicit_host):
+        return None
+    return locator_field, bare
+
+
+def _default_host_is(host: str) -> bool:
+    """True when ``GITHUB_HOST`` makes bare ``owner/repo`` resolve to *host*, so it
+    never falls back to public ``github.com`` (#3945).
+
+    Uses :func:`default_host`, which every install path sees; a manifest
+    ``default_host:`` scope is not active during marketplace resolution.
+    """
+    return default_host().strip().lower() == host.strip().lower()
+
+
+def _bare_locator_means_marketplace_host(
+    plugin: MarketplacePlugin, source: MarketplaceSource
+) -> bool:
+    """True when a bare dict locator on a ``*.ghe.com`` marketplace names that host.
+
+    Either it names the catalog repository itself (#1285; ``repo:`` and its
+    ``repository:`` / ``url:`` synonyms, #3945), or ``GITHUB_HOST`` is the
+    marketplace host (#3945). The resolver then host-qualifies the
+    canonical so later parsing cannot route it anywhere else.
+    """
+    if not isinstance(plugin.source, dict) or _bare_dict_locator(plugin.source) is None:
+        return False
+    host = source.host.strip().lower()
+    if not is_github_hostname(host) or host == "github.com":
+        return False
+    return _is_in_marketplace_source(plugin, source) or _default_host_is(host)
+
+
 def _compute_cross_repo_misconfig_risk(
     plugin: MarketplacePlugin,
     source: MarketplaceSource,
@@ -363,12 +432,14 @@ def _compute_cross_repo_misconfig_risk(
       ``git-subdir``, ``gitlab``, ``url``; #3937). A bare locator carries no
       host, so every one of them falls back to public ``github.com``.
     - the source is **not** an in-marketplace reference (PR #1292 already
-      backfills the host for those)
+      backfills the host for those; ``repo:``, ``repository:`` and ``url:``
+      all count, #3945)
     - ``_needs_canonical_host_prefix`` agrees the canonical is bare and the
       host is GitHub-family enterprise (``*.ghe.com``; idempotent against
       already host-qualified, URL, and SSH forms)
     - the locator (``repo`` and its per-type fallbacks) is a non-empty,
       non-host-qualified ``owner/repo`` shorthand
+    - ``GITHUB_HOST`` is not the marketplace host (#3945)
 
     A structured reference built from a bare locator (``type: url``, packed
     ``git-subdir``) still defaults to ``github.com``, so it does not exempt the
@@ -380,44 +451,12 @@ def _compute_cross_repo_misconfig_risk(
         return None
     if not _needs_canonical_host_prefix(canonical, source.host):
         return None
-    locator_field, locator = _dict_source_locator(plugin.source)
-    bare = locator.strip().lstrip("/")
-    if "/" not in bare:
+    bare_locator = _bare_dict_locator(plugin.source)
+    if bare_locator is None:
         return None
-    # #1326: an already-host-qualified `repo:` field declares explicit intent
-    # (e.g. ``repo: github.com/owner/repo`` on a ``*.ghe.com`` marketplace is
-    # an unambiguous declared cross-host dependency). Only the truly-bare
-    # ``owner/repo`` form is the dependency-confusion vector this sentinel
-    # flags. ``_needs_canonical_host_prefix`` above already returns False
-    # for SAME-host qualification (its idempotency clause) and for URL /
-    # SSH SCP shorthand canonicals; this is the symmetric guard for the
-    # remaining case -- CROSS-host shorthand qualification (``github.com/...``
-    # on a ``*.ghe.com`` marketplace), which the idempotency check cannot
-    # detect because the canonical starts with a different host than
-    # ``source.host``.
-    #
-    # Defense in depth: extract the host from URL and SCP shorthand forms
-    # too, so the guard is robust even if a future upstream refactor lets
-    # those forms reach this point. A bare ``split("/", 1)[0]`` would
-    # otherwise classify ``https://...`` as having a ``https:`` first
-    # segment (not a host) and incorrectly attach the sentinel.
-    explicit_host = ""
-    bare_lower = bare.lower()
-    if bare_lower.startswith(("https://", "http://", "ssh://")):
-        explicit_host = (urlparse(bare).hostname or "").strip()
-    elif scp := _SCP_LOCATOR_RE.match(bare):
-        # SCP shorthand with any user: ``git@host:owner/repo``
-        explicit_host = scp.group(1).strip()
-    else:
-        explicit_host = bare.split("/", 1)[0]
-    # ``is_supported_git_host`` accepts any valid FQDN, not an allowlist.
-    # This is intentional: the goal is to distinguish "looks like a
-    # hostname" (explicit intent) from "bare owner/repo" (ambiguous).
-    # Restricting to known hosts would silently refuse legitimate
-    # self-hosted Git servers and create a false sense of security --
-    # the real protection is the fail-closed refusal of the bare form.
-    if is_supported_git_host(explicit_host):
+    if _default_host_is(source.host):
         return None
+    locator_field, bare = bare_locator
     return CrossRepoMisconfigRisk(
         marketplace_host=source.host,
         bare_repo_field=bare,
@@ -653,19 +692,25 @@ def _resolve_git_subdir_source(source: dict) -> str:
 
 def _dependency_reference_from_packed_source(
     plugin: MarketplacePlugin,
+    *,
+    bare_host: str | None = None,
 ) -> DependencyReference | None:
-    """Parse packed or explicitly qualified sources before catalog-local routing."""
+    """Parse packed or explicitly qualified sources before catalog-local routing.
+
+    *bare_host* host-qualifies a bare ``url:`` locator before parsing, so a
+    locator known to name that host keeps its ref and path (#3945).
+    """
     source = plugin.source
     if not isinstance(source, dict):
         return None
 
     source_type = _coerce_dict_plugin_type(source)
-    if source_type == "url":
-        remote = source.get("url")
-    elif source_type == "git-subdir" and not source.get("repo"):
+    if source_type == "url" or (source_type == "git-subdir" and not source.get("repo")):
         # Pack emits git-subdir repository identity in ``url``. Hand-authored
         # ``repo`` forms retain the existing marketplace-relative routing.
         remote = source.get("url")
+        if bare_host and isinstance(remote, str) and remote.strip():
+            remote = f"{bare_host}/{remote.strip().lstrip('/')}"
     elif source_type in {"github", "git-subdir", "gitlab"}:
         remote = source.get("repo") or source.get("repository")
         if not isinstance(remote, str) or not (
@@ -1048,7 +1093,12 @@ def resolve_marketplace_plugin(
             source_digest=source_digest,
         )
 
-    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(plugin)
+    # A bare locator that names the marketplace host is parsed with that host,
+    # not the ``github.com`` default (#3945).
+    names_marketplace_host = _bare_locator_means_marketplace_host(plugin, source)
+    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(
+        plugin, bare_host=source.host if names_marketplace_host else None
+    )
     if dep_ref is not None:
         canonical = dep_ref.to_canonical()
     else:
@@ -1084,11 +1134,12 @@ def resolve_marketplace_plugin(
     # because there is no nested-group ambiguity to disambiguate, but the bare
     # canonical drops the host that ``DependencyReference.parse`` needs to route auth
     # at the enterprise host instead of falling back to ``github.com``. Backfill the
-    # host so the canonical self-routes, scoped to in-marketplace sources where the
-    # host is unambiguously the registered marketplace host (#1285).
+    # host so the canonical self-routes, scoped to sources where the host is
+    # unambiguously the registered marketplace host: in-marketplace sources
+    # (#1285) and bare locators when GITHUB_HOST is the marketplace host (#3945).
     if (
         dep_ref is None
-        and _is_in_marketplace_source(plugin, source)
+        and (_is_in_marketplace_source(plugin, source) or names_marketplace_host)
         and _needs_canonical_host_prefix(canonical, source.host)
     ):
         canonical = f"{source.host}/{canonical}"
@@ -1098,6 +1149,15 @@ def resolve_marketplace_plugin(
             plugin_name,
             marketplace_name,
         )
+        if not _is_in_marketplace_source(plugin, source):
+            logger.debug(
+                "%s@%s: bare cross-repo locator resolved to '%s' because GITHUB_HOST is"
+                " the marketplace host (#3945); host-qualify it as github.com/... for"
+                " public GitHub",
+                plugin_name,
+                marketplace_name,
+                source.host,
+            )
 
     # ---- Cross-repo misconfig sentinel (#1305) ----
     # PR #1292's host backfill only covers in-marketplace sources. A cross-repo

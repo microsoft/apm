@@ -1739,10 +1739,14 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 2,
+      "test_count": 6,
       "tests": [
         "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-install-hooks]",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-mcp-admission]",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[unlisted-denied-install-hooks]",
+        "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[unlisted-denied-mcp-admission]"
       ]
     },
     {

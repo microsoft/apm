@@ -132,10 +132,10 @@ dependencies:
 
 mcp:
   transport:
-    allow: [http, stdio]   # explicit allow list: blocks sse and streamable-http
+    allow: [http, stdio]   # http = streamable-http; blocks sse
 ```
 
-Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`. With no `mcp.transport.allow` set, all transports are permitted by default; the example above shows how to restrict.
+Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`, judged on the transport install writes (see [`transport.allow`](../policy-reference/#transportallow)). With no `mcp.transport.allow` set, all transports are permitted by default; the example above shows how to restrict.
 
 > **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced -- consent is a pinned [`apm approve`](../../reference/cli/approve/#pinned-approvals) grant in `apm.yml`, or the one-run `--trust-transitive-mcp` flag (defaults to deny). See [Governance Guide section 5a](../governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
 
@@ -182,7 +182,7 @@ For setup, see [Enforce in CI](../enforce-in-ci/).
 
 ## Tighten-only inheritance
 
-A repo can have its own `apm-policy.yml` that **extends** the org policy. Children can only **tighten** rules, never relax them. This means a repo can be more restrictive than the org, but cannot widen what the org has allowed.
+A repo can have its own `apm-policy.yml` that **extends** the org policy (discovery finds only the org policy; pass a repo file to `apm audit --ci --policy`). Children can only **tighten** rules, never relax them. This means a repo can be more restrictive than the org, but cannot widen what the org has allowed.
 
 The merge rules in plain English:
 
@@ -218,8 +218,8 @@ dependencies:
 `apm install` halts before any file is written. The CLI emits a single-line violation followed by a remediation hint:
 
 ```
-[x] Policy violation: untrusted-org/random-skills -- denied by pattern: untrusted-org/**
-    Run `apm audit --ci --policy org` for the full report.
+[x] Policy violation: github.com/untrusted-org/random-skills -- denied by pattern: untrusted-org/**
+  Blocked by org policy at org:<org>/.github-private (dependency-denylist) -- remove `github.com/untrusted-org/random-skills` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 ```
 
 Exit code is non-zero so CI fails. Run `apm audit --ci --policy org` (in CI or locally) for the full SARIF report including which policy file in the inheritance chain produced the rule.
@@ -272,7 +272,7 @@ apm policy status --policy-source contoso/governance     # any owner/repo
 apm audit --ci --policy ./apm-policy.yml
 ```
 
-`apm install` has no `--policy` flag — discovery runs automatically from your git remote. Use `--no-cache` to force a fresh fetch.
+`apm install` has no `--policy` flag -- discovery runs automatically from your git remote. Add `--no-cache` to `apm policy status` or `apm audit` to force a fresh fetch.
 
 ### 3. The schema in one screen
 

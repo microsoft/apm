@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -179,7 +179,39 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
         return False
     from ..install.mcp.retired_destinations import lock_holds_untranslated_mcp_claims
 
-    return lock_holds_untranslated_mcp_claims(existing.apm_version, existing.mcp_target_servers)
+    # Only claims carried forward keep the old meaning: removing the last one,
+    # or writing new ones, hands the lock to this writer.
+    carried = {
+        runtime: set(names or ()) & set(lock.mcp_target_servers.get(runtime) or ())
+        for runtime, names in existing.mcp_target_servers.items()
+    }
+    return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
+
+
+def _same_document_on_disk(path: Path, serialized: str) -> bool:
+    """Whether *path* already holds exactly the data *serialized* would write.
+
+    Only formatting may differ; a legacy layout the writer would migrate is a
+    different document and is rewritten.
+    """
+    from ..utils.yaml_io import load_yaml_str
+
+    try:
+        on_disk = load_yaml_str(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+        return False
+    return on_disk == load_yaml_str(serialized)
+
+
+def recorded_generator(data: Mapping[str, Any]) -> object:
+    """The ``apm_version`` a parsed lockfile records for the generator gate.
+
+    An explicit ``apm_version: null`` is unverifiable, unlike an absent key, so
+    both the project and the bundle reader warn on it the same way (#3963).
+    """
+    if "apm_version" in data and data["apm_version"] is None:
+        return "null"
+    return data.get("apm_version")
 
 
 def resolve_reproducible_timestamp(
@@ -1736,6 +1768,9 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
+        if unchanged and _same_document_on_disk(path, serialized):
+            # A proven no-op keeps the file's own bytes (comments, key style).
+            return True
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
         return True
 

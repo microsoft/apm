@@ -23,6 +23,10 @@ from .adapters.package_manager.default_manager import DefaultMCPPackageManager
 # ``ClientFactory.supported_clients()`` rather than maintain parallel
 # lists (see ``mcp_integrator`` runtime loops for the canonical
 # consumers).
+# Runtimes whose project MCP destination is workspace-root ``.mcp.json``
+# (ClaudeClientAdapter._project_mcp_path, CopilotProjectClientAdapter).
+_ROOT_MCP_JSON_CLIENTS = frozenset({"claude", "copilot"})
+
 _MCP_CLIENT_REGISTRY: dict[str, type] = {
     "antigravity": AntigravityClientAdapter,
     "copilot": CopilotClientAdapter,
@@ -73,6 +77,20 @@ class ClientFactory:
             project_root=project_root,
             user_scope=user_scope,
         )
+
+    @staticmethod
+    def project_destination_is_root_mcp_json(client_type: str) -> bool | None:
+        """Whether *client_type* writes project MCP servers to workspace-root ``.mcp.json``.
+
+        Read-only: no adapter is built and nothing is created on disk. ``None``
+        for a runtime APM does not know, so callers can choose a conservative
+        answer. Claude Code and the project ``copilot`` adapter share the root
+        file; every other runtime keeps its own native config.
+        """
+        key = client_type.lower()
+        if key not in _MCP_CLIENT_REGISTRY:
+            return None
+        return key in _ROOT_MCP_JSON_CLIENTS
 
     @staticmethod
     def supported_clients() -> frozenset[str]:

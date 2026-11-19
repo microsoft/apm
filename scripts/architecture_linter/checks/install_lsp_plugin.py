@@ -150,14 +150,19 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _DRIFT_REPLAY: (
                     "replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)",
                     "allow_executables=replay_allow,",
-                    "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
+                    "project_root, config.policy_provider, user_scope=config.user_scope",
                 ),
                 _AUDIT_REPLAY: ("policy_provider=policy_provider,",),
                 _CI_CHECKS: ("policy_provider=policy_provider,",),
                 _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
                 _INSTALL_TEMPLATE: (
                     "trust_ctx = exec_trust_context_for_project(",
-                    "manifest_path = get_manifest_path(scope)",
+                    "manifest_root(project_root, user_scope=is_user_scope(",
+                ),
+                # McpAdmission reads grants from the scope manifest (#3954, #3986).
+                "src/apm_cli/security/trust.py": (
+                    "grants_manifest = project_manifest_path(manifest_root(project_root, "
+                    "user_scope=user_scope))",
                 ),
                 "src/apm_cli/commands/update.py": ("get_manifest_path(scope),",),
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
@@ -234,6 +239,25 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
         path_facts, path_failures = _facts_for(provider, path, GUARD_EXECUTABLE_TRUST)
         if path_failures:
             continue
+        # A registered caller passes a manifest the scope owner named
+        # (core.scope.get_manifest_path / manifest_root + project_manifest_path);
+        # it never builds apm.yml from a root itself (#3954, #3986).
+        registered = {scope for caller, scope in _TRUST_OWNER_CALLERS if caller == path}
+        lines = _lines(path_facts)
+        for definition in path_facts.definitions:
+            if definition.name not in registered:
+                continue
+            body = lines[definition.line - 1 : definition.end_line]
+            if any(token in line for line in body for token in _MANIFEST_DERIVATION_TOKENS):
+                findings.append(
+                    violation(
+                        GUARD_EXECUTABLE_TRUST,
+                        path,
+                        f"{definition.name} derives apm.yml from a root; pass the manifest "
+                        "the scope owner names (project_manifest_path(manifest_root(...)))",
+                        line=definition.line,
+                    )
+                )
         findings.extend(
             violation(
                 GUARD_EXECUTABLE_TRUST,

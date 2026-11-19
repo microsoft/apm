@@ -730,8 +730,8 @@ def install_runtime_option(func):
         "--runtime",
         callback=canonical_runtime_option,
         help=(
-            f"Target a specific runtime only. {target_help_fragment('install')} "
-            "(legacy alias for --target, single value only; prefer --target)"
+            "Target a specific runtime only. Legacy alias for --target (single value only; "
+            f"prefer --target). {target_help_fragment('install')}"
         ),
     )(func)
 

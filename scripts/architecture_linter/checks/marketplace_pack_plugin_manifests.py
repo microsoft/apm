@@ -43,6 +43,14 @@ _MCP_OPT_OUT_SITES = {
     ("src/apm_cli/bundle/plugin_exporter.py", "_cache_would_contribute_hooks_or_mcp")
 }
 _MCP_DEFAULT = "exclude_apm_managed: bool = True"
+# Authored sources only (#3966): apm.yml declarations ship from apm.yml, and a
+# lock claim hides a root entry only when its runtime writes root .mcp.json.
+_MCP_AUTHORED_TOKENS = {
+    "servers.update(authored)": "root apm.yml MCP declarations must ship from apm.yml",
+    "ClientFactory.project_destination_is_root_mcp_json(": (
+        "only a claim whose destination is root .mcp.json may hide a root entry"
+    ),
+}
 
 
 def _check(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -98,6 +106,9 @@ def _mcp_ownership_findings(provider: FactsProvider) -> list[Violation]:
                 RULE_ID, _OWNER, "collect_mcp_servers must exclude APM-managed servers by default"
             )
         )
+    for token, message in _MCP_AUTHORED_TOKENS.items():
+        if not any(token in line for line in owner_lines):
+            findings.append(violation(RULE_ID, _OWNER, message))
     for path in _src_python(provider):
         facts = provider.file_facts(path)
         lines = getattr(facts, "lines", ())

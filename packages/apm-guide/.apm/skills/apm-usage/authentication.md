@@ -119,7 +119,7 @@ For in-repository plugins from GitLab and generic git marketplaces, an SSH
 registration stays SSH when APM generates the concrete `git:` and `path:`
 dependency. Existing SSH keys keep working instead of the dependency being
 rewritten to HTTPS. A `github.com` marketplace registered over SSH is
-pre-flighted with `git ls-remote` over SSH as well, so a private catalog needs
+pre-flighted with `git ls-remote` over SSH as well, so a private marketplace needs
 only an SSH key, not a GitHub token. Named refs on an SSH dependency also
 resolve through Git rather than the HTTPS commits API.
 
@@ -189,7 +189,7 @@ supported. Resolution order:
 4. If the helper is empty or rejected: an error listing every step in order
 
 Every ADO operation uses this chain (validation, clone, ref resolution,
-`--update` pre-flight, file downloads, org policy discovery, marketplace).
+`apm update` pre-flight, file downloads, org policy discovery, marketplace).
 Auth failures are HTTP 401/403, a redirect to the ADO sign-in service, an
 HTML sign-in page instead of the file, or a Git auth error. DNS, TLS,
 timeout, and not-found errors stop the chain. ADO requests use only the
@@ -224,7 +224,7 @@ and marketplace ref resolution. A successful bearer retry warns:
 `[!] ADO_APM_PAT was rejected for {host}; fell back to az cli bearer.`
 
 When auth fails entirely, APM prints a targeted diagnostic (not a generic "not accessible"
-message). For `--update` operations, a pre-flight auth check runs before any files are
+message). For `apm update`, a pre-flight auth check runs before any files are
 modified -- on failure you see `No files were modified`.
 
 ### On-prem Azure DevOps Server

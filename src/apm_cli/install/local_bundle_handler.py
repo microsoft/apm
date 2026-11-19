@@ -284,6 +284,12 @@ def install_local_bundle(
 
         deployed = result.get("deployed_files", [])
         deployed_hashes = result.get("deployed_file_hashes", {})
+        if global_:
+            # The user lock resolves bundle claims against $HOME, as audit and
+            # --frozen replay read them; absolute claims never resolve there.
+            deployed, deployed_hashes = _home_relative_claims(
+                deployed, deployed_hashes, project_root
+            )
         skipped = result.get("skipped", 0)
 
         # Issue #1207 D2.b: instructions staged into
@@ -339,8 +345,8 @@ def install_local_bundle(
         if deployed or staged_instructions or staged_fallbacks:
             from ..deps.lockfile import migrate_lockfile_if_needed
 
-            migrate_lockfile_if_needed(project_root)
-            lockfile_path = get_lockfile_path(project_root)
+            migrate_lockfile_if_needed(_bundle_lock_root(global_))
+            lockfile_path = get_lockfile_path(_bundle_lock_root(global_))
             lockfile = LockFile.read(lockfile_path) or LockFile()
             from ..core.deployment_ledger import DeploymentLedgerCodec
 
@@ -583,6 +589,39 @@ def _require_legacy_bundle_mcp_format(bundle_format: str) -> None:
         raise ValueError("Legacy MCP helpers require a Claude plugin bundle format")
 
 
+def _home_relative_claims(
+    deployed: list[str], hashes: dict[str, str], home: Path
+) -> tuple[list[str], dict[str, str]]:
+    """Encode user-scope bundle claims relative to the home deploy root."""
+    from ..utils.paths import portable_relpath
+
+    def _relative(path: str) -> str:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            return path
+        try:
+            candidate.resolve().relative_to(home.resolve())
+        except ValueError:
+            return path
+        return portable_relpath(candidate.resolve(), home.resolve())
+
+    return [_relative(path) for path in deployed], {
+        _relative(path): digest for path, digest in hashes.items()
+    }
+
+
+def _bundle_lock_root(user_scope: bool) -> Path:
+    """The scope's lockfile directory, apart from where files deploy.
+
+    At user scope files deploy under ``$HOME`` but the lock lives in
+    ``$APM_HOME`` with the user manifest, where ``install -g --frozen`` and
+    audit read it.
+    """
+    from ..core.scope import InstallScope, get_apm_dir
+
+    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)
+
+
 def _wire_legacy_bundle_mcp_servers(
     *,
     bundle_format: str,
@@ -623,7 +662,7 @@ def _wire_legacy_bundle_mcp_servers(
         count = run_owned_mcp_integration(
             dependencies=deps,
             owner=owner,
-            lock_path=get_lockfile_path(project_root),
+            lock_path=get_lockfile_path(_bundle_lock_root(user_scope)),
             target_runtimes=target_names,
             verbose=verbose,
             project_root=project_root,
@@ -710,7 +749,7 @@ def _wire_bundle_lsp_servers(
     count = run_owned_lsp_integration(
         dependencies=deps,
         owner=owner,
-        lock_path=get_lockfile_path(project_root),
+        lock_path=get_lockfile_path(_bundle_lock_root(user_scope)),
         project_root=project_root,
         user_scope=user_scope,
         logger=logger,

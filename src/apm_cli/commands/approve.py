@@ -775,8 +775,23 @@ def _record_and_save(
     recorded: list[ExecutableDeclaration] = []
     cleared: list[str] = []
     refused = 0
+    # Bulk approval is eligible only where no layer denies (#3957): an org or
+    # other-store deny is skipped with its reason and no allow is written.
+    layer_denied = (
+        {id(decl): layer for decl, layer in _still_denied(manifest, declarations, logger=logger)}
+        if bulk
+        else {}
+    )
     for decl in declarations:
         denied = _same_store_denies(deny, decl)
+        if bulk and not denied and id(decl) in layer_denied:
+            layer = layer_denied[id(decl)]
+            _rich_info(
+                f"Skipped {_identity(decl)}: denied ({layer}). "
+                f"Lift the deny: {_lift_deny_hint(layer, _identity(decl))}",
+                symbol="info",
+            )
+            continue
         if denied and bulk:
             _rich_info(
                 f"Skipped {_identity(decl)}: denied in {_store_label(user_scope)}. "

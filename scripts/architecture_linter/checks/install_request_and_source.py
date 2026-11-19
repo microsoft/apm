@@ -575,7 +575,7 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
     # integration, so a failed run never deploys untracked files.
     pipeline_lines = _lines(provider.file_facts("src/apm_cli/install/pipeline.py"))
     barrier = [
-        n for n, line in enumerate(pipeline_lines) if "if _direct_dependency_failed(ctx):" in line
+        n for n, line in enumerate(pipeline_lines) if "if direct_dependency_failed(ctx):" in line
     ]
     integrate = [
         n for n, line in enumerate(pipeline_lines) if "_run_integration_phase(ctx)" in line
@@ -585,7 +585,7 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
             _summary(
                 rule_id,
                 "src/apm_cli/install/pipeline.py",
-                "run_install_pipeline must stop on _direct_dependency_failed before integrating (#3874)",
+                "run_install_pipeline must stop on direct_dependency_failed before integrating (#3874)",
             )
         )
     if not (

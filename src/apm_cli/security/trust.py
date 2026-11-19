@@ -280,6 +280,7 @@ class McpAdmission:
         cls,
         project_root: Path,
         *,
+        user_scope: bool,
         one_off: bool = False,
         no_policy: bool = False,
         include_user: bool = True,
@@ -287,13 +288,23 @@ class McpAdmission:
         logger: Any = None,
         trust_context: ExecTrustContext | None = None,
     ) -> McpAdmission:
-        """Resolve org, project and (optionally) user layers for *project_root*."""
+        """Resolve org, project and (optionally) user layers for *project_root*.
+
+        Org policy is discovered from *project_root*; the grants are read from
+        the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
+        """
         if trust_context is not None:
             return cls(trust_context, one_off=one_off)
+        from apm_cli.core.scope import manifest_root
+
+        from .executables import project_manifest_path
+
+        # Grants come from the scope's manifest file; policy stays at project_root.
+        grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
         admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
-            from .executables import exec_trust_context_for_project, project_manifest_path
+            from .executables import exec_trust_context_for_project
 
             policy = None
             if not no_policy:
@@ -311,20 +322,14 @@ class McpAdmission:
                     if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
                         admission.policy_unavailable = str(outcome)
             return exec_trust_context_for_project(
-                project_manifest_path(project_root),
-                policy=policy,
-                logger=logger,
-                include_user=include_user,
+                grants_manifest, policy=policy, logger=logger, include_user=include_user
             )
 
         def pins() -> ExecTrustContext:
-            from .executables import exec_trust_context_for_project, project_manifest_path
+            from .executables import exec_trust_context_for_project
 
             return exec_trust_context_for_project(
-                project_manifest_path(project_root),
-                policy=None,
-                logger=None,
-                include_user=include_user,
+                grants_manifest, policy=None, logger=None, include_user=include_user
             )
 
         admission = cls(resolve, one_off=one_off, pins=pins)

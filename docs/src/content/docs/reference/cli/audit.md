@@ -378,7 +378,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | Clean, info-only findings, advisory drift without `security.audit.fail_on_drift`, an advisory cache-miss skip, or successful `--strip`. |
-| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, or drift-check failures promoted by `security.audit.fail_on_drift`. |
+| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, drift-check failures promoted by `security.audit.fail_on_drift`, or (except with `--file`) an `apm.lock.yaml` written by a newer APM (the message names both versions). |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
 | `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 
@@ -387,7 +387,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), or an explicit `--policy` source could not be loaded. |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, or `apm.lock.yaml` was written by a newer APM. |
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 

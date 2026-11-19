@@ -73,6 +73,7 @@ apm lock --verbose
 - **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
 - **Conflicted lockfiles fail closed.** If `apm.lock.yaml` still contains git merge conflict markers, `apm lock` reports the conflict and exits without modifying the file. See the [lockfile specification](../../lockfile-spec/#versioning).
+- **Newer lockfiles fail closed.** If `apm.lock.yaml` was written by a newer APM, `apm lock` refuses before changing anything, names both versions, and tells you how to upgrade. There is no override flag.
 
 ## Export (SBOM inventory)
 

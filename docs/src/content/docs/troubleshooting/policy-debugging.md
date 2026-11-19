@@ -64,7 +64,7 @@ APM Policy Status
 -----------------
   Outcome        found
   Source         acme-corp/.github/apm-policy.yml
-  Enforcement    enforce
+  Enforcement    block
   Cache age      4m ago
   Extends chain  acme-corp/.github/apm-policy.yml
   Effective rules  dependency: 2 rule(s); mcp: 3 rule(s); manifest: 1 rule(s)
@@ -166,7 +166,7 @@ shortest path to green.
 
 ### `mcp-transport` excluding `stdio`
 
-- **Symptom:** `<name>: transport 'stdio' not in allowed ['http', 'sse']`.
+- **Symptom:** `<name>: transport 'stdio' not in allowed [http, sse]`.
 - **Cause:** Org has narrowed transports to remote-only (`http`,
   `sse`) and your `apm.yml` pins a stdio command.
 - **Fix:** Re-install the server from the registry with `--url` (HTTP

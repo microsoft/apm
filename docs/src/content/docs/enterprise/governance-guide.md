@@ -78,7 +78,7 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Registry source policy | `registry_source.require`, `.allow_non_registry` | `registry-source` | Yes | Yes |
 | MCP server allowlist | `mcp.allow` | `mcp-allowlist` | Yes (direct + transitive) | Yes |
 | MCP server denylist | `mcp.deny` | `mcp-denylist` | Yes (direct + transitive) | Yes |
-| MCP transport allowlist | `mcp.transport.allow` | `mcp-transport` | Yes | Yes |
+| MCP transport allowlist | `mcp.transport.allow` | `mcp-transport` | Yes (transport install writes; also `apm update`) | Yes |
 | Self-defined MCP control | `mcp.self_defined` | `mcp-self-defined` | Yes | Yes |
 | Compilation target allowlist | `compilation.target.allow` / `.enforce` | `compilation-target` | Yes (post-targets phase, effective selection) | Yes (targets declared in `apm.yml`) |
 | Compilation strategy | `compilation.strategy.enforce` | `compilation-strategy` | `[i] audit-only` | Yes |
@@ -183,7 +183,7 @@ Policies can extend other policies up to 5 levels deep (`MAX_CHAIN_DEPTH = 5`, e
 
 ```mermaid
 graph TD
-    Hub["enterprise-hub-org/.github/<br/>apm-policy.yml<br/>broad allow lists,<br/>enforcement: warn"] --> Org["contoso/.github/<br/>apm-policy.yml<br/>extends: enterprise-hub-org<br/>adds deny + tightens<br/>enforcement: block"]
+    Hub["enterprise-hub-org/.github/<br/>apm-policy.yml<br/>broad allow lists,<br/>enforcement: warn"] --> Org["contoso/.github/<br/>apm-policy.yml<br/>extends: enterprise-hub-org/.github<br/>adds deny + tightens<br/>enforcement: block"]
     Org --> Repo["contoso/web-app/<br/>apm.yml policy stanza<br/>policy.hash pin,<br/>fetch_failure_default: block"]
     Hub --> Merge["[*] merge_policies()<br/>tighten-only:<br/>allow=intersect, deny=union,<br/>enforcement=max(...),<br/>max_depth=min(...),<br/>require_pinned_constraint=OR"]
     Org --> Merge
@@ -222,7 +222,7 @@ mcp:
 ```yaml
 name: "Contoso engineering"
 version: "1.0.0"
-extends: "enterprise-hub-org"
+extends: "enterprise-hub-org/.github"
 enforcement: block
 dependencies:
   deny:
@@ -236,9 +236,9 @@ mcp:
 **Repo** -- `contoso/web-app/apm.yml`:
 
 ```yaml
-packages:
-  - name: contoso/web-standards
-    version: "^1.0"
+dependencies:
+  apm:
+    - contoso/web-standards#v1.0.0
 policy:
   hash: "sha256:abc123..."        # pin the fetched org policy
   fetch_failure_default: block    # fail-closed if discovery fails
@@ -255,11 +255,11 @@ policy:
 | `mcp.transport.allow` | `stdio` | Org narrowed `[stdio, http]` to `[stdio]`. Intersect rule. |
 | `mcp.self_defined` | `deny` | Org escalated. |
 
-**Counter-example: a child cannot relax a parent.** If `contoso/web-app/apm.yml` tried to override the org's `block` back down to `warn`:
+**Counter-example: a child cannot relax a parent.** If a team policy that extends the org policy tried to set the org's `block` back down to `warn`:
 
 ```yaml
-policy:
-  enforcement: warn   # rejected: org policy is block; child cannot relax
+extends: "contoso/.github"
+enforcement: warn   # dropped: org policy is block; child cannot relax
 ```
 
 The merge rule for `enforcement` is `max(parent, child)` ordered `warn < block`, so the org's `block` wins. The child's `warn` is silently dropped from the effective policy. The same applies to allow-list widening (intersect rule) and deny-list removal (union rule): tightening flows down, relaxation does not.
@@ -306,7 +306,7 @@ When `apm install` returns exit code 0 and the effective org policy is in `enfor
 
 - Every APM dependency declared in `apm.yml` matches `dependencies.allow` and is not matched by `dependencies.deny`.
 - Every package in `dependencies.require` is present and at the required version (with one nuance: `require_resolution: project-wins` downgrades version mismatches to warnings, by design).
-- Every direct MCP server matches `mcp.allow`, is not matched by `mcp.deny`, uses an allowed transport, and respects the `mcp.self_defined` rule.
+- Every direct MCP server matches `mcp.allow`, is not matched by `mcp.deny`, uses an allowed transport (the one install writes; a registry server APM cannot resolve fails), and respects the `mcp.self_defined` rule.
 - Every transitive MCP server discovered from APM packages was re-checked against the same `mcp.*` rules in a second pass.
 - The effective target selection (`--target`, `apm.yml`, `apm config target`, or auto-detection) includes `compilation.target.enforce` when it is set; otherwise every selected target is in `compilation.target.allow`. `enforce` takes precedence, so `allow` is not checked when both are set. Targets compare after aliases resolve (`vscode` is `copilot`).
 - The fetched policy file matched any `policy.hash` pin in `apm.yml`. If the hash did not match, install failed closed regardless of `fetch_failure_default` -- hash-mismatch is unconditionally fail-closed in non-dry-run install paths. (`apm install --dry-run` logs the mismatch but does not exit non-zero -- see section 14 gap.)
@@ -354,7 +354,7 @@ Workarounds when the network is unreliable:
 | Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Cached stale (past effective `cache.ttl`, within the 7-day ceiling; refresh failed) | Warn and proceed with cached policy | `fetch_failure: block` set in the cached org policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed YAML (`malformed`) (org policy file) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
-| **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
+| **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN**; `apm audit --ci` warns, `apm install` warns on `empty` and shows the others only with `--verbose` | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
 | Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | **Explicit `apm audit --ci --policy <path\|url\|owner/repo>` cannot be loaded** (missing file, unreachable, malformed, garbage, not found) | **Always fail-CLOSED** (`[x]`, exit 1) | n/a -- `policy.fetch_failure_default` does not apply; `--policy org` keeps discovery semantics | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
@@ -413,7 +413,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install apm-cli==X.Y.Z  # REPLACE: pin to current version, see /installation
+      - run: pip install apm-cli==X.Y.Z  # REPLACE: pin to current version, see /installation; audit refuses a lockfile from a newer APM
       - run: apm install
       - run: apm audit --ci -f sarif --output apm-audit.sarif
       - uses: github/codeql-action/upload-sarif@v3
@@ -574,7 +574,6 @@ mcp:
 compilation:
   target:
     allow: ["copilot", "claude"]
-    enforce: true
 ```
 
 **Hub + org + repo (100+ repos)** -- enterprise hub with broad allows, org extending and tightening, repos pinning the hash:
@@ -588,7 +587,7 @@ dependencies:
   allow: ["microsoft/*", "contoso/*", "partner-corp/*"]
 
 # contoso/.github-private/apm-policy.yml
-extends: "enterprise-hub-org"
+extends: "enterprise-hub-org/.github-private"
 enforcement: block
 dependencies:
   deny: ["untrusted-org/*"]
