@@ -713,6 +713,32 @@ def inherit_shared_destination_claims(
                     native_hashes.setdefault(peer, {}).setdefault(name, peer_hash)
 
 
+def transfer_deselected_shared_claims(
+    managed_target_servers: dict[str, set[str]],
+    native_hashes: dict[str, dict[str, str]] | None,
+    *,
+    selected: Mapping[str, set[str]],
+    user_scope: bool,
+) -> None:
+    """Hand a shared-file claim to the active peer a server's ``targets:`` now selects.
+
+    The entry in the shared file (.mcp.json) is the same one, so the peer
+    owns it with the deselected runtime's receipt instead of reading it as
+    foreign while that runtime's cleanup removes it.
+    """
+    for runtime in sorted(set(managed_target_servers) & set(selected)):
+        dropped = managed_target_servers[runtime] - selected[runtime]
+        for peer in sorted(shared_destination_peers(runtime, user_scope=user_scope)):
+            if peer not in selected:
+                continue
+            owned = managed_target_servers.setdefault(peer, set())
+            for name in sorted((dropped & selected[peer]) - owned):
+                owned.add(name)
+                receipt = (native_hashes or {}).get(runtime, {}).get(name)
+                if native_hashes is not None and receipt is not None:
+                    native_hashes.setdefault(peer, {}).setdefault(name, receipt)
+
+
 def names_owned_by_active_peers(
     runtime: str,
     names: set[str],

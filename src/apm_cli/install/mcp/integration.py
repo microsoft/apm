@@ -600,11 +600,15 @@ def run_mcp_integration(  # noqa: PLR0913
         )
         from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
-        # Targets the manifest itself stopped selecting leave every entry's reach.
-        manifest_selected = (
-            runtime is None and target_decision is not None and target_decision.from_manifest
+        # Targets the manifest itself stopped selecting leave every entry's reach;
+        # a target only excluded from this run (--exclude) is still listed there.
+        manifest_runtimes = (
+            builtins.set(target_decision.runtime_targets_for_scope(user_scope=user_scope) or ())
+            if runtime is None and target_decision is not None and target_decision.from_manifest
+            else None
         )
         retired_by_target: builtins.dict[str, builtins.set] = {}
+        retained_names: builtins.set = builtins.set()
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
             if owned_target in managed_target_servers:
                 # Declared servers whose `targets:` no longer select this runtime.
@@ -617,11 +621,19 @@ def run_mcp_integration(  # noqa: PLR0913
             kept = builtins.set(owned) & mcp_servers_for_runtime(
                 mcp_deps, owned_target, named_only=True
             )
-            if manifest_selected:
+            if manifest_runtimes is not None and owned_target not in manifest_runtimes:
                 kept = builtins.set()
             if kept:
                 managed_target_servers[owned_target] = kept
+                retained_names |= kept
             retired_by_target[owned_target] = builtins.set(owned) - kept
+        # A skipped target still holds the old declaration: keep that baseline
+        # so its next install sees the drift and applies the new one.
+        for name in MCPIntegrator._detect_mcp_config_drift(
+            [dep for dep in mcp_deps if getattr(dep, "name", None) in retained_names],
+            old_mcp_configs,
+        ):
+            new_mcp_configs[name] = old_mcp_configs[name]
         for removed_target, retired_names in retired_by_target.items():
             # An entry in a file the removed runtime shares (.mcp.json) stays
             # while an active runtime still owns it.

@@ -4141,9 +4141,15 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
         ),
         pytest.param(
             "src/apm_cli/integration/mcp_integrator_install.py",
-            "managed_target_servers[target] &= mcp_servers_for_runtime(mcp_deps, target)",
+            "managed_target_servers[target] &= selected[target]",
             "managed_target_servers[target] &= set(managed_target_servers[target])",
             id="claims-ignore-dependency-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        transfer_deselected_shared_claims(\n",
+            "        (lambda *args, **kwargs: None)(\n",
+            id="retarget-drops-shared-file-claim",
         ),
         pytest.param(
             "src/apm_cli/install/mcp/integration.py",

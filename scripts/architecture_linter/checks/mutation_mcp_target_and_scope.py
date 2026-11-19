@@ -277,7 +277,9 @@ _MCP_DEPENDENCY_TARGET_CONSUMERS: tuple[tuple[str, str, tuple[str, ...]], ...] =
         "run_mcp_install",
         (
             "mcp_dependency_runtimes(dep, target_runtimes)",
-            "managed_target_servers[target] &= mcp_servers_for_runtime(mcp_deps, target)",
+            "selected = {target: mcp_servers_for_runtime(mcp_deps, target) for target in",
+            "managed_target_servers[target] &= selected[target]",
+            "transfer_deselected_shared_claims(",
         ),
     ),
     (

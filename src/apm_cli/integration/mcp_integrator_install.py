@@ -1927,11 +1927,17 @@ def run_mcp_install(  # noqa: PLR0913
             active_runtimes=active_targets,
             user_scope=user_scope,
         )
+        from apm_cli.install.mcp.ownership import transfer_deselected_shared_claims
+
+        selected = {target: mcp_servers_for_runtime(mcp_deps, target) for target in active_targets}
+        transfer_deselected_shared_claims(
+            managed_target_servers, native_hashes, selected=selected, user_scope=user_scope
+        )
         for target in list(managed_target_servers):
             if target not in active_targets:
                 del managed_target_servers[target]
             else:
-                managed_target_servers[target] &= mcp_servers_for_runtime(mcp_deps, target)
+                managed_target_servers[target] &= selected[target]
         for target in target_runtimes:
             managed_target_servers.setdefault(target, set())
 

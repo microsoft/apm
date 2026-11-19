@@ -131,3 +131,37 @@ def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
     write_global([_scoped("srv-b", "codex"), stdio_server("srv-c", "c")])
     chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "codex")
     assert claude_servers() == {}
+
+
+def test_project_retained_claims_survive_exclude_retarget_and_pending_updates(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Exclusion keeps claims, skipped targets get later updates, shared-file retarget keeps."""
+    chain = Chain(tmp_path / "retained", apm_binary_path, dirs=(".claude", ".cursor"))
+    manifest_targets = ["claude", "cursor", "copilot"]
+    chain.write_manifest(
+        [_scoped("srv-cursor", "cursor"), _scoped("srv-shared", "claude")],
+        targets=manifest_targets,
+    )
+    chain.ok("install", "--no-policy")
+    assert chain.servers("cursor")["srv-cursor"]["args"] == ["srv-cursor"]
+
+    # --exclude skips a target the manifest still lists: its claims stay.
+    chain.ok("install", "--no-policy", "--exclude", "cursor")
+    assert "srv-cursor" in chain.servers("cursor")
+    assert chain.lock()["mcp_target_servers"]["cursor"] == ["srv-cursor"]
+
+    # A declaration change made while cursor is skipped lands on its next install.
+    updated = {**_scoped("srv-cursor", "cursor"), "args": ["srv-cursor", "--v2"]}
+    chain.write_manifest([updated, _scoped("srv-shared", "claude")], targets=manifest_targets)
+    chain.ok("install", "--no-policy", "--exclude", "cursor")
+    assert chain.servers("cursor")["srv-cursor"]["args"] == ["srv-cursor"]
+    chain.ok("install", "--no-policy")
+    assert chain.servers("cursor")["srv-cursor"]["args"] == ["srv-cursor", "--v2"]
+
+    # Retargeting between claude and copilot keeps the one shared .mcp.json entry.
+    chain.write_manifest([updated, _scoped("srv-shared", "copilot")], targets=manifest_targets)
+    chain.ok("install", "--no-policy")
+    assert "srv-shared" in chain.servers("copilot")
+    assert chain.lock()["mcp_target_servers"].get("claude", []) == []
+    assert chain.lock()["mcp_target_servers"]["copilot"] == ["srv-shared"]
