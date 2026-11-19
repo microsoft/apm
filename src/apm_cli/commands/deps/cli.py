@@ -273,7 +273,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 if dep.alias is not None:
                     install_path = dep.get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = dep.get_canonical_dependency_string()
+                    # An aliased slot keeps host and port in its row (B4, #3967).
+                    dep_key = dep.get_unique_key()
                     physical_to_logical[physical_key] = dep_key
                     declared_sources[dep_key] = source
                     continue
@@ -329,11 +330,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = (
-                        dep.repo_url
-                        if dep.source == "local"
-                        else dep.get_canonical_dependency_string()
-                    )
+                    # An aliased slot keeps host and port in its row (B4, #3967).
+                    dep_key = dep.repo_url if dep.source == "local" else dep.get_unique_key()
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
