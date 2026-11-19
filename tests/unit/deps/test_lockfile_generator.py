@@ -288,3 +288,15 @@ def test_bundle_and_project_readers_warn_alike(tmp_path, running, monkeypatch, h
     LockFile.read(tmp_path / "apm.lock.yaml")
     _read_bundle_lockfile(tmp_path)
     assert warned[0] == warned[1]
+
+
+def test_packed_bundle_lock_names_the_packer(tmp_path, stamping):
+    """A bundle lock is a new artifact: its generator is the packer, not the input (#3962)."""
+    import yaml
+
+    from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
+
+    source = LockFile(apm_version="0.35.0", mcp_servers=["s"])
+    enriched = yaml.safe_load(enrich_lockfile_for_pack(source, "plugin", "all"))
+    assert enriched["apm_version"] == "0.40.0"
+    assert source.apm_version == "0.35.0"

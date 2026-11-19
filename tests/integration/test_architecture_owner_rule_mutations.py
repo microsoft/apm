@@ -4510,3 +4510,40 @@ def test_exec_decision_guard_rejects_second_readers(path: str, old: str, new: st
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", yaml.safe_dump(lockfile.to_dict()))',
+            id="bundle-lock-from-a-dict-dump",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            '    shutil.copy2(project_root / "apm.lock.yaml", bundle_dir / "apm.lock.yaml")',
+            id="bundle-lock-copied-from-the-project",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/lockfile_enrichment.py",
+            '        data["apm_version"] = installed_apm_version()\n',
+            "        pass\n",
+            id="bundle-lock-keeps-the-input-stamp",
+        ),
+    ],
+)
+def test_bundle_lock_stamp_guard_rejects_other_writers(path: str, old: str, new: str) -> None:
+    """#3962: every packed lock names the packer as its generator."""
+    rule_id = "contracts-tooling-lockfile-generator-stamp"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
