@@ -119,3 +119,16 @@ def fixture_dir():
 @pytest.fixture(scope="session")
 def repo_root():
     return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _isolate_console_stream():
+    """An in-process ``--format json`` CLI call routes the console to stderr.
+
+    That routing is process-global, so reset it after every test; otherwise a
+    later test reading ``capsys.readouterr().out`` depends on shard order.
+    """
+    yield
+    from apm_cli.utils.console import _reset_console
+
+    _reset_console()

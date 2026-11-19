@@ -194,6 +194,15 @@ def get_apm_dir(scope: InstallScope) -> Path:
     return Path.cwd()
 
 
+def manifest_root(project_root: Path, *, user_scope: bool) -> Path:
+    """Return the directory whose ``apm.yml`` holds a command's trust grants.
+
+    At user scope the deploy root is ``$HOME`` but the manifest, and its
+    ``executables`` grants, live in ``$APM_HOME`` (default ``~/.apm/``).
+    """
+    return get_apm_home() if user_scope else Path(project_root)
+
+
 def get_modules_dir(scope: InstallScope) -> Path:
     """Return the ``apm_modules`` directory for *scope*."""
     from ..constants import APM_MODULES_DIR

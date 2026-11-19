@@ -46,6 +46,7 @@ def prepare_mcp_integration(
     diagnostics: "DiagnosticCollector | None" = None,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
+    user_scope: bool,
     project_root: Path | None = None,
     executable_context: tuple[dict | None, bool] = (None, False),
     no_policy: bool = False,
@@ -64,6 +65,7 @@ def prepare_mcp_integration(
     allow_map, _resolved = executable_context
     admission = McpAdmission.for_project(
         project,
+        user_scope=user_scope,
         one_off=trust_transitive_mcp,
         no_policy=no_policy,
         logger=logger,
@@ -388,6 +390,7 @@ def run_mcp_integration(  # noqa: PLR0913
         logger=logger,
         diagnostics=diagnostics,
         active_package_keys=active_package_keys,
+        user_scope=user_scope,
         project_root=project_root,
         executable_context=executable_context,
         no_policy=no_policy,
