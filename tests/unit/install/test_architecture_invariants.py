@@ -46,7 +46,8 @@ KNOWN_LARGE_MODULES = {
     # G2 adds the atomic native Agent Plugin deployment boundary before any
     # target reconciliation or generic integrator can mutate state.
     # Decomposition tracked as follow-up.
-    "services.py": 1175,
+    # Local plugin bundle hooks route through HookIntegrator (#3700).
+    "services.py": 1195,
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
     # Replay builds the project's own package through the install builder (#3151).

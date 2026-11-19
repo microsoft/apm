@@ -475,7 +475,7 @@ commands that write project and personal trust, see
 There is no `enforce` mandate runtime or cryptographic signing in this release:
 an `executables.enforce` rung is accepted in policy but fail-safe degrades to
 `recommend` (allowed, still overridable by a deny). Ordinary dependency grants
-remain package-scoped. Local bundle MCP, LSP, and canvas grants use the exact
+remain package-scoped. Local bundle hook, MCP, LSP, and canvas grants use the exact
 SHA-256 content key printed by `apm install`; changed bundle content requires a
 new grant.
 
