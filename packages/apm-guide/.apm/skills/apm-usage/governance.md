@@ -155,6 +155,31 @@ registry_source:
 The same registry-source rule applies to `apm install`,
 `apm install <pkg>`, `apm update`, and `apm audit --ci`.
 
+## Marketplace origin governance
+
+Restrict the marketplace catalogs a root project `apm.yml` may declare
+under `marketplaces:`, and the catalogs marketplace packages are installed
+from (the lock's `source_url` and each fresh resolution, map or
+registration), so a committed lock cannot bypass the list. A locked package
+with no recorded origin is refused. Checked at install (policy gate) and by
+`apm audit --ci`. To clear a refused package: remove its `apm.yml` entry, run
+`apm install`, then add it back from an allowed catalog (`apm update` keeps
+the recorded catalog).
+
+```yaml
+# .github/apm-policy.yml
+marketplace:
+  allow:
+    - github.com/contoso/*              # host/path glob of the catalog origin
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `allow` | `null` | Catalog origins every declared marketplace and every locked or resolved marketplace package must match (`*` = one segment, `**` = any depth; scheme, `.git` and host case ignored). `null` = no opinion; `[]` = none allowed. Local-path catalogs never match. Intersected (tighten-only) through `extends`. |
+
+Registration (`apm marketplace add`) enables discovery and `@name` shorthand
+only; it is never a trust gate. This policy is the org control.
+
 ## Integrity and drift enforcement
 
 Two additive, optional, default-off keys under the existing `security:`
@@ -492,7 +517,8 @@ modify the manifest, lockfile, or deployment.
 Additional checks when a policy is provided:
 
 - **Dependencies:** allowlist, denylist, required packages (present, deployed,
-  version, executables trusted), transitive depth, pinned constraints, registry source
+  version, executables trusted), transitive depth, pinned constraints, registry source,
+  declared marketplace origins (`marketplace.allow`)
 - **Integrity:** dependency content hashes
 - **MCP:** allowlist, denylist, transport, self-defined servers
 - **Compilation:** target, strategy, source attribution
