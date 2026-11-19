@@ -91,8 +91,16 @@ def _exec_status(project: Path) -> str | None:
 
 @pytest.mark.parametrize(
     ("target", "gate_off"),
-    [("claude", "deny"), ("claude", "revoke"), ("copilot", "deny")],
-    ids=["claude-deny", "claude-revoke", "copilot-deny"],
+    [
+        ("claude", "deny"),
+        ("claude", "revoke"),
+        ("copilot", "deny"),
+        ("cursor", "deny"),
+        ("codex", "deny"),
+        ("gemini", "deny"),
+        ("windsurf", "deny"),
+    ],
+    ids=lambda value: value,
 )
 def test_gating_a_package_retires_its_deployed_hooks(
     tmp_path: Path, apm_binary_path: Path, target: str, gate_off: str
@@ -133,7 +141,8 @@ def test_gating_a_package_retires_its_deployed_hooks(
     }
 
     if gate_off == "deny":
-        apm("deny", "../hooky")
+        denied = " ".join(apm("deny", "../hooky").split())
+        assert "Run 'apm install' to remove executables already deployed." in denied, denied
     else:
         dump_yaml({**manifest, "executables": {}}, project / "apm.yml")
 
@@ -154,10 +163,10 @@ def test_gating_a_package_retires_its_deployed_hooks(
     audit = apm("audit", "--ci", "--no-policy")
     assert "Drift detected" not in audit, audit
 
-    if target == "claude":
-        # A denied hook still registered (e.g. by an older CLI) fails the audit.
+    if target != "copilot":
+        # A denied hook still registered in a shared config (e.g. by an older
+        # CLI) fails the audit.
         for path, content in deployed_configs.items():
             path.write_bytes(content)
         leftover = apm("audit", "--ci", "--no-policy", expect=1)
         assert "Drift detected" in leftover, leftover
-        assert ".claude/settings.json" in leftover, leftover

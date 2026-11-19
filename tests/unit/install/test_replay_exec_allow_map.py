@@ -10,19 +10,24 @@ import pytest
 from apm_cli.install.exec_gate import ReplayExecAllowMap
 
 
-def _write_manifest(root: Path) -> None:
-    (root / "apm.yml").write_text(
+@pytest.fixture
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(
+        "apm_cli.security.executables._user_config_file", lambda: tmp_path / "config.json"
+    )
+    (tmp_path / "apm.yml").write_text(
         "name: p\nversion: 1.0.0\nexecutables:\n  deny:\n    ../hooky:\n      hooks: true\n",
         encoding="utf-8",
     )
+    return tmp_path
 
 
 @pytest.fixture
-def discovered(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
-    calls: list[str | None] = []
+def discovered(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    calls: list[Path] = []
 
-    def _discover(project_root, *, policy_override=None, **_kwargs):
-        calls.append(policy_override)
+    def _discover(project_root, **_kwargs):
+        calls.append(project_root)
         return SimpleNamespace(policy=None)
 
     monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", _discover)
@@ -31,30 +36,30 @@ def discovered(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
 
 @pytest.mark.parametrize("status", [None, "absent", "deployed"])
 def test_deployed_entries_replay_ungated(
-    tmp_path: Path, discovered: list[str | None], status: str | None
+    project: Path, discovered: list[Path], status: str | None
 ) -> None:
-    _write_manifest(tmp_path)
-    allow = ReplayExecAllowMap(tmp_path).for_dependency(SimpleNamespace(exec_status=status))
-    assert allow is None
+    provider_calls: list[int] = []
+    gate = ReplayExecAllowMap(project, lambda: provider_calls.append(1))
+    assert gate.for_dependency(SimpleNamespace(exec_status=status)) is None
+    assert provider_calls == []
     assert discovered == []
 
 
-def test_gated_entry_replays_the_gate_without_policy_under_no_policy(
-    tmp_path: Path, discovered: list[str | None]
-) -> None:
-    _write_manifest(tmp_path)
-    gate = ReplayExecAllowMap(tmp_path, no_policy=True)
+def test_gated_entries_use_the_callers_policy_once(project: Path, discovered: list[Path]) -> None:
+    provider_calls: list[int] = []
+
+    def provider():
+        provider_calls.append(1)
+
+    gate = ReplayExecAllowMap(project, provider)
     allow = gate.for_dependency(SimpleNamespace(exec_status="denied"))
+    gate.for_dependency(SimpleNamespace(exec_status="gated_pending_approval"))
     assert allow is not None
     assert "hooks" not in allow.get("../hooky", {})
+    assert provider_calls == [1]
     assert discovered == []
 
 
-def test_explicit_policy_source_reaches_discovery(
-    tmp_path: Path, discovered: list[str | None]
-) -> None:
-    _write_manifest(tmp_path)
-    gate = ReplayExecAllowMap(tmp_path, no_policy=True, policy_override="acme/policy")
-    gate.for_dependency(SimpleNamespace(exec_status="gated_pending_approval"))
-    gate.for_dependency(SimpleNamespace(exec_status="denied"))
-    assert discovered == ["acme/policy"]
+def test_without_a_provider_replay_discovers_policy(project: Path, discovered: list[Path]) -> None:
+    ReplayExecAllowMap(project).for_dependency(SimpleNamespace(exec_status="denied"))
+    assert discovered == [project]

@@ -1125,26 +1125,22 @@ def resolve_project_exec_allow_map(
     *,
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
-    policy_override: str | None = None,
     logger: Any | None = None,
 ) -> dict[str, dict[str, bool]] | None:
     """Return the deny-wins executables map for one project command.
 
     Reuses a map the caller already resolved (``executable_context`` is
-    ``(map, resolved)``); otherwise resolves org policy (unless disabled;
-    *policy_override* selects an explicit source and wins over
-    *no_policy*), project, and user layers through
-    :func:`effective_exec_map_for_project`.
+    ``(map, resolved)``); otherwise resolves org policy (unless disabled),
+    project, and user layers through :func:`effective_exec_map_for_project`.
     """
     allow_map, resolved = executable_context
     if resolved:
         return allow_map
     policy = None
-    if policy_override or not no_policy:
+    if not no_policy:
         from apm_cli.policy.discovery import discover_policy_with_chain
 
-        fetched = discover_policy_with_chain(project_root, policy_override=policy_override)
-        policy = getattr(fetched, "policy", None)
+        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
     return effective_exec_map_for_project(
         project_root,
         policy=policy,

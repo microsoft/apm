@@ -78,6 +78,8 @@ from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.install.replay_transport import DeclaredTransportIndex
 
@@ -104,9 +106,8 @@ class ReplayConfig:
     scratch_root: Path | None = None
     modules_root: Path | None = None
     user_scope: bool = False
-    # The audit's policy selection, applied to the replayed executables gate.
-    no_policy: bool = False
-    policy_override: str | None = None
+    # Returns the audit's already-fetched org policy for the replayed gate.
+    policy_provider: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -640,9 +641,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     replayed_count = 0
     from apm_cli.install.exec_gate import ReplayExecAllowMap
 
-    gated_allow_map = ReplayExecAllowMap(
-        project_root, no_policy=config.no_policy, policy_override=config.policy_override
-    )
+    gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)
     local_parent_index = build_local_parent_index(lock)
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError

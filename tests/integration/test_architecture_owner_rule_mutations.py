@@ -764,8 +764,28 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
         ),
         (
             "src/apm_cli/install/exec_gate.py",
-            "self._map = resolve_project_exec_allow_map(",
+            "self._map = effective_exec_map_for_project(",
             "self._map = (",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
+            "gated_allow_map = ReplayExecAllowMap(project_root)",
+        ),
+        (
+            "src/apm_cli/install/audit_replay.py",
+            "policy_provider=policy_provider,",
+            "policy_provider=None,",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "policy_provider=policy_provider,",
+            "policy_provider=None,",
+        ),
+        (
+            "src/apm_cli/commands/audit.py",
+            "policy_provider=replay_policy",
+            "policy_provider=None",
         ),
         (
             "src/apm_cli/install/services.py",
@@ -783,8 +803,8 @@ def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, 
     """Gated hooks retire at install and stay withheld in audit replay (#3924)."""
     rule_id = "install-deployment-executable-trust-context"
     source = (ROOT / path).read_text(encoding="utf-8")
-    assert source.count(old) == 1
-    mutated = source.replace(old, new, 1)
+    assert source.count(old) >= 1
+    mutated = source.replace(old, new)
     ast.parse(mutated, filename=path)
 
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})

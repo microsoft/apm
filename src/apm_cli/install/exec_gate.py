@@ -8,6 +8,7 @@ the npm v12-style ``allowExecutables`` default-deny policy.
 from __future__ import annotations
 
 import builtins
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -266,15 +267,18 @@ class ReplayExecAllowMap:
     """Resolve the install gate's allow-map once, only for gated dependencies.
 
     A lock entry whose ``exec_status`` is gated or denied had executables
-    withheld at install, so audit replay applies the same deny-wins map and
-    withholds them too (#3924). Fully deployed entries replay ungated.
+    withheld at install, so audit replay re-derives the per-type decisions
+    from the deny-wins trust owner and withholds them too (#3924). Entries
+    recorded as deployed trust that record and replay ungated. The lockfile
+    keeps no per-type evidence, so this is the only re-check replay makes.
+
+    *policy_provider* returns the org policy object (or ``None``) the caller
+    already fetched, so one audit run consults a single policy.
     """
 
-    def __init__(
-        self, project_root: Path, *, no_policy: bool = False, policy_override: str | None = None
-    ) -> None:
+    def __init__(self, project_root: Path, policy_provider: Callable[[], Any] | None = None):
         self._project_root = project_root
-        self._policy = {"no_policy": no_policy, "policy_override": policy_override}
+        self._policy_provider = policy_provider
         self._resolved = False
         self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
 
@@ -284,11 +288,17 @@ class ReplayExecAllowMap:
         if getattr(lock_dep, "exec_status", None) in (None, TRUST_ABSENT, TRUST_DEPLOYED):
             return None
         if not self._resolved:
-            from apm_cli.models.apm_package import APMPackage
-            from apm_cli.security.executables import resolve_project_exec_allow_map
+            from apm_cli.security.executables import effective_exec_map_for_project
 
-            manifest_path = self._project_root / "apm.yml"
-            manifest = APMPackage.from_apm_yml(manifest_path) if manifest_path.is_file() else None
-            self._map = resolve_project_exec_allow_map(self._project_root, manifest, **self._policy)
+            if self._policy_provider is not None:
+                policy = self._policy_provider()
+            else:
+                from apm_cli.policy.discovery import discover_policy_with_chain
+
+                policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
+            # Audit is read-only: never migrate legacy user consent here.
+            self._map = effective_exec_map_for_project(
+                self._project_root, policy=policy, migrate_user_legacy=False
+            )
             self._resolved = True
         return self._map

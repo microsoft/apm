@@ -13,8 +13,10 @@ from __future__ import annotations
 import contextlib
 import io
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
 from apm_cli.install.drift import (
@@ -78,8 +80,7 @@ def prepare_ci_audit_replay(
     project_root: Path,
     *,
     verbose: bool = False,
-    no_policy: bool = False,
-    policy_override: str | None = None,
+    policy_provider: Callable[[], Any] | None = None,
 ) -> PreparedCiAuditReplay:
     """Prepare one lock-pinned scratch replay for ``apm audit --ci`` consumers."""
     project_root = project_root.resolve()
@@ -126,8 +127,7 @@ def prepare_ci_audit_replay(
         scratch_root=scratch_root,
         modules_root=modules_root,
         user_scope=user_scope,
-        no_policy=no_policy,
-        policy_override=policy_override,
+        policy_provider=policy_provider,
     )
     stderr_context = (
         contextlib.nullcontext() if verbose else contextlib.redirect_stderr(io.StringIO())
@@ -157,8 +157,7 @@ def resolve_ci_audit_materialization(
     project_root: Path,
     *,
     verbose: bool = False,
-    no_policy: bool = False,
-    policy_override: str | None = None,
+    policy_provider: Callable[[], Any] | None = None,
 ) -> CiAuditMaterialization:
     """Decide how ``apm audit --ci`` reaches installed package materialization.
 
@@ -199,8 +198,7 @@ def resolve_ci_audit_materialization(
             prepared_replay=prepare_ci_audit_replay(
                 project_root,
                 verbose=verbose,
-                no_policy=no_policy,
-                policy_override=policy_override,
+                policy_provider=policy_provider,
             )
         )
     except CiAuditReplayError as exc:
