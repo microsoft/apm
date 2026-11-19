@@ -473,7 +473,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
     if legacy.is_file():
         out.add(OutputKind.MARKETPLACE)
 
-    # Check target: field for 'claude' or 'copilot' (plugin-manifest ecosystems).
+    # Check target: field for plugin-manifest ecosystems (claude, copilot, codex).
     if data:
         from ..models.manifest_targets import manifest_target_restriction
         from .errors import (
@@ -518,13 +518,16 @@ class BuildOrchestrator:
     def run(self, options: BuildOptions, logger: Any = None) -> BuildResult:
         outputs_needed = detect_outputs(options.apm_yml_path)
         if not outputs_needed:
+            from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
+
+            ecosystems = ", ".join(f"'{name}'" for name in sorted(PLUGIN_MANIFEST_ECOSYSTEMS))
             raise BuildError(
                 "apm.yml has neither 'dependencies:' nor 'marketplace:' "
-                "block, and 'target:' does not include 'claude' or "
-                "'copilot'. Nothing to pack. Add dependencies via "
+                f"block, and 'targets:' includes none of {ecosystems}. "
+                "Nothing to pack. Add dependencies via "
                 "'apm install <pkg>', scaffold a marketplace block "
-                "with 'apm marketplace init', or set 'target:' to "
-                "include 'claude' or 'copilot'. See "
+                "with 'apm marketplace init', or add one of those "
+                "ecosystems to 'targets:'. See "
                 "https://microsoft.github.io/apm/reference/cli/pack/."
             )
 
