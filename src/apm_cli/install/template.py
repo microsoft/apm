@@ -64,7 +64,15 @@ def effective_allow_map(ctx) -> dict | None:
         return getattr(ctx, "exec_allow_map", None)
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    # The manifest the install parsed is the trust source, the same root
+    # ``--frozen`` reads: user scope keeps apm.yml in APM_HOME, not in the
+    # home directory that source_root points at (#3954).
+    manifest_dir = getattr(getattr(ctx, "apm_package", None), "package_path", None)
+    project_root = (
+        manifest_dir
+        if isinstance(manifest_dir, Path)
+        else getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    )
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
         project_root,
