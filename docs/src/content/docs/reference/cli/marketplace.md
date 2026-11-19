@@ -236,7 +236,10 @@ apm marketplace browse awesome-agents
 ### `apm marketplace update [NAME]`
 
 Refresh the local cache for one marketplace, or all when `NAME` is
-omitted.
+omitted. Each catalog is revalidated (a conditional request where the host
+supports it). If a catalog cannot be fetched or is invalid, its last valid
+cached copy is kept and the command exits non-zero, naming every catalog that
+failed; catalogs that did refresh stay refreshed.
 
 ```bash
 apm marketplace update                 # refresh every registered marketplace

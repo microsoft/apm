@@ -123,6 +123,7 @@ from apm_cli.install.validation import (
     _uses_clone_root_probe,
     _validate_package_exists,
 )
+from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
@@ -320,6 +321,10 @@ def _resolve_package_references(
                     marketplace_provenance = resolution.provenance(marketplace_name, plugin_name)
                     package = canonical_str
                     marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
+                except MarketplaceFreshnessError:
+                    # An explicit refresh that cannot be verified fails the
+                    # whole command; it never installs the rest (#3279).
+                    raise
                 except Exception as mkt_err:
                     reason = str(mkt_err)
                     invalid_outcomes.append((package, reason))
@@ -1170,6 +1175,9 @@ def install(  # noqa: PLR0913
     from ..install.service import InstallService
 
     ctx.with_resource(InstallService.frozen_writes(frozen))
+    ctx.with_resource(
+        InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen)
+    )
     try:
         if mcp_name is not None:
             InstallService.reject_frozen_mutation(frozen, "--mcp")
