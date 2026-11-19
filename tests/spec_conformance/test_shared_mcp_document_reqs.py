@@ -35,8 +35,11 @@ class _Project:
             manifest["dependencies"] = {"mcp": [ECHO]}
         (self.root / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
 
+    def run(self, *args: str):
+        return self.runner.run(args, cwd=self.root, env=self.env)
+
     def install(self, *args: str) -> None:
-        result = self.runner.run(("install", "--no-policy", *args), cwd=self.root, env=self.env)
+        result = self.run("install", "--no-policy", *args)
         assert result.returncode == 0, result.stdout + result.stderr
 
     def servers(self) -> dict:
@@ -47,6 +50,14 @@ class _Project:
         return lock.get("mcp_target_servers") or {}
 
 
+def _shared_project(tmp_path: Path) -> _Project:
+    project = _Project(tmp_path)
+    (project.root / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"mine": USER_ENTRY}}), encoding="utf-8"
+    )
+    return project
+
+
 @pytest.mark.req("req-mf-027")
 def test_deactivating_one_target_keeps_entries_another_active_target_selects(
     tmp_path: Path,
@@ -55,37 +66,55 @@ def test_deactivating_one_target_keeps_entries_another_active_target_selects(
     assert_spec_contains(
         "**[req-mf-027]** When two or more targets write project-scoped MCP",
         "implementation attributes each entry it wrote in that",
-        "NOT remove that entry while another active target that writes the same",
-        "file still selects the server, and it MUST treat the entry as owned",
+        "example because that target is deactivated, it MUST NOT remove the",
+        "selects the server, and it MUST treat the entry as owned for that",
     )
-    project = _Project(tmp_path)
-    (project.root / ".mcp.json").write_text(
-        json.dumps({"mcpServers": {"mine": USER_ENTRY}}), encoding="utf-8"
-    )
+    project = _shared_project(tmp_path)
     project.manifest(["claude", "copilot"])
     project.install()
     assert project.servers() == {"mine": USER_ENTRY, "echo": WRITTEN}
     assert project.owners() == {"claude": ["echo"], "copilot": ["echo"]}
-    # The entry one target wrote is not foreign to the other: frozen replay accepts it.
+    # (a) The entry one target wrote is not foreign to the other: frozen replay accepts it.
     project.install("--frozen")
 
-    for remaining in ("copilot", "claude"):
-        project.manifest(["claude", "copilot"])
-        project.install()
-        project.manifest([remaining])
-        project.install()
-        assert project.servers() == {"mine": USER_ENTRY, "echo": WRITTEN}
-        assert project.owners() == {remaining: ["echo"]}
+    # (b) Retiring one target keeps the entry and hands its claim to the active one.
+    project.manifest(["copilot"])
+    project.install()
+    assert project.servers() == {"mine": USER_ENTRY, "echo": WRITTEN}
+    assert project.owners() == {"copilot": ["echo"]}
+    # `claude` never wrote this entry for itself: it holds only the inherited claim.
+    project.manifest(["claude"])
+    project.install()
+    assert project.servers() == {"mine": USER_ENTRY, "echo": WRITTEN}
+    assert project.owners() == {"claude": ["echo"]}
 
-    # The inherited claim alone lets the remaining target remove the entry.
+    # (c) With no active target selecting the server, the inherited claim removes it.
     project.manifest(["claude"], servers=False)
     project.install()
     assert project.servers() == {"mine": USER_ENTRY}
 
-    project.manifest(["claude", "copilot"])
-    project.install()
 
-    # Once no active target sharing the file selects the server, it may go.
-    project.manifest(["claude", "copilot"], servers=False)
-    project.install()
-    assert project.servers() == {"mine": USER_ENTRY}
+@pytest.mark.req("req-mf-027")
+def test_inherited_entry_keeps_the_recorded_write_checks(tmp_path: Path) -> None:
+    """An entry edited after another target wrote it is preserved, not deleted."""
+    assert_spec_contains(
+        "checks it applies to its own entries, including",
+        "remaining target from then on, retaining a native write hash",
+    )
+    project = _shared_project(tmp_path)
+    for targets in (["copilot"], ["claude"]):
+        project.manifest(targets)
+        project.install()
+    edited = {**WRITTEN, "args": ["--mine"]}
+    path = project.root / ".mcp.json"
+    path.write_text(
+        json.dumps({"mcpServers": {"mine": USER_ENTRY, "echo": edited}}), encoding="utf-8"
+    )
+
+    project.manifest(["claude"], servers=False)
+    result = project.run("install", "--no-policy")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode != 0, output
+    assert "Preserved MCP connection(s) echo" in output
+    assert project.servers() == {"mine": USER_ENTRY, "echo": edited}
