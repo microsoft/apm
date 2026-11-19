@@ -496,7 +496,7 @@ class MCPDependency:
                             f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
                             f"  Fix:  command: {first}",
                             f"        args: {suggested_args}",
-                            f"  See:  https://microsoft.github.io/apm/guides/mcp-servers/",  # noqa: F541
+                            f"  See:  https://microsoft.github.io/apm/consumer/install-mcp-servers/",  # noqa: F541
                         ]
                     )
                 )

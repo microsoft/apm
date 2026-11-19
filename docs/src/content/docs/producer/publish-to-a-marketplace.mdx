@@ -1,0 +1,178 @@
+---
+title: Publish to a marketplace
+description: List your packages and plugins in a marketplace that APM, Claude Code, GitHub Copilot CLI and Codex users install from by name.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+Use this page when you maintain several packages or plugins and want people to
+find them by name instead of by repository URL. A **marketplace** is a published
+list: a `marketplace.json` file in a git repository, where each entry names a
+package, the repository it comes from and the version to install. You author it
+in `apm.yml`, and `apm pack` writes the file each harness (agent tool) reads.
+
+Authoring uses the `marketplace:` block in `apm.yml`, the `apm marketplace init`,
+`package`, `check`, `outdated`, `audit` and `migrate` commands, and the
+marketplace output of `apm pack`.
+
+## Create the marketplace
+
+Start in an empty repository for the marketplace, such as
+`contoso/agent-marketplace`. The packages it lists stay in their own
+repositories, each with its own tags.
+
+<Steps>
+
+1. **Add a `marketplace:` block.**
+
+   ```bash frame="terminal"
+   apm marketplace init --owner contoso --name contoso
+   ```
+
+   This writes `apm.yml` with a commented `marketplace:` block and one
+   placeholder entry, `example-package`.
+
+2. **Replace the placeholder with your packages.**
+
+   ```bash frame="terminal"
+   apm marketplace package remove example-package --yes
+   apm marketplace package add microsoft/apm-sample-package --version "^1.0.0" --category developer-tools
+   ```
+
+   `--version` takes a semver range; `apm pack` resolves it to the highest
+   matching tag. Use `--ref` to pin a tag or commit instead.
+
+3. **Choose which harnesses get a marketplace file.**
+
+   ```diff title="apm.yml"
+    marketplace:
+      outputs:
+        claude: {}
+   +    copilot: {}
+   +    codex: {}
+   ```
+
+   Codex output requires a `category` on every package, which step 2 set.
+
+4. **Check that every entry resolves.**
+
+   ```bash frame="terminal"
+   apm marketplace check
+   ```
+
+   APM prints one row per package and `[+] All 1 entries OK`. A missing tag or a
+   range with no match fails here, before you publish.
+
+5. **Build the marketplace files.**
+
+   ```bash frame="terminal"
+   apm pack
+   ```
+
+   ```text frame="none"
+   [!] No 'license:' field in apm.yml; the SBOM will record NOASSERTION for this
+   package. Add a 'license:' field to apm.yml (an SPDX expression such as MIT or
+   Apache-2.0, or UNLICENSED) to declare it.
+   [*] Built marketplace.json [claude] (1 package(s)) -> .../.claude-plugin/marketplace.json
+   [*] Built marketplace.json [copilot] (1 package(s)) -> .../.github/plugin/marketplace.json
+   [*] Built marketplace.json [codex] (1 package(s)) -> .../.agents/plugins/marketplace.json
+   ...
+   ```
+
+   Each entry records the resolved tag and its commit SHA. Add `license:` to
+   `apm.yml` to clear the warning.
+
+6. **Commit and tag.**
+
+   ```bash frame="terminal"
+   git add apm.yml .claude-plugin/ .github/plugin/ .agents/plugins/
+   git commit -m "Marketplace 1.0.0"
+   git tag -a v1.0.0 -m "v1.0.0"
+   git push --follow-tags
+   ```
+
+</Steps>
+
+To try the marketplace before you push, register the local file:
+
+```bash frame="terminal"
+apm marketplace add ./apm.yml --name contoso-dev
+apm marketplace browse contoso-dev
+```
+
+APM rereads `apm.yml` on every command; it builds and publishes nothing.
+
+## How consumers use it
+
+APM users register the marketplace once per machine, pinned to your tag, and
+install by name:
+
+```bash frame="terminal"
+apm marketplace add contoso/agent-marketplace --ref v1.0.0 --name contoso
+apm install apm-sample-package@contoso
+```
+
+Their lockfile records the package's commit and where it was found:
+`discovered_via: contoso`, plus `constraint` and `resolved_tag` when they
+declare a range. Claude Code reads `.claude-plugin/marketplace.json`
+(`/plugin marketplace add contoso/agent-marketplace`), Copilot CLI reads
+`.github/plugin/marketplace.json`, and Codex reads
+`.agents/plugins/marketplace.json`. The full consumer side:
+[Install from a marketplace](../../consumer/installing-from-marketplaces/).
+
+## Choose a repository shape
+
+| Shape | `packages:` entries | Use it when |
+|---|---|---|
+| One repository per package, plus a marketplace repository | Remote: `source: contoso/review-skills`, `version: "^1.0.0"` | Packages release on their own schedule. The usual choice. |
+| One plugin and its marketplace in one repository | Local: `source: ./` | You ship a single plugin and want it listed. |
+| Monorepo | Local: `source: ./plugins/review`, one `apm.yml` per plugin | Many plugins share a repository and a release. |
+
+Add a local entry with
+`apm marketplace package add ./plugins/review --name review --version 0.1.0 --no-verify`.
+For local entries, `marketplace.versioning.strategy` decides how versions are
+checked at release: `lockstep` (the default; every package `version:` equals the
+root `version:`), `tag_pattern` or `per_package`.
+
+To serve several audiences from one repository, give each its own folder with an
+`apm.yml`, and have consumers register each file with `--path`. Separate files
+organize discovery; they are not access control.
+
+## Keep it current
+
+```bash frame="terminal"
+apm marketplace outdated
+```
+
+lists packages whose repositories have newer tags than the marketplace offers.
+Run `apm pack` again to pick them up, then tag a new marketplace release.
+
+`apm marketplace audit contoso` checks a registered marketplace for packages
+whose own dependencies bypass it, for example a direct `owner/repo` line instead
+of `name@contoso`. Add `--strict` to fail CI on any finding.
+
+## Release the marketplace
+
+Before you tag, run the release checks. They write nothing:
+
+```bash frame="terminal"
+apm pack --check-versions --check-clean
+```
+
+`--check-versions` exits 3 when local package versions break the versioning
+strategy. `--check-clean` exits 4 when the committed `marketplace.json` differs
+from what `apm pack` would write now; run `apm pack`, commit, and tag again.
+On GitHub Actions, `microsoft/apm-action@v1` with `mode: release` runs these
+checks and creates the release ([Release a version](../release-a-version/#release-from-ci)).
+
+<Aside type="note" title="For an organization">
+A central team that curates approved packages for many repositories combines
+this marketplace with an org policy and a CI check. See
+[Build your organization's marketplace](../../enterprise/org-marketplace/).
+</Aside>
+
+## Related
+
+- [`apm marketplace`](../../reference/cli/marketplace/): every subcommand and option.
+- [`apm pack`](../../reference/cli/pack/): marketplace outputs and exit codes.
+- [Manifest schema](../../reference/manifest-schema/): every `marketplace:` field.

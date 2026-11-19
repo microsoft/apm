@@ -590,7 +590,7 @@ class DependencyReference(ProviderCoordinateMixin):
             f"Shorthand '@alias' is not supported in '{preview}'. "
             f"Use object form with 'git:', optional 'path:', and 'alias:' "
             f"fields to install a dependency under a custom directory name. "
-            f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
+            f"See: https://microsoft.github.io/apm/consumer/install-packages/#reference-formats"
         )
 
     @staticmethod
@@ -773,7 +773,7 @@ class DependencyReference(ProviderCoordinateMixin):
             "Use the `path:` key instead: "
             "`git: <repo-url>` + `path: <primitive>/<name>` "
             "(or the shorthand `org/repo/<primitive>/<name>`). "
-            "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
+            "See https://microsoft.github.io/apm/consumer/install-packages/"
         )
 
     @classmethod
@@ -1017,7 +1017,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 f".collection.yml is no longer supported. "
                 f"Convert '{virtual_path}' to an apm.yml with a "
                 f"'dependencies' section. "
-                f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                f"See: https://microsoft.github.io/apm/consumer/install-packages/"
             )
 
     @classmethod
@@ -1328,7 +1328,7 @@ class DependencyReference(ProviderCoordinateMixin):
                     f".collection.yml is no longer supported. "
                     f"Convert '{virtual_path}' to an apm.yml with a "
                     f"'dependencies' section. "
-                    f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                    f"See: https://microsoft.github.io/apm/consumer/install-packages/"
                 )
 
             # Accept any path ending in a recognised virtual file
@@ -1621,7 +1621,7 @@ class DependencyReference(ProviderCoordinateMixin):
                         f".collection.yml is no longer supported. "
                         f"Convert '{ado_virtual}' to an apm.yml with a "
                         f"'dependencies' section. "
-                        f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                        f"See: https://microsoft.github.io/apm/consumer/install-packages/"
                     )
 
                 # Accept any recognised virtual file extension; reject other

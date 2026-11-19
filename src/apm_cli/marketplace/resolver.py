@@ -551,7 +551,7 @@ def parse_marketplace_ref(
                 "Semver ranges are not supported in marketplace refs. "
                 "Use a raw git tag, branch, or SHA instead "
                 "(e.g. 'plugin@mkt#v2.0.0'). "
-                "See: https://microsoft.github.io/apm/guides/marketplaces/"
+                "See: https://microsoft.github.io/apm/consumer/installing-from-marketplaces/"
             )
         return (match.group(1), match.group(2), ref)
     return None
