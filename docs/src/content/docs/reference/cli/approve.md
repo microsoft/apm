@@ -68,7 +68,7 @@ anywhere is parked until you approve it, and `apm install` still succeeds (see
 
 There is no `enforce` mandate runtime or cryptographic signing in this release.
 An org `executables.enforce` rung degrades to `recommend` (allowed but still
-overridable by a deny). Local bundle MCP, LSP, and canvas approvals are bound to
+overridable by a deny). Local bundle hook, MCP, LSP, and canvas approvals are bound to
 the exact SHA-256 content key printed by `apm install`.
 
 A dependency redirected by a [`replace:` rule](../../../consumer/manage-dependencies/#replace-a-source-candidate)
