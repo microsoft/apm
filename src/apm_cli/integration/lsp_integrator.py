@@ -469,7 +469,9 @@ class LSPIntegrator:
     @staticmethod
     def deps_for_runtime(lsp_deps: list, runtime: str) -> list:
         """Drop servers *runtime* loads natively from their plugin (never APM's copy)."""
-        return [dep for dep in lsp_deps if runtime not in getattr(dep, "native_runtimes", ())]
+        from apm_cli.install.mcp.native_runtimes import native_runtimes_of
+
+        return [dep for dep in lsp_deps if runtime not in native_runtimes_of(dep)]
 
     # ------------------------------------------------------------------
     # Target resolution

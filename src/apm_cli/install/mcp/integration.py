@@ -411,6 +411,8 @@ def run_mcp_integration(  # noqa: PLR0913
     # MCPIntegrator writes runtime configs.  The caller is responsible
     # for catching PolicyBlockError and aborting the MCP write while
     # leaving already-installed APM packages in place.
+    from apm_cli.install.mcp.native_runtimes import native_runtimes_of
+
     # A server every active runtime loads natively from its plugin is written
     # nowhere by APM; native admission already applied org MCP policy to it.
     active_runtimes = (
@@ -423,8 +425,7 @@ def run_mcp_integration(  # noqa: PLR0913
     policy_deps = [
         dep
         for dep in mcp_deps
-        if not active_runtimes
-        or not set(active_runtimes) <= getattr(dep, "native_runtimes", frozenset())
+        if not active_runtimes or not set(active_runtimes) <= native_runtimes_of(dep)
     ]
     if should_install and policy_deps:
         run_policy_preflight(

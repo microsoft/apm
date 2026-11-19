@@ -1768,7 +1768,8 @@ class HookIntegrator(BaseIntegrator):
             )
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
-                stats["failed_paths"].append(portable_relpath(json_path, project_root))
+                for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
+                    stats["failed_paths"].append(portable_relpath(path, project_root))
         return stats
 
     @staticmethod

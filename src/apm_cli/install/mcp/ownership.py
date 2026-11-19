@@ -508,38 +508,6 @@ def retire_runtime_claim(
         native_hashes.get(runtime, {}).pop(name, None)
 
 
-def retire_native_runtime_claims(
-    deps: list,
-    target_runtimes: list[str],
-    logger: Any,
-    *,
-    project_root: Any,
-    user_scope: bool,
-    stored_mcp_configs: dict,
-    managed_target_servers: dict[str, set[str]] | None,
-    native_hashes: dict[str, dict[str, str]] | None,
-) -> None:
-    """Retire APM's loose entries on runtimes that load a server from its plugin."""
-    from apm_cli.factory import ClientFactory
-
-    for dep in deps:
-        for runtime in sorted(set(target_runtimes) & dep.native_runtimes):
-            if dep.name not in (managed_target_servers or {}).get(runtime, set()):
-                continue
-            retire_runtime_claim(
-                ClientFactory.create_client(
-                    runtime, project_root=project_root, user_scope=user_scope
-                ),
-                runtime,
-                dep.name,
-                None,
-                logger,
-                stored_config=stored_mcp_configs.get(dep.name),
-                managed_target_servers=managed_target_servers,
-                native_hashes=native_hashes,
-            )
-
-
 def _shape_delta(current: dict, legacy: dict) -> set[str]:
     """Keys whose value differs between the current and a legacy render (the shape change)."""
     return {key for key in current.keys() | legacy.keys() if current.get(key) != legacy.get(key)}

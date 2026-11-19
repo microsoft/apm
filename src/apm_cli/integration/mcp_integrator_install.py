@@ -1432,6 +1432,10 @@ def _install_self_defined_deps(
     Returns the number of servers newly configured or updated.
     """
     from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.install.mcp.native_runtimes import (
+        native_runtimes_of,
+        retire_native_runtime_claims,
+    )
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         claim_shared_destination,
@@ -1440,7 +1444,6 @@ def _install_self_defined_deps(
         peer_wrote_shared_entry,
         reconcile_legacy_truncated_key,
         retain_native_receipt,
-        retire_native_runtime_claims,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -1450,7 +1453,7 @@ def _install_self_defined_deps(
     if written_connections is None:
         written_connections = set()
     retire_native_runtime_claims(
-        [dep for dep in self_defined_deps if getattr(dep, "native_runtimes", None)],
+        [dep for dep in self_defined_deps if native_runtimes_of(dep)],
         target_runtimes,
         logger,
         project_root=project_root,
@@ -1461,9 +1464,7 @@ def _install_self_defined_deps(
     )
     # Runtimes that load a server natively from its plugin never get APM's copy.
     self_defined_deps = [
-        dep
-        for dep in self_defined_deps
-        if not set(target_runtimes) <= getattr(dep, "native_runtimes", frozenset())
+        dep for dep in self_defined_deps if not set(target_runtimes) <= native_runtimes_of(dep)
     ]
     protected_clients = native_comparison_clients(
         target_runtimes, project_root=project_root, user_scope=user_scope
@@ -1544,7 +1545,7 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
-            if rt in getattr(dep, "native_runtimes", frozenset()):
+            if rt in native_runtimes_of(dep):
                 continue
             if _skip_unsupported_remote_transport(
                 rt,
