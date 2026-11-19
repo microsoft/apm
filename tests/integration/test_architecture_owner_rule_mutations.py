@@ -4669,3 +4669,43 @@ def test_trust_owner_guard_requires_a_manifest_argument(path: str, old: str, new
         and "not a directory" in violation.message
         for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_config_view.py",
+            "        and name in deployed\n",
+            "",
+            id="bundle-claim-without-deployment-receipt",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "        mcp_deps = list(view.kept_dependencies())\n",
+            "        mcp_deps = manifest.get_all_mcp_dependencies()\n",
+            id="audit-policy-judges-only-apm-yml-servers",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "        mcp_brought_in_by=mcp_brought_in_by,\n",
+            "",
+            id="audit-policy-drops-transitive-declarers",
+        ),
+    ],
+)
+def test_bundle_baseline_guard_rejects_unjudged_or_unreceipted_servers(
+    path: str, old: str, new: str
+) -> None:
+    """#3989: a bundle: claim needs its receipt, and audit policy judges every kept server."""
+    rule_id = "mutation_writes.mcp_declaration_scope"
+    assert not run_selected_rules(ROOT, (rule_id,)).violations
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

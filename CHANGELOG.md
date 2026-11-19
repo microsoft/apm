@@ -99,6 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm update` re-gates executables recorded while the gate was off once org policy turns it on, as `apm install` does. (closes #3990, #3989)
 - `apm update` retires an executable type whose approval was removed from a partially approved package; the lock records the approved types in `exec_allowed_types`. (closes #3991, #3989)
 - Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#3989)
+- `apm audit --ci` applies org MCP policy to every server the lock keeps, including transitive and local-bundle servers, and accepts a `bundle:` server only when the lock records its deployment. (#3989)
 
 ### Security
 

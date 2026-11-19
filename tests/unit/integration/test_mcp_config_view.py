@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_config_view import (
     CurrentMcpConfigView,
@@ -728,12 +729,20 @@ def test_local_bundle_servers_are_recorded_baseline(tmp_path: Path) -> None:
         "bundled": {"name": "bundled", "command": "b"},
         "shared": {"name": "shared", "command": "b"},
         "removed": {"name": "removed"},
+        "claimed": {"name": "claimed", "command": "c"},
     }
     lock.mcp_config_provenance = {
         "bundled": "bundle:mcppkg",
         "shared": "bundle:mcppkg",
         "removed": "old-package",
+        "claimed": "bundle:mcppkg",
     }
+    # A bundle install records a native-entry receipt; a bare claim has none.
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock,
+        {"claude": ["bundled", "shared", "claimed"]},
+        native_hashes={"claude": {"bundled": "sha256:" + "b" * 64, "shared": "sha256:" + "c" * 64}},
+    )
 
     view = _derive(root, lock, tmp_path / "apm_modules")
 
@@ -741,7 +750,8 @@ def test_local_bundle_servers_are_recorded_baseline(tmp_path: Path) -> None:
     assert view.configs["bundled"] == {"name": "bundled", "command": "b"}
     assert view.configs["shared"]["command"] == "root"
     assert view.provenance == {"bundled": "bundle:mcppkg", "forged": "package:bundle:evil"}
-    assert view.diff(lock.mcp_configs).lock_only == frozenset({"removed"})
+    assert view.diff(lock.mcp_configs).lock_only == frozenset({"removed", "claimed"})
+    assert {dep.name for dep in view.kept_dependencies()} == {"bundled", "shared", "forged"}
 
 
 def test_local_package_config_change_is_detected(tmp_path: Path) -> None:
