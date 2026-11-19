@@ -226,6 +226,10 @@ def compare_native_mcp_connection(
     ``--frozen`` heal, so the caller refreshes the receipt without a write.
     """
     from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.deps.plugin_root_render import (
+        RECORDED_RENDER_INFO_KEY,
+        portable_rewrite_equivalent,
+    )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -249,6 +253,16 @@ def compare_native_mcp_connection(
             if registry_request
             else client.render_server_config(requested_info)
         )
+    recorded_info = (requested_info or {}).get(RECORDED_RENDER_INFO_KEY)
+    if (
+        managed
+        and isinstance(recorded_info, dict)
+        and isinstance(native, dict)
+        and client.matches_managed_server_config(native, client.render_server_config(recorded_info))
+    ):
+        # --frozen over a pre-#3825 lock: the entry is exactly what that lock
+        # recorded, so keep its bytes rather than write the lock-sourced root.
+        return NativeMcpConnectionState.MATCHING_MANAGED
     comparison = native
     matches_baseline = False
     retired_shape = False
@@ -312,6 +326,17 @@ def compare_native_mcp_connection(
                     # moved since (a re-pointed skill launcher), so update it.
                     matches_baseline = (
                         mcp_native_hash(client.managed_server_config(native)) == native_hash
+                    )
+                    if matches_baseline:
+                        comparison = native
+                if not matches_baseline and isinstance(native, dict):
+                    # A pre-#3825 baseline recorded at another clone's root, and
+                    # the entry is this project's portable render of it (written
+                    # by a --frozen install that could not refresh the receipt).
+                    matches_baseline = portable_rewrite_equivalent(
+                        expected,
+                        client.managed_server_config(native),
+                        client._plugin_root_reference(),
                     )
                     if matches_baseline:
                         comparison = native

@@ -379,17 +379,56 @@ def _servers(project: Path, path: str) -> dict:
     return json.loads((project / path).read_text(encoding="utf-8"))["mcpServers"]
 
 
+def _native_roots(project: Path) -> dict[str, set[str]]:
+    """Absolute roots each native MCP file points ``.../apm_modules/...`` paths at."""
+    roots: dict[str, set[str]] = {}
+    for path in _NATIVE_REFERENCES:
+        native = project / path
+        text = native.read_text(encoding="utf-8") if native.is_file() else "{}"
+        found: set[str] = set()
+
+        def walk(value: object, found: set[str] = found) -> None:
+            if isinstance(value, str) and "/apm_modules/" in value:
+                prefix = value[: value.index("/apm_modules/")]
+                if prefix.startswith("/") or (len(prefix) > 1 and prefix[1] == ":"):
+                    found.add(prefix)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    walk(item)
+            elif isinstance(value, list):
+                for item in value:
+                    walk(item)
+
+        walk(json.loads(text))
+        roots[path] = found
+    return roots
+
+
+@pytest.mark.parametrize("clone", ["same path", "moved clone"])
 def test_frozen_replay_of_a_pre_3825_lock_keeps_native_state_removable(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, clone: str
 ) -> None:
     world, project = _pre_3825_project(tmp_path, apm_binary_path, fingerprints=True)
-    recorded = {
-        path: (project / path).read_bytes() for path in (*_NATIVE_REFERENCES, "apm.lock.yaml")
-    }
+    if clone == "moved clone":
+        moved = world.isolated.work_root / "teammate clone"
+        shutil.copytree(project, moved, symlinks=True)
+        project = moved
+    # An uncommitted harness config (here Cursor's) is rebuilt by the replay:
+    # lock text must never choose the absolute path it runs.
+    (project / ".cursor/mcp.json").unlink()
+    (project / ".cursor/mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    before_roots = _native_roots(project)
+    recorded = {path: (project / path).read_bytes() for path in (".mcp.json", "apm.lock.yaml")}
 
     world.apm(project, "install", "--frozen", "--no-policy")
     world.apm(project, "audit", "--ci", "--no-policy")
+    after_roots = _native_roots(project)
+    for path, roots in after_roots.items():
+        assert roots <= before_roots[path], (path, roots - before_roots[path])
     assert {path: (project / path).read_bytes() for path in recorded} == recorded
+    assert _servers(project, ".cursor/mcp.json")["synth-db"]["args"] == [
+        "${workspaceFolder}/apm_modules/acme/synth/scripts/server.js"
+    ]
 
     world.apm(project, "uninstall", remote_url("synth"))
     for path in _NATIVE_REFERENCES:

@@ -287,17 +287,16 @@ class CurrentMcpConfigView:
     def replay_recorded_roots(
         self, dependencies: list[Any], stored_configs: Mapping[str, Mapping[str, Any]]
     ) -> list[Any]:
-        """Return *dependencies* with a pre-#3825 recorded root replayed (``--frozen``).
+        """Mark pre-#3825 recorded roots so ``--frozen`` keeps unchanged native entries.
 
         A lock written before #3825 holds ``${CLAUDE_PLUGIN_ROOT}`` already
-        expanded. A frozen install replays that recorded declaration, so native
-        files and their lock receipts stay as recorded; the next ordinary
-        install migrates both to the portable form.
+        expanded, possibly at another clone's path. The recorded root is never
+        rendered: a native entry that already equals the recorded render is
+        kept byte-for-byte, so its lock receipt stays valid, and any other entry
+        gets this project's portable render. The next ordinary install migrates
+        both.
         """
-        from apm_cli.deps.plugin_root_render import (
-            legacy_absolute_root,
-            with_absolute_plugin_root,
-        )
+        from apm_cli.deps.plugin_root_render import legacy_absolute_root
 
         replayed: list[Any] = []
         for dependency in dependencies:
@@ -315,16 +314,9 @@ class CurrentMcpConfigView:
                 else None
             )
             if root is not None:
-                dependency = replace(
-                    with_absolute_plugin_root(dependency, _ROOT_FIELDS, root=root),
-                    plugin_root=None,
-                )
+                dependency = replace(dependency, recorded_plugin_root=root)
             replayed.append(dependency)
         return replayed
-
-
-# Declaration fields that may carry an authored ``${CLAUDE_PLUGIN_ROOT}``.
-_ROOT_FIELDS = ("command", "args", "env", "url", "headers", "cwd", "extra")
 
 
 @dataclass(frozen=True)
