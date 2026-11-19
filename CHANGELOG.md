@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Declaring the same `owner/repo` from two hosts (for example `acme/tool` and `gitlab.example.com/acme/tool`, directly or through a dependency) now fails before anything is downloaded, with an error naming both declarations and suggesting `alias:` or removing one, instead of `Path already has a replacement in progress` or installing the other host's copy (#3895)
+- The same `owner/repo` from two hosts (such as `acme/tool` and `gitlab.example.com/acme/tool`) now fails before download with an error naming both declarations; set `alias:` on one or remove one. (#3895)
 - The MCP retired-shape heal lifecycle test now asserts the 0.37 `mcp.transport.allow` contract (a registry SSE remote outside the allow list is blocked before any write). (#3877)
 - `apm install` policy blocks print one violation per offending dependency or MCP server, naming it, and the hint names what to remove, add or pin (for a transitive MCP server, the direct apm.yml dependency that brings it in, even through deeper chains) instead of telling you to remove the check name from apm.yml (#3865)
 - `apm install <pkg> --dry-run` without an `apm.yml` no longer writes one in project scope; it prints `Would create apm.yml`, as `-g` already did (#3865)
