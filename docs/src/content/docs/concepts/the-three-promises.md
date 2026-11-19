@@ -42,7 +42,7 @@ git clone <repo> && cd <repo> && apm install
 ### Read more
 
 - Lifecycle of an install: [Lifecycle](/apm/concepts/lifecycle/)
-- Lockfile fields and semantics: [CLI commands](/apm/reference/cli/install/)
+- Lockfile fields and semantics: [Lockfile specification](/apm/reference/lockfile-spec/)
 
 ## Promise 2: Secure by default
 
@@ -113,10 +113,11 @@ apm install --dry-run <package>
   `resolve_policy_chain()` implement the tighten-only enterprise
   -> org -> repo flow with `_escalate()` enforcement.
 - `src/apm_cli/policy/ci_checks.py` -- `run_baseline_checks()` is
-  the CI surface used by `apm audit --ci`. It runs 8 baseline
-  checks: lockfile-exists, ref-consistency, deployed-files-present,
-  no-orphans, skill-subset-consistency, config-consistency,
-  content-integrity, and includes-consent.
+  the CI surface used by `apm audit --ci`. It runs 9 always-on baseline
+  checks: lockfile-exists, ref-consistency, deployment-ledger-owners,
+  deployed-files-present, no-orphaned-packages, skill-subset-consistency,
+  config-consistency, content-integrity, and includes-consent. See
+  [Baseline checks](/apm/reference/baseline-checks/).
 
 ### Read more
 
@@ -127,7 +128,7 @@ apm install --dry-run <package>
 ### Is this just `npm` for prompts?
 
 The verbs rhyme on purpose -- `apm install`, `apm update`,
-`apm list`, `apm prune`. The package model does not. APM resolves
+`apm outdated`, `apm prune`. The package model does not. APM resolves
 primitives (skills, prompts, instructions, hooks, MCP servers) and
 deploys them into nine default agent harnesses from one manifest.
 npm has no equivalent of the harness fan-out, the install-time
@@ -147,6 +148,6 @@ right now -- including hand-edits to files inside `apm_modules/`.
 At install time: dependencies from disallowed sources or scopes,
 primitives outside the allow-list, and transitive MCP servers that
 fail any of the configured trust rules -- evaluated before any
-download. In CI via `apm audit --ci`: the 8 baseline checks above,
+download. In CI via `apm audit --ci`: the baseline checks above,
 which catch lockfile drift, missing deployed files, orphaned
 packages, and content-hash mismatches before a PR can merge.
