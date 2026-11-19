@@ -517,12 +517,12 @@ requirements:
     keyword: MUST
     section: "8.5.11"
     conformance_class: consumer
-    notes: "native plugin activation only for a target selected by the req-tg-008 effective target intersection and a scope and disclosed client version that meets Part A criteria A1-A5 by published documentation; unknown qualification does not qualify; the conformance statement discloses each target, scope, oldest qualified version and cited source per criterion"
+    notes: "a consumer that natively activates does so only for a target selected by the req-tg-008 effective target intersection and a scope and disclosed client version that meets Part A criteria A1-A5 by published documentation; unknown qualification does not qualify; the conformance statement discloses each target, scope, oldest qualified version and cited source per criterion"
   - id: req-na-002
     keyword: MUST
     section: "8.5.11"
     conformance_class: consumer
-    notes: "activated set derives only from the lockfile; only the approved plugin root is deployed from locked bytes to <profile root>/<plugin>/ under a safe single-segment name with req-tg-013 claimant selection; the lock records the root and a pinned sha256 root digest over every regular file's sorted POSIX path, NUL, exec-bit byte and raw content digest, symlinks refused, checked for drift with expected and observed digests; a generated .claude-plugin/marketplace.json lists only activated plugins by relative path; the resolved dependency root is never declared; project-scope output is not ignored; the deployed root substitutes for in-place placement under req-tg-013"
+    notes: "activated set derives only from the lockfile; only the approved plugin root is deployed from locked bytes to <profile root>/<plugin>/ under a safe single-segment name (no leading dot, trailing dot or space, separators, @, :, or control bytes; Unicode case-fold collisions refused) with req-tg-013 claimant selection; the lock records the root and a pinned sha256 root digest over every regular file's byte-wise sorted POSIX path (no normalization, .git components excluded and not deployed), NUL, exec-bit byte and raw content digest; symlinks or escaping paths make the plugin ineligible, handled like req-na-006 and never silent; checked for drift with expected and observed digests; a generated .claude-plugin/marketplace.json lists only activated plugins by relative path; the resolved dependency root is never declared; project-scope output is not ignored; the deployed root substitutes for in-place placement under req-tg-013"
   - id: req-na-003
     keyword: MUST
     section: "8.5.11"
@@ -533,17 +533,17 @@ requirements:
     section: "8.5.11"
     conformance_class: consumer
     oracle: tests/fixtures/spec-conformance/native-activation/req-na-004.json
-    notes: "ownership of activation entries, deployed roots and marketplace entries derives from the previous and next lockfile plus the source binding; add what next needs, remove only what previous produced with the same binding; preserve unrelated keys and explicit false; with a missing previous lock and an existing entry remove nothing and report; a moved binding or foreign entry is reported and nothing is written under that name; first activation needs no diagnostic; the consumer owns only lock-produced plugin roots and the generated marketplace under the profile root; unparseable settings fail closed; one rollback unit; no receipt or ledger file"
+    notes: "ownership of activation entries, deployed roots and marketplace entries derives from the previous and next lockfile plus the source binding; add what next needs, remove only what previous produced with the same binding; preserve unrelated keys and explicit false; with a missing previous lock and an existing entry remove nothing and report; a moved or renamed binding or foreign entry is reported, nothing is written under either name and no second marketplace is declared for the same profile root; first activation needs no diagnostic; the consumer owns only lock-produced plugin roots and the generated marketplace under the profile root and never overwrites an unowned plugin directory unless its digest matches; unparseable settings fail closed; one rollback unit; no receipt or ledger file"
   - id: req-na-005
     keyword: MUST
     section: "8.5.11"
     conformance_class: consumer
-    notes: "a consumer that natively activates writes enable true only when an implementation-defined, disclosed approval bound to the req-na-002 root digest covers the plugin root and the req-tg-013 admission gates (lock integrity, req-sc-015 scan, executable authorization) admit it for every plugin format; an update to uncovered content keeps or retires the previous root in one rollback unit; otherwise not deployed under the profile root, not declared, never declared disabled, with a default-visible diagnostic; never replace a deployed root with uncovered content"
+    notes: "a consumer that natively activates writes enable true only when an implementation-defined, disclosed approval bound to the req-na-002 root digest covers the plugin root and the req-tg-013 admission gates (lock integrity, req-sc-015 scan, executable authorization) admit it for every plugin format; an update to uncovered content keeps the previous lock entry, root and entries with a diagnostic, or retires them in the lock write's rollback unit; the lock never pins undeployed content; otherwise not deployed under the profile root, not declared, never declared disabled, with a default-visible diagnostic; never replace a deployed root with uncovered content"
   - id: req-na-006
     keyword: MUST
     section: "8.5.11"
     conformance_class: consumer
-    notes: "a consumer that natively activates gives a target and scope that does not qualify no native activation and no private state or activation entries; explicit split install or refusal with a default-visible diagnostic naming target, scope and unmet or unknown criterion; never silent; dry-run reports the same decision; req-tg-011 governs opaque dependencies; req-tg-013 registrations without native activation are unaffected"
+    notes: "a consumer that natively activates gives a target and scope that does not qualify no native activation and no private state or activation entries; explicit split install or refusal with a default-visible diagnostic naming target, scope and unmet or unknown criterion (A1-A5); never silent; dry-run reports the same decision; req-tg-011 governs opaque dependencies; req-tg-013 registrations without native activation are unaffected"
   - id: req-na-007
     keyword: MUST
     section: "8.5.11"

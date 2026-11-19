@@ -3721,7 +3721,9 @@ text shipped in a cited client version.
   marketplace source of type local directory whose listed plugins load from
   their path inside that directory, without being copied into the target's
   private state, and accepts a plugin source path relative to the
-  marketplace directory when the marketplace is declared at project scope.
+  marketplace directory when the marketplace is declared at project scope,
+  and, at project scope, documents how a relative directory path in the
+  marketplace declaration resolves.
 - <a id="na-crit-a3"></a>**A3. Declarative enable.** The target documents a per-plugin enable
   switch keyed by plugin and marketplace, such that a plugin listed by a
   declared A2 marketplace and switched on loads at a session start in a
@@ -3738,8 +3740,9 @@ text shipped in a cited client version.
   scope meets A5.
 
 <a id="req-na-001"></a>
-**[req-na-001]** A conforming **consumer** implementation MUST natively
-activate a plugin for a target that the effective target intersection of
+**[req-na-001]** A conforming **consumer** implementation that natively
+activates plugins MUST do so only for a target that the effective target
+intersection of
 [req-tg-008](#req-tg-008) selects, and only at a scope and client version for which
 that target qualifies under criteria A1 to A5. A target whose qualification
 is unknown does not qualify. The consumer MUST disclose in its conformance
@@ -3788,9 +3791,11 @@ root covered by the approval in [req-na-005](#req-na-005), copied from the
 locked and materialized bytes, to `<profile root>/<plugin>/`, where
 `<plugin>` is the plugin's declared name. The consumer MUST refuse, before
 any write and with an actionable diagnostic naming the plugin, a declared
-name that is empty, is `.` or `..`, equals `.claude-plugin`, or contains `/`,
-`\`, `@`, or a NUL byte, and two plugins activated at one scope whose names
-differ only by letter case. Among plugins activated at one scope that
+name that is empty, begins with `.` (which covers `.`, `..`, `.git`, and
+`.claude-plugin`), ends with `.` or a space, or contains `/`, `\`, `@`,
+`:`, or a byte in the range 0x00 to 0x1F or equal to 0x7F, and two plugins
+activated at one scope whose names are equal under Unicode default case
+folding. Among plugins activated at one scope that
 declare the same name, the claimant selection of [req-tg-013](#req-tg-013)
 applies whatever the plugin format. The consumer MUST verify, without
 following symbolic links, that each deployed path resolves inside the
@@ -3803,13 +3808,20 @@ whose recomputed digest differs from the recorded one as drift under [Section 5.
 diagnostic MUST name the plugin and the expected and observed root digests.
 The root digest is a hash envelope of the form `sha256:<hex-lowercase>`
 defined by [req-lk-016](#req-lk-016). It is the SHA-256 of the
-concatenation, over every regular file in the plugin root except `.git`
-entries, taken in ascending order of the file's POSIX relative path encoded
-as UTF-8, of: that relative path, one NUL (0x00) byte, one byte `x` (0x78)
+concatenation, over every regular file in the plugin root except any file whose relative
+path has a component equal to `.git`, at any depth, taken in ascending
+byte-wise order of the file's POSIX relative path encoded as UTF-8, with no
+Unicode normalization, of: that relative path, one NUL (0x00) byte, one byte `x` (0x78)
 when the file is owner-executable or `-` (0x2D) otherwise, and the 32-byte
 raw SHA-256 digest of the file's bytes. File bytes are not line-ending
-normalized, unlike [req-lk-012](#req-lk-012). A symbolic link anywhere in the
-plugin root makes that root ineligible for native activation. It MUST NOT
+normalized, unlike [req-lk-012](#req-lk-012). Files so excluded MUST NOT be
+deployed under the profile root. A symbolic link anywhere in the
+plugin root makes that root ineligible for native activation. A plugin
+that is ineligible under this requirement MUST be handled as
+[req-na-006](#req-na-006) handles a target that does not qualify: it is
+split-installed or refused, subject to [req-tg-011](#req-tg-011), with a
+default-visible diagnostic that names the plugin and the reason, and never
+skipped silently. It MUST NOT
 deploy other content of the resolved package there. It MUST generate `<profile root>/.claude-plugin/marketplace.json`
 listing exactly the activated plugins at that scope, each with a source
 path relative to the profile root and no remote source. The consumer MUST
@@ -3858,11 +3870,13 @@ already holds an entry under the consumer's marketplace name, the consumer
 MUST report that in an actionable diagnostic, MUST NOT remove any existing
 activation entry, and MAY add what the next lockfile requires; a first
 activation with no such entry needs no diagnostic. When the binding has
-moved (the expected profile-root path differs from the one the previous
-lockfile's entries were produced under), or an entry under the consumer's
-marketplace name points at a different source, the consumer MUST report the
-conflict in an actionable diagnostic and MUST NOT write, delete, or
-overwrite any activation entry under that name. A settings file the consumer
+moved (the expected marketplace name or profile-root path differs from the
+binding the previous lockfile's entries were produced under), or an entry
+under the consumer's marketplace name points at a different source, the
+consumer MUST report the conflict in an actionable diagnostic, MUST NOT
+write, delete, or overwrite any activation entry under either name, and
+MUST NOT declare another marketplace that points at the same profile root
+while an entry under the previous binding remains. A settings file the consumer
 cannot parse MUST fail closed before any overwrite. Settings, generated
 marketplace, and deployed-root writes for one operation MUST commit as one
 rollback unit, so a failed operation leaves no partial new activation. The
@@ -3871,7 +3885,12 @@ native activation; for a dependency in scope of [req-tg-013](#req-tg-013),
 the lockfile is the consumer-owned ownership record that requirement
 names. Under the profile root the consumer owns only the plugin roots that
 the previous or next lockfile produced and the generated marketplace file;
-it MUST NOT modify or remove any other entry there.
+it MUST NOT modify or remove any other entry there. A directory at
+`<profile root>/<plugin>/` that the previous lockfile did not produce is not
+owned: the consumer MUST NOT overwrite it unless its recomputed root digest
+equals the one the next lockfile records, and otherwise MUST refuse, before
+any write, with an actionable diagnostic that names the plugin and the
+path.
 
 <a id="req-na-005"></a>
 **[req-na-005]** A conforming **consumer** implementation that natively
@@ -3892,11 +3911,14 @@ consumer MUST NOT deploy that content under the profile root,
 MUST NOT declare it to any target, MUST NOT declare it in a disabled state,
 and MUST emit a default-visible diagnostic that names the plugin. It MUST
 NOT replace a deployed plugin root with content the approval does not
-cover. When the next lockfile pins content that no approval covers for a
-previously activated plugin, the consumer MUST either leave the previously
-deployed root and its activation entries unchanged, or retire them in the
-same rollback unit, and MUST NOT record in the lock a root digest for
-content it did not deploy.
+cover. When the next lockfile would pin content that no approval covers for a
+previously activated plugin, the consumer MUST either keep that plugin's
+previous lock entry (including its recorded plugin root and root digest),
+the previously deployed root, and its activation entries unchanged, and
+emit a default-visible diagnostic that names the plugin and states that the
+update was not applied; or retire the deployed root and its activation
+entries in the same rollback unit as the lock write. The written lock MUST
+NOT record a pin or root digest for content the consumer did not deploy.
 
 <a id="req-na-006"></a>
 **[req-na-006]** A conforming **consumer** implementation that natively
@@ -3907,7 +3929,8 @@ or activation entries for it under this subsection. For a plugin it would
 otherwise natively activate at such a target and scope, it MUST either
 split-install the plugin or refuse it, and in both cases MUST emit a
 default-visible diagnostic that names the target, the scope, and the criterion that is
-unmet or unknown. It MUST NOT split-install a plugin silently, and a
+unmet or unknown, identified by its label ([A1](#na-crit-a1) to
+[A5](#na-crit-a5)). It MUST NOT split-install a plugin silently, and a
 `--dry-run` invocation MUST report the same decision without mutating
 state. Where [req-tg-011](#req-tg-011) makes a dependency opaque at the
 deployment boundary, that requirement governs instead of split install.
@@ -4381,7 +4404,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
 | 11| Unauthorised executable primitive deployment | [req-sc-009](#req-sc-009)                                         | Consumer-default  |
-| 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010)                                         | Consumer-default  |
+| 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010), [req-na-005](#req-na-005)              | Consumer-default  |
 | 13| Org executable denial bypassed by project/user grant | [req-sc-011](#req-sc-011)                                 | Consumer-default  |
 | 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
 | 15| Cross-repository cache substitution                  | [req-rs-016](#req-rs-016)                                         | Consumer-default  |
@@ -4563,9 +4586,14 @@ lockfile ([req-na-004](#req-na-004)), and requires per-project marketplace
 names ([req-na-007](#req-na-007)).
 
 **Residual.** Committed project-scope plugin roots and activation entries
-load at session start without a consumer run, so a clone loads what the
-committer approved. A per-user approval does not travel with the clone, and
-the target's own trust prompt is the remaining gate.
+load at session start without a consumer run, so a clone loads the
+committed bytes, which a consumer checks against the recorded root digest
+only when it next runs. A per-user approval does not travel with the clone, and
+the target's own trust prompt is the remaining gate. A committed `true`
+enable entry is a version-control enablement path that
+[req-sc-010](#req-sc-010) does not cover (see
+[Section 10.11](#1011-summary-table), row 12); it is not an approval under
+[req-na-005](#req-na-005) for any other user.
 
 ---
 
@@ -4932,7 +4960,7 @@ settings content and conflict diagnostics expected afterwards, for
 [req-na-004](#req-na-004). A consumer uses it to show that it adds only what
 the next lockfile needs, removes only what the previous lockfile produced,
 preserves unrelated keys, explicit `false` values and manual keys under its
-marketplace name, reports a moved or foreign binding instead of deleting it,
+marketplace name, reports a moved, renamed, or foreign binding instead of deleting it,
 leaves unparseable settings untouched, and declares a relative path at
 project scope.
 

@@ -26,6 +26,7 @@ _ORACLE = ("native-activation", "req-na-004.json")
 @pytest.mark.req("req-na-001")
 def test_native_activation_requires_documented_part_a_qualification():
     assert_spec_contains(
+        "that natively\nactivates plugins MUST do so only for a target",
         "A target **qualifies** for a scope (project or user) and a client version",
         "A target whose qualification\nis unknown does not qualify.",
         "the oldest client\nversion it qualified, and the published source it relies on for each\ncriterion.",
@@ -121,7 +122,7 @@ def _reconcile(case: dict[str, Any]) -> tuple[Any, list[str]]:
     binding = {"source": {"source": "directory", "path": case["marketplace"]["path"]}}
     before = case["settings_before"]
     moved_from = case.get("previous_marketplace")
-    if moved_from is not None and moved_from["path"] != case["marketplace"]["path"]:
+    if moved_from is not None and moved_from != case["marketplace"]:
         return copy.deepcopy(before), ["binding-moved"]
     settings = copy.deepcopy(before)
     marketplaces = settings.setdefault("extraKnownMarketplaces", {})
@@ -156,5 +157,8 @@ def test_req_na_004_oracle_matches_the_reconciliation_rule():
     for case in inputs:
         settings, diagnostics = _reconcile(case)
         want = expected[case["id"]]
-        assert settings == want.get("settings_after", want.get("settings_after_raw")), case["id"]
+        allowed = want.get("settings_after_one_of")
+        if allowed is None:
+            allowed = [want.get("settings_after", want.get("settings_after_raw"))]
+        assert settings in allowed, case["id"]
         assert diagnostics == expected[case["id"]]["diagnostics"], case["id"]

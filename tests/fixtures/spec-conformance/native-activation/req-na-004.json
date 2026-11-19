@@ -1,6 +1,6 @@
 {
   "spec_anchor": "req-na-004",
-  "description": "Oracle for OpenAPM req-na-004 (Section 8.5.11): settings reconciliation from the previous and next lockfile, with no receipt file. Plugin lists name the plugins each lockfile activates at the scope; null means no previous lockfile. Diagnostic codes are oracle labels, not required message text. Settings are compared semantically; settings_before_raw and settings_after_raw carry a file the consumer cannot parse, byte for byte. previous_marketplace, when present, is the binding the previous lockfile's entries were produced under.",
+  "description": "Oracle for OpenAPM req-na-004 (Section 8.5.11): settings reconciliation from the previous and next lockfile, with no receipt file. Plugin lists name the plugins each lockfile activates at the scope; null means no previous lockfile. Diagnostic codes are oracle labels, not required message text. Settings are compared semantically; settings_before_raw and settings_after_raw carry a file the consumer cannot parse, byte for byte. previous_marketplace, when present, is the binding the previous lockfile's entries were produced under. settings_after_one_of lists every conforming outcome where the rule leaves a choice (MAY).",
   "input": {
     "cases": [
       {
@@ -205,8 +205,40 @@
         }
       },
       {
+        "id": "binding-renamed",
+        "description": "The expected marketplace name differs from the one the previous lockfile's entries were produced under: nothing is written under either name, no second marketplace is declared for the same profile root, and the conflict is reported.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_marketplace": {
+          "name": "apm-u-0a71",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": [
+          "alpha"
+        ],
+        "next_lock_plugins": [
+          "alpha"
+        ],
+        "settings_before": {
+          "extraKnownMarketplaces": {
+            "apm-u-0a71": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-0a71": true
+          }
+        }
+      },
+      {
         "id": "settings-unparseable",
-        "description": "A settings file the consumer cannot parse (here JSONC with a comment) fails closed before any overwrite.",
+        "description": "A settings file the consumer cannot parse (here a truncated object) fails closed before any overwrite.",
         "scope": "user",
         "marketplace": {
           "name": "apm-u-3f9c",
@@ -219,7 +251,7 @@
           "alpha",
           "beta"
         ],
-        "settings_before_raw": "{\n  // personal settings\n  \"enabledPlugins\": {\"alpha@apm-u-3f9c\": true}\n}\n"
+        "settings_before_raw": "{\n  \"enabledPlugins\": {\"alpha@apm-u-3f9c\": true\n"
       },
       {
         "id": "project-scope-relative",
@@ -346,20 +378,35 @@
       },
       {
         "id": "previous-lock-missing",
-        "settings_after": {
-          "extraKnownMarketplaces": {
-            "apm-u-3f9c": {
-              "source": {
-                "source": "directory",
-                "path": "/home/dev/.agents/plugins"
+        "settings_after_one_of": [
+          {
+            "extraKnownMarketplaces": {
+              "apm-u-3f9c": {
+                "source": {
+                  "source": "directory",
+                  "path": "/home/dev/.agents/plugins"
+                }
               }
+            },
+            "enabledPlugins": {
+              "beta@apm-u-3f9c": true
             }
           },
-          "enabledPlugins": {
-            "beta@apm-u-3f9c": true,
-            "alpha@apm-u-3f9c": true
+          {
+            "extraKnownMarketplaces": {
+              "apm-u-3f9c": {
+                "source": {
+                  "source": "directory",
+                  "path": "/home/dev/.agents/plugins"
+                }
+              }
+            },
+            "enabledPlugins": {
+              "beta@apm-u-3f9c": true,
+              "alpha@apm-u-3f9c": true
+            }
           }
-        },
+        ],
         "diagnostics": [
           "previous-lock-missing"
         ]
@@ -403,8 +450,27 @@
         ]
       },
       {
+        "id": "binding-renamed",
+        "settings_after": {
+          "extraKnownMarketplaces": {
+            "apm-u-0a71": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-0a71": true
+          }
+        },
+        "diagnostics": [
+          "binding-moved"
+        ]
+      },
+      {
         "id": "settings-unparseable",
-        "settings_after_raw": "{\n  // personal settings\n  \"enabledPlugins\": {\"alpha@apm-u-3f9c\": true}\n}\n",
+        "settings_after_raw": "{\n  \"enabledPlugins\": {\"alpha@apm-u-3f9c\": true\n",
         "diagnostics": [
           "settings-unparseable"
         ]
