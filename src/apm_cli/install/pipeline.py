@@ -348,18 +348,10 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
-def _fail_before_integration(ctx: InstallContext, diagnostics: Any) -> None:
-    """Raise before integration when a direct dependency failed to resolve or download."""
+def _direct_dependency_failed(ctx: InstallContext) -> bool:
+    """Whether a direct dependency failed to resolve or download (#3874)."""
     direct_keys = {dep.get_unique_key() for dep in ctx.all_apm_deps}
-    failed = sorted(set(ctx.callback_failures) & direct_keys)
-    if not failed:
-        return
-    if diagnostics is not None and diagnostics.has_diagnostics:
-        diagnostics.render_summary()
-    raise DirectDependencyError(
-        f"{len(failed)} direct dependency(ies) failed to resolve or download "
-        f"({', '.join(failed)}); nothing was integrated. Fix or remove them and retry."
-    )
+    return bool(set(ctx.callback_failures) & direct_keys)
 
 
 @transactional_pipeline
@@ -822,7 +814,13 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # Apply barrier (#3874): every requested package resolves and downloads
         # before any is integrated, so a failed direct dependency never leaves
         # untracked files deployed by the packages that succeeded.
-        _fail_before_integration(ctx, diagnostics)
+        if _direct_dependency_failed(ctx):
+            from .outcome import result_from_install_context
+
+            ctx.diagnostics = diagnostics
+            barrier_result = result_from_install_context(ctx)
+            if barrier_result.disposition is InstallDisposition.FAILED:
+                return barrier_result
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         materialization_session = _run_integration_phase(ctx)

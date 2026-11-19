@@ -1036,10 +1036,10 @@ def test_failed_direct_dependency_stops_before_integration() -> None:
     """Dropping the apply barrier lets a failed install deploy untracked files (#3874)."""
     rule_id = "install-deployment-outcome"
     path = "src/apm_cli/install/pipeline.py"
-    old = "        _fail_before_integration(ctx, diagnostics)\n"
+    old = "        if _direct_dependency_failed(ctx):"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
-    mutated = source.replace(old, "")
+    mutated = source.replace(old, "        if False:")
     ast.parse(mutated, filename=path)
 
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
