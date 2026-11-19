@@ -1171,10 +1171,9 @@ def install(  # noqa: PLR0913
     # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
-    logger = None
+    logger = dry_run_manifest_tmp = None
     command_result: InstallResult | None = None
     transaction: InstallTransaction | None = None
-    dry_run_manifest_tmp = None
     from ..install.service import InstallService
 
     ctx.with_resource(InstallService.frozen_writes(frozen))
