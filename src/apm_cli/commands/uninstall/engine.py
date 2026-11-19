@@ -54,17 +54,29 @@ def _removal_target(dep_entry: object, lockfile: LockFile | None) -> object:
 
     An object-form ``{name, marketplace}`` declaration is identified as
     ``_marketplace/<alias>/<plugin>``; its lock row, ``apm_modules`` checkout
-    and transitive edges belong to the concrete coordinate the lockfile
-    associates with that declaration (#3928). Other entries are unchanged.
+    and transitive edges belong to the one locked row recorded for that
+    alias/plugin pair, matched case-insensitively like the selection (#3928).
+    With no such row the entry is returned unchanged (nothing was locked); an
+    ambiguous pair is refused earlier by
+    :func:`_refuse_unsafe_marketplace_removals`.
     """
+    rows = _locked_marketplace_rows(dep_entry, lockfile)
+    return rows[0].to_dependency_ref() if len(rows) == 1 else dep_entry
+
+
+def _locked_marketplace_rows(dep_entry: object, lockfile: LockFile | None) -> list:
+    """Return the lock rows an object-form declaration's alias/plugin pair records."""
+    if lockfile is None:
+        return []
     try:
         dependency = _parse_dependency_entry(dep_entry)
     except (ValueError, TypeError, AttributeError, KeyError):
-        return dep_entry
-    if lockfile is None or not dependency.is_marketplace:
-        return dep_entry
-    locked = lockfile.get_dependency(dependency.get_unique_key())
-    return locked.to_dependency_ref() if locked is not None else dep_entry
+        return []
+    if not dependency.is_marketplace:
+        return []
+    return lockfile.marketplace_rows(
+        dependency.marketplace_name or "", dependency.marketplace_plugin_name or ""
+    )
 
 
 def _removal_targets(packages: list, lockfile: LockFile | None) -> list:
@@ -82,22 +94,36 @@ def _marketplace_declaration_label(dep_entry: object) -> str | None:
     return f"{dependency.marketplace_plugin_name}@{dependency.marketplace_name}"
 
 
-def _refuse_shared_marketplace_coordinates(
+def _refuse_unsafe_marketplace_removals(
     packages_to_remove: list, current_deps: list, lockfile: LockFile | None, logger
 ) -> list[str]:
-    """Refuse removing one of two declarations that own the same locked package.
+    """Refuse marketplace removals that would leave package state behind (#3928).
 
-    An object-form ``{name, marketplace}`` entry and another declaration (for
-    example the same package's Git URL) can resolve to one locked coordinate.
-    Removing only one would delete the checkout, files and lock row the
-    survivor still needs, so uninstall fails closed and names both (#3928).
+    An object-form ``{name, marketplace}`` entry whose alias/plugin pair is
+    recorded on several lock rows cannot be mapped to one package, so removing
+    it would drop the declaration but keep its lock row and files. And an
+    object-form entry plus another declaration (for example the same package's
+    Git URL) can own one locked coordinate; removing only one would delete the
+    checkout, files and lock row the survivor still needs. Both fail closed.
     """
     if lockfile is None or not packages_to_remove:
         return []
     removed = manifest_declarations_of(current_deps, packages_to_remove)
+    refused: list[str] = []
+    for entry in removed:
+        rows = _locked_marketplace_rows(entry, lockfile)
+        if len(rows) > 1:
+            label = _marketplace_declaration_label(entry)
+            logger.error(
+                f"apm.lock.yaml records {len(rows)} packages for {label}, so uninstall "
+                "cannot tell which one to remove. Nothing was changed. Run 'apm install' "
+                "to refresh apm.lock.yaml, then retry."
+            )
+            refused.append(label)
+    if refused:
+        return refused
     removed_ids = {id(entry) for entry in removed}
     removed_by_key = {_removed_lock_key(entry, lockfile): entry for entry in removed}
-    refused: list[str] = []
     for survivor in current_deps:
         if id(survivor) in removed_ids:
             continue
@@ -841,7 +867,7 @@ def _validate_uninstall_packages(
                 )
 
     packages_not_found.extend(
-        _refuse_shared_marketplace_coordinates(packages_to_remove, current_deps, lockfile, logger)
+        _refuse_unsafe_marketplace_removals(packages_to_remove, current_deps, lockfile, logger)
     )
     return packages_to_remove, packages_not_found
 

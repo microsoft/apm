@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_marketplace_origin_evidence_lifecycle import (
     _ALIAS,
     _INSTALL_FLAGS,
@@ -87,6 +87,28 @@ def test_uninstall_selects_object_form_marketplace_declaration_offline(
     manifest_before = consumer.manifest_path.read_bytes()
     lock_before = lock_path.read_bytes()
 
+    # A second declaration of the same package (its Git form) must not lose its
+    # checkout, files and lock row: removing only one of them fails closed.
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"].append(
+        {"git": f"{_REMOTE_A}.git", "path": f"plugins/{_PLUGIN}"}
+    )
+    dump_yaml(manifest, consumer.manifest_path)
+    shared_manifest = consumer.manifest_path.read_bytes()
+    (refused,) = runner.run_sequence(
+        (("uninstall", f"{_PLUGIN}@{_ALIAS}"),),
+        expected_returncodes=(1,),
+        scenario_id="object-form-uninstall-shared-coordinate",
+        cwd=consumer.root,
+        env=offline,
+    )
+    assert "Remove both together" in " ".join((refused.stdout + refused.stderr).split())
+    assert consumer.manifest_path.read_bytes() == shared_manifest
+    assert lock_path.read_bytes() == lock_before
+    assert deployed_skill.exists()
+    assert all(path.is_dir() for path in checkouts)
+    consumer.manifest_path.write_bytes(manifest_before)
+
     (preview,) = runner.run_sequence(
         (("uninstall", f"{_PLUGIN}@{_ALIAS}", "--dry-run"),),
         expected_returncodes=(0,),
@@ -95,6 +117,7 @@ def test_uninstall_selects_object_form_marketplace_declaration_offline(
         env=offline,
     )
     assert _PLUGIN in preview.stdout
+    assert "from apm_modules/" in preview.stdout
     assert consumer.manifest_path.read_bytes() == manifest_before
     assert lock_path.read_bytes() == lock_before
     assert deployed_skill.exists()

@@ -128,10 +128,12 @@ _OWNED_SELECTION_DEFS = frozenset(
 # through _removal_target so object-form entries resolve to their locked row.
 _UNINSTALL_ROUTES = (
     ("_validate_uninstall_packages", "_select_marketplace_declarations", 1),
-    ("_validate_uninstall_packages", "_refuse_shared_marketplace_coordinates", 1),
-    ("_refuse_shared_marketplace_coordinates", "_removed_lock_key", 2),
+    ("_validate_uninstall_packages", "_refuse_unsafe_marketplace_removals", 1),
+    ("_refuse_unsafe_marketplace_removals", "_removed_lock_key", 2),
+    ("_refuse_unsafe_marketplace_removals", "_locked_marketplace_rows", 1),
+    ("_locked_marketplace_rows", "lockfile.marketplace_rows", 1),
     ("_select_marketplace_declarations", "select_marketplace_declaration", 1),
-    ("_removal_target", "lockfile.get_dependency", 1),
+    ("_removal_target", "_locked_marketplace_rows", 1),
     ("_removal_targets", "_removal_target", 1),
     ("_removed_lock_key", "_removal_target", 1),
     ("_remove_packages_from_disk", "_removal_target", 1),
@@ -145,7 +147,7 @@ def _uninstall_route_findings(engine, cli, rule_id: str) -> list[Violation]:
     findings: list[Violation] = []
     for facts, path, routes in (
         (engine, _UNINSTALL_ENGINE, _UNINSTALL_ROUTES),
-        (cli, _UNINSTALL_CLI, (("uninstall", "_removed_lock_key", 3),)),
+        (cli, _UNINSTALL_CLI, (("uninstall", "_removed_lock_key", 1),)),
     ):
         for scope, callee, minimum in routes:
             calls = [c for c in facts.calls if c.qualname == callee and c.scope == scope]
@@ -153,6 +155,18 @@ def _uninstall_route_findings(engine, cli, rule_id: str) -> list[Violation]:
                 findings.append(
                     _summary(rule_id, path, f"{scope} must route through {callee} (#3928)")
                 )
+    # Negative half: cli.py never derives a lock key from a manifest entry itself.
+    for call in cli.calls:
+        terminal = call.qualname.rsplit(".", 1)[-1]
+        if terminal in {"get_unique_key", "parse_dependency_entry", "_parse_dependency_entry"}:
+            findings.append(
+                violation(
+                    rule_id,
+                    _UNINSTALL_CLI,
+                    "uninstall lock keys for removed entries must come from _removed_lock_key",
+                    line=call.line,
+                )
+            )
     return findings
 
 

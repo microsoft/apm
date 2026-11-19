@@ -182,7 +182,7 @@ def test_removing_one_of_two_declarations_of_one_package_fails_closed() -> None:
     """An object-form entry and a Git entry for the same package go together or not at all."""
     from unittest.mock import MagicMock
 
-    from apm_cli.commands.uninstall.engine import _refuse_shared_marketplace_coordinates
+    from apm_cli.commands.uninstall.engine import _refuse_unsafe_marketplace_removals
 
     lockfile, locked = _object_form_lock()
     declared = {"name": "example-plugin", "marketplace": "company"}
@@ -190,13 +190,13 @@ def test_removing_one_of_two_declarations_of_one_package_fails_closed() -> None:
     manifest = [declared, git_form]
     logger = MagicMock()
 
-    refused = _refuse_shared_marketplace_coordinates([declared], manifest, lockfile, logger)
+    refused = _refuse_unsafe_marketplace_removals([declared], manifest, lockfile, logger)
     assert refused == ["example-plugin@company"]
     message = logger.error.call_args.args[0]
     assert git_form in message and "apm uninstall example-plugin@company" in message
 
     logger.reset_mock()
-    both = _refuse_shared_marketplace_coordinates([declared, git_form], manifest, lockfile, logger)
+    both = _refuse_unsafe_marketplace_removals([declared, git_form], manifest, lockfile, logger)
     assert both == []
     logger.error.assert_not_called()
 
@@ -224,3 +224,61 @@ def test_dry_run_previews_object_form_checkout_from_the_scoped_lockfile(
     )
     lines = [call.args[0] for call in logger.progress.call_args_list]
     assert any("from apm_modules/" in line for line in lines)
+
+
+def test_recased_alias_still_targets_the_locked_row() -> None:
+    """A lock row written as ``Company`` still owns the ``company`` declaration."""
+    from apm_cli.commands.uninstall.engine import _removed_lock_key
+
+    lockfile, locked = _object_form_lock()
+    locked.discovered_via = "Company"
+    declared = {"name": "example-plugin", "marketplace": "company"}
+
+    assert _removed_lock_key(declared, lockfile) == locked.get_unique_key()
+
+
+def test_ambiguous_lock_rows_for_one_declaration_fail_closed() -> None:
+    """Two lock rows for one alias/plugin pair cannot be mapped, so nothing is removed."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.engine import _refuse_unsafe_marketplace_removals
+
+    lockfile, _locked = _object_form_lock()
+    twin = LockedDependency(
+        repo_url="team/other-catalog",
+        host="git.example.com",
+        resolved_commit="b" * 40,
+        discovered_via="company",
+        marketplace_plugin_name="example-plugin",
+    )
+    lockfile.dependencies[twin.get_unique_key()] = twin
+    declared = {"name": "example-plugin", "marketplace": "company"}
+    logger = MagicMock()
+
+    refused = _refuse_unsafe_marketplace_removals([declared], [declared], lockfile, logger)
+    assert refused == ["example-plugin@company"]
+    assert "records 2 packages" in logger.error.call_args.args[0]
+
+
+def test_object_form_removal_seeds_the_orphan_scan_from_the_locked_plugin() -> None:
+    """The plugin's own dependencies become orphan candidates when it is removed."""
+    from apm_cli.commands.uninstall.engine import _removal_targets
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+    from apm_cli.install.orphans import collect_orphan_candidates
+
+    lockfile, locked = _object_form_lock()
+    child = LockedDependency(
+        repo_url="acme/child",
+        resolved_commit="c" * 40,
+        depth=2,
+        resolved_by=lockfile_parent_identity(locked, lockfile.replacements),
+    )
+    lockfile.dependencies[child.get_unique_key()] = child
+    declared = {"name": "example-plugin", "marketplace": "company"}
+
+    candidates, _parents = collect_orphan_candidates(
+        lockfile, _removal_targets([declared], lockfile)
+    )
+    assert child.get_unique_key() in candidates
+    unmapped, _ = collect_orphan_candidates(lockfile, [declared])
+    assert child.get_unique_key() not in unmapped
