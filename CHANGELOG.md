@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm.yml` marketplace entries, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, like `apm install NAME@MARKETPLACE` (#1326). (#3923)
 - `apm install --frozen` passes on its first run after a lock bump: `apm_modules` copies that no longer match `apm.lock.yaml` are re-downloaded first. (#3900)
 - `apm install` on a fresh clone adopts committed skills after an `apm.yml` ref bump; hand-edited skill files still fail closed. (#3900)
 - Claude plugin MCP and LSP servers record `${CLAUDE_PLUGIN_ROOT}` portably, so `--frozen` and `audit --ci` pass in any clone; commit the one-time `apm.lock.yaml` diff. (#3900)
