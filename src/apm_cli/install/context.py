@@ -214,6 +214,8 @@ class InstallContext:
     exec_trust_ctx: ExecTrustContext | None = None  # lazily built in template
     exec_allow_map: dict[str, dict[str, bool]] | None = None  # None means gate disabled
     package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
+    # dep_key -> exec types a deny layer refuses (not approvable), for skip wording.
+    package_denied_exec_types: dict[str, frozenset[str]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # copilot_plugins (#2703)

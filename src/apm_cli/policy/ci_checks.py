@@ -22,6 +22,9 @@ from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import Any
+
     from ..deps.lockfile import LockFile
     from ..install.audit_replay import PreparedCiAuditReplay
     from ..install.drift import DriftFinding
@@ -908,6 +911,7 @@ def _check_drift(
     cache_only: bool = True,
     verbose: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
+    policy_provider: Callable[[], Any] | None = None,
 ) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
@@ -947,6 +951,7 @@ def _check_drift(
             targets=frozenset(targets) if targets else None,
             cache_only=cache_only,
             user_scope=user_scope,
+            policy_provider=policy_provider,
         )
 
         try:

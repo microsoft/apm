@@ -754,6 +754,65 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/drift.py",
+            "allow_executables=gated_allow_map.for_dependency(lock_dep),",
+            "allow_executables=None,",
+        ),
+        (
+            "src/apm_cli/install/exec_gate.py",
+            "self._map = effective_exec_map_for_project(",
+            "self._map = build_effective_exec_map(",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
+            "gated_allow_map = ReplayExecAllowMap(project_root)",
+        ),
+        (
+            "src/apm_cli/install/audit_replay.py",
+            "policy_provider=policy_provider,",
+            "policy_provider=None,",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "policy_provider=policy_provider,",
+            "policy_provider=None,",
+        ),
+        (
+            "src/apm_cli/commands/audit.py",
+            "policy_provider=replay_policy",
+            "policy_provider=None",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "reconcile_package_targets(package_info, project_root, targets),",
+            "{},",
+        ),
+        (
+            "src/apm_cli/install/exec_gate.py",
+            "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+            "denied = frozenset(unapproved)",
+        ),
+    ],
+)
+def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, new: str) -> None:
+    """Gated hooks retire at install and stay withheld in audit replay (#3924)."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) >= 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

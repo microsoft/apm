@@ -60,7 +60,7 @@ def user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def replay_calls(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     calls: list[Path] = []
 
-    def _fake(project_root: Path, *, verbose: bool = False) -> str:
+    def _fake(project_root: Path, *, verbose: bool = False, policy_provider=None) -> str:
         calls.append(project_root)
         return "prepared"
 
@@ -142,7 +142,7 @@ def test_project_replay_failure_is_reported(
 ) -> None:
     root = _workspace(tmp_path / "project", _ONE_PACKAGE)
 
-    def _fail(project_root: Path, *, verbose: bool = False) -> None:
+    def _fail(project_root: Path, *, verbose: bool = False, policy_provider=None) -> None:
         raise audit_replay.CiAuditReplayError("cache unavailable")
 
     monkeypatch.setattr(audit_replay, "prepare_ci_audit_replay", _fail)

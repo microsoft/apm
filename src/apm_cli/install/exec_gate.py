@@ -8,6 +8,7 @@ the npm v12-style ``allowExecutables`` default-deny policy.
 from __future__ import annotations
 
 import builtins
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,8 +87,17 @@ def check_executable_approval(
             "",
             approval_identity=pkg_key,
         )
-        # Only a declared type that stays unapproved parks the package.
-        if any(not approved[t] for t in _decl.exec_types):
+        unapproved = [t for t in _decl.exec_types if not approved[t]]
+        denied: frozenset[str] = frozenset()
+        from apm_cli.security.executables import ExecTrustContext, denied_exec_types
+
+        if unapproved and isinstance(ctx.exec_trust_ctx, ExecTrustContext):
+            denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
+            if denied:
+                ctx.package_denied_exec_types[package_name] = denied
+        # Only a declared type that stays unapproved, and is not hard-denied
+        # (approving cannot lift a deny), parks the package for approval.
+        if any(t not in denied for t in unapproved):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
             from apm_cli.security.executables import exec_status_for_declaration
@@ -216,3 +226,79 @@ def log_bin_status(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
             f"Run 'apm install --trust-bin {package_label}' to restore them."
         )
+
+
+def log_hooks_skip(
+    package_name: str,
+    package_info: Any,
+    logger: Any | None,
+    ctx: InstallContext | None = None,
+) -> None:
+    """Warn about skipped hooks only when the package actually ships them.
+
+    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
+    ``*.json`` in ``.apm/hooks/`` and ``hooks/``. A hard-denied package is
+    named as denied; approving it cannot lift the deny.
+    """
+    install = Path(package_info.install_path)
+    if logger is None or not any(
+        d.is_dir() and any(d.glob("*.json"))
+        for d in (install / ".apm" / "hooks", install / "hooks")
+    ):
+        return
+    from apm_cli.security.executables import EXEC_TYPE_HOOKS
+
+    label = package_name or getattr(package_info, "name", "unknown")
+    denied = getattr(ctx, "package_denied_exec_types", None) or {}
+    if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
+        message = (
+            f"{label}: hooks skipped (denied). "
+            f"Run 'apm policy explain {label}' to see which deny applies."
+        )
+    else:
+        message = (
+            f"{label}: hooks skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {label}' to approve."
+        )
+    logger.warning(message, symbol="warning")
+
+
+class ReplayExecAllowMap:
+    """Resolve the install gate's allow-map once, only for gated dependencies.
+
+    A lock entry whose ``exec_status`` is gated or denied had executables
+    withheld at install, so audit replay re-derives the per-type decisions
+    from the deny-wins trust owner and withholds them too (#3924). Entries
+    recorded as deployed trust that record and replay ungated. The lockfile
+    keeps no per-type evidence, so this is the only re-check replay makes.
+
+    *policy_provider* returns the org policy object (or ``None``) the caller
+    already fetched, so one audit run consults a single policy.
+    """
+
+    def __init__(self, project_root: Path, policy_provider: Callable[[], Any] | None = None):
+        self._project_root = project_root
+        self._policy_provider = policy_provider
+        self._resolved = False
+        self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
+
+    def for_dependency(self, lock_dep: Any) -> builtins.dict[str, builtins.dict[str, bool]] | None:
+        from apm_cli.security.executables import TRUST_ABSENT, TRUST_DEPLOYED
+
+        if getattr(lock_dep, "exec_status", None) in (None, TRUST_ABSENT, TRUST_DEPLOYED):
+            return None
+        if not self._resolved:
+            from apm_cli.security.executables import effective_exec_map_for_project
+
+            if self._policy_provider is not None:
+                policy = self._policy_provider()
+            else:
+                from apm_cli.policy.discovery import discover_policy_with_chain
+
+                policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
+            # Audit is read-only: never migrate legacy user consent here.
+            self._map = effective_exec_map_for_project(
+                self._project_root, policy=policy, migrate_user_legacy=False
+            )
+            self._resolved = True
+        return self._map
