@@ -14,6 +14,7 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 import shlex
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -106,7 +107,7 @@ def run_integration_template(
         materialization, terminal_deltas = prepare_integration_materialization(source)
         if terminal_deltas is not None:
             return terminal_deltas
-    source.announce()
+    announce_package(source)
     if materialization is None:
         return None
 
@@ -118,14 +119,28 @@ def run_integration_template(
 def prepare_integration_materialization(
     source: DependencySource,
 ) -> tuple[Materialization | None, dict[str, int] | None]:
-    """Acquire one package without deploying it."""
+    """Acquire one package without deploying it.
+
+    Its ``[+]`` header is held for :func:`announce_package`, so each header
+    prints above its own integration tree even when every package is
+    acquired first (#3994).
+    """
     from apm_cli.deps.plugin_parser import DeclaredPluginComponentError
 
-    try:
-        return source.acquire(), None
-    except DeclaredPluginComponentError as exc:
-        source.ctx.diagnostics.error(str(exc), package=source.dep_key)
-        return None, {}
+    hold = getattr(getattr(source.ctx, "logger", None), "held_package_header", None)
+    with hold() if callable(hold) else nullcontext([]) as held:
+        source._held_header_lines = held
+        try:
+            return source.acquire(), None
+        except DeclaredPluginComponentError as exc:
+            source.ctx.diagnostics.error(str(exc), package=source.dep_key)
+            return None, {}
+
+
+def announce_package(source: DependencySource) -> None:
+    """Emit the header lines held while *source* was acquired."""
+    for emit in list(vars(source).pop("_held_header_lines", None) or ()):
+        emit()
 
 
 def preflight_agent_plugin_materializations(

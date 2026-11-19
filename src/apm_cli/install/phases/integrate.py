@@ -28,6 +28,7 @@ from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import _targets_explicitly_requested, integrate_local_content
 from apm_cli.install.sources import make_dependency_source
 from apm_cli.install.template import (
+    announce_package,
     preflight_agent_plugin_materializations,
     preflight_skill_materializations,
     prepare_integration_materialization,
@@ -730,7 +731,7 @@ def run(ctx: InstallContext) -> None:
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:
-            source.announce()
+            announce_package(source)
             deltas = terminal_deltas
         else:
             deltas = run_integration_template(

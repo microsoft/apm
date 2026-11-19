@@ -1396,10 +1396,7 @@ def _audit_content_scan(
     "--policy",
     "policy_source",
     default=None,
-    help=(
-        f"Policy source. {POLICY_SOURCE_FORMS_HELP} "
-        "Used with --ci for policy checks."
-    ),
+    help=f"Policy source. {POLICY_SOURCE_FORMS_HELP} Used with --ci for policy checks.",
 )
 @click.option(
     "--no-cache",

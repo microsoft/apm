@@ -148,14 +148,11 @@ def render_drift_text(
         )
     else:
         edited = [
-            finding
-            for finding in by_kind.get("modified", [])
-            if finding.path not in unedited
+            finding for finding in by_kind.get("modified", []) if finding.path not in unedited
         ]
         if edited:
             lines.append(
-                f"  {STATUS_SYMBOLS['info']} "
-                f"{restore_locked_content_hint('the modified files')}."
+                f"  {STATUS_SYMBOLS['info']} {restore_locked_content_hint('the modified files')}."
             )
         if len(edited) < len(findings):
             lines.append(

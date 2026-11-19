@@ -687,8 +687,9 @@ def _interactive_project_setup(
     auto_version = version if version is not None else "1.0.0"
 
     try:
-        from apm_cli.utils.console import new_console
         from rich.prompt import Prompt  # type: ignore
+
+        from apm_cli.utils.console import new_console
 
         console = _get_console() or new_console()
         console.print("\n[info]Setting up your APM project...[/info]")
@@ -735,9 +736,10 @@ def _confirm_setup_summary(config: dict, logger) -> None:
     targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
 
     try:
-        from apm_cli.utils.console import new_console
         from rich.panel import Panel  # type: ignore
         from rich.prompt import Confirm  # type: ignore
+
+        from apm_cli.utils.console import new_console
 
         console = _get_console() or new_console()
         summary_content = (

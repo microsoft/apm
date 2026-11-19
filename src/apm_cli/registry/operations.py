@@ -558,8 +558,9 @@ class MCPServerOperations:
 
         try:
             # Try to use Rich for better prompts
-            from apm_cli.utils.console import new_console
             from rich.prompt import Prompt
+
+            from apm_cli.utils.console import new_console
 
             console = new_console()
             console.print(

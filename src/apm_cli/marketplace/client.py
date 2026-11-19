@@ -1101,9 +1101,7 @@ def fetch_raw(
     if proxy_bytes is not None:
         return proxy_bytes
 
-    from ..deps.registry_proxy import RegistryConfig
-
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.registry_proxy import RegistryConfig, is_enforce_only
 
     cfg = RegistryConfig.from_env()
     if (cfg is not None and cfg.enforce_only) or is_enforce_only():

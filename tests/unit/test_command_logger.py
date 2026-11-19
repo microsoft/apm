@@ -565,6 +565,29 @@ class TestInstallLogger:
         assert "(cached)" in msg
 
     @patch("apm_cli.core.command_logger._rich_echo")
+    def test_download_complete_prints_ref_once(self, mock_echo):
+        """A name that already spells the ref does not repeat it (#3994)."""
+        logger = InstallLogger()
+        logger.download_complete("host/o/r/plugins/x#main", ref="main", sha="30c0ac7f")
+        msg = mock_echo.call_args[0][0]
+        assert msg == "  [+] host/o/r/plugins/x #main @30c0ac7f"
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_held_package_header_prints_on_release(self, mock_echo):
+        """Held header lines print only when released, in order (#3994)."""
+        logger = InstallLogger(verbose=True)
+        with logger.held_package_header() as held:
+            logger.download_complete("owner/repo", ref="v1", sha="abc12345")
+            logger.package_auth("GITHUB_TOKEN", "pat")
+        mock_echo.assert_not_called()
+        for emit in held:
+            emit()
+        assert [call.args[0] for call in mock_echo.call_args_list] == [
+            "  [+] owner/repo #v1 @abc12345",
+            "    Auth: GITHUB_TOKEN (pat)",
+        ]
+
+    @patch("apm_cli.core.command_logger._rich_echo")
     def test_download_complete_legacy_ref_suffix(self, mock_echo):
         logger = InstallLogger()
         logger.download_complete("owner/repo", ref_suffix="old-style")

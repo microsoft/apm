@@ -17,12 +17,12 @@ from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_adoption import (
-    adoptable_skill_members,
     dircmp_equal,
     installing_commit,
     is_skill_dir_identical_to_source,
     render_skill_markdown,
     skill_tree_baselines,
+    tree_equals_install_output,
 )
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
@@ -1312,31 +1312,14 @@ class SkillIntegrator(BaseIntegrator):
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
             target_existed = skill_dir_has_content(target_skill_dir)
-            # A local copy that already equals this install's output is adopted,
-            # as sub-skills are, rather than skipped as user content (#3994).
-            unchanged = (
-                target_existed
-                and not session_owned
-                and bool(
-                    adoptable_skill_members(
-                        package_path,
-                        target_skill_dir,
-                        walk_source=self.walk_source_tree,
-                        ignore=native_ignore,
-                        resolve_links=self.resolve_links,
-                    )
-                )
+            # An unowned copy equal to this install's output is adopted (#3994).
+            unchanged = not session_owned and tree_equals_install_output(
+                self, package_path, target_skill_dir, native_ignore
             )
-            if (
-                target_existed
-                and not unchanged
-                and self.check_collision(
-                    target_skill_dir,
-                    rel_path,
-                    {rel_path} if session_owned else collision_managed,
-                    force,
-                    diagnostics=diagnostics,
-                )
+            owned = {rel_path} if session_owned else collision_managed
+            collides = target_existed and not unchanged
+            if collides and self.check_collision(
+                target_skill_dir, rel_path, owned, force, diagnostics=diagnostics
             ):
                 self._skill_can_complete = False
                 continue
@@ -1677,10 +1660,9 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import PackageType as _PackageType
 
         if package_info.package_type is _PackageType.MARKETPLACE_PLUGIN:
-            if skip_bin:
+            if skip_bin and (package_path / "bin").is_dir():
                 # A refusal is reportable only for a plugin that ships bin/.
-                if (package_path / "bin").is_dir():
-                    bin_skip_reason = bin_skip_reason_override or "not_approved"
+                bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:
                 bin_paths, bin_skip_reason = self._deploy_plugin_bin(
                     package_info,

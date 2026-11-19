@@ -27,10 +27,8 @@ substantially different shape (no PackageInfo, dedicated tracking on
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -83,13 +81,6 @@ class Materialization:
     deltas: dict[str, int] = field(default_factory=lambda: {"installed": 1})
 
 
-def _install_display_name(dep_ref: Any) -> str:
-    """Name a package in its ``[+]`` header; the header appends the ref itself."""
-    if dep_ref.is_virtual:
-        return str(replace(dep_ref, reference=None))
-    return dep_ref.repo_url
-
-
 class DependencySource(ABC):
     """Strategy: acquire one dependency and prepare it for integration.
 
@@ -114,22 +105,6 @@ class DependencySource(ABC):
         self.dep_ref = dep_ref
         self.install_path = install_path
         self.dep_key = dep_key
-        self._announcement: Callable[[], None] | None = None
-
-    def _announce_later(self, emit: Callable[[], None]) -> None:
-        """Hold this package's ``[+]`` header until its integration runs.
-
-        Every package is acquired before any deploys, so emitting the header
-        at acquisition would stack all headers above the first package's
-        integration lines and misattribute them.
-        """
-        self._announcement = emit
-
-    def announce(self) -> None:
-        """Emit the held ``[+]`` header once, right before integration output."""
-        emit, self._announcement = self._announcement, None
-        if emit is not None:
-            emit()
 
     @abstractmethod
     def acquire(self) -> Materialization | None:
@@ -243,9 +218,7 @@ class LocalDependencySource(DependencySource):
             return None
 
         if logger:
-            self._announce_later(
-                partial(logger.download_complete, dep_ref.local_path, ref_suffix="local")
-            )
+            logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
         # Capture the validated copy before manifest synthesis or integration
         # transforms it. Frozen preflight hashes this same materialization.
@@ -434,7 +407,7 @@ class CachedDependencySource(DependencySource):
         dep_locked_chk = self.dep_locked_chk
         logger = ctx.logger
 
-        display_name = _install_display_name(dep_ref)
+        display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _rref = getattr(dep_ref, "resolved_reference", None)
         if _rref and getattr(_rref, "ref_name", None):
             _ref = _rref.ref_name
@@ -460,14 +433,8 @@ class CachedDependencySource(DependencySource):
             if _callback_sha:
                 _sha = format_short_sha(_callback_sha)
         if logger:
-            self._announce_later(
-                partial(
-                    logger.download_complete,
-                    display_name,
-                    ref=_ref,
-                    sha=_sha,
-                    cached=not self.fetched_this_run,
-                )
+            logger.download_complete(
+                display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
             )
 
         deltas: dict[str, int] = {"installed": int(self.fetched_this_run)}
@@ -706,7 +673,7 @@ class FreshDependencySource(DependencySource):
         logger = ctx.logger
 
         try:
-            display_name = _install_display_name(dep_ref)
+            display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
             # Workstream B (#1116): per-dep progress is owned by the
@@ -813,45 +780,42 @@ class FreshDependencySource(DependencySource):
             deltas: dict[str, int] = {"installed": 1}
 
             resolved = getattr(package_info, "resolved_reference", None)
-            def _emit_header() -> None:
-                if logger:
-                    _ref = ""
-                    _sha = ""
-                    if resolved:
-                        _ref = resolved.ref_name if resolved.ref_name else ""
-                        # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
-                        _sha = format_short_sha(resolved.resolved_commit)
-                    logger.download_complete(display_name, ref=_ref, sha=_sha)
-                    # Only emit the per-package git auth diagnostic for git deps.
-                    # Registry-sourced deps don't talk to git hosts; resolving
-                    # github.com auth here for them is misleading (and can issue
-                    # network calls via auth.AuthResolver providers).
-                    if ctx.auth_resolver and dep_ref.source in (None, "git"):
-                        try:
-                            _host = dep_ref.host or "github.com"
-                            _org = (
-                                dependency_repository_owner(dep_ref)
-                                if dep_ref.repo_url and "/" in dep_ref.repo_url
-                                else None
-                            )
-                            _ctx = ctx.auth_resolver.resolve(_host, org=_org, port=dep_ref.port)
-                            logger.package_auth(_ctx.source, _ctx.token_type or "none")
-                        except Exception:
-                            pass
-                else:
-                    _ref_suffix = ""
-                    if resolved:
-                        _r = resolved.ref_name if resolved.ref_name else ""
-                        _s = format_short_sha(resolved.resolved_commit)
-                        if _r and _s:
-                            _ref_suffix = f" #{_r} @{_s}"
-                        elif _r:
-                            _ref_suffix = f" #{_r}"
-                        elif _s:
-                            _ref_suffix = f" @{_s}"
-                    _rich_success(f"[+] {display_name}{_ref_suffix}")
-
-            self._announce_later(_emit_header)
+            if logger:
+                _ref = ""
+                _sha = ""
+                if resolved:
+                    _ref = resolved.ref_name if resolved.ref_name else ""
+                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                    _sha = format_short_sha(resolved.resolved_commit)
+                logger.download_complete(display_name, ref=_ref, sha=_sha)
+                # Only emit the per-package git auth diagnostic for git deps.
+                # Registry-sourced deps don't talk to git hosts; resolving
+                # github.com auth here for them is misleading (and can issue
+                # network calls via auth.AuthResolver providers).
+                if ctx.auth_resolver and dep_ref.source in (None, "git"):
+                    try:
+                        _host = dep_ref.host or "github.com"
+                        _org = (
+                            dependency_repository_owner(dep_ref)
+                            if dep_ref.repo_url and "/" in dep_ref.repo_url
+                            else None
+                        )
+                        _ctx = ctx.auth_resolver.resolve(_host, org=_org, port=dep_ref.port)
+                        logger.package_auth(_ctx.source, _ctx.token_type or "none")
+                    except Exception:
+                        pass
+            else:
+                _ref_suffix = ""
+                if resolved:
+                    _r = resolved.ref_name if resolved.ref_name else ""
+                    _s = format_short_sha(resolved.resolved_commit)
+                    if _r and _s:
+                        _ref_suffix = f" #{_r} @{_s}"
+                    elif _r:
+                        _ref_suffix = f" #{_r}"
+                    elif _s:
+                        _ref_suffix = f" @{_s}"
+                _rich_success(f"[+] {display_name}{_ref_suffix}")
 
             if not dep_ref.reference:
                 deltas["unpinned"] = 1

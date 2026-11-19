@@ -715,7 +715,6 @@ def _check_deps_with_progress(
     total = len(checkable)
 
     try:
-        from apm_cli.utils.console import new_console
         from rich.progress import (
             BarColumn,
             Progress,
@@ -723,6 +722,8 @@ def _check_deps_with_progress(
             TaskProgressColumn,
             TextColumn,
         )
+
+        from apm_cli.utils.console import new_console
 
         # Own the Console instead of borrowing Rich's process-global singleton:
         # a caller (or a leaked test double) that poisons ``rich._console`` must

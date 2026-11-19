@@ -14,8 +14,9 @@ def _get_console():
     """Get Rich console instance with lazy loading."""
     global _console
     if _console is None:
-        from apm_cli.utils.console import new_console
         from rich.theme import Theme
+
+        from apm_cli.utils.console import new_console
 
         custom_theme = Theme(
             {

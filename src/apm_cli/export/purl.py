@@ -161,8 +161,7 @@ def build_purl(dep: LockedDependency) -> str:
             )
         # Unknown forge: stay honest with a generic identity keyed on the commit.
         return (
-            f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}"
-            f"@{dep.resolved_commit}{subpath}"
+            f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}@{dep.resolved_commit}{subpath}"
         )
 
     # Local / primitive / hash-only identity.

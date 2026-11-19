@@ -885,8 +885,9 @@ def tree(global_):
 
     try:
         # Import Rich components with fallback
-        from apm_cli.utils.console import new_console
         from rich.tree import Tree
+
+        from apm_cli.utils.console import new_console
 
         console = new_console()
         has_rich = True
