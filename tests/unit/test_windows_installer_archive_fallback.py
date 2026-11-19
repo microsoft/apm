@@ -5,9 +5,11 @@ PowerShell 7 Archive module, whose Expand-Archive calls a ZipFile overload
 .NET Framework lacks. ``Expand-ReleaseArchive`` must then extract with the
 2-argument ``ZipFile.ExtractToDirectory`` overload instead of failing.
 
-The extracted function runs under every available PowerShell host; the
-failure is simulated with an ``Expand-Archive`` function, which PowerShell
-resolves before the cmdlet.
+The extracted function runs under every available PowerShell host. When the
+test process itself runs below PowerShell 7 (as on the Windows CI gate), the
+inherited-environment case reproduces the real failure under ``powershell``.
+The forced-failure case shadows ``Expand-Archive`` with a function, which
+PowerShell resolves before the cmdlet.
 """
 
 from __future__ import annotations
@@ -16,9 +18,12 @@ import re
 import shutil
 import subprocess
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+
+from apm_cli.commands import self_update
 
 pytestmark = pytest.mark.windows_compat
 
@@ -41,7 +46,9 @@ def _quote(path: Path) -> str:
     return "'" + str(path).replace("'", "''") + "'"
 
 
-def _expand(host: str, tmp_path: Path, *, broken: bool) -> tuple[Path, str]:
+def _expand(
+    host: str, tmp_path: Path, *, broken: bool = False, env: Mapping[str, str] | None = None
+) -> tuple[Path, str]:
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} is not available")
@@ -69,6 +76,7 @@ def _expand(host: str, tmp_path: Path, *, broken: bool) -> tuple[Path, str]:
         text=True,
         timeout=120,
         check=False,
+        env=dict(env) if env is not None else None,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     roots = [line[5:].strip() for line in result.stdout.splitlines() if line.startswith("ROOT=")]
@@ -76,13 +84,31 @@ def _expand(host: str, tmp_path: Path, *, broken: bool) -> tuple[Path, str]:
     return Path(roots[0]), result.stdout
 
 
-@pytest.mark.parametrize("host", POWERSHELL_HOSTS)
-def test_release_archive_extracts_with_expand_archive(host: str, tmp_path: Path):
-    root, output = _expand(host, tmp_path, broken=False)
+def _self_update_child_env(monkeypatch) -> dict[str, str]:
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    return self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
 
-    assert root == tmp_path / "apm-install"
+
+@pytest.mark.parametrize("host", POWERSHELL_HOSTS)
+def test_self_update_child_env_extracts_with_expand_archive(host: str, tmp_path, monkeypatch):
+    """The env self-update gives the installer must let Expand-Archive work as-is."""
+    root, output = _expand(host, tmp_path, env=_self_update_child_env(monkeypatch))
+
+    assert root == tmp_path / "apm-install", output
     assert (root / "apm-windows-x86_64" / "apm.exe").read_text(encoding="utf-8") == "binary"
     assert "retrying" not in output
+
+
+@pytest.mark.parametrize("host", POWERSHELL_HOSTS)
+def test_release_archive_extracts_under_inherited_host_env(host: str, tmp_path: Path):
+    """A direct install.ps1 run keeps the caller's env; extraction must still succeed."""
+    root, _ = _expand(host, tmp_path)
+
+    assert (root / "apm-windows-x86_64" / "apm.exe").read_text(encoding="utf-8") == "binary"
 
 
 @pytest.mark.parametrize("host", POWERSHELL_HOSTS)
