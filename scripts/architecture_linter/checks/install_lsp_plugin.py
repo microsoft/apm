@@ -44,6 +44,12 @@ _TARGET_REWRITE_PATHS = ("src/apm_cli/commands/init.py", "src/apm_cli/commands/_
 _YAML_IO = "src/apm_cli/utils/yaml_io.py"
 # Anchors are refused on read (req-mf-020(b), #3858), so no rewrite may keep one.
 _ANCHOR_REWRITE_TOKENS = (".anchor.value", "_detached_sequence")
+# approve.py must not re-derive a locked row's trust principal (#3710).
+_APPROVE_PARALLEL_TRUST_TOKENS = (
+    "approval_identity=locked.",
+    ".replacement is not None",
+    "original_identity=locked.",
+)
 
 
 def _missing_tokens(
@@ -71,44 +77,61 @@ def _missing_tokens(
 
 def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, ...]:
     """Install and update must consume one effective executable-trust owner."""
-    return _missing_tokens(
-        provider,
-        GUARD_EXECUTABLE_TRUST,
-        {
-            _EXECUTABLES: (
-                "def exec_trust_context_for_project(",
-                "def resolve_project_exec_allow_map(",
-                "def locked_dependency_approval_identity(",
-                "def locked_dependency_approval_keys(",
-                "def dependency_approval_key(",
-                "return dependency_approval_key(dependency.to_dependency_ref())",
-                "identity = locked_dependency_approval_identity(dependency)",
-                "def local_bundle_approval_key(",
-                'owner = getattr(dependency, "resolved_by", None)',
-                'approval_keys = getattr(dependency, "approval_keys", ())',
-            ),
-            _APPROVE_COMMAND: (
-                "approval_identity=locked_dependency_approval_identity(locked),",
-                "resolve_exec_decision(ctx, d.package_key, t)",
-            ),
-            _EXEC_GATE: ("return dependency_approval_key(dep_ref)",),
-            _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
-            _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
-            _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
-            _MCP_PIPELINE: ("allow_map = resolve_project_exec_allow_map(",),
-            _MCP_VIEW: ("approval_keys=locked_dependency_approval_keys(dependency)",),
-            _UNINSTALL_ENGINE: ("_allow_executables = resolve_project_exec_allow_map(",),
-            _HOOK_INTEGRATOR: ("allow_map = resolve_project_exec_allow_map(",),
-            _LOCAL_BUNDLE: (
-                "bundle_approval_key = local_bundle_approval_key(",
-                "approval_key=bundle_approval_key,",
-            ),
-            _INSTALL_SERVICES: (
-                "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
-                "_is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)",
-            ),
-        },
+    findings = list(
+        _missing_tokens(
+            provider,
+            GUARD_EXECUTABLE_TRUST,
+            {
+                _EXECUTABLES: (
+                    "def exec_trust_context_for_project(",
+                    "def resolve_project_exec_allow_map(",
+                    "def locked_dependency_approval(",
+                    "def locked_dependency_approval_keys(",
+                    "def dependency_approval_key(",
+                    "identity=dependency_approval_key(dependency.to_dependency_ref())",
+                    "approval = locked_dependency_approval(dependency)",
+                    "def local_bundle_approval_key(",
+                    'owner = getattr(dependency, "resolved_by", None)',
+                    'approval_keys = getattr(dependency, "approval_keys", ())',
+                ),
+                _APPROVE_COMMAND: (
+                    "approval = locked_dependency_approval(locked",
+                    "approval_identity=approval.identity",
+                    "original_identity=approval.original_identity",
+                    "resolve_exec_decision(ctx, d.package_key, t)",
+                ),
+                _EXEC_GATE: ("return dependency_approval_key(dep_ref)",),
+                _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
+                _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
+                _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
+                _MCP_PIPELINE: ("allow_map = resolve_project_exec_allow_map(",),
+                _MCP_VIEW: ("approval_keys=locked_dependency_approval_keys(dependency)",),
+                _UNINSTALL_ENGINE: ("_allow_executables = resolve_project_exec_allow_map(",),
+                _HOOK_INTEGRATOR: ("allow_map = resolve_project_exec_allow_map(",),
+                _LOCAL_BUNDLE: (
+                    "bundle_approval_key = local_bundle_approval_key(",
+                    "approval_key=bundle_approval_key,",
+                ),
+                _INSTALL_SERVICES: (
+                    "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
+                    "_is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)",
+                ),
+            },
+        )
     )
+    # A second locked-row trust derivation beside the owner is a split authority.
+    facts, failures = _facts_for(provider, _APPROVE_COMMAND, GUARD_EXECUTABLE_TRUST)
+    if not failures:
+        findings.extend(
+            _summary(
+                GUARD_EXECUTABLE_TRUST,
+                _APPROVE_COMMAND,
+                f"Locked-row trust must come from locked_dependency_approval; remove {token}",
+            )
+            for token in _APPROVE_PARALLEL_TRUST_TOKENS
+            if _present(facts, token)
+        )
+    return tuple(findings)
 
 
 _CONSUMER_MANIFEST_TOKENS: dict[str, tuple[str, ...]] = {

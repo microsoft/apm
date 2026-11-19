@@ -4,7 +4,7 @@ The executable gate keys consent by the source a ``replace:`` rule selects, so
 an upstream grant never unlocks the replacement. The remediation install
 prints -- ``apm approve <original>`` -- must write that selected-source key so
 the next ``apm install`` deploys the replacement's hooks, for a local path and
-for a fork.
+for a fork. ``apm deny <original>`` then re-gates the replacement.
 """
 
 from __future__ import annotations
@@ -141,3 +141,14 @@ def test_approve_original_name_unlocks_replacement_hooks(
     assert _claude_hook_commands(project) == [_REPLACEMENT_COMMAND]
     assert _exec_status(project) == "deployed"
     assert "hooky" not in apm("approve", "--pending")
+
+    # Deny by the declared name re-gates the replacement and also blocks the
+    # upstream, so removing the replace: rule cannot revive an old grant.
+    apm("deny", "acme/hooky")
+    executables = load_yaml(project / "apm.yml")["executables"]
+    assert set(executables["deny"]) == {expected_grant, "acme/hooky"}
+    assert executables.get("allow", {}) == {}
+
+    denied = apm("install", "--no-policy")
+    assert "hooks skipped" in denied, denied
+    assert _exec_status(project) == "denied"

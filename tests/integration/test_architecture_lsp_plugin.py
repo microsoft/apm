@@ -154,9 +154,9 @@ def test_approve_original_identity_grant_is_rejected() -> None:
     """``apm approve`` must grant the key the gate checks, not the original (#3710)."""
     path = "src/apm_cli/commands/approve.py"
     source = (ROOT / path).read_text(encoding="utf-8")
-    old = "approval_identity=locked_dependency_approval_identity(locked),"
+    old = "approval_identity=approval.identity"
     assert old in source
-    mutated = source.replace(old, "approval_identity=locked.get_unique_key(),", 1)
+    mutated = source.replace(old, "approval_identity=locked.get_unique_key()", 1)
 
     report = run_selected_rules(
         ROOT,
@@ -168,6 +168,24 @@ def test_approve_original_identity_grant_is_rejected() -> None:
     assert {item.rule_id for item in report.violations} == {
         "install-deployment-executable-trust-context"
     }
+
+
+def test_approve_parallel_replacement_derivation_is_rejected() -> None:
+    """A second "is this row replaced" decision beside the owner is refused."""
+    path = "src/apm_cli/commands/approve.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source + "\n\ndef _is_replaced(locked):\n    return locked.replacement is not None\n"
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-executable-trust-context",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.exit_code == 2
+    assert [item.rule_id for item in report.violations] == [
+        "install-deployment-executable-trust-context"
+    ]
 
 
 def test_local_bundle_canvas_approval_bypass_is_rejected() -> None:

@@ -526,25 +526,53 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
-def locked_dependency_approval_identity(dependency: Any) -> str:
+@dataclass(frozen=True)
+class LockedApproval:
+    """The trust principal a locked dependency is granted under.
+
+    Attributes:
+        identity: Approval name the install gate checks.
+        version: Version bound into the grant key; empty for a replaced row,
+            whose identity already carries the selected ``with:`` ref.
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            or None for a row that was not replaced.
+    """
+
+    identity: str
+    version: str
+    original_identity: str | None = None
+
+    @property
+    def key(self) -> str:
+        """Return the full approval key (``identity#version``)."""
+        return build_approval_key(self.identity, self.version)
+
+
+def locked_dependency_approval(dependency: Any, version: str | None = None) -> LockedApproval:
     """Return the trust principal for a locked dependency.
 
     A replaced row is keyed by its selected source, exactly as the install
     gate keys the resolved reference, so an upstream grant never unlocks the
-    replacement and ``apm approve`` writes the key the gate checks.
+    replacement and ``apm approve`` writes the key the gate checks. *version*
+    overrides the locked version for a row that was not replaced.
     """
     if getattr(dependency, "replacement", None) is not None:
-        return dependency_approval_key(dependency.to_dependency_ref())
-    return dependency.get_unique_key()
+        return LockedApproval(
+            identity=dependency_approval_key(dependency.to_dependency_ref()),
+            version="",
+            original_identity=dependency.get_unique_key(),
+        )
+    if version is None:
+        version = dependency.version or ""
+    return LockedApproval(identity=dependency.get_unique_key(), version=version)
 
 
 def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     """Return trust keys derived only from a locked package identity."""
-    identity = locked_dependency_approval_identity(dependency)
-    if getattr(dependency, "replacement", None) is not None:
-        return tuple(dict.fromkeys((identity, _strip_version(identity))))
-    versioned = build_approval_key(identity, dependency.version or "")
-    return tuple(dict.fromkeys((identity, versioned)))
+    approval = locked_dependency_approval(dependency)
+    if approval.original_identity is not None:
+        return tuple(dict.fromkeys((approval.key, _strip_version(approval.key))))
+    return tuple(dict.fromkeys((approval.identity, approval.key)))
 
 
 def dependency_approval_key(dependency_ref: Any) -> str:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -30,6 +31,11 @@ from ..policy import outcome_routing as policy_outcomes
 from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ..security.executables import ExecutableDeclaration
 
 _POLICY_RESOLUTION_WARNING = (
     "Org policy could not be resolved; approval is proceeding without org "
@@ -232,6 +238,18 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
         deny[decl.package_key] = {t: True for t in decl.exec_types}
         allow.pop(_find_matching_key(allow, decl.package_key) or decl.package_key, None)
         _rich_info(f"Denied {decl.package_key}: {decl.summary_line()}", symbol="info")
+        if decl.original_identity:
+            # Deny is safety-positive: the upstream the user named stays denied
+            # even after the replace: rule is removed.
+            deny[decl.original_identity] = {t: True for t in decl.exec_types}
+            allow.pop(
+                _find_matching_key(allow, decl.original_identity) or decl.original_identity,
+                None,
+            )
+            _rich_info(
+                f"Denied {decl.original_identity} (replaced by {decl.package_key})",
+                symbol="info",
+            )
         changed += 1
 
     if changed > 0:
@@ -349,21 +367,32 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
         )
 
 
-def _find_declaration(declarations: list, pkg: str):
+def _find_declaration(
+    declarations: Sequence[ExecutableDeclaration], pkg: str
+) -> ExecutableDeclaration | None:
     """Return the installed declaration that *pkg* names, or None.
 
-    Matches the approval key, the package name, or the locked identity a
-    ``replace:`` rule redirected (exact, then ``pkg#...`` prefix forms).
+    Lockfile-derived names (the approval key, or the locked identity a
+    ``replace:`` rule redirected) are tried before the package's own
+    ``apm.yml`` name, so another package cannot capture a grant or deny by
+    declaring a lookalike name. Exact matches are tried before prefix forms;
+    ``acme/hooky#1.0.0`` still finds a replaced ``acme/hooky``.
     """
-    for decl in declarations:
-        if pkg in (decl.package_key, decl.package_name, decl.original_identity):
-            return decl
-    for decl in declarations:
-        if decl.package_key.startswith(pkg + "#") or decl.package_name.startswith(pkg):
-            return decl
+
+    def _original_prefix(decl: ExecutableDeclaration) -> bool:
         original = decl.original_identity
-        if original and (original.startswith(pkg + "#") or pkg.startswith(original + "#")):
-            return decl
+        return bool(original) and (original.startswith(pkg + "#") or pkg.startswith(original + "#"))
+
+    tiers = (
+        lambda d: pkg in (d.package_key, d.original_identity),
+        lambda d: pkg == d.package_name,
+        lambda d: d.package_key.startswith(pkg + "#") or _original_prefix(d),
+        lambda d: d.package_name.startswith(pkg),
+    )
+    for matches in tiers:
+        for decl in declarations:
+            if matches(decl):
+                return decl
     return None
 
 
@@ -499,8 +528,7 @@ def _approve_packages(
 def scan_installed_executable_packages(manifest: Path) -> list:
     """Scan all installed packages under apm_modules/ for executables."""
     from ..security.executables import (
-        ExecutableDeclaration,
-        locked_dependency_approval_identity,
+        locked_dependency_approval,
         scan_package_executables,
     )
 
@@ -550,16 +578,14 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         version = str(manifest_data.get("version", version))
                 except Exception:
                     manifest_data = {}
-            # A replaced row is granted under its selected source, the key the
-            # install gate checks; the original identity only helps lookup.
-            replaced = locked.replacement is not None
+            approval = locked_dependency_approval(locked, version)
             declaration = scan_package_executables(
                 package_dir,
                 name,
-                "" if replaced else version,
-                approval_identity=locked_dependency_approval_identity(locked),
+                approval.version,
+                approval_identity=approval.identity,
                 manifest_data=manifest_data,
-                original_identity=locked.get_unique_key() if replaced else None,
+                original_identity=approval.original_identity,
             )
             if declaration.has_executables:
                 results.append(declaration)
