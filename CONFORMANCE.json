@@ -783,9 +783,10 @@
       "keyword": "MUST",
       "section": "4.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_shared_mcp_document_reqs.py::test_deactivating_one_target_keeps_entries_another_active_target_selects"
+        "tests/spec_conformance/test_shared_mcp_document_reqs.py::test_deactivating_one_target_keeps_entries_another_active_target_selects",
+        "tests/spec_conformance/test_shared_mcp_document_reqs.py::test_inherited_entry_keeps_the_recorded_write_checks"
       ]
     },
     {
