@@ -39,6 +39,10 @@ _log = logging.getLogger(__name__)
 # Claude Code's reference syntax: ${VAR} or ${VAR:-default}.
 _CLAUDE_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}")
 
+# Path segments a conflict hint may print verbatim after the project-root
+# reference: ASCII only, so no query string, credential or JSON escape leaks.
+_PRINTABLE_PACKAGE_PATH_RE = re.compile(r"(?:/[A-Za-z0-9._-]+)*")
+
 
 def _string_leaves(value: object) -> Iterator[str]:
     """Yield every string inside a rendered server entry."""
@@ -368,28 +372,35 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         if not expanded:
             return None
         # APM's own project-root reference renders a package path (#3927): it
-        # is neither an apm.yml environment reference nor a credential.
+        # is neither an apm.yml environment reference nor a credential, and is
+        # named verbatim so its ``:-.`` default survives.
         root = self._plugin_root_reference()
         names = {
             path: list(
                 dict.fromkeys(
-                    "${" + m.group(1) + "}"
-                    for m in _CLAUDE_REFERENCE_RE.finditer(text.replace(root, "") if root else text)
+                    m.group(0) if m.group(0) == root else "${" + m.group(1) + "}"
+                    for m in _CLAUDE_REFERENCE_RE.finditer(text)
                 )
             )
             for path, text in expanded
         }
-        paths = [(path, text) for path, text in expanded if not names[path]]
-        restore = "; ".join(f"{path}: {ascii(text)[1:-1]}" for path, text in paths)
-        env_fields = [path for path, _text in expanded if names[path]]
+        paths = [(path, text) for path, text in expanded if names[path] == [root]]
+        restore = "; ".join(
+            f"{path}: {text}"
+            if text.startswith(root) and _PRINTABLE_PACKAGE_PATH_RE.fullmatch(text[len(root) :])
+            else f"{path}: a package path under {root}"
+            for path, text in paths
+        )
+        env_fields = [path for path, _text in expanded if names[path] != [root]]
         if not env_fields:
             return (
                 f"{_holds([path for path, _text in paths])} where APM writes a package "
                 f"path, and APM cannot confirm it wrote {'it' if len(paths) == 1 else 'them'}. "
-                f"Restore what APM writes ({restore}) or rename or remove the connection "
-                "yourself, then retry."
+                f"Restore the package path APM writes ({restore}) or rename or remove the "
+                "connection yourself, then retry."
             )
-        # Names only: show which reference belongs where, never a value or default.
+        # Names only: show which reference belongs where, never a value or an
+        # environment default.
         mapping = "; ".join(f"{path}: {', '.join(names[path])}" for path in env_fields)
         restore_paths = f" and the package paths APM writes ({restore})" if paths else ""
         return (

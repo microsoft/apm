@@ -644,7 +644,7 @@ current environment. It prints the affected variable names. An entry APM
 cannot confirm it wrote is kept, and install exits with an error that names
 each field holding a value and the reference it should hold. A field where APM
 writes a package path, such as `${CLAUDE_PROJECT_DIR:-.}/apm_modules/...`,
-instead names the exact value to restore.
+instead names the path to restore (the exact value when it is a plain ASCII path).
 Replace those yourself with `${NAME}` references, for example
 `Bearer ${GITHUB_TOKEN}`. Export the variables before starting `claude`.
 Claude Code still asks you to approve project servers; APM does not change

@@ -618,11 +618,36 @@ class TestClaudeLegacyEntries(unittest.TestCase):
         guidance = self.adapter.native_conflict_guidance("synthdb", expected)
 
         self.assertIn("Fields args[1], env.TOKEN hold values", guidance)
-        self.assertIn("(args[1]: ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance)
+        self.assertIn(
+            "(args[1]: ${CLAUDE_PROJECT_DIR:-.}, ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance
+        )
         self.assertIn(f"(args[0]: {root}/server.js)", guidance)
         self.assertIn("rotate those credentials", guidance)
         self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
         self.assertNotIn("leaked-sentinel", guidance)
+
+    def test_conflict_guidance_names_unprintable_plugin_root_paths_only(self):
+        root = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local"
+        expected = {
+            "type": "stdio",
+            "command": "node",
+            "args": [
+                f"{root}/p/server.js?token=literal-sentinel",
+                f"{root}/m\u00fcnchen/server.js",
+            ],
+        }
+        native = dict(expected, args=["/x/server.js", "/y/server.js"])
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn(
+            "(args[0]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
+            "args[1]: a package path under ${CLAUDE_PROJECT_DIR:-.})",
+            guidance,
+        )
+        self.assertNotIn("literal-sentinel", guidance)
+        self.assertNotIn("rotate", guidance)
+        self.assertTrue(guidance.isascii())
 
     def test_conflict_guidance_is_silent_without_expanded_fields(self):
         self.adapter.update_config({"legacy": dict(_LEGACY_EXPECTED, command="other")})
