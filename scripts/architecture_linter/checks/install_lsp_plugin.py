@@ -38,6 +38,7 @@ _MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 _UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 _HOOK_INTEGRATOR = "src/apm_cli/integration/hook_integrator.py"
 _AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
+_DRIFT_REPLAY = "src/apm_cli/install/drift.py"
 _MANIFEST_TARGETS = "src/apm_cli/models/manifest_targets.py"
 # The remaining apm.yml target rewrite paths (apm init re-init, #3857/#3868).
 _TARGET_REWRITE_PATHS = ("src/apm_cli/commands/init.py", "src/apm_cli/commands/_helpers.py")
@@ -93,6 +94,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "def local_bundle_approval_key(",
                     'owner = getattr(dependency, "resolved_by", None)',
                     'approval_keys = getattr(dependency, "approval_keys", ())',
+                    "def denied_exec_types(",
                 ),
                 _APPROVE_COMMAND: (
                     "approval = locked_dependency_approval(locked",
@@ -100,7 +102,13 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "original_identity=approval.original_identity",
                     "resolve_exec_decision(ctx, d.package_key, t)",
                 ),
-                _EXEC_GATE: ("return dependency_approval_key(dep_ref)",),
+                _EXEC_GATE: (
+                    "return dependency_approval_key(dep_ref)",
+                    "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+                    "self._map = resolve_project_exec_allow_map(",
+                ),
+                # Audit replay withholds what the install gate withheld (#3924).
+                _DRIFT_REPLAY: ("allow_executables=gated_allow_map.for_dependency(lock_dep),",),
                 _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
                 _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
@@ -115,6 +123,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _INSTALL_SERVICES: (
                     "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
                     "_is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)",
+                    # A gated package's hooks retire through the hook owner (#3924).
+                    "reconcile_package_targets(package_info, project_root, targets),",
                 ),
             },
         )

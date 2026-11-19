@@ -86,8 +86,17 @@ def check_executable_approval(
             "",
             approval_identity=pkg_key,
         )
-        # Only a declared type that stays unapproved parks the package.
-        if any(not approved[t] for t in _decl.exec_types):
+        unapproved = [t for t in _decl.exec_types if not approved[t]]
+        denied: frozenset[str] = frozenset()
+        from apm_cli.security.executables import ExecTrustContext, denied_exec_types
+
+        if unapproved and isinstance(ctx.exec_trust_ctx, ExecTrustContext):
+            denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
+            if denied:
+                ctx.package_denied_exec_types[package_name] = denied
+        # Only a declared type that stays unapproved, and is not hard-denied
+        # (approving cannot lift a deny), parks the package for approval.
+        if any(t not in denied for t in unapproved):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
             from apm_cli.security.executables import exec_status_for_declaration
@@ -216,3 +225,67 @@ def log_bin_status(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
             f"Run 'apm install --trust-bin {package_label}' to restore them."
         )
+
+
+def log_hooks_skip(
+    package_name: str,
+    package_info: Any,
+    logger: Any | None,
+    ctx: InstallContext | None = None,
+) -> None:
+    """Warn about skipped hooks only when the package actually ships them.
+
+    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
+    ``*.json`` in ``.apm/hooks/`` and ``hooks/``. A hard-denied package is
+    named as denied; approving it cannot lift the deny.
+    """
+    install = Path(package_info.install_path)
+    if logger is None or not any(
+        d.is_dir() and any(d.glob("*.json"))
+        for d in (install / ".apm" / "hooks", install / "hooks")
+    ):
+        return
+    from apm_cli.security.executables import EXEC_TYPE_HOOKS
+
+    label = package_name or getattr(package_info, "name", "unknown")
+    denied = getattr(ctx, "package_denied_exec_types", None) or {}
+    if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
+        message = (
+            f"{label}: hooks skipped (denied). "
+            f"Run 'apm policy explain {label}' to see which deny applies."
+        )
+    else:
+        message = (
+            f"{label}: hooks skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {label}' to approve."
+        )
+    logger.warning(message, symbol="warning")
+
+
+class ReplayExecAllowMap:
+    """Resolve the install gate's allow-map once, only for gated dependencies.
+
+    A lock entry whose ``exec_status`` is gated or denied had executables
+    withheld at install, so audit replay applies the same deny-wins map and
+    withholds them too (#3924). Fully deployed entries replay ungated.
+    """
+
+    def __init__(self, project_root: Path) -> None:
+        self._project_root = project_root
+        self._resolved = False
+        self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
+
+    def for_dependency(self, lock_dep: Any) -> builtins.dict[str, builtins.dict[str, bool]] | None:
+        from apm_cli.security.executables import TRUST_ABSENT, TRUST_DEPLOYED
+
+        if getattr(lock_dep, "exec_status", None) in (None, TRUST_ABSENT, TRUST_DEPLOYED):
+            return None
+        if not self._resolved:
+            from apm_cli.models.apm_package import APMPackage
+            from apm_cli.security.executables import resolve_project_exec_allow_map
+
+            manifest_path = self._project_root / "apm.yml"
+            manifest = APMPackage.from_apm_yml(manifest_path) if manifest_path.is_file() else None
+            self._map = resolve_project_exec_allow_map(self._project_root, manifest)
+            self._resolved = True
+        return self._map

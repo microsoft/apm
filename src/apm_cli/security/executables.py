@@ -1026,6 +1026,26 @@ def exec_status_for_declaration(
     return worst
 
 
+def denied_exec_types(
+    ctx: ExecTrustContext,
+    candidate_keys: list[str],
+    exec_types: tuple[str, ...] | list[str],
+) -> frozenset[str]:
+    """Return the exec types a deny layer refuses for every candidate key.
+
+    A type counts as denied only when no candidate key allows it and at least
+    one resolves to ``denied``; a default-deny (approvable) gate is not a deny.
+    """
+    denied: set[str] = set()
+    for exec_type in exec_types:
+        decisions = [resolve_exec_decision(ctx, key, exec_type) for key in candidate_keys]
+        if any(d.allowed for d in decisions):
+            continue
+        if any(d.trust_state == TRUST_DENIED for d in decisions):
+            denied.add(exec_type)
+    return frozenset(denied)
+
+
 def build_effective_exec_map(
     *,
     policy: Any | None,

@@ -635,6 +635,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_start()
     replayed_count = 0
+    from apm_cli.install.exec_gate import ReplayExecAllowMap
+
+    gated_allow_map = ReplayExecAllowMap(project_root)
     local_parent_index = build_local_parent_index(lock)
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
@@ -713,6 +716,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the
                             # replay does not write to targets excluded by the consumer (#1923).
                             dep_target_subset=selection.target_subset,
+                            # Withhold what the install gate withheld (#3924).
+                            allow_executables=gated_allow_map.for_dependency(lock_dep),
                         )
                     except AgentPluginTargetExcludedError:
                         continue
