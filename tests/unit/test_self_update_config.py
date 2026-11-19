@@ -4,6 +4,8 @@ import os
 import sys
 from urllib.parse import urlparse
 
+import pytest
+
 from apm_cli.commands import self_update
 
 
@@ -124,6 +126,7 @@ def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
     assert version == "2.0.0rc1"
 
 
+@pytest.mark.windows_compat
 def test_windows_installer_env_drops_inherited_psmodulepath(monkeypatch):
     """A PowerShell 7 parent's module path must not leak into the installer host (#3926)."""
     monkeypatch.setattr(self_update, "_is_windows_platform", lambda: True)
@@ -147,12 +150,19 @@ def test_windows_installer_env_drops_inherited_psmodulepath(monkeypatch):
     assert env["PATH"] == r"C:\Windows\System32"
 
 
+@pytest.mark.windows_compat
 def test_unix_installer_env_keeps_psmodulepath(monkeypatch):
     """Only the Windows PowerShell installer host needs its own module path."""
     monkeypatch.setattr(self_update, "_is_windows_platform", lambda: False)
     monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
     monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
-    monkeypatch.setenv("PSModulePath", "/opt/microsoft/powershell/7/Modules")
+    # Inject the env: Windows os.environ upper-cases keys, so a real setenv
+    # would surface as PSMODULEPATH on Windows runners.
+    monkeypatch.setattr(
+        self_update,
+        "external_process_env",
+        lambda: {"PSModulePath": "/opt/microsoft/powershell/7/Modules"},
+    )
 
     env = self_update._build_self_update_installer_env(
         self_update._resolve_self_update_release("1.2.3")

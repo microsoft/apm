@@ -537,7 +537,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
+    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import _project_has_root_primitives
@@ -578,7 +578,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         else project_root / "apm_modules"
     )
     live_modules_dir = project_root / "apm_modules"
-    deployment_modules_dir = replay_modules_root(scratch_root, user_scope=config.user_scope)
+    deployment_modules_dir, deployment_frame = replay_deployment_frame(
+        scratch_root, project_root, user_scope=config.user_scope
+    )
     codex_records = None
 
     live_targets = resolve_audit_targets(
@@ -691,6 +693,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         package_info.deployment_package_root = (
                             lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
                         )
+                        package_info.deployment_frame = deployment_frame
                     dep_key = lock_dep.get_unique_key()
 
                     # Replay deploys the locked selection, as uninstall does (#3760).
@@ -731,9 +734,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         verify_native_plugin_cache(
                             lock_dep,
                             install_path,
-                            package_info.deployment_package_root,
-                            live_modules_dir,
-                            scratch_root,
+                            # The materialized replay image, not the link frame (#3901).
+                            replay_path=install_path,
+                            live_modules=live_modules_dir,
+                            scratch_root=scratch_root,
                         )
                         if identity := result.get("codex_source_identity"):
                             from apm_cli.codex_plugins.registrar import verify_codex_source_identity

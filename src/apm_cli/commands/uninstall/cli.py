@@ -35,6 +35,7 @@ from .engine import (
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
+    manifest_dependency_entries,
 )
 
 
@@ -262,7 +263,7 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
         data["devDependencies"]["apm"] = []
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
-    return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
+    return had_dev_section, prod_deps, dev_deps, manifest_dependency_entries(data)
 
 
 def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
