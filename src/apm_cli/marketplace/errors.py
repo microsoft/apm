@@ -80,16 +80,27 @@ class MarketplaceFreshnessError(MarketplaceFetchError):
     missing.
     """
 
+    RETRY_HINT = (
+        "The cached catalog was kept and nothing was changed. Retry when the "
+        "catalog is reachable; a plain 'apm install' still uses the cached catalog."
+    )
+
     def __init__(self, name: str, reason: str = ""):
-        self.name = name
-        self.reason = reason
+        super().__init__(name, reason, retry_hint=self.RETRY_HINT)
         detail = f": {reason}" if reason else ""
-        Exception.__init__(
-            self,
-            f"Could not verify that marketplace '{name}' is current{detail}. "
-            "The cached catalog was kept and nothing was changed. Retry when the "
-            "catalog is reachable, or run 'apm install' without --refresh to use "
-            "the cached catalog.",
+        self.args = (
+            f"Could not verify that marketplace '{name}' is current{detail}. {self.RETRY_HINT}",
+        )
+
+
+class MarketplaceNotCachedError(MarketplaceFetchError):
+    """An advisory read during an explicit refresh found no cached catalog."""
+
+    def __init__(self, name: str):
+        super().__init__(
+            name,
+            "no cached catalog for an advisory read during an explicit refresh",
+            retry_hint="",
         )
 
 

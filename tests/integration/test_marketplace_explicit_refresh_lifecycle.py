@@ -325,16 +325,51 @@ def test_mixed_batch_fails_whole_and_skips_unrelated_catalogs(world: _World) -> 
 
 
 def test_frozen_replay_needs_no_live_catalog(world: _World) -> None:
-    """A locked restore never acquires a catalog request, even when it is down."""
+    """A locked restore never acquires a catalog request, even with --refresh."""
     _register(world, "acme")
-    seeded = world.run("install", "foo@acme", *_INSTALL, scenario="seed")
+    _declare_from_catalog(world, "foo")
+    seeded = world.run("install", *_INSTALL, scenario="seed")
     assert seeded.returncode == 0, _evidence(seeded)
     world.catalogs.modes["acme"] = "unavailable"
     requests = world.catalogs.count("acme")
+    before = world.state()
 
-    frozen = world.run("install", "--frozen", *_INSTALL, scenario="frozen")
-    assert frozen.returncode == 0, _evidence(frozen)
-    assert world.catalogs.count("acme") == requests
+    for args in (("install", "--frozen"), ("install", "--frozen", "--refresh")):
+        frozen = world.run(*args, *_INSTALL, scenario=" ".join(args))
+        assert frozen.returncode == 0, _evidence(frozen)
+        assert world.catalogs.count("acme") == requests
+        assert world.state() == before
+
+
+def test_local_catalog_stays_a_local_read_under_refresh(world: _World) -> None:
+    """Explicit refresh reads a local catalog directly, never as an unverifiable remote."""
+    catalog_dir = world.isolated.work_root / "local-catalog"
+    catalog_dir.mkdir()
+    catalog = catalog_dir / "marketplace.json"
+    catalog.write_text(
+        json.dumps(
+            {"name": "loc", "owner": {"name": "APM Test"}, "plugins": [_entry("foo", "v1")]}
+        ),
+        encoding="utf-8",
+    )
+    added = world.run("marketplace", "add", str(catalog_dir), "--name", "loc", scenario="add-local")
+    assert added.returncode == 0, _evidence(added)
+
+    refreshed = world.run("install", "--refresh", "foo@loc", *_INSTALL, scenario="local-refresh")
+    assert refreshed.returncode == 0, _evidence(refreshed)
+    assert world.deployed("foo") == _skill("foo", "v1")
+
+    catalog.write_text(
+        json.dumps(
+            {"name": "loc", "owner": {"name": "APM Test"}, "plugins": [_entry("bar", "v1")]}
+        ),
+        encoding="utf-8",
+    )
+    removed = world.run("install", "--refresh", "foo@loc", *_INSTALL, scenario="local-removed")
+    assert removed.returncode == 1, _evidence(removed)
+    assert "Plugin 'foo' not found in marketplace 'loc'" in _output(removed)
+    assert _NOT_CURRENT not in _output(removed)
+    assert world.catalogs.requests == {}
 
 
 def test_marketplace_update_reports_partial_failure(world: _World) -> None:

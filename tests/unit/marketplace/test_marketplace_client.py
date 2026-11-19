@@ -17,6 +17,7 @@ from apm_cli.marketplace.errors import (
     MarketplaceError,
     MarketplaceFetchError,
     MarketplaceFreshnessError,
+    MarketplaceNotCachedError,
 )
 from apm_cli.marketplace.models import MarketplaceSource
 
@@ -238,6 +239,21 @@ class TestExplicitFreshness:
             stale = client_mod.fetch_or_cache(source, auth_resolver=resolver, advisory=True)
             fresh = client_mod.fetch_or_cache(source, auth_resolver=resolver)
         assert (stale.name, fresh.name) == ("Cached", "Fresh")
+        assert resolver.try_with_fallback.call_count == 1
+
+    def test_advisory_read_contract_per_scope(self):
+        """Required scopes skip uncached advisory catalogs; ordinary scopes fetch them."""
+        uncached = _make_source("uncached")
+        resolver = _api_resolver(data={"name": "Fetched", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            with pytest.raises(MarketplaceNotCachedError):
+                client_mod.fetch_or_cache(uncached, auth_resolver=resolver, advisory=True)
+        resolver.try_with_fallback.assert_not_called()
+
+        with client_mod.catalog_freshness_scope(require_fresh=False):
+            read = client_mod.fetch_or_cache(uncached, auth_resolver=resolver, advisory=True)
+        assert read.name == "Fetched"
         assert resolver.try_with_fallback.call_count == 1
 
     def test_required_refresh_rejects_malformed_entries(self):

@@ -44,7 +44,12 @@ from ..utils.http_credentials import (
     origin_bounded_request,
     origin_root,
 )
-from .errors import MarketplaceError, MarketplaceFetchError, MarketplaceFreshnessError
+from .errors import (
+    MarketplaceError,
+    MarketplaceFetchError,
+    MarketplaceFreshnessError,
+    MarketplaceNotCachedError,
+)
 from .models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -1294,16 +1299,10 @@ def fetch_marketplace(
 
     # Try fresh cache first (API kinds only)
     if use_sidecar_cache and not (force_refresh or require_fresh):
-        cached = _read_cache(cache_name)
+        cached = _manifest_from_cache(source, cache_name, stale=False)
         if cached is not None:
             logger.debug("Using cached marketplace data for '%s'", source.name)
-            meta = _read_stale_meta(cache_name) or {}
-            return parse_marketplace_json(
-                cached,
-                source.name,
-                source_url=source_url,
-                source_digest=meta.get("index_digest", "") if source_url else "",
-            )
+            return cached
 
     # Fetch from source
     try:
@@ -1375,16 +1374,10 @@ def fetch_marketplace(
             raise MarketplaceFreshnessError(source.name, exc.reason or str(exc)) from exc
         # Stale-while-revalidate (API kinds only): serve expired cache on network error
         if use_sidecar_cache:
-            stale = _read_stale_cache(cache_name)
+            stale = _manifest_from_cache(source, cache_name, stale=True)
             if stale is not None:
                 logger.warning("Network error fetching '%s'; using stale cache", source.name)
-                meta = _read_stale_meta(cache_name) or {}
-                return parse_marketplace_json(
-                    stale,
-                    source.name,
-                    source_url=source_url,
-                    source_digest=meta.get("index_digest", "") if source_url else "",
-                )
+                return stale
         raise
 
 
@@ -1450,22 +1443,48 @@ def catalog_freshness_scope(*, require_fresh: bool) -> Iterator[None]:
             _invocation = previous
 
 
-def _cached_catalog(source: MarketplaceSource) -> MarketplaceManifest:
-    """Return the last cached catalog for *source* without any network request."""
-    if source.kind == "local":
-        return fetch_marketplace(source)
-    cache_name = _cache_key(source)
-    cached = _read_stale_cache(cache_name) if source.kind in _SIDECAR_KINDS else None
-    if cached is None:
-        raise MarketplaceFetchError(source.name, "no cached catalog for an advisory read")
+def _manifest_from_cache(
+    source: MarketplaceSource, cache_name: str, *, stale: bool
+) -> MarketplaceManifest | None:
+    """Return the cached catalog (within TTL, or any age when *stale*), else ``None``.
+
+    Single owner of cache-to-manifest projection: metadata lookup, url-kind
+    provenance (source_url / index digest) and root validation. A cached
+    payload that is not a catalog object counts as no cache.
+    """
+    data = _read_stale_cache(cache_name) if stale else _read_cache(cache_name)
+    if data is None:
+        return None
     meta = _read_stale_meta(cache_name) or {}
     source_url = source.url if source.kind == "url" else ""
-    return parse_marketplace_json(
-        cached,
-        source.name,
-        source_url=source_url,
-        source_digest=meta.get("index_digest", "") if source_url else "",
+    try:
+        return _parse_catalog(
+            data,
+            source,
+            source_url=source_url,
+            source_digest=meta.get("index_digest", "") if source_url else "",
+        )
+    except MarketplaceFetchError:
+        return None
+
+
+def _cached_catalog(source: MarketplaceSource) -> MarketplaceManifest:
+    """Return the last cached catalog for *source* without any network request.
+
+    Raises :class:`MarketplaceNotCachedError` for generic-git sources (no
+    sidecar cache) and for sources never cached: during an explicit refresh an
+    advisory reader then checks fewer catalogs rather than spending requests.
+    """
+    if source.kind == "local":
+        return fetch_marketplace(source)
+    cached = (
+        _manifest_from_cache(source, _cache_key(source), stale=True)
+        if source.kind in _SIDECAR_KINDS
+        else None
     )
+    if cached is None:
+        raise MarketplaceNotCachedError(source.name)
+    return cached
 
 
 def fetch_or_cache(
