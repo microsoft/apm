@@ -63,3 +63,45 @@ def test_gated_entries_use_the_callers_policy_once(project: Path, discovered: li
 def test_without_a_provider_replay_discovers_policy(project: Path, discovered: list[Path]) -> None:
     ReplayExecAllowMap(project).for_dependency(SimpleNamespace(exec_status="denied"))
     assert discovered == [project]
+
+
+def _hook_package(root: Path) -> SimpleNamespace:
+    from apm_cli.deps.lockfile import LockedDependency
+
+    (root / ".apm" / "hooks").mkdir(parents=True)
+    (root / ".apm" / "hooks" / "guard.json").write_text('{"hooks": {}}', encoding="utf-8")
+    lock_dep = LockedDependency(
+        repo_url="_local/hooky", source="local", local_path="../hooky", exec_status="deployed"
+    )
+    return SimpleNamespace(
+        lock_dep=lock_dep,
+        package_info=SimpleNamespace(
+            dependency_ref=lock_dep.to_dependency_ref(), install_path=root
+        ),
+    )
+
+
+def test_deployed_entry_denied_since_install_replays_gated(
+    project: Path, discovered: list[Path], tmp_path: Path
+) -> None:
+    """A deny no install has reconciled withholds the hooks, so leftovers drift (#3958)."""
+    package = _hook_package(tmp_path / "hooky")
+    allow = ReplayExecAllowMap(project, lambda: None).for_dependency(
+        package.lock_dep, package.package_info
+    )
+    assert allow is not None
+    assert "hooks" not in allow.get("../hooky", {})
+
+
+def test_deployed_entry_still_allowed_replays_ungated(
+    project: Path, discovered: list[Path], tmp_path: Path
+) -> None:
+    (project / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\nexecutables:\n  allow:\n    ../hooky:\n      hooks: true\n",
+        encoding="utf-8",
+    )
+    package = _hook_package(tmp_path / "hooky")
+    gate = ReplayExecAllowMap(project, lambda: None)
+    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+    package.lock_dep.exec_status = None
+    assert gate.for_dependency(package.lock_dep, package.package_info) is None

@@ -36,9 +36,10 @@ installed or declares no executables -- APM blocks all supported executable
 types for that reference. Writing a deny also removes a matching allow from the
 selected store.
 
-The next `apm install` stops deploying the denied package's hooks and removes
-the hook entries and scripts it deployed earlier from every harness config.
-Removing an approval while the gate is on has the same effect.
+The next `apm install` or `apm update` stops deploying the denied package's
+hooks and removes the hook entries and scripts it deployed earlier from every
+harness config. Removing an approval while the gate is on has the same effect.
+Until then, `apm audit --ci` reports the leftover hooks as drift.
 
 ## Examples
 

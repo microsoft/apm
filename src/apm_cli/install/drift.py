@@ -694,6 +694,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
                     # Replay deploys the locked selection, as uninstall does (#3760).
                     selection = effective_dependency_selection(package_info.dependency_ref)
+                    # Withhold what the install gate withheld (#3924) or would
+                    # now withhold after a deny no install reconciled (#3958).
+                    replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)
                     try:
                         result = integrate_package_primitives(
                             package_info,
@@ -720,8 +723,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the
                             # replay does not write to targets excluded by the consumer (#1923).
                             dep_target_subset=selection.target_subset,
-                            # Withhold what the install gate withheld (#3924).
-                            allow_executables=gated_allow_map.for_dependency(lock_dep),
+                            allow_executables=replay_allow,
                         )
                     except AgentPluginTargetExcludedError:
                         continue

@@ -10,6 +10,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -267,6 +268,99 @@ def hook_file_admission(
     return hook_file_filter(allow_executables, keys, Path(package_info.install_path))
 
 
+def _candidate_keys(pkg_key: str) -> list[str]:
+    """Return the approval key and its version-blind form."""
+    name_blind = pkg_key.split("#", 1)[0]
+    return [pkg_key] if name_blind == pkg_key else [pkg_key, name_blind]
+
+
+def current_exec_status(
+    trust_ctx_provider: Callable[[], Any], package_info: Any, package_name: str
+) -> str | None:
+    """Return the ``exec_status`` the install gate would record now.
+
+    Scans the materialized package and resolves its declared executable
+    types through the deny-wins trust context, exactly as
+    :func:`check_executable_approval` does during install. ``None`` means
+    the package declares no executables or the gate is disabled.
+    *trust_ctx_provider* is called only for a package that declares some.
+    """
+    from apm_cli.security.executables import scan_package_executables
+    from apm_cli.security.trust import package_exec_status
+
+    pkg_key = resolve_package_key(package_info, package_name)
+    install = Path(package_info.install_path)
+    native = hasattr(package_info, "package") and native_install(package_info)
+    decl = scan_package_executables(install, package_name, "", approval_identity=pkg_key)
+    exec_types = decl.exec_types
+    if native:
+        exec_types = tuple(dict.fromkeys((*exec_types, *native_declared_types(package_info))))
+    if not exec_types:
+        return None
+    return package_exec_status(
+        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
+    )
+
+
+def recorded_exec_status_is_stale(recorded: str | None, current: str | None) -> bool:
+    """Return whether a lock row's executables decision no longer holds.
+
+    A row recorded as gated or denied, or one that is now gated or denied,
+    must be re-integrated so install deploys or retires its executables.
+    Unrecorded and deployed rows are both ungated, so they agree.
+    """
+    from apm_cli.security.executables import TRUST_DEPLOYED
+
+    ungated = {None, TRUST_DEPLOYED}
+    return recorded != current and not (recorded in ungated and current in ungated)
+
+
+def lock_exec_decisions_stale(
+    lockfile: Any,
+    modules_dir: Path,
+    source_root: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> bool:
+    """Return whether any lock row's executables decision no longer holds.
+
+    ``apm update`` short-circuits when no ref moved; this tells it that an
+    ``apm approve`` / ``apm deny`` (or a policy change) still needs the
+    install gate to deploy or retire executables and rewrite the lock.
+    Trust (and *policy_provider*) resolve only when a package declares
+    executables.
+    """
+    from apm_cli.security.executables import TRUST_ABSENT, exec_trust_context_for_project
+
+    trust: list[Any] = []
+
+    def _trust_ctx() -> Any:
+        if not trust:
+            trust.append(
+                exec_trust_context_for_project(
+                    source_root,
+                    policy=policy_provider(),
+                    fallback_allow_executables=fallback_allow_executables,
+                    migrate_user_legacy=False,
+                )
+            )
+        return trust[0]
+
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        dep_ref = dep.to_dependency_ref()
+        install_path = dep_ref.get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        package_info = SimpleNamespace(dependency_ref=dep_ref, install_path=install_path)
+        current = current_exec_status(_trust_ctx, package_info, dep.get_unique_key())
+        if recorded_exec_status_is_stale(dep.exec_status, current):
+            return True
+    return False
+
+
 def resolve_package_key(package_info: Any, package_name: str) -> str:
     """Build the ``allowExecutables`` lookup key for a package.
 
@@ -424,9 +518,12 @@ class ReplayExecAllowMap:
 
     A lock entry whose ``exec_status`` is gated or denied had executables
     withheld at install, so audit replay re-derives the per-type decisions
-    from the deny-wins trust owner and withholds them too (#3924). Entries
-    recorded as deployed trust that record and replay ungated. The lockfile
-    keeps no per-type evidence, so this is the only re-check replay makes.
+    from the deny-wins trust owner and withholds them too (#3924). Any other
+    entry replays ungated unless the trust owner now gates or denies it (an
+    ``apm deny`` that no install has reconciled yet), so executables left
+    deployed against the current decision surface as drift (#3958).
+    The lockfile keeps no per-type evidence, so this is the only re-check
+    replay makes.
 
     *policy_provider* returns the org policy object (or ``None``) the caller
     already fetched, so one audit run consults a single policy.
@@ -436,25 +533,48 @@ class ReplayExecAllowMap:
         self._project_root = project_root
         self._policy_provider = policy_provider
         self._resolved = False
+        self._trust_ctx_value: Any = None
         self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
 
-    def for_dependency(self, lock_dep: Any) -> builtins.dict[str, builtins.dict[str, bool]] | None:
+    def _resolve(self) -> None:
+        if self._resolved:
+            return
+        from apm_cli.security.executables import (
+            exec_trust_context_for_project,
+            materialize_exec_map,
+        )
+
+        if self._policy_provider is not None:
+            policy = self._policy_provider()
+        else:
+            from apm_cli.policy.discovery import discover_policy_with_chain
+
+            policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
+        # Audit is read-only: never migrate legacy user consent here.
+        self._trust_ctx_value = exec_trust_context_for_project(
+            self._project_root, policy=policy, migrate_user_legacy=False
+        )
+        self._map = materialize_exec_map(self._trust_ctx_value)
+        self._resolved = True
+
+    def _trust_ctx(self) -> Any:
+        self._resolve()
+        return self._trust_ctx_value
+
+    def for_dependency(
+        self, lock_dep: Any, package_info: Any | None = None
+    ) -> builtins.dict[str, builtins.dict[str, bool]] | None:
         from apm_cli.security.executables import TRUST_ABSENT, TRUST_DEPLOYED
 
-        if getattr(lock_dep, "exec_status", None) in (None, TRUST_ABSENT, TRUST_DEPLOYED):
+        status = getattr(lock_dep, "exec_status", None)
+        if status == TRUST_ABSENT:
             return None
-        if not self._resolved:
-            from apm_cli.security.executables import effective_exec_map_for_project
-
-            if self._policy_provider is not None:
-                policy = self._policy_provider()
-            else:
-                from apm_cli.policy.discovery import discover_policy_with_chain
-
-                policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
-            # Audit is read-only: never migrate legacy user consent here.
-            self._map = effective_exec_map_for_project(
-                self._project_root, policy=policy, migrate_user_legacy=False
-            )
-            self._resolved = True
+        if status in (None, TRUST_DEPLOYED):
+            # The project's own content is always trusted (see the install gate).
+            if package_info is None or getattr(lock_dep, "local_path", None) == ".":
+                return None
+            current = current_exec_status(self._trust_ctx, package_info, lock_dep.get_unique_key())
+            if not recorded_exec_status_is_stale(status, current):
+                return None
+        self._resolve()
         return self._map

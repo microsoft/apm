@@ -170,3 +170,53 @@ def test_gating_a_package_retires_its_deployed_hooks(
             path.write_bytes(content)
         leftover = apm("audit", "--ci", "--no-policy", expect=1)
         assert "Drift detected" in leftover, leftover
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot", "cursor", "codex", "gemini", "kiro"])
+def test_audit_and_update_honor_the_current_executables_decision(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """A gated package audits green; a deny no install reconciled audits red
+    until ``apm update`` with no ref changes retires the hooks (#3958)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    _hook_package(isolated.work_root / "hooky")
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = {
+        "name": "consumer",
+        "version": "0.1.0",
+        "targets": [target],
+        "dependencies": {"apm": ["../hooky"]},
+        "executables": {},
+    }
+    dump_yaml(manifest, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str, expect: int = 0) -> str:
+        result = runner.run(args, cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == expect, f"apm {' '.join(args)}\n{output}"
+        return output
+
+    apm("install", "--no-policy")
+    assert _exec_status(project) == "gated_pending_approval"
+    assert _hook_residue(project) == []
+    apm("audit", "--ci", "--no-policy")
+
+    apm("approve", "../hooky")
+    apm("install", "--no-policy")
+    assert _exec_status(project) == "deployed"
+    assert _hook_residue(project)
+
+    apm("deny", "../hooky")
+    lingering = apm("audit", "--ci", "--no-policy", expect=1)
+    assert "Drift detected" in lingering, lingering
+
+    updated = " ".join(apm("update", "--yes").split())
+    assert "already at their latest" not in updated, updated
+    assert "hooks skipped (denied)" in updated, updated
+    assert _exec_status(project) == "denied"
+    assert _hook_residue(project) == []
+    apm("audit", "--ci", "--no-policy")
+    assert "already at their latest" in apm("update", "--yes")

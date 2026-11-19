@@ -107,12 +107,14 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _EXEC_GATE: (
                     "return dependency_approval_key(dep_ref)",
                     "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
-                    "self._map = effective_exec_map_for_project(",
+                    "self._trust_ctx_value = exec_trust_context_for_project(",
                 ),
                 # Audit replay withholds what the install gate withheld, under
-                # the audit's own single policy fetch (#3924).
+                # the audit's own single policy fetch (#3924), and what it would now
+                # withhold after an unreconciled deny (#3958).
                 _DRIFT_REPLAY: (
-                    "allow_executables=gated_allow_map.for_dependency(lock_dep),",
+                    "replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)",
+                    "allow_executables=replay_allow,",
                     "gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)",
                 ),
                 _AUDIT_REPLAY: ("policy_provider=policy_provider,",),

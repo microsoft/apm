@@ -759,13 +759,13 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
     [
         (
             "src/apm_cli/install/drift.py",
-            "allow_executables=gated_allow_map.for_dependency(lock_dep),",
-            "allow_executables=None,",
+            "replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)",
+            "replay_allow = None",
         ),
         (
             "src/apm_cli/install/exec_gate.py",
-            "self._map = effective_exec_map_for_project(",
-            "self._map = build_effective_exec_map(",
+            "self._trust_ctx_value = exec_trust_context_for_project(",
+            "self._trust_ctx_value = build_exec_trust_context(",
         ),
         (
             "src/apm_cli/install/drift.py",

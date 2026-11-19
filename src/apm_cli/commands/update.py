@@ -143,6 +143,41 @@ def _module_cache_needs_rehydration(
     return has_locked_dependency
 
 
+def _executables_need_reconcile(
+    lockfile: LockFile | None,
+    modules_dir: Path,
+    scope: InstallScope,
+    apm_package: Any,
+) -> bool:
+    """Return whether a recorded executables decision no longer holds (#3958).
+
+    Lets the no-change short-circuit still run the install gate after an
+    ``apm approve`` / ``apm deny`` so it deploys or retires executables.
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.core.scope import get_deploy_root, get_source_root
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    def _policy() -> Any:
+        from apm_cli.policy.discovery import discover_policy_with_chain
+
+        try:
+            return getattr(discover_policy_with_chain(get_deploy_root(scope)), "policy", None)
+        except Exception:
+            # The install gate fetches policy again and enforces it; this only
+            # decides whether to run that gate.
+            return None
+
+    return lock_exec_decisions_stale(
+        lockfile,
+        modules_dir,
+        get_source_root(scope),
+        policy_provider=_policy,
+        fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+    )
+
+
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
     """Build the downloader used for authoritative revision-pin ref checks."""
     return GitHubPackageDownloader(auth_resolver=AuthResolver())
@@ -793,7 +828,12 @@ def _run_dep_update_locked(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if not _cache_rehydration_required:
+            if _exec_reconcile_required:
+                logger.info(
+                    "Executables approvals changed since the last install; "
+                    "reconciling deployed executables."
+                )
+            elif not _cache_rehydration_required:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
                     noun = "pin" if retained_count == 1 else "pins"
@@ -847,6 +887,9 @@ def _run_dep_update_locked(
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
+    )
+    _exec_reconcile_required = not _cache_rehydration_required and _executables_need_reconcile(
+        _existing_lock, _modules_dir, scope, apm_package
     )
 
     try:
@@ -982,7 +1025,9 @@ def _run_dep_update_locked(
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
-                "Restored dependency cache without changing refs.",
+                "Reconciled executables without changing refs."
+                if _exec_reconcile_required
+                else "Restored dependency cache without changing refs.",
                 symbol="check",
             )
         elif revision_pin_updates:
