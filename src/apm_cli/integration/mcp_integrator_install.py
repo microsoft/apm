@@ -1968,10 +1968,13 @@ def run_mcp_install(  # noqa: PLR0913
             )
 
     dep_runtimes = {id(dep): mcp_dependency_runtimes(dep, target_runtimes) for dep in mcp_deps}
+    scoped_out: set[int] = set()
     for dep in mcp_deps:
-        if not dep_runtimes[id(dep)]:
+        declared = _declared_mcp_targets(dep)
+        if declared is not None and not dep_runtimes[id(dep)]:
+            scoped_out.add(id(dep))
             logger.warning(
-                f"MCP server '{dep.name}' targets [{', '.join(dep.targets)}] do not overlap "
+                f"MCP server '{dep.name}' targets [{', '.join(declared)}] do not overlap "
                 f"active MCP targets [{', '.join(target_runtimes)}]; skipping"
             )
 
@@ -1992,7 +1995,7 @@ def run_mcp_install(  # noqa: PLR0913
             registry_groups: builtins.dict[tuple, list] = {}
             for dep in registry_deps:
                 key = (tuple(dep_runtimes[id(dep)]), _registry_group_key(dep))
-                if key[0]:
+                if id(dep) not in scoped_out:
                     registry_groups.setdefault(key, []).append(dep)
 
             for (group_runtimes, group_registry_url), group_deps_list in registry_groups.items():
@@ -2049,7 +2052,7 @@ def run_mcp_install(  # noqa: PLR0913
     # --- Self-defined deps (registry: false) ---
     self_defined_groups: builtins.dict[tuple, list] = {}
     for dep in self_defined_deps:
-        if dep_runtimes[id(dep)]:
+        if id(dep) not in scoped_out:
             self_defined_groups.setdefault(tuple(dep_runtimes[id(dep)]), []).append(dep)
     for group_runtimes, group_self_defined in self_defined_groups.items():
         try:
