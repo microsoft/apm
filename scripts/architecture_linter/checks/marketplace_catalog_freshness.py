@@ -30,7 +30,7 @@ _ROUTES = (
 # Revalidation-or-fail must stay explicit where the owner is invoked.
 _REQUIRED_TEXT = (
     (_CLIENT, "fetch_or_cache", "require_fresh=invocation.require_fresh"),
-    (_CLIENT, "fetch_marketplace", "if require_fresh and"),
+    (_CLIENT, "fetch_marketplace", "strict = require_fresh and"),
 )
 # Every catalog read in ``apm marketplace update`` must revalidate.
 _STRICT_CALLS = ((_MARKETPLACE_COMMANDS, "update", "fetch_marketplace", "require_fresh=True"),)

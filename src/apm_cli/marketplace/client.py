@@ -67,6 +67,7 @@ class FetchResult:
 
 
 _CACHE_TTL_SECONDS = 3600  # 1 hour
+_SIDECAR_KINDS = frozenset({"github", "gitlab", "ado", "url"})
 _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
@@ -1286,8 +1287,10 @@ def fetch_marketplace(
             retry_hint="Omit --offline to use the existing JSON or repository workflow.",
         )
     cache_name = _cache_key(source)
-    use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
+    use_sidecar_cache = source.kind in _SIDECAR_KINDS
     source_url = source.url if source.kind == "url" else ""
+    # Local catalogs stay ordinary local reads even under explicit refresh.
+    strict = require_fresh and source.kind != "local"
 
     # Try fresh cache first (API kinds only)
     if use_sidecar_cache and not (force_refresh or require_fresh):
@@ -1320,6 +1323,7 @@ def fetch_marketplace(
                 manifest = _parse_catalog(
                     stale,
                     source,
+                    strict=strict,
                     source_url=source.url,
                     source_digest=stale_meta.get("index_digest", ""),
                 )
@@ -1332,7 +1336,11 @@ def fetch_marketplace(
                 )
                 return manifest
             manifest = _parse_catalog(
-                result.data, source, source_url=source.url, source_digest=result.digest
+                result.data,
+                source,
+                source_url=source.url,
+                source_digest=result.digest,
+                strict=strict,
             )
             _write_cache(
                 cache_name,
@@ -1357,13 +1365,13 @@ def fetch_marketplace(
                 source.name,
                 f"marketplace.json not found at '{source.path}' in {source.display_source}",
             )
-        manifest = _parse_catalog(data, source)
+        manifest = _parse_catalog(data, source, strict=strict)
         # Only a validated catalog replaces the last valid cache.
         if use_sidecar_cache:
             _write_cache(cache_name, data)
         return manifest
     except MarketplaceFetchError as exc:
-        if require_fresh and source.kind != "local":
+        if strict:
             raise MarketplaceFreshnessError(source.name, exc.reason or str(exc)) from exc
         # Stale-while-revalidate (API kinds only): serve expired cache on network error
         if use_sidecar_cache:
@@ -1386,18 +1394,26 @@ def _parse_catalog(
     *,
     source_url: str = "",
     source_digest: str = "",
+    strict: bool = False,
 ) -> MarketplaceManifest:
     """Parse fetched catalog JSON, rejecting a non-object root.
 
     Runs before any cache write so an invalid response never replaces the
-    last valid cached catalog. Entry-level problems stay tolerated and are
-    reported as structural diagnostics by the model parser.
+    last valid cached catalog. Ordinary reads tolerate entry-level problems
+    (the model parser records them as structural diagnostics). A *strict*
+    (explicit-refresh) read rejects them, so a malformed catalog cannot pass
+    as a successful refresh that silently drops entries.
     """
     if not isinstance(data, dict):
         raise MarketplaceFetchError(source.name, "marketplace.json root must be an object")
-    return parse_marketplace_json(
+    manifest = parse_marketplace_json(
         data, source.name, source_url=source_url, source_digest=source_digest
     )
+    if strict and manifest.structural_errors:
+        raise MarketplaceFetchError(
+            source.name, "invalid catalog: " + "; ".join(manifest.structural_errors[:3])
+        )
+    return manifest
 
 
 @dataclass
@@ -1434,6 +1450,24 @@ def catalog_freshness_scope(*, require_fresh: bool) -> Iterator[None]:
             _invocation = previous
 
 
+def _cached_catalog(source: MarketplaceSource) -> MarketplaceManifest:
+    """Return the last cached catalog for *source* without any network request."""
+    if source.kind == "local":
+        return fetch_marketplace(source)
+    cache_name = _cache_key(source)
+    cached = _read_stale_cache(cache_name) if source.kind in _SIDECAR_KINDS else None
+    if cached is None:
+        raise MarketplaceFetchError(source.name, "no cached catalog for an advisory read")
+    meta = _read_stale_meta(cache_name) or {}
+    source_url = source.url if source.kind == "url" else ""
+    return parse_marketplace_json(
+        cached,
+        source.name,
+        source_url=source_url,
+        source_digest=meta.get("index_digest", "") if source_url else "",
+    )
+
+
 def fetch_or_cache(
     source: MarketplaceSource,
     *,
@@ -1454,6 +1488,10 @@ def fetch_or_cache(
     key = f"{source.kind}:{_cache_key(source)}"
     known = invocation.results.get(key)
     if known is None and advisory:
+        if invocation.require_fresh:
+            # Never spend a request on an unrelated catalog during an
+            # explicit refresh; advisory readers fall back to what is cached.
+            return _cached_catalog(source)
         return fetch_marketplace(source, auth_resolver=auth_resolver)
     if known is None:
         # Serialize first reads so concurrent selections from one source

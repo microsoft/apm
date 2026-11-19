@@ -81,7 +81,10 @@ class _Catalogs:
                 if mode == "invalid":
                     self._reply(name, 200, b"<html>not a catalog</html>")
                     return
-                body = json.dumps(catalogs.bodies[name]).encode()
+                catalog = catalogs.bodies[name]
+                if mode == "malformed-entry":
+                    catalog = {**catalog, "plugins": [None, *catalog["plugins"]]}
+                body = json.dumps(catalog).encode()
                 etag = '"' + hashlib.sha256(body).hexdigest()[:16] + '"'
                 if self.headers.get("If-None-Match") == etag:
                     self._reply(name, 304, b"", etag=etag)
@@ -254,7 +257,7 @@ def test_update_follows_changed_pins_and_respects_selection(world: _World) -> No
     assert world.deployed("bar") == _skill("bar", "v2")
 
 
-@pytest.mark.parametrize("mode", ["unavailable", "invalid"])
+@pytest.mark.parametrize("mode", ["unavailable", "invalid", "malformed-entry"])
 def test_refresh_fails_closed_and_preserves_state(world: _World, mode: str) -> None:
     """An unverifiable catalog fails --refresh and update without touching any bytes."""
     _register(world, "acme")
@@ -284,6 +287,41 @@ def test_refresh_fails_closed_and_preserves_state(world: _World, mode: str) -> N
     ordinary = world.run("install", *_INSTALL, scenario="ordinary-after-failure")
     assert ordinary.returncode == 0, _evidence(ordinary)
     assert world.deployed("foo") == _skill("foo", "v1")
+
+
+def _expire_caches(world: _World) -> None:
+    for meta in (world.isolated.config_root / "cache" / "marketplace").glob("*.meta.json"):
+        data = json.loads(meta.read_text("utf-8"))
+        data["fetched_at"] = 0
+        meta.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_mixed_batch_fails_whole_and_skips_unrelated_catalogs(world: _World) -> None:
+    """One unverifiable catalog fails the batch; shadow checks never spend requests."""
+    _register(world, "acme", "beta")
+    seeded = world.run("install", "foo@acme", *_INSTALL, scenario="seed")
+    assert seeded.returncode == 0, _evidence(seeded)
+    _expire_caches(world)
+    baseline = (world.catalogs.count("acme"), world.catalogs.count("beta"))
+
+    # Expired caches would otherwise make shadow detection fetch the other catalog.
+    both = world.run(
+        "install", "--refresh", "bar@acme", "foo@beta", *_INSTALL, scenario="refresh-two-sources"
+    )
+    assert both.returncode == 0, _evidence(both)
+    assert (world.catalogs.count("acme"), world.catalogs.count("beta")) == (
+        baseline[0] + 1,
+        baseline[1] + 1,
+    )
+
+    world.catalogs.modes["beta"] = "unavailable"
+    before = world.state()
+    mixed = world.run(
+        "install", "--refresh", "foo@acme", "bar@beta", *_INSTALL, scenario="refresh-mixed"
+    )
+    assert mixed.returncode == 1, _evidence(mixed)
+    assert _NOT_CURRENT in _output(mixed)
+    assert world.state() == before
 
 
 def test_frozen_replay_needs_no_live_catalog(world: _World) -> None:

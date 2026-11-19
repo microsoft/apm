@@ -226,6 +226,32 @@ class TestExplicitFreshness:
         assert resolver.try_with_fallback.call_count == 1
         assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Fresh"
 
+    def test_required_scope_advisory_reads_never_fetch(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        meta_path = client_mod._cache_meta_path(source.name)
+        with open(meta_path, "w") as f:
+            json.dump({"fetched_at": time.time() - 7200, "ttl_seconds": 3600}, f)
+        resolver = _api_resolver(data={"name": "Fresh", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            stale = client_mod.fetch_or_cache(source, auth_resolver=resolver, advisory=True)
+            fresh = client_mod.fetch_or_cache(source, auth_resolver=resolver)
+        assert (stale.name, fresh.name) == ("Cached", "Fresh")
+        assert resolver.try_with_fallback.call_count == 1
+
+    def test_required_refresh_rejects_malformed_entries(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        before = _cached_bytes(source)
+        resolver = _api_resolver(data={"name": "Bad", "plugins": [None]})
+
+        with pytest.raises(MarketplaceFreshnessError, match="invalid catalog"):
+            client_mod.fetch_marketplace(source, require_fresh=True, auth_resolver=resolver)
+        assert _cached_bytes(source) == before
+        tolerant = client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=resolver)
+        assert tolerant.structural_errors
+
     def test_scope_shares_one_failure_per_source(self):
         source = _make_source()
         client_mod._write_cache(source.name, {"name": "Old", "plugins": []})
