@@ -335,6 +335,14 @@ setup_codex() {
             log_info "No GitHub token found - you'll need to set GITHUB_TOKEN (user-scoped PAT)"
         fi
         
+        # GitHub Models has no Responses API: Codex after v0.115 needs wire_api=chat
+        # (#605). Only a release known to be v0.115 or older keeps "responses".
+        wire_api="chat"
+        codex_minor=$(echo "$CODEX_VERSION" | sed -n 's/^rust-v0\.\([0-9]*\).*/\1/p')
+        if [ -n "$codex_minor" ] && [ "$codex_minor" -le "$LAST_COMPAT_VERSION_MINOR" ] 2>/dev/null; then
+            wire_api="responses"
+        fi
+
         cat > "$codex_config" << EOF
 model_provider = "github-models"
 model = "openai/gpt-4o"
@@ -343,23 +351,11 @@ model = "openai/gpt-4o"
 name = "GitHub Models"
 base_url = "https://models.github.ai/inference/"
 env_key = "$github_token_var"
-wire_api = "responses"
+wire_api = "$wire_api"
 EOF
-        
-        log_success "Codex configuration created at $codex_config"
-        log_info "Using Codex $CODEX_VERSION."
 
-        # Version compatibility check
-        codex_minor=$(echo "$CODEX_VERSION" | sed -n 's/^rust-v0\.\([0-9]*\).*/\1/p')
-        if [ -n "$codex_minor" ] && [ "$codex_minor" -gt "$LAST_COMPAT_VERSION_MINOR" ] 2>/dev/null; then
-            echo ""
-            log_warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
-            log_warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
-            log_warning "To fix, update wire_api in $codex_config:"
-            log_warning "  wire_api = \"chat\""
-            log_warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
-            echo ""
-        fi
+        log_success "Codex configuration created at $codex_config"
+        log_info "Using Codex $CODEX_VERSION (wire_api = \"$wire_api\" for GitHub Models)."
 
         log_info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
         log_info "APM configured Codex with GitHub Models as default provider"
