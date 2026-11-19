@@ -29,7 +29,8 @@ written per target: `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<pkg>/...` in
 `.mcp.json` (Claude, Copilot), `${workspaceFolder}/...` for Cursor and VS Code,
 `${CLAUDE_PROJECT_DIR}/...` in the Claude LSP plugin, otherwise (and with
 `--global`) the absolute path. A lockfile from an older release holding the
-absolute path still replays `--frozen`.
+absolute path still replays `--frozen` unchanged; the next `apm install`
+migrates it. `apm pack --format agent-plugin` rejects such MCP servers.
 
 Root `plugin.json` and `.claude-plugin/plugin.json` also precede the Codex
 compatibility overlay. The Codex route requires a native-discoverable skill

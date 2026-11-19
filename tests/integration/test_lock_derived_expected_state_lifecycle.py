@@ -320,3 +320,94 @@ def test_plugin_root_mcp_and_lsp_replay_frozen_in_a_moved_clone(
 
     world.apm(moved, "install", "--no-policy")
     assert tree_bytes(moved, exclude=_COMMITTED) == committed
+
+
+_NATIVE_REFERENCES = {
+    ".mcp.json": ("claude", "${CLAUDE_PROJECT_DIR:-.}"),
+    ".cursor/mcp.json": ("cursor", "${workspaceFolder}"),
+}
+
+
+def _expand(value: object, root: str) -> object:
+    if isinstance(value, str):
+        return value.replace(_ROOT, root)
+    if isinstance(value, dict):
+        return {key: _expand(item, root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand(item, root) for item in value]
+    return value
+
+
+def _rewrite_as_pre_3825_release(project: Path, *, fingerprints: bool) -> None:
+    """Rewrite MCP state as releases before #3825 wrote it: the root expanded."""
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import mcp_native_hash
+
+    relative = "apm_modules/acme/synth"
+    root = str((project / relative).resolve())
+    hashes: dict[str, str] = {}
+    for path, (runtime, reference) in _NATIVE_REFERENCES.items():
+        native = project / path
+        text = native.read_text(encoding="utf-8").replace(
+            f"{reference}/{relative}", json.dumps(root)[1:-1]
+        )
+        native.write_text(text, encoding="utf-8")
+        entry = json.loads(text)["mcpServers"]["synth-db"]
+        client = ClientFactory.create_client(runtime, project_root=project)
+        hashes[runtime] = mcp_native_hash(client.managed_server_config(entry))
+    lock = load_yaml(project / "apm.lock.yaml")
+    lock["mcp_configs"]["synth-db"] = _expand(lock["mcp_configs"]["synth-db"], root)
+    for record in lock["deployments"]:
+        if record.get("kind") == "uri" and record.get("target") == "mcp":
+            record["content_hash"] = hashes.get(record["runtime"]) if fingerprints else None
+    dump_yaml(lock, project / "apm.lock.yaml")
+
+
+def _pre_3825_project(tmp_path: Path, apm_binary_path: Path, *, fingerprints: bool):
+    world = CornerWorld.create(tmp_path, apm_binary_path)
+    world.publish("synth", _claude_plugin(world.isolated.package_root / "synth", "synth"))
+    project = world.project("legacy", targets=("claude", "cursor"), deps=(remote_url("synth"),))
+    (project / ".claude").mkdir()
+    (project / ".cursor").mkdir()
+    world.apm(project, "install", "--no-policy")
+    _rewrite_as_pre_3825_release(project, fingerprints=fingerprints)
+    shutil.rmtree(project / "apm_modules")
+    return world, project
+
+
+def _servers(project: Path, path: str) -> dict:
+    return json.loads((project / path).read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_frozen_replay_of_a_pre_3825_lock_keeps_native_state_removable(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, project = _pre_3825_project(tmp_path, apm_binary_path, fingerprints=True)
+    recorded = {
+        path: (project / path).read_bytes() for path in (*_NATIVE_REFERENCES, "apm.lock.yaml")
+    }
+
+    world.apm(project, "install", "--frozen", "--no-policy")
+    world.apm(project, "audit", "--ci", "--no-policy")
+    assert {path: (project / path).read_bytes() for path in recorded} == recorded
+
+    world.apm(project, "uninstall", remote_url("synth"))
+    for path in _NATIVE_REFERENCES:
+        assert "synth-db" not in _servers(project, path)
+
+
+def test_install_migrates_an_unfingerprinted_pre_3825_entry_per_target(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, project = _pre_3825_project(tmp_path, apm_binary_path, fingerprints=False)
+
+    world.apm(project, "install", "--no-policy")
+
+    script = "apm_modules/acme/synth/scripts/server.js"
+    assert world.lock(project)["mcp_configs"]["synth-db"]["args"] == [f"{_ROOT}/scripts/server.js"]
+    for path, (_runtime, reference) in _NATIVE_REFERENCES.items():
+        assert _servers(project, path)["synth-db"]["args"] == [f"{reference}/{script}"]
+    world.apm(project, "install", "--frozen", "--no-policy")
+    world.apm(project, "uninstall", remote_url("synth"))
+    for path in _NATIVE_REFERENCES:
+        assert "synth-db" not in _servers(project, path)

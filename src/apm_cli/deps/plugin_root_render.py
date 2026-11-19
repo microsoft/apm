@@ -98,14 +98,17 @@ def render_plugin_root(
     return _substitute(value, replacement)
 
 
-def with_absolute_plugin_root(dependency: Any, fields: Iterable[str]) -> Any:
-    """Return *dependency* with *fields* expanded at its absolute package root.
+def with_absolute_plugin_root(
+    dependency: Any, fields: Iterable[str], *, root: str | None = None
+) -> Any:
+    """Return *dependency* with *fields* expanded at an absolute package root.
 
-    For values no target renders portably, such as registry overlays.
+    *root* defaults to the bound package root. For values no target renders
+    portably, such as registry overlays, and for replaying a recorded root.
     """
     import dataclasses
 
-    root = plugin_root_of(dependency)
+    root = root or plugin_root_of(dependency)
     if root is None or not dataclasses.is_dataclass(dependency):
         return dependency
 
@@ -169,6 +172,51 @@ def _is_absolute(path: str) -> bool:
     return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
 
 
+def _is_normalized_root(root: str) -> bool:
+    """An absolute root with no empty, ``.`` or ``..`` segment."""
+    normalized = root.replace("\\", "/")
+    if not _is_absolute(root) or normalized.endswith("/"):
+        return False
+    segments = normalized.split("/")[1:]
+    if PureWindowsPath(root).drive:
+        segments = segments[1:] if normalized.startswith("//") else segments
+    return all(segment not in ("", ".", "..") for segment in segments)
+
+
+def legacy_absolute_root(
+    current: Any,
+    stored: Any,
+    *,
+    plugin_root: str | None,
+    project_root: Path | None,
+) -> str | None:
+    """Return the absolute root at which *stored* is *current* expanded, if any.
+
+    Releases before #3825 recorded the placeholder already expanded. Such a
+    value is the same declaration when one normalized absolute root, either
+    this package's root or a path ending in the same project-relative install
+    path (another clone), turns every placeholder into the stored text.
+    """
+    if not plugin_root or not contains_plugin_root(current):
+        return None
+    pairs: list[tuple[str, str]] = []
+    if not _placeholder_pairs(current, stored, pairs) or not pairs:
+        return None
+    roots = {_expanded_root(authored, value) for authored, value in pairs}
+    if len(roots) != 1 or None in roots:
+        return None
+    (root,) = roots
+    if root is None or not _is_normalized_root(root):
+        return None
+    normalized = root.replace("\\", "/")
+    same_root = normalized == str(Path(plugin_root)).replace("\\", "/").rstrip("/")
+    relative = _project_relative(plugin_root, project_root) if project_root is not None else None
+    moved_clone = relative not in (None, ".") and normalized.endswith("/" + str(relative))
+    if (same_root or moved_clone) and _substitute(current, root) == stored:
+        return root
+    return None
+
+
 def legacy_absolute_equivalent(
     current: Any,
     stored: Any,
@@ -176,26 +224,8 @@ def legacy_absolute_equivalent(
     plugin_root: str | None,
     project_root: Path | None,
 ) -> bool:
-    """Whether *stored* is *current* expanded at an absolute package path.
-
-    Releases before #3825 recorded the placeholder already expanded. Such a
-    value is the same declaration when one absolute root, either this package's
-    root or any path ending in the same project-relative install path (another
-    clone), turns every placeholder into the stored text.
-    """
-    if not plugin_root or not contains_plugin_root(current):
-        return False
-    pairs: list[tuple[str, str]] = []
-    if not _placeholder_pairs(current, stored, pairs) or not pairs:
-        return False
-    roots = {_expanded_root(authored, value) for authored, value in pairs}
-    if len(roots) != 1 or None in roots:
-        return False
-    (root,) = roots
-    if root is None or not _is_absolute(root):
-        return False
-    normalized = root.replace("\\", "/").rstrip("/")
-    same_root = normalized == str(Path(plugin_root)).replace("\\", "/").rstrip("/")
-    relative = _project_relative(plugin_root, project_root) if project_root is not None else None
-    moved_clone = relative not in (None, ".") and normalized.endswith("/" + str(relative))
-    return (same_root or moved_clone) and _substitute(current, root) == stored
+    """Whether *stored* is *current* recorded with its plugin root expanded."""
+    return (
+        legacy_absolute_root(current, stored, plugin_root=plugin_root, project_root=project_root)
+        is not None
+    )
