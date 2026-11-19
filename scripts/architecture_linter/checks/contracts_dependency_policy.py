@@ -46,6 +46,9 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
             "normalize_package_policy_identity",
             "normalize_policy_host",
             "split_policy_pattern_host",
+            "effective_policy_host",
+            "required_package_policy_host",
+            "required_package_policy_hosts",
         ),
     )
     required = {
@@ -55,11 +58,15 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
             "dependency.case_insensitive_identity_prefix_segments",
             "split_policy_pattern_host(pattern)",
             "dependency.policy_host",
+            "dependency.required_package_host",
+            "required_package_policy_hosts(policy_name)",
         ),
         CHECKS: (
             "check_dependency_allowed(dep, policy)",
             "DependencyPolicyIndex.from_dependencies(deps)",
             "index.find_name(pkg_name)",
+            "index.find(pkg_name)",
+            "match.lock_key",
         ),
     }
     parallel_case = re.compile(
@@ -82,8 +89,10 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                     "models/dependency/identity.py",
                 )
             )
+        if path == CHECKS and facts.tree_index is not None:
+            findings.extend(_required_lock_identity_findings(facts.tree_index))
         if path == MATCHER and facts.tree_index is not None:
-            for method in ("from_dependencies", "find_name"):
+            for method in ("from_dependencies", "_first"):
                 function = facts.tree_index.function(f"DependencyPolicyIndex.{method}")
                 nodes = facts.tree_index.own_scope(function) if function is not None else ()
                 if not any(
@@ -106,6 +115,45 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                         )
                     )
     return tuple(findings)
+
+
+_REQUIRED_CHECKS = (
+    "_check_required_packages",
+    "_check_required_packages_deployed",
+    "_check_required_executable_untrusted",
+    "_check_required_package_version",
+)
+_NO_SKIP_CHECKS = ("_check_required_packages", "_check_required_packages_deployed")
+
+
+def _required_lock_identity_findings(tree_index) -> list[Violation]:
+    """Closed world for required-package identity (#3993).
+
+    Every required-package check resolves an entry through the host-aware
+    ``DependencyPolicyIndex.find``; a check that reads the lockfile addresses
+    rows only by the matched dependency's ``lock_key``, never by a host-blind
+    name; and the two presence checks never skip an entry.
+    """
+    findings: list[Violation] = []
+    for name in _REQUIRED_CHECKS:
+        function = tree_index.function(name)
+        if function is None:
+            findings.append(_summary(POLICY_RULE, CHECKS, f"{name} must exist"))
+            continue
+        nodes = tuple(tree_index.own_scope(function))
+        attributes = {node.attr for node in nodes if isinstance(node, ast.Attribute)}
+        reads_lock = "get_unique_key" in attributes
+        if reads_lock and ("lock_key" not in attributes or "find_name" in attributes):
+            findings.append(
+                _summary(
+                    POLICY_RULE,
+                    CHECKS,
+                    f"{name} must address lock rows by DependencyPolicyIndex.find(...).lock_key",
+                )
+            )
+        if name in _NO_SKIP_CHECKS and any(isinstance(node, ast.Continue) for node in nodes):
+            findings.append(_summary(POLICY_RULE, CHECKS, f"{name} must not skip a require entry"))
+    return findings
 
 
 def check_python_artifact_membership(provider: FactsProvider) -> tuple[Violation, ...]:

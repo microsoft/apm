@@ -118,6 +118,13 @@ dependencies:
 - Enforced at install and by `apm audit` (direct deps incl. dev deps and
   `replace` sources, plus lockfile transitives).
 
+`dependencies.require` entries are exact and name ONE host: a hostless
+entry (`contoso/baseline`) names the default host only; write other hosts
+in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
+and `required-packages-deployed` (apm.lock.yaml) compare that same
+identity; an entry matching no declared package fails both, and the
+message names the entry form when the package is declared on another host.
+
 ## Registry source governance (experimental)
 
 Gate dependency sources to REST-based APM registries declared via the

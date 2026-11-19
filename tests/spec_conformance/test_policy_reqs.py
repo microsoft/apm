@@ -417,8 +417,9 @@ def test_policy_host_qualified_patterns_match_effective_host(monkeypatch):
 @pytest.mark.req("req-pl-018")
 def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
     """Clause (g): leading-dot paths stay hostless, numeric ports and one
-    trailing dot are removed on both sides, require is not host-qualified,
-    and audit gates locked transitive dependencies."""
+    trailing dot are removed on both sides, an exact require entry names its
+    host (hostless names the default host), and audit gates locked transitive
+    dependencies."""
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency import DependencyReference
     from apm_cli.policy.policy_checks import (
@@ -445,8 +446,13 @@ def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
     monkeypatch.delenv("GITHUB_HOST")
 
     shorthand = [DependencyReference.parse("contoso/repo")]
-    require = DependencyPolicy(require=("github.com/contoso/repo",))
-    assert not _check_required_packages(shorthand, require).passed
+    gitlab = [DependencyReference.parse("gitlab.com/contoso/repo")]
+    for entry in ("contoso/repo", "github.com/contoso/repo", "GitHub.com:443/contoso/repo"):
+        assert _check_required_packages(shorthand, DependencyPolicy(require=(entry,))).passed
+        assert not _check_required_packages(gitlab, DependencyPolicy(require=(entry,))).passed
+    assert _check_required_packages(
+        gitlab, DependencyPolicy(require=("gitlab.com/contoso/repo",))
+    ).passed
 
     (tmp_path / "apm.yml").write_text(
         "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - example-org/app\n",

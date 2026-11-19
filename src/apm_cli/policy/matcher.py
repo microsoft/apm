@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Protocol
 
 from ..models.dependency.identity import (
+    effective_policy_host,
     normalize_package_policy_identity,
+    required_package_policy_hosts,
     split_policy_pattern_host,
 )
 from .schema import DependencyPolicy, McpPolicy
@@ -31,18 +34,59 @@ class _DependencyPolicySubject(Protocol):
         """Return the dependency identity used by policy checks."""
         ...
 
+    @property
+    def required_package_host(self) -> str | None:
+        """Return the host an exact ``require`` entry must name."""
+        ...
+
+    def get_unique_key(self) -> str:
+        """Return the lockfile key of this dependency."""
+        ...
+
+
+@dataclass(frozen=True)
+class RequiredPackageMatch:
+    """One declared dependency an exact ``require`` entry identifies."""
+
+    position: int
+    name: str
+    host: str | None
+    dependency: _DependencyPolicySubject | None = None
+
+    @property
+    def lock_key(self) -> str:
+        """Return the lockfile key, derived by the lockfile's own key owner.
+
+        A legacy supplied name carries no source metadata; its byte-exact name
+        stays the key, as before.
+        """
+        if self.dependency is None:
+            return self.name
+        return self.dependency.get_unique_key()
+
+    @property
+    def require_entry(self) -> str:
+        """Return the ``require`` spelling that identifies this dependency."""
+        if self.host in (None, effective_policy_host(None)):
+            return self.name
+        return f"{self.host}/{self.name}"
+
 
 class DependencyPolicyIndex:
     """Snapshot exact policy names once, retaining each source's casing rule.
 
     Buckets use the identity owner's prefix length, not a parallel host catalog.
-    A match across buckets retains declaration order, as the original scan did.
-    Legacy supplied name sets remain authoritative and byte-exact: they carry
-    no source metadata, and an empty set must not trigger dependency discovery.
+    Exact ``require`` entries are host-aware: a hostless entry names the
+    default host and a host-qualified entry names that host, on the manifest
+    and the lockfile side alike. A match across buckets retains declaration
+    order, as the original scan did. Legacy supplied name sets remain
+    authoritative and byte-exact: they carry no source metadata, and an empty
+    set must not trigger dependency discovery.
     """
 
     def __init__(self) -> None:
-        self._names: dict[int, dict[str, tuple[int, str]]] = {}
+        self._names: dict[int, dict[str, list[RequiredPackageMatch]]] = {}
+        self._legacy = False
 
     @classmethod
     def from_dependencies(cls, deps: Iterable[_DependencyPolicySubject]) -> DependencyPolicyIndex:
@@ -54,28 +98,55 @@ class DependencyPolicyIndex:
             normalized = normalize_package_policy_identity(
                 name, case_insensitive_prefix_segments=prefix
             )
-            index._names.setdefault(prefix, {}).setdefault(normalized, (position, name))
+            index._names.setdefault(prefix, {}).setdefault(normalized, []).append(
+                RequiredPackageMatch(position, name, dependency.required_package_host, dependency)
+            )
         return index
 
     @classmethod
     def from_names(cls, names: set[str]) -> DependencyPolicyIndex:
         """Snapshot the legacy authoritative name set without inspecting deps."""
         index = cls()
-        index._names[0] = {name: (0, name) for name in names}
+        index._legacy = True
+        index._names[0] = {name: [RequiredPackageMatch(0, name, None)] for name in names}
         return index
+
+    def find(self, policy_name: str) -> RequiredPackageMatch | None:
+        """Return the first dependency *policy_name* identifies, host included."""
+        if self._legacy:
+            hosts, path = None, policy_name.split("#", 1)[0]
+        else:
+            hosts, path = required_package_policy_hosts(policy_name)
+        return self._first(path, hosts)
 
     def find_name(self, policy_name: str) -> str | None:
         """Return the first matching canonical name without re-projecting deps."""
-        name = policy_name.split("#", 1)[0]
-        first: tuple[int, str] | None = None
+        match = self.find(policy_name)
+        return match.name if match is not None else None
+
+    def expected_entry(self, policy_name: str) -> str | None:
+        """Return the ``require`` spelling of a same-path dependency on another host."""
+        if self._legacy:
+            return None
+        _hosts, path = required_package_policy_hosts(policy_name)
+        match = self._first(path, None)
+        return match.require_entry if match is not None else None
+
+    def _first(
+        self, path: str, hosts: tuple[str | None, ...] | None
+    ) -> RequiredPackageMatch | None:
+        first: RequiredPackageMatch | None = None
         for prefix, names in self._names.items():
             normalized = normalize_package_policy_identity(
-                name, case_insensitive_prefix_segments=prefix
+                path, case_insensitive_prefix_segments=prefix
             )
-            match = names.get(normalized)
-            if match is not None and (first is None or match[0] < first[0]):
+            match = next(
+                (m for m in names.get(normalized, ()) if hosts is None or m.host in hosts),
+                None,
+            )
+            if match is not None and (first is None or match.position < first.position):
                 first = match
-        return first[1] if first is not None else None
+        return first
 
 
 @lru_cache(maxsize=512)
@@ -212,10 +283,16 @@ def dependency_policy_name_matches(
     dependency: _DependencyPolicySubject,
     policy_name: str,
 ) -> bool:
-    """Return whether an exact policy package name identifies *dependency*."""
+    """Return whether an exact policy package name identifies *dependency*.
+
+    The single-dependency form of :meth:`DependencyPolicyIndex.find`: the
+    entry's host (default host when hostless) must equal the dependency's.
+    """
+    hosts, expected_name = required_package_policy_hosts(policy_name)
+    if dependency.required_package_host not in hosts:
+        return False
     prefix_segments = dependency.case_insensitive_identity_prefix_segments
     canonical_name = dependency.get_canonical_dependency_string().split("#", 1)[0]
-    expected_name = policy_name.split("#", 1)[0]
     return normalize_package_policy_identity(
         canonical_name,
         case_insensitive_prefix_segments=prefix_segments,

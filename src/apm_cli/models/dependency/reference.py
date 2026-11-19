@@ -49,9 +49,10 @@ from .identity import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
     case_insensitive_identity_prefix_segments,
+    effective_policy_host,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
-    normalize_policy_host,
+    required_package_policy_host,
 )
 from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
@@ -197,14 +198,13 @@ class DependencyReference(ProviderCoordinateMixin):
 
     @property
     def policy_host(self) -> str | None:
-        """Return the effective host compared by host-qualified policy patterns.
+        """Return the effective host compared by host-qualified policy patterns."""
+        return effective_policy_host(self.host, is_local=self.is_local)
 
-        A reference without an explicit host resolves to the configured default
-        host (``GITHUB_HOST`` or ``github.com``). Local paths have no host.
-        """
-        if self.is_local:
-            return None
-        return normalize_policy_host(self.host or default_host())
+    @property
+    def required_package_host(self) -> str | None:
+        """Return the host an exact policy ``require`` entry must name."""
+        return required_package_policy_host(self.host, self.is_local, self.artifactory_prefix)
 
     @property
     def ref_kind(self) -> str | None:

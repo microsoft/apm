@@ -105,7 +105,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
 | `allow`              | list of patterns or null | `null`        | `null` = no opinion. `[]` = nothing allowed. `[...]` = only these.                          |
 | `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Always wins over `allow`. |
-| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. |
+| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. Exact and host-bound; see below. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
 | `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, exact package release tag such as `name@1.2.3` or `@scope/name@1.2.3`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
@@ -150,6 +150,17 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 A range is classified as the author wrote it: `fourth/lib#^1.2.0` stays `OK` after the install selects `v1.4.0` for it, and `acme/lib#main` stays `FAIL` whatever commit it resolves to. The package name used for `{name}-v{version}` and `{name}--v{version}` tags is the final path segment of a subdirectory dependency, otherwise the repository name. An exact `name@X.Y.Z` or `@scope/name@X.Y.Z` tag (optional `v`, semver prerelease/build allowed, at most one scope segment) counts for any name, because monorepo tags often name the published package rather than the directory. `release@next`, `feature/x@1.2.3`, `name@^1.2.0` and `name@1.x` are not exact releases and still fail. The check judges declared release intent, not immutability: a tag can be moved. Replaying a committed lockfile with `apm install --frozen` installs the locked commit; [`security.integrity.require_hashes`](#integrity-and-drift-enforcement) only requires every locked entry to carry a content hash, so an update can still record a moved tag's new commit.
 
 Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; see [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns)). Wildcards via shell-style globs, e.g. `contoso/*`.
+
+`require` entries are exact and name one host. A hostless entry names the default host (`GITHUB_HOST`, else `github.com`); a package on any other host (GitLab, GHES, Gitea) must be written with its host:
+
+```yaml
+dependencies:
+  require:
+    - contoso/baseline                      # on the default host
+    - gitlab.example.com/platform/sub/pkg   # on a self-managed GitLab
+```
+
+`required-packages` (declared in `apm.yml`) and `required-packages-deployed` (present in `apm.lock.yaml`) compare the same identity. An entry that matches no declared package fails both checks; when the package is declared on another host, the message names the entry to write.
 
 ## mcp
 
@@ -341,7 +352,7 @@ For every `allow:` field, the three states are distinct:
 
 `allow`, `deny`, and exact `require` patterns match on each dependency's canonical identity casing, not the pattern's literal case. GitHub owner/repository identities, and registry-backed identities (already canonicalized that way), compare case-insensitively -- `Contoso/Repo` and `contoso/repo` are the same package. Non-GitHub git hosts, ADO, local paths, marketplace identities, virtual in-repository subpaths (the path segment after `owner/repo`), Git refs/version strings (after `#`), MCP server names, and registry *names* stay case-sensitive.
 
-A hostless pattern such as `owner/repo` matches that package on any host; a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. See [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns). Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
+A hostless `allow` or `deny` pattern such as `owner/repo` matches that package on any host (a hostless `require` entry names the default host only); a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. See [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns). Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
 
 For example, a mixed-case `deny` written as `**/Secure-Baseline` does not fire against the canonical lowercase repository name; write the owner/repository prefix first. A mixed-case owner-prefix deny that older releases failed to match can correctly surface new violations after upgrade.
 

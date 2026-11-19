@@ -51,8 +51,38 @@ def test_policy_index_guard_rejects_source_prefix_bypass() -> None:
     methods = {finding.message for finding in report.violations if finding.rule_id == POLICY_RULE}
     assert methods == {
         "DependencyPolicyIndex.from_dependencies must normalize through the identity owner",
-        "DependencyPolicyIndex.find_name must normalize through the identity owner",
+        "DependencyPolicyIndex._first must normalize through the identity owner",
     }
+
+
+@pytest.mark.parametrize(
+    ("original", "mutation", "message"),
+    [
+        (
+            "            subjects.append(_unresolved_required_subject(index, pkg_name))\n"
+            "        elif match.lock_key not in lock_keys:",
+            "            continue\n        elif match.lock_key not in lock_keys:",
+            "_check_required_packages_deployed must not skip a require entry",
+        ),
+        (
+            "        elif match.lock_key not in lock_keys:",
+            "        elif match.name not in lock_keys:",
+            "_check_required_packages_deployed must address lock rows by "
+            "DependencyPolicyIndex.find(...).lock_key",
+        ),
+    ],
+    ids=["skip-unresolved-entry", "host-blind-lock-lookup"],
+)
+def test_required_package_guard_rejects_skip_and_host_blind_lock_lookup(
+    original: str, mutation: str, message: str
+) -> None:
+    """#3993: required-package presence never skips and never reads the lock host-blind."""
+    path = "src/apm_cli/policy/policy_checks.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(original, mutation, 1)
+    assert mutated != source
+    report = run_selected_rules(ROOT, (POLICY_RULE,), source_overrides={path: mutated})
+    assert message in {f.message for f in report.violations if f.rule_id == POLICY_RULE}
 
 
 @pytest.mark.parametrize(
