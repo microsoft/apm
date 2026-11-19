@@ -790,6 +790,105 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-na-001",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_native_activation_requires_documented_part_a_qualification"
+      ],
+      "waivers": [
+        "No APM route natively activates under sec.8.5.11 yet; the conformance statement disclosure lands with the Claude user-scope route (#3290)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-002",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lockfile_drives_deployment_of_the_approved_plugin_root"
+      ],
+      "waivers": [
+        "Deployment to .agents/plugins is implemented by the Claude user-scope route (#3290) and the project-scope route for Claude and Copilot (#3921)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-003",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_uses_only_documented_activation_entries"
+      ],
+      "waivers": [
+        "Settings-only declaration is implemented by the Claude user-scope route (#3290) and the shared settings writer for Copilot (#3921)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-004",
+      "keyword": "MUST",
+      "oracle": "tests/fixtures/spec-conformance/native-activation/req-na-004.json",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile"
+      ],
+      "waivers": [
+        "Lock-derived settings ownership is implemented by the Claude user-scope route (#3290), which runs against the native-activation/req-na-004.json oracle."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-005",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_enable_requires_content_bound_approval"
+      ],
+      "waivers": [
+        "Content-bound enablement depends on #3902 and is implemented by the Claude user-scope route (#3290)."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-006",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_unqualified_target_gets_explicit_split_install"
+      ],
+      "waivers": [
+        "The explicit split fallback for Codex, which fails A3, is implemented in #3920."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-na-007",
+      "keyword": "MUST",
+      "section": "8.5.11",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_project_and_scope"
+      ],
+      "waivers": [
+        "Per-scope marketplace naming is implemented by the Claude user-scope route (#3290) and the project-scope route (#3921)."
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1981,7 +2080,7 @@
   "summary_by_class": {
     "consumer": {
       "active": 105,
-      "skipped": 1,
+      "skipped": 8,
       "unbound": 0,
       "xfail": 0
     },
@@ -2004,5 +2103,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 140
+  "total_requirements": 147
 }

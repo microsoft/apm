@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **140 normative statements (135 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **147 normative statements (142 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -3518,6 +3518,13 @@ suffix.
 > the materialized dependency directory; it does not copy package content into
 > the host's private plugin state.
 
+> **Editorial note (amendment 0.1.65).** For a dependency natively activated
+> under the profile in [Section 8.5.11](#8511-native-plugin-activation-profile),
+> [req-na-002](#req-na-002) replaces the placement beneath the resolved
+> dependency root with the deployed plugin root, and [req-na-004](#req-na-004)
+> makes the lockfile the ownership record. All other obligations of this
+> requirement still apply.
+
 #### 8.5.8 User-scoped MCP target selection
 
 <a id="req-tg-014"></a>
@@ -3671,6 +3678,236 @@ is absent, empty, or null, the emitted frontmatter MUST omit both
 > (`https://cursor.com/docs/rules`): `alwaysApply: true` includes a rule in
 > every chat, while `globs` attaches it to matching files.
 
+#### 8.5.11 Native plugin activation profile
+
+This subsection defines when a consumer may install a whole plugin by
+declaring it to a target's own plugin loader, instead of projecting the
+plugin's primitives into target directories. Part A states what a target
+must offer. Part B states what a consumer that activates plugins this way
+guarantees. Part C records, informatively, how known targets qualify.
+
+Terms used in this subsection:
+
+- **Plugin root**: the directory of a resolved dependency that holds the
+  plugin manifest and every resource the plugin references by a path
+  relative to that directory.
+- **Profile root**: `.agents/plugins/` in the project directory at project
+  scope, and `.agents/plugins/` in the user's home directory at user scope.
+  This is a subdirectory partition of `.agents/` in the sense of
+  [req-tg-002](#req-tg-002).
+- **Activation entries**: the target's documented marketplace declaration
+  (for the targets in Part C, an `extraKnownMarketplaces` entry) and its
+  documented per-plugin enable switch (for the targets in Part C, an
+  `enabledPlugins` key of the form `<plugin>@<marketplace>`).
+- **Natively activate**: deploy a plugin root under the profile root and
+  write activation entries so that the target loads that plugin itself.
+- **Split install**: deploy a plugin's primitives through the consumer's
+  ordinary per-primitive deployment for the target (Sections 8.1 to 8.5.10),
+  without activation entries.
+
+##### 8.5.11.1 Part A: target requirements (normative)
+
+A target **qualifies** for a scope (project or user) and a client version
+when its published documentation, for that scope and version, establishes
+all five criteria below. Observed behavior, source code, and undocumented
+files are evidence for Part C; they do not establish a criterion.
+
+- **A1. Documented settings scopes.** The target documents a settings file
+  at user scope and at project scope that accepts the activation entries,
+  and documents the precedence between those files and any local or managed
+  settings layer.
+- **A2. In-place directory marketplace.** The target documents a
+  marketplace source of type local directory whose listed plugins load from
+  their path inside that directory, without being copied into the target's
+  private state, and accepts a plugin source path relative to the
+  marketplace directory when the marketplace is declared at project scope.
+- **A3. Declarative enable.** The target documents a per-plugin enable
+  switch keyed by plugin and marketplace, such that a plugin listed by a
+  declared A2 marketplace and switched on loads at a session start in a
+  trusted scope, with no install command, RPC call, or interactive step
+  other than the target's own trust prompt.
+- **A4. No automatic update of directory sources.** The target documents
+  that it does not fetch, refresh, or replace plugin content from a local
+  directory source on its own. Loaded content changes only when the
+  directory content changes.
+- **A5. Documented cross-target reading.** When the target reads settings
+  or catalog files at a scope that another target also reads, the target
+  documents which of those files it reads and the precedence between them
+  and its own files. A target that reads no other target's files at that
+  scope meets A5.
+
+<a id="req-na-001"></a>
+**[req-na-001]** A conforming **consumer** implementation MUST natively
+activate a plugin for a target only at a scope and client version for which
+that target qualifies under criteria A1 to A5. A target whose qualification
+is unknown does not qualify. The consumer MUST disclose in its conformance
+statement each target and scope it natively activates, the oldest client
+version it qualified, and the published source it relies on for each
+criterion.
+
+> **Editorial note.** Each criterion names a capability that at least one
+> target already documents:
+> A1, Claude Code settings precedence
+> (`https://code.claude.com/docs/en/settings-reference`) and GitHub Copilot
+> CLI settings files (`https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference`);
+> A2, Claude Code in-place plugins
+> (`https://code.claude.com/docs/en/plugins/loading`, "In-place and copied
+> plugins") and Copilot CLI path-sourced plugins that "load live from their
+> real directory"
+> (`https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference`);
+> A3, Claude Code project marketplaces, where contributors need no install
+> when a local `directory` or `file` marketplace lists the plugin with a
+> relative-path source (`https://code.claude.com/docs/en/plugins/org`), and
+> Copilot repository settings, where plugins "are installed if missing and
+> turned on" once the folder is trusted (`copilot help config`);
+> A4, Claude Code in-place plugins, which load the current source files at
+> every session start (`https://code.claude.com/docs/en/plugins/loading`),
+> and Copilot CLI, which auto-updates only the built-in `awesome-copilot`
+> marketplace and ignores a repository-level `autoUpdate`
+> (`https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference`);
+> A5, Copilot CLI, which documents that it reads a repository's
+> `.claude/settings.json` and `.claude/settings.local.json` and never
+> `~/.claude/settings.json`
+> (`https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference`).
+> Sources were read on 2026-11-19.
+
+##### 8.5.11.2 Part B: consumer guarantees (normative)
+
+<a id="req-na-002"></a>
+**[req-na-002]** A conforming **consumer** implementation that natively
+activates plugins under [req-na-001](#req-na-001) MUST derive the set of
+activated plugins at a scope only from the lockfile it writes or replays
+for that scope. For each activated plugin it MUST deploy exactly the plugin
+root covered by the approval in [req-na-005](#req-na-005), copied from the
+locked and materialized bytes, to `<profile root>/<plugin>/`, where
+`<plugin>` is the plugin's declared name. It MUST record in the lock entry
+the deployed plugin root and one root digest covering the path, bytes, and
+executable bit of every file in that root, and MUST treat a deployed root
+whose recomputed digest differs from the recorded one as drift under
+[Section 5.5](#55-drift-and-integrity-model). It MUST NOT deploy other content
+of the resolved package there. It MUST generate `<profile root>/.claude-plugin/marketplace.json`
+listing exactly the activated plugins at that scope, each with a source
+path relative to the profile root and no remote source. The consumer MUST
+NOT declare the resolved dependency root to a target as a marketplace for
+such a plugin. At project scope the deployed plugin roots and the generated
+marketplace file are project files, and the consumer MUST NOT add them to a
+version-control ignore file. For a schema-bearing Agent Plugins v1
+dependency activated under this subsection, the deployed plugin root takes
+the place of the materialized package beneath the resolved dependency root
+in the in-place reference obligation of [req-tg-013](#req-tg-013).
+
+<a id="req-na-003"></a>
+**[req-na-003]** A conforming **consumer** implementation that natively
+activates plugins MUST declare them only by writing the target's
+documented activation entries into the settings file the target documents
+for that scope under A1. The marketplace declaration MUST be a local
+directory source that points at the profile root. The consumer MUST NOT
+write any other settings key for this purpose, MUST NOT write the target's
+private state (including plugin caches and installed-plugin or
+known-marketplace registries), and MUST NOT write trust decisions or update
+settings such as `autoUpdate`. During install, update, restore, uninstall,
+and prune, it MUST NOT locate, invoke, or version-check a target-native
+binary, CLI, or RPC endpoint in order to activate, register, or remove a
+plugin.
+
+<a id="req-na-004"></a>
+**[req-na-004]** A conforming **consumer** implementation that natively
+activates plugins MUST compute the activation entries, deployed plugin
+roots, and generated marketplace entries it owns at a scope only from the
+previous and the next lockfile for that scope, together with the expected
+marketplace source binding (the marketplace name and the profile-root path
+it points at). It MUST add what the next lockfile requires and MUST remove
+only what the previous lockfile produced with the same binding. It MUST
+preserve every other settings key and value semantically, MUST write an
+enable value of `true` only when that key is absent, and MUST NOT change an
+existing `false` enable value or remove a key whose value is `false`. When
+the previous lockfile is missing or unreadable, the binding has moved, or
+an entry under the consumer's marketplace name points at a different
+source, the consumer MUST report the conflict in an actionable diagnostic
+and MUST NOT delete or overwrite that entry. A settings file the consumer
+cannot parse MUST fail closed before any overwrite. Settings, generated
+marketplace, and deployed-root writes for one operation MUST commit as one
+rollback unit, so a failed operation leaves no partial new activation. The
+consumer MUST NOT create a receipt, ledger, or other ownership file for
+native activation; for a dependency in scope of [req-tg-013](#req-tg-013),
+the lockfile is the consumer-owned ownership record that requirement
+names.
+
+<a id="req-na-005"></a>
+**[req-na-005]** A conforming **consumer** implementation MUST write an
+enable value of `true` for a natively activated plugin only when an
+approval covers the content of its plugin root, identified by the root
+digest of [req-na-002](#req-na-002) rather than by package name, version
+label, or source location, and the executable admission of [req-sc-009](#req-sc-009) and
+[req-sc-011](#req-sc-011) admits it. When no such approval covers the
+content, the consumer MUST NOT deploy that content under the profile root,
+MUST NOT declare it to any target, MUST NOT declare it in a disabled state,
+and MUST emit a default-visible diagnostic that names the plugin. It MUST
+NOT replace a deployed plugin root with content the approval does not
+cover.
+
+<a id="req-na-006"></a>
+**[req-na-006]** For a target and scope that does not qualify under
+[req-na-001](#req-na-001), a conforming **consumer** implementation MUST
+NOT natively activate a plugin and MUST NOT write that target's private
+state or activation entries for it. It MUST either split-install the
+plugin or refuse it, and in both cases MUST emit a default-visible
+diagnostic that names the target, the scope, and the criterion that is
+unmet or unknown. It MUST NOT split-install a plugin silently, and a
+`--dry-run` invocation MUST report the same decision without mutating
+state. Where [req-tg-011](#req-tg-011) makes a dependency opaque at the
+deployment boundary, that requirement governs instead of split install.
+
+<a id="req-na-007"></a>
+**[req-na-007]** A conforming **consumer** implementation that natively
+activates plugins MUST give its generated marketplace a name that is
+deterministic, stable across clones of the same project at project scope,
+different between different projects, and different between project scope
+and user scope. Before writing activation entries, it MUST refuse to use a
+marketplace name that an existing entry in the target's settings files at
+that scope already declares with a different source, and MUST emit an
+actionable diagnostic naming that entry.
+
+> **Editorial note.** Claude Code keeps one marketplace registry per user,
+> keyed by name. In the 2026-11-19 study, two repositories that declared the
+> same marketplace name ran the other repository's SessionStart hook after a
+> project switch, which is why [req-na-007](#req-na-007) requires names that
+> differ per project. This subsection does not prescribe how the name is
+> derived.
+
+##### 8.5.11.3 Part C: target qualification (informative)
+
+The table records how the targets studied for issue #3094 measure against
+Part A, from vendor documentation and isolated runs on 2026-11-19 (see the
+[design record](https://github.com/microsoft/apm/issues/3094#issuecomment-7009780973)).
+It is not normative and does not qualify a target for a consumer; a
+consumer's conformance statement does that under [req-na-001](#req-na-001).
+
+| Target (client version) | A1 | A2 | A3 | A4 | A5 | Classification |
+|---|---|---|---|---|---|---|
+| Claude Code (2.1.322) | Met: user, project and local settings files with documented precedence | Met: `directory` marketplaces load in place; relative paths at project scope | Met: relative-path plugins in a local marketplace need no install; a user-scope declaration loaded and ran its SessionStart hook in the first session, with no `claude` command | Met: in-place plugins load current source at every session start | Met: Claude reads no other target's settings | Native-eligible. User scope delivered by PR #3290; project scope by #3921 |
+| GitHub Copilot CLI (1.0.114) | Met: `~/.copilot/settings.json` and `.github/copilot/settings.json` (and `.local`), with managed settings taking precedence | Met: path-sourced plugins in a local directory marketplace load live | Met: repository plugins are installed if missing and turned on after folder trust | Met: auto-update applies only to `awesome-copilot`; repository `autoUpdate` is ignored | User scope: met. Project scope: Copilot documents reading `.claude/settings.json` and `.claude/settings.local.json`; same-key precedence against `.github/copilot/settings*.json` awaits a witness | Native-eligible (route migrates in #3921) |
+| OpenAI Codex CLI (0.170.0) | Met: user and trusted-project `config.toml` | Not met: Codex installs plugins into its own cache rather than loading them in place | **Not met** (see below) | Unknown | Unknown | Split (fails A3) |
+| Every other catalog target | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown until the #3922 survey |
+
+Codex A3 evidence, 2026-11-19, Codex 0.170.0, isolated `CODEX_HOME`,
+trusted project: a hand-written `[marketplaces.<name>]` entry with
+`source_type = "local"` is discovered, but `[plugins."<plugin>@<name>"]
+enabled = true` leaves the plugin `installed: false`, and a real session
+start does not install it. Per the Codex source, a local plugin is installed
+only by `codex plugin add`, a git marketplace upgrade, or the desktop or TUI
+plugin browser
+(`https://developers.openai.com/plugins/build/plugins`). Codex therefore
+gets explicit split install under [req-na-006](#req-na-006).
+
+Known residuals that do not fail Part A for Claude Code: its per-user
+marketplace registry (addressed by [req-na-007](#req-na-007)); worktrees
+resolve a relative `directory` path against the main checkout; and with a
+relative path, a project-scope plugin loads from the second session onward.
+At the time of writing, the GitHub Copilot implementation route described in
+[req-tg-013](#req-tg-013) still keeps an ownership ledger, and moves to
+this profile under #3921.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -3693,7 +3930,11 @@ without a spec revision. The current matrix is in the companion
   [req-pr-007](#req-pr-007), [req-pr-008](#req-pr-008),
   [req-tg-016](#req-tg-016),
   [req-tg-017](#req-tg-017),
-  [req-tg-018](#req-tg-018).
+  [req-tg-018](#req-tg-018),
+  [req-na-001](#req-na-001), [req-na-002](#req-na-002),
+  [req-na-003](#req-na-003), [req-na-004](#req-na-004),
+  [req-na-005](#req-na-005), [req-na-006](#req-na-006),
+  [req-na-007](#req-na-007).
 
 ---
 
@@ -4090,6 +4331,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 22| Silent hook passthrough or double-activation via native-format conversion | [req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017) | Consumer-default |
 | 23| Partial native deployment with false successful-state persistence | [req-pr-008](#req-pr-008) | Consumer-default |
 | 24| Manifest-directed dependency redirection via a root replacement table | [req-rpl-001](#req-rpl-001), [req-rpl-002](#req-rpl-002), [req-rpl-004](#req-rpl-004) | Consumer-default when capability is provided |
+| 25| Native activation of unlocked or unapproved plugin content, or of settings the consumer does not own | [req-na-002](#req-na-002), [req-na-003](#req-na-003), [req-na-004](#req-na-004), [req-na-005](#req-na-005) | Consumer-default when native activation is provided |
 
 For Codex conversion metadata diagnostics, [req-tg-015](#req-tg-015)
 separately constrains field-name display and excludes dropped values.
@@ -4288,7 +4530,8 @@ conformance statement identifying:
 4. Any limitations or non-conformance points, with rationale.
 5. Any additional conformance-statement content required by a specific
    requirement, including reserved namespace disclosure under
-   [req-tg-013](#req-tg-013) and fixture citations under
+   [req-tg-013](#req-tg-013), native activation qualification under
+   [req-na-001](#req-na-001), and fixture citations under
    [req-cf-002](#req-cf-002).
 6. <a id="conformance-statement-case-rule"></a>If it claims the Governance class, or documents a case-insensitive
    host under [req-rs-016](#req-rs-016), the repository-coordinate
@@ -4358,6 +4601,10 @@ conformance statement identifying:
 [req-tg-014](#req-tg-014), [req-tg-015](#req-tg-015),
 [req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017),
 [req-tg-018](#req-tg-018),
+[req-na-001](#req-na-001), [req-na-002](#req-na-002),
+[req-na-003](#req-na-003), [req-na-004](#req-na-004),
+[req-na-005](#req-na-005), [req-na-006](#req-na-006),
+[req-na-007](#req-na-007),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -4575,6 +4822,8 @@ tests/fixtures/spec-conformance/
     semver-dialect.json
   source-plan/
     req-sc-015.json
+  native-activation/
+    req-na-004.json
 ```
 
 Conformance-suite expansion (additional fixtures for archive
@@ -4594,6 +4843,14 @@ for [req-sc-015](#req-sc-015). A consumer uses the oracle to demonstrate
 that scanning and materialization share the same authorized source set
 through both install and re-integration; each lifecycle result matches
 the oracle's authorized paths.
+
+The `native-activation/req-na-004.json` oracle gives previous and next
+lockfile plugin sets with settings content before an operation, and the
+settings content and conflict diagnostics expected afterwards, for
+[req-na-004](#req-na-004). A consumer uses it to show that it adds only what
+the next lockfile needs, removes only what the previous lockfile produced,
+preserves unrelated keys and explicit `false` values, and reports a moved or
+foreign binding instead of deleting it.
 
 ### 12.5 Round-trip conformance (normative)
 
@@ -4871,6 +5128,13 @@ staged-replacement capability, not every consumer implementation.
 | [req-tg-016](#req-tg-016)                | MUST    | 8.5.9   | consumer    |
 | [req-tg-017](#req-tg-017)                | MUST    | 8.5.9   | consumer    |
 | [req-tg-018](#req-tg-018)                | MUST    | 8.5.10  | consumer    |
+| [req-na-001](#req-na-001)                | MUST    | 8.5.11  | consumer    |
+| [req-na-002](#req-na-002)                | MUST    | 8.5.11  | consumer    |
+| [req-na-003](#req-na-003)                | MUST    | 8.5.11  | consumer    |
+| [req-na-004](#req-na-004)                | MUST    | 8.5.11  | consumer    |
+| [req-na-005](#req-na-005)                | MUST    | 8.5.11  | consumer    |
+| [req-na-006](#req-na-006)                | MUST    | 8.5.11  | consumer    |
+| [req-na-007](#req-na-007)                | MUST    | 8.5.11  | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -4894,7 +5158,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 140** (135 MUST, 5 SHOULD).
+**Total normative statements: 147** (142 MUST, 5 SHOULD).
 
 ---
 
@@ -4964,13 +5228,14 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.61  | 2026-11-19 | Amendment for issues #3762, #3866 and #3868, introduced in PR #3801, corrected in PR #3851 (issue #3860) and revised in PR #3875 for #3866 and #3868; the earlier proposed text of this amendment, which preserved `vscode` on rewrite and gave it an MCP configuration destination of its own, is withdrawn. Revised Section 4.2.1 in place: `vscode` is a deprecated alias of `copilot`, admitted under `target:` and `targets:`; it has no MCP configuration destination of its own, a consumer treats it exactly as `copilot` (including the [req-tg-008](#req-tg-008) effective target intersection and recorded lockfile state), a lock writer records it as `copilot` and a lock reader reads a recorded `vscode` as `copilot` before [req-rs-018](#req-rs-018) comparisons, and a manifest rewrite replaces it in place with `copilot`, dropping a resulting duplicate; `agents` still normalises to `copilot` and is not admitted under `targets:`. Revised the Section 4.2 `targets` row and [req-tg-008](#req-tg-008) in place to admit `vscode` as that alias, and added `hermes` and `grok-bot` to the Section 4.2.1 canonical-set block to match its explicit-only enumeration. Under Section 9.2 this is not behavior-neutral errata: a consumer that gave `vscode` a distinct MCP configuration destination, preserved it on rewrite, or recorded it in lock state no longer conforms, and `targets:` values containing `vscode`, `hermes` or `grok-bot`, and `target:` values `hermes` and `grok-bot`, that previously had to be rejected are now accepted. Deprecation announcements under Section 9.5: the `vscode` alias and the singular `target:` field (in favor of `targets:`) are deprecated from the adoption date, 2026-11-19, on which the Section 9.5 migration window starts. The window stays open until a later revision removes the deprecated form, subject to the Section 9.5 minimum of 90 days; this amendment sets no removal date and none is scheduled. The non-normative Section 4.2.1 note records that the Target Registry companion now lists the workspace-root `.mcp.json` as the `copilot` project MCP configuration destination, replacing `.github/mcp.json` and `.vscode/mcp.json`; this changes an existing companion entry rather than adding one, and cleanup of entries a consumer wrote at the retired destinations is implementation-defined under the existing ownership rules, including [req-mf-026](#req-mf-026). Manifest JSON Schema bytes are unchanged because the `targets` pattern already admits these tokens. Proposed 2026-11-18; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. Adoption does not change the status of amendment 0.1.60, which still proposes [req-rs-018](#req-rs-018) and the `subset_pairings` lock field, or of amendment 0.1.45, whose explicit-only enumeration the `hermes` and `grok-bot` canonical-set addition matches. Statement count remains 139 (134 MUST, 5 SHOULD). |
 | 0.1.62  | 2026-11-19 | Amendment for issue #3847. Revised the `fetch_failure` row of the [req-pl-006](#req-pl-006) merge table (Section 6.4, governance MUST) from "Child overrides if set" to stricter wins (`block` > `warn`, an unset value being the `warn` default per Section 6.2), so a child policy can tighten but never relax the parent's fail-closed choice, matching the tighten-only inheritance principle of Section 6.4 and the `enforcement` row. Under Section 9.2 this changes an evaluation already defined by a normative statement, so it is an amendment, not behavior-neutral errata: the only verdict class that changes is a chain whose parent sets `fetch_failure: block` and whose child sets `warn` (or leaves it unset), which now merges to `block` and fails closed on a policy fetch failure instead of warning. Chains where the child is at least as strict as the parent are unchanged. The reference implementation already merges this way. No statement is added or removed; the statement count is unchanged. Proposed 2026-11-18; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. |
 | 0.1.63  | 2026-11-19 | Amendment for issue #3880 (shared MCP document attribution, deferred from the 0.1.61 review). Added [req-mf-027](#req-mf-027) (Section 4.5, consumer MUST): when two or more targets write project-scoped MCP servers to the same configuration file (at this revision `claude` and `copilot` share the workspace-root `.mcp.json`), each entry the consumer wrote there is attributed to the file, not only to the target that selected the server; an entry recorded for one of those targets is not foreign to another that selects the same server, subject to the same recorded-write checks; when one of those targets stops selecting the server, for example because it is deactivated, the entry is kept and owned, retaining a recorded write hash, for any other active target that writes the file and still selects it, and is removable, under the consumer's other ownership rules including [req-mf-026](#req-mf-026), only once no such target selects it. Entries the consumer did not write and distinct (including user-scoped) configuration files are outside the requirement. The non-normative Section 4.2.1 note now points to the new requirement instead of deferring it. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: the only verdict class that changes is a consumer that removes, or treats as foreign, a shared-file entry another active target sharing that file still selects, which no longer conforms. The reference implementation already behaves this way. Sections 1.3, 4.2.1, 4.5, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Proposed 2026-11-19; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. Adoption does not change the status of [req-mf-026](#req-mf-026), which amendment 0.1.57 still proposes. Adds one MUST. Statement count: 139 -> 140 (135 MUST, 5 SHOULD). |
+| 0.1.65  | 2026-11-19 | Amendment for issue #3919 (native plugin activation profile), from the #3094 design record accepted on 2026-11-19. Added Section 8.5.11 with seven consumer MUSTs. Part A (normative) defines target criteria A1 to A5: documented user and project settings files with precedence, an in-place local directory marketplace with relative paths at project scope, a declarative per-plugin enable switch that needs no install command once declared and trusted, no automatic update of directory sources, and documented precedence when a target reads another target's files. [req-na-001](#req-na-001) permits native activation only for a target, scope and client version that meets A1 to A5 by published documentation, with a conformance-statement disclosure. Part B (normative): [req-na-002](#req-na-002) the lockfile is the source of truth, only the approved plugin root is deployed to `.agents/plugins/<plugin>/` or `~/.agents/plugins/<plugin>/` with a generated `.claude-plugin/marketplace.json`, and the lock records one root digest over every deployed file's path, bytes and executable bit; [req-na-003](#req-na-003) only the documented activation entries are written, never private target state, and no target binary, CLI or RPC is called; [req-na-004](#req-na-004) ownership comes from the previous and next lockfile with no receipt file, preserving unrelated keys and explicit `false`; [req-na-005](#req-na-005) a plugin is enabled only when a content-bound approval covers it, and is otherwise neither deployed nor declared; [req-na-006](#req-na-006) a target that does not qualify gets explicit split install or refusal with a default-visible diagnostic, never silent; [req-na-007](#req-na-007) generated marketplace names are unique per project and per scope. Part C (informative) records Claude Code and GitHub Copilot as native-eligible, Codex as split because it fails A3 (Codex 0.170.0, 2026-11-19), and every other catalog target as unknown. [req-tg-013](#req-tg-013) is unchanged; a Section 8.5.7 editorial note points to the two clauses [req-na-002](#req-na-002) and [req-na-004](#req-na-004) substitute for a profile-activated dependency. Under Section 9.2 this adds an optional capability: the requirements bind only a consumer that natively activates plugins as Section 8.5.11 defines it, so no existing verdict changes and registrations made under [req-tg-013](#req-tg-013) alone are unaffected. No schema or lockfile-version change; the lock records the root and digest as additive entry data. Sections 1.3, 8.5.7, 8.7, 10.11, 11.2, 11.3.2, 12.4, Appendix C, the requirements manifest, a reconciliation oracle and conformance coverage are updated. Version 0.1.64 is reserved for the concurrent proposal for issue #3902. Proposed and adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3919, without the Section 9.3 reviewer-panel approval and public comment period. Adds seven MUSTs. Statement count: 140 -> 147 (142 MUST, 5 SHOULD). |
 
-In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62 and 0.1.63 that is the adoption date, and each of those rows states its proposal date.
+In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63 and 0.1.65 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals and the adopted 0.1.63 amendment each add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
+0.1.60 proposals and the adopted 0.1.63 amendment each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
 working draft
-contains 140 statements (135 MUST, 5 SHOULD). Combining the proposals does not establish
-Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
+contains 147 statements (142 MUST, 5 SHOULD). Combining the proposals does not establish
+Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), and amendment 0.1.65 on the same date by editor decision (issue #3919), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
 
 Errata:
 

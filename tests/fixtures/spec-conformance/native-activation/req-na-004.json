@@ -1,0 +1,297 @@
+{
+  "spec_anchor": "req-na-004",
+  "description": "Oracle for OpenAPM req-na-004 (Section 8.5.11): settings reconciliation from the previous and next lockfile, with no receipt file. Plugin lists name the plugins each lockfile activates at the scope; null means no previous lockfile. Diagnostic codes are oracle labels, not required message text. Settings are compared semantically.",
+  "input": {
+    "cases": [
+      {
+        "id": "add-and-remove",
+        "description": "Adds what the next lock needs, removes only what the previous lock produced, keeps unrelated keys.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": [
+          "alpha",
+          "beta"
+        ],
+        "next_lock_plugins": [
+          "alpha",
+          "gamma"
+        ],
+        "settings_before": {
+          "model": "opus",
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            },
+            "contoso": {
+              "source": {
+                "source": "github",
+                "repo": "contoso/agent-marketplace"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": true,
+            "beta@apm-u-3f9c": true,
+            "helper@contoso": true
+          }
+        }
+      },
+      {
+        "id": "explicit-false-kept",
+        "description": "An explicit false enable value is never flipped back to true.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": [
+          "alpha"
+        ],
+        "next_lock_plugins": [
+          "alpha"
+        ],
+        "settings_before": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": false
+          }
+        }
+      },
+      {
+        "id": "false-kept-on-removal",
+        "description": "Removing a plugin keeps a user's explicit false; the marketplace entry the previous lock produced is retired.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": [
+          "alpha"
+        ],
+        "next_lock_plugins": [],
+        "settings_before": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            },
+            "contoso": {
+              "source": {
+                "source": "github",
+                "repo": "contoso/agent-marketplace"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": false,
+            "helper@contoso": true
+          }
+        }
+      },
+      {
+        "id": "first-activation",
+        "description": "With no previous lock and no existing entry, the consumer declares the marketplace and enables the plugin.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": null,
+        "next_lock_plugins": [
+          "alpha"
+        ],
+        "settings_before": {}
+      },
+      {
+        "id": "previous-lock-missing",
+        "description": "With no previous lock but an existing entry under the consumer's name, nothing is removed and the conflict is reported.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": null,
+        "next_lock_plugins": [
+          "alpha"
+        ],
+        "settings_before": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "beta@apm-u-3f9c": true
+          }
+        }
+      },
+      {
+        "id": "binding-conflict",
+        "description": "An entry under the consumer's name that points elsewhere is neither overwritten nor deleted.",
+        "scope": "user",
+        "marketplace": {
+          "name": "apm-u-3f9c",
+          "path": "/home/dev/.agents/plugins"
+        },
+        "previous_lock_plugins": [
+          "alpha"
+        ],
+        "next_lock_plugins": [
+          "alpha"
+        ],
+        "settings_before": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/other/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": true
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "cases": [
+      {
+        "id": "add-and-remove",
+        "settings_after": {
+          "model": "opus",
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            },
+            "contoso": {
+              "source": {
+                "source": "github",
+                "repo": "contoso/agent-marketplace"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": true,
+            "helper@contoso": true,
+            "gamma@apm-u-3f9c": true
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "id": "explicit-false-kept",
+        "settings_after": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": false
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "id": "false-kept-on-removal",
+        "settings_after": {
+          "extraKnownMarketplaces": {
+            "contoso": {
+              "source": {
+                "source": "github",
+                "repo": "contoso/agent-marketplace"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": false,
+            "helper@contoso": true
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "id": "first-activation",
+        "settings_after": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": true
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "id": "previous-lock-missing",
+        "settings_after": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/.agents/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "beta@apm-u-3f9c": true,
+            "alpha@apm-u-3f9c": true
+          }
+        },
+        "diagnostics": [
+          "previous-lock-missing"
+        ]
+      },
+      {
+        "id": "binding-conflict",
+        "settings_after": {
+          "extraKnownMarketplaces": {
+            "apm-u-3f9c": {
+              "source": {
+                "source": "directory",
+                "path": "/home/dev/other/plugins"
+              }
+            }
+          },
+          "enabledPlugins": {
+            "alpha@apm-u-3f9c": true
+          }
+        },
+        "diagnostics": [
+          "binding-conflict"
+        ]
+      }
+    ]
+  }
+}
