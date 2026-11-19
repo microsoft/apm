@@ -372,8 +372,13 @@ def split_mcp_claims(
         names["copilot"] |= candidates
         hashes["copilot"].update({name: live[name] for name in candidates if name in live})
         moved |= candidates
+        # The heal never deletes .github/mcp.json, so a copilot claim counts as
+        # moved only while that file is still there.
+        github_kept = (project_root / _RETIRED_PATHS["copilot"]).is_file()
         moved_unrecorded = _absent_from_retired_files(
-            candidates | vscode, project_root=project_root, stored_configs=stored_configs
+            (candidates if github_kept else set()) | vscode,
+            project_root=project_root,
+            stored_configs=stored_configs,
         )
     if copilot and moved:
         target_servers["copilot"] = type(copilot)(name for name in copilot if name not in moved)

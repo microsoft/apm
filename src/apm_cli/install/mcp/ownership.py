@@ -245,6 +245,21 @@ def compare_native_mcp_connection(
     comparison = native
     matches_baseline = False
     retired_shape = False
+    adoptable = (
+        not managed
+        and requested is not None
+        and client.target_name == "copilot"
+        and name in _adoptable_root_names.get()
+    )
+    if adoptable and isinstance(stored_config, dict) and stored_config.get("registry") is False:
+        # What --frozen wrote from the locked declaration, before apm.yml changed.
+        try:
+            locked = client.render_server_config(
+                MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored_config))
+            )
+            matches_baseline = client.matches_managed_server_config(native, locked)
+        except (TypeError, ValueError):
+            logger.debug("Unusable locked declaration for %s", name)
     if managed and isinstance(stored_config, dict):
         try:
             dependency = MCPDependency.from_dict(stored_config)
@@ -349,11 +364,6 @@ def compare_native_mcp_connection(
             else client.matches_managed_server_config(requested_native, requested)
         )
         if matches_request:
-            adoptable = (
-                not managed
-                and client.target_name == "copilot"
-                and name in _adoptable_root_names.get()
-            )
             return (
                 NativeMcpConnectionState.MATCHING_MANAGED
                 if matches_baseline or adoptable

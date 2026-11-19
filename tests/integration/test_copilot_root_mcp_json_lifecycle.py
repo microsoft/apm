@@ -634,18 +634,70 @@ def test_frozen_upgrade_keeps_the_root_entry_apm_wrote(
     assert project.read_json(".mcp.json")["mcpServers"] == {}
 
 
-def test_moved_claim_never_adopts_a_differing_or_undeclared_root_entry(
+def test_frozen_upgrade_then_a_changed_declaration_updates_the_root_entry(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """With no retired entry left, only an entry equal to the requested render is APM's."""
+    """The entry --frozen wrote from the locked declaration is APM's even after apm.yml changes."""
     project = _Project(tmp_path, apm_binary_path)
-    servers = [_ECHO, {**_ECHO, "name": "gone"}]
-    rendered = {"type": "stdio", "command": "echo", "args": []}
-    project.write_json(".mcp.json", {"mcpServers": {"echo": _USER_ROOT, "gone": rendered}})
+    _seed_036_copilot_only(project, targets=["copilot"])
+    project.install("--frozen")
+
+    project.manifest(targets=["copilot"], dependencies={"mcp": [{**_ECHO, "args": ["hi"]}]})
+    project.install()
+
+    assert project.read_json(".mcp.json")["mcpServers"]["echo"]["args"] == ["hi"]
+    assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+
+
+def test_moved_claim_never_adopts_a_differing_root_entry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    project = _Project(tmp_path, apm_binary_path)
+    project.write_json(".github/mcp.json", {"mcpServers": {}})
+    project.write_json(".mcp.json", {"mcpServers": {"echo": _USER_ROOT}})
     project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
-    _seed_036_lock(project, servers, {"copilot": ["echo", "gone"]})
+    _seed_036_lock(project, [_ECHO], {"copilot": ["echo"]})
 
     failed = project.apm("install", "--no-policy")
 
     assert failed.returncode != 0, failed.stdout + failed.stderr
-    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": _USER_ROOT, "gone": rendered}
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": _USER_ROOT}
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["undeclared", "lock-0.37", "claims-another-name", "github-file-missing", "github-symlinked"],
+)
+def test_identical_root_entry_stays_the_users_unless_every_adoption_bound_holds(
+    tmp_path: Path, apm_binary_path: Path, case: str
+) -> None:
+    """Each case breaks one bound; the user's identical .mcp.json entry is never adopted."""
+    project = _Project(tmp_path, apm_binary_path)
+    rendered = {"type": "stdio", "command": "echo", "args": []}
+    checked = "gone" if case == "undeclared" else "echo"
+    servers = [_ECHO, {**_ECHO, "name": "gone"}, {**_ECHO, "name": "other"}]
+    claims = {
+        "undeclared": {"copilot": ["echo", "gone"]},
+        "lock-0.37": {"vscode": ["echo"]},
+        "claims-another-name": {"copilot": ["other"]},
+    }.get(case, {"copilot": ["echo"]})
+    project.write_json(".mcp.json", {"mcpServers": {checked: rendered}})
+    if case == "github-symlinked":
+        outside = tmp_path / "outside-mcp.json"
+        outside.write_text('{"mcpServers": {}}\n', encoding="utf-8")
+        (project.root / ".github").mkdir()
+        (project.root / ".github/mcp.json").symlink_to(outside)
+    elif case != "github-file-missing":
+        project.write_json(".github/mcp.json", {"mcpServers": {}})
+    project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
+    _seed_036_lock(project, servers, claims)
+    if case == "lock-0.37":
+        lock = project.lock()
+        dump_yaml({**lock, "apm_version": "0.37.0"}, project.root / "apm.lock.yaml")
+
+    project.install()
+    assert checked not in project.lock().get("mcp_target_servers", {}).get("copilot", [])
+
+    project.manifest(targets=["copilot"])
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"][checked] == rendered
