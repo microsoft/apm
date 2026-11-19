@@ -46,6 +46,10 @@ packages (single-plugin, monorepo-hybrid). Pure aggregator
 marketplaces resolve every entry against a remote git ref and skip
 the local check.
 
+Use SemVer 2.0.0 for versions and tags. Version-range resolution skips
+tags with leading zeros or non-ASCII digits, such as `v01.2.3` or
+`v1.2.3-01`; `--check-versions` does not flag them.
+
 ## lockstep (default)
 
 Every local package's manifest `version` must equal the marketplace's

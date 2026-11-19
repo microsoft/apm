@@ -29,10 +29,10 @@ apm compile --validate
 ```
 
 Prints the placement decisions [`apm compile`](../compile/) would make
-without touching disk: which primitives go to which harness directory,
-which files would be overwritten, which targets would be skipped. Use
-it whenever you are not sure what your `apm.yml` and `.apm/` will
-produce.
+without touching disk: which root context files (`AGENTS.md`,
+`CLAUDE.md`, ...) would be written where, and which targets would be
+skipped. Use it whenever you are not sure what your `apm.yml` and
+`.apm/instructions/` will produce.
 
 `--validate` is the stricter sibling. It parses every primitive's
 frontmatter and structure and reports errors without producing output.
