@@ -74,7 +74,7 @@ One repo that ships a marketplace and the plugins it indexes side-by-side. Usefu
 
 ```bash
 mkdir agents-hub && cd agents-hub
-apm marketplace init --yes
+apm marketplace init
 apm plugin init review-bot --yes
 apm plugin init lint-bot --yes
 ```
