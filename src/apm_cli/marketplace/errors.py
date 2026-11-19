@@ -1,5 +1,12 @@
 """Marketplace-specific error hierarchy."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .resolver import CrossRepoMisconfigRisk
+
 
 class MarketplaceError(Exception):
     """Base class for marketplace errors."""
@@ -45,6 +52,64 @@ class PluginNotFoundError(MarketplaceError):
         super().__init__(
             f"Plugin '{plugin_name}' not found in marketplace '{marketplace_name}'. "
             f"Run 'apm marketplace browse {marketplace_name}' to see available plugins."
+        )
+
+
+class DependencyConfusionError(MarketplaceError, ValueError):
+    """A marketplace entry resolved to an ambiguous bare cross-repo source (#1326).
+
+    Raised only by
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`.
+    ``ValueError`` stays a base so resolution-error handlers keep recording it.
+    """
+
+    def __init__(self, risk: CrossRepoMisconfigRisk) -> None:
+        self.risk = risk
+        super().__init__(
+            "\n".join(
+                [
+                    f"refused (dependency-confusion risk #1326): bare"
+                    f" `repo: {risk.bare_repo_field}` on enterprise"
+                    f" marketplace '{risk.marketplace_host}' is ambiguous."
+                    f" Host-qualify the plugin `repo` field in"
+                    f" marketplace.json to one of:",
+                    f"  - '{risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
+                    f"  - 'github.com/{risk.bare_repo_field}' (declared cross-host dep on public github.com)",
+                ]
+            )
+        )
+
+
+class MarketplaceOriginConflictError(MarketplaceError):
+    """Raised when an alias now names a different catalog than the lock recorded."""
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        import shlex
+
+        from .source_identity import parse_marketplace_source
+
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        try:
+            parse_marketplace_source(locked)
+        except ValueError:
+            restore = (
+                "To keep the locked catalog, register its origin again with "
+                f"'apm marketplace add' under the name {marketplace_name!r}."
+            )
+        else:
+            restore = (
+                "To keep the locked catalog, run: apm marketplace add "
+                f"{shlex.quote(locked)} --name {shlex.quote(marketplace_name)} "
+                "(add --ref or --path if the original registration used them)."
+            )
+        super().__init__(
+            f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
+            f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
+            f"To switch catalogs on purpose, remove {plugin_name!r} from apm.yml, run "
+            "'apm install', then add it back and run 'apm install' again."
         )
 
 

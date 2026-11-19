@@ -376,6 +376,12 @@ ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resoluti
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
+On a `*.ghe.com` marketplace, a `type: github` plugin source with a bare
+cross-repo `repo: owner/repo` is refused as a dependency-confusion risk (#1326)
+before APM contacts the package repository or writes any file. This applies to
+`apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
+`apm update`. Locked entries replay without the catalog; run `apm update` to
+re-check entries an older APM locked.
 
 Once the lockfile records an entry, `apm install` and `apm install --frozen`
 replay its locked commit without reading the catalog or needing the
@@ -403,6 +409,16 @@ ambiguous evidence fails. Audit does not fetch the catalog, so removing a local
 catalog registration does not invalidate otherwise valid installed evidence.
 Omitting `version` removes the selector comparison, not the unique-provenance
 and full locked-commit requirements.
+
+The lock also records the catalog origin as `source_url` (and a
+`source_digest`) for every remote catalog kind, including Git; local catalogs
+record neither. The alias is machine-local: if it now points at a different
+origin, re-resolving the entry (for example `apm update`) fails and names both
+origins; `apm install` keeps replaying the locked catalog. Restore the alias with `apm marketplace add <locked-origin>
+--name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
+add it back and run `apm install` again. Only the origin is compared, not the
+catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
+it on the next lock write.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.

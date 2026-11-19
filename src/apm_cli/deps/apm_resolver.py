@@ -687,8 +687,13 @@ class APMDependencyResolver:
             raise refusal
         if self._read_only:
             raise ValueError("Marketplace lookup is not available in an offline dependency preview")
+        from apm_cli.marketplace.catalog_origin import require_locked_catalog_origin
+        from apm_cli.marketplace.dependency_confusion import admit_marketplace_resolution
         from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 
+        require_locked_catalog_origin(
+            dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, self._existing_lockfile
+        )
         resolution = resolve_marketplace_plugin(
             dep_ref.marketplace_plugin_name,
             dep_ref.marketplace_name,
@@ -696,6 +701,7 @@ class APMDependencyResolver:
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
         )
+        admit_marketplace_resolution(resolution)
         resolved = (
             resolution.dependency_reference
             if resolution.dependency_reference is not None
@@ -742,15 +748,19 @@ class APMDependencyResolver:
         """
         from apm_cli.marketplace.errors import (
             BuildError,
+            DependencyConfusionError,
             MarketplaceFetchError,
             MarketplaceNotFoundError,
+            MarketplaceOriginConflictError,
             PluginNotFoundError,
         )
 
         try:
             return self._resolve_marketplace_dep(dep_ref)
         except (
+            DependencyConfusionError,
             MarketplaceNotFoundError,
+            MarketplaceOriginConflictError,
             PluginNotFoundError,
             MarketplaceFetchError,
             BuildError,
