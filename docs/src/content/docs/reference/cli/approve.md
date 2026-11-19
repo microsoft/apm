@@ -103,8 +103,8 @@ Each item is then admitted in this order (first match wins):
 3. A transitive MCP server that is self-defined, sets its own `registry:`, or
    carries an overlay, with no matching pin -> parked
    (`untrusted-transitive`). `--trust-transitive-mcp` admits it for that run
-   only; it also accepts a changed pinned registry overlay for that run, but
-   never a changed self-defined server, which always needs `apm approve`.
+   only. It never admits a server whose pin no longer matches; a changed
+   definition always needs `apm approve`.
 4. Type-level rungs 4-7 above.
 
 When an approved definition changes upstream, install parks the item and

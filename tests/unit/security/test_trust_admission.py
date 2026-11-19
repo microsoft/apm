@@ -107,9 +107,9 @@ def test_row5_changed_definition_is_parked_and_one_off_never_reapproves_it() -> 
     # A changed executable always needs a re-approval, even under the flag.
     gated = admit(ctx, _subject(fingerprint=changed), one_off=True)
     assert (gated.allowed, gated.reason) == (False, "definition-changed")
-    # A changed registry overlay (not an executable) may run for this run only.
+    # A changed registry overlay is parked too: the flag never overrides a pin.
     overlay = admit(ctx, _subject(fingerprint=changed, gated=False), one_off=True)
-    assert overlay.allowed and overlay.one_off
+    assert (overlay.allowed, overlay.reason) == (False, "definition-changed")
 
 
 def test_row6_one_off_admits_and_flags_non_persistence() -> None:

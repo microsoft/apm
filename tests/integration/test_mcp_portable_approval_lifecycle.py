@@ -186,6 +186,31 @@ def test_lockfile_only_edit_cannot_grant_trust(tmp_path: Path, apm_binary_path: 
     assert chain.lock()["mcp_omissions"][SERVER]["reason"] == "untrusted-transitive"
 
 
+def test_lockfile_depth_edit_cannot_make_a_transitive_server_direct(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """req-sc-016: rewriting a transitive package to depth 1 grants nothing."""
+    chain = _transitive(tmp_path, apm_binary_path)
+    chain.ok("install", "--trust-transitive-mcp")
+    admitted = chain.lock()["mcp_configs"][SERVER]
+    chain.ok("install")
+    lock = chain.lock()
+    for dependency in lock["dependencies"]:
+        if dependency.get("depth", 1) > 1:
+            dependency["depth"] = 1
+            dependency.pop("resolved_by", None)
+    lock["mcp_configs"] = {**(lock.get("mcp_configs") or {}), SERVER: admitted}
+    lock["mcp_servers"] = sorted({*(lock.get("mcp_servers") or []), SERVER})
+    lock.get("mcp_omissions", {}).pop(SERVER, None)
+    (chain.project / "apm.lock.yaml").write_text(yaml.safe_dump(lock), encoding="utf-8")
+
+    assert not _audit(chain)["passed"]
+    assert chain.run("install", "--frozen").returncode != 0
+    assert SERVER not in chain.servers("claude")
+    chain.ok("install")
+    assert SERVER not in chain.servers("claude")
+
+
 def test_org_policy_beats_an_approval(tmp_path: Path, apm_binary_path: Path) -> None:
     """(f) An org executables deny parks an approved server; the reason says so."""
     chain = Chain(tmp_path / "world", apm_binary_path, dirs=(".claude",))

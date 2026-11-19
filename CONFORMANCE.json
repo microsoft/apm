@@ -1829,11 +1829,12 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_changed_definition_is_withheld_with_a_named_diagnostic",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_lockfile_state_never_grants_transitive_consent",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_organization_denial_still_wins_over_a_pin",
+        "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_per_user_pin_admits_and_the_opt_in_never_overrides_a_stale_pin",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_transitive_mcp_consent_comes_from_a_pinned_manifest_grant"
       ]
     },

@@ -632,7 +632,7 @@ requirements:
     keyword: MUST
     section: "10.13"
     conformance_class: consumer
-    notes: "transitive self-defined or overlaying MCP server admitted only by root re-declaration, a manifest grant bound to package + server + matching definition fingerprint, or a non-persisted per-invocation opt-in; never by lockfile state; a changed definition is withheld with a diagnostic"
+    notes: "proposed in amendment 0.1.64 (PR #3918), Section 9.3 pending: transitive self-defined, registry-naming or overlaying MCP server admitted only by root re-declaration, a consuming-manifest or per-user grant bound to package + server + full sha256 definition fingerprint, or a non-persisted per-invocation opt-in; never by lockfile state; a changed definition is withheld with a diagnostic even under the opt-in; organization denial wins over every path"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

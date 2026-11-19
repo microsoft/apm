@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -78,6 +79,28 @@ def test_transitive_mcp_consent_comes_from_a_pinned_manifest_grant(tmp_path: Pat
     one_off = _view(tmp_path, root, lock, McpAdmission(None, one_off=True))
     assert "leaf-server" in one_off.configs
     assert [name for name, _package in one_off.one_off_admitted] == ["leaf-server"]
+
+
+@pytest.mark.req("req-sc-016")
+def test_per_user_pin_admits_and_the_opt_in_never_overrides_a_stale_pin(tmp_path: Path) -> None:
+    assert_spec_contains(
+        "approval location of [req-sc-010](#req-sc-010), binds the declaring",
+        "a full-length `sha256:<64 lowercase hex>` digest compared in full, never",
+        "fingerprint no longer matches, even under (c); in that case it MUST",
+    )
+    root, lock, dependency = _project(tmp_path)
+    pin = mcp_definition_fingerprint(MCPDependency.from_dict(SERVER))
+    identity = ex.locked_dependency_approval_keys(dependency)[0].split("#", 1)[0]
+    grant = {"allow": {identity: {"mcp": {"leaf-server": pin}}}, "deny": {}}
+    (tmp_path / "config.json").write_text(json.dumps({"executables": grant}), encoding="utf-8")
+    user_only = build_exec_trust_context(policy=None, project_data={})
+    assert "leaf-server" in _view(tmp_path, root, lock, McpAdmission(user_only)).configs
+    (tmp_path / "config.json").unlink()
+
+    stale = _pinned(dependency, "sha256:" + "0" * 64)
+    view = _view(tmp_path, root, lock, McpAdmission(stale, one_off=True))
+    assert "leaf-server" not in view.configs
+    assert view.omissions["leaf-server"]["reason"] == "definition-changed"
 
 
 @pytest.mark.req("req-sc-016")

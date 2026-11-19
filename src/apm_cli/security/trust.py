@@ -192,11 +192,9 @@ def admit(
         layer, pin = pinned
         if subject.fingerprint is not None and pin == subject.fingerprint:
             return Admission(True, None, layer)
-        # A one-off run may accept a changed registry overlay for this run,
-        # never a changed executable: that always needs a re-approval.
-        if not (one_off and needs_trust and not subject.exec_gated):
-            return Admission(False, REASON_DEFINITION_CHANGED, layer)
-        return Admission(True, None, LAYER_ONE_OFF, one_off=True)
+        # A changed definition always needs a re-approval; the one-off flag
+        # never overrides a pin (req-sc-016).
+        return Admission(False, REASON_DEFINITION_CHANGED, layer)
 
     if needs_trust and not one_off:
         return Admission(False, REASON_UNTRUSTED_TRANSITIVE, LAYER_DEFAULT_DENY)
