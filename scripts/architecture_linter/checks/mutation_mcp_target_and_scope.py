@@ -430,6 +430,7 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             "return self.omission_view.omission_evidence(lockfile)",
             "omissions = prepared.omissions(lockfile)",
             "admission = McpAdmission.for_project(",
+            "admission=admission,",
             "current_view = CurrentMcpConfigView.select(",
             "recorded=None,",
             "current_view if should_install else None",
