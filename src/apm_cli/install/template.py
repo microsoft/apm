@@ -64,10 +64,12 @@ def effective_allow_map(ctx) -> dict | None:
         return getattr(ctx, "exec_allow_map", None)
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    from apm_cli.core.scope import is_user_scope, manifest_root
+
     project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
-        project_root,
+        manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))),
         policy=policy,
         fallback_allow_executables=project_allow,
         logger=getattr(ctx, "logger", None),

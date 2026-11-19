@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install -g` and global `apm uninstall` now apply the `executables` approvals in `~/.apm/apm.yml`; they were ignored, so unapproved hooks could deploy. (#PR)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
 - `apm install` removes hooks a package deployed earlier once `apm deny` or a removed approval gates them, and names a denied package as denied. (#3944)

@@ -140,3 +140,17 @@ def test_unparseable_hook_file_cannot_be_fingerprinted(tmp_path: Path) -> None:
     hook.write_text("[1, 2]", encoding="utf-8")
     with pytest.raises(UnfingerprintableError):
         hook_file_fingerprint(tmp_path, hook)
+
+
+def test_normalization_receipt_is_not_an_unpinned_apm_copy(tmp_path: Path) -> None:
+    """Legacy-plugin normalization writes one receipt; any other non-copy still parks."""
+    from apm_cli.utils.content_hash import unpinned_apm_copy
+
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/hooks.json").write_text("{}")
+    (tmp_path / ".apm/hooks").mkdir(parents=True)
+    (tmp_path / ".apm/hooks/hooks.json").write_text("{}")
+    (tmp_path / ".apm/.plugin-skill-sources.json").write_text('{"skills": []}')
+    assert unpinned_apm_copy(tmp_path) is None
+    (tmp_path / ".apm/hooks/extra.sh").write_text("echo unpinned")
+    assert "extra.sh" in unpinned_apm_copy(tmp_path)
