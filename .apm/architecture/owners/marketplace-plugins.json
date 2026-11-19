@@ -41,7 +41,7 @@
     {
       "id": "marketplace-dependency-confusion-admission",
       "decision": "Whether a resolved marketplace entry may be installed despite the #1326 bare cross-repo dependency-confusion sentinel",
-      "owner": "marketplace/dependency_confusion.py (admit_marketplace_resolution); consumers: commands/install.py _resolve_package_references (CLI argument) and deps/apm_resolver.py _resolve_marketplace_dep (apm.yml entries, transitive dependencies, apm update)",
+      "owner": "marketplace/dependency_confusion.py (admit_marketplace_resolution); required consumers are enforced by guard marketplace-integrations-dependency-confusion",
       "selectors": [
         "src/apm_cli/marketplace/dependency_confusion.py"
       ],

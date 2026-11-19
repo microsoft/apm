@@ -1112,7 +1112,9 @@ def resolve_marketplace_plugin(
     resolved_tag_name: str | None = None
     resolved_version: str | None = None
     resolved_at: str | None = None
-    if version_spec:
+    # A risky resolution is refused by admit_marketplace_resolution; skip the
+    # tag lookup so no request reaches the ambiguous package remote (#1326).
+    if version_spec and cross_repo_misconfig_risk is None:
         from .version_resolver import is_version_constraint
 
         base = canonical.split("#", 1)[0]

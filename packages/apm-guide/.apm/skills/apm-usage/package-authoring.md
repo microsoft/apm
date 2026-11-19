@@ -1116,7 +1116,8 @@ nested `type:` and `repo:` keys (rather than the simple `source: owner/repo`
 string) -- the `repo:` field **must be host-qualified**. A bare
 `owner/repo` value is refused because it cannot be
 disambiguated from a public-github.com dependency-confusion attempt
-(#1326). The refusal happens before any fetch or write, on every
+(#1326). The refusal happens before APM contacts the package repository or
+writes any file, on every
 consumer path: `apm install name@marketplace`, `apm.yml` marketplace
 entries, transitive marketplace dependencies, and `apm update`. Two valid forms:
 

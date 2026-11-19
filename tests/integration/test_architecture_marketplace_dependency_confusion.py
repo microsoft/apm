@@ -40,10 +40,31 @@ def test_dependency_confusion_admission_routes_through_owner() -> None:
             "def _check_marketplace_ref(dep, verbose):\n"
             "    resolve_marketplace_plugin(dep.marketplace_plugin_name, dep.discovered_via)\n",
         ),
+        (
+            "deps/apm_resolver.py",
+            "        admit_marketplace_resolution(resolution)\n",
+            "        def _never():\n            admit_marketplace_resolution(resolution)\n",
+        ),
+        (
+            "commands/install.py",
+            "                    admit_marketplace_resolution(resolution)\n",
+            "                    getattr(resolution, 'cross_repo_misconfig_risk')\n",
+        ),
+        (
+            "commands/outdated.py",
+            "def _check_marketplace_ref(dep, verbose):\n",
+            "def _check_marketplace_ref(dep, verbose):\n"
+            "    from ..marketplace.resolver import resolve_marketplace_plugin as lookup\n",
+        ),
+        (
+            "commands/outdated.py",
+            "def _check_marketplace_ref(dep, verbose):\n",
+            "def _check_marketplace_ref(dep, verbose):\n    resolve_plugin_source(dep)\n",
+        ),
     ],
 )
 def test_dependency_confusion_guard_rejects_bypasses(path: str, before: str, after: str) -> None:
-    """Skipping the owner, re-reading the sentinel, or a new unadmitted resolver call fails."""
+    """Skipping or nesting the owner, re-reading the sentinel, aliasing or bypassing the resolver fails."""
     source_path = f"src/apm_cli/{path}"
     source = (_ROOT / source_path).read_text(encoding="utf-8")
     assert source.count(before) == 1

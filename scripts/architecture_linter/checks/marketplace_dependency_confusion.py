@@ -19,8 +19,11 @@ RULE_ID = "marketplace-integrations-dependency-confusion"
 _OWNER_PATH = "src/apm_cli/marketplace/dependency_confusion.py"
 _OWNER_FUNCTION = "admit_marketplace_resolution"
 _RESOLVE = "resolve_marketplace_plugin"
+# Lower-level canonical builder: no sentinel, so only its producer may call it.
+_RAW_RESOLVE = "resolve_plugin_source"
 _SENTINEL_PRODUCER = "src/apm_cli/marketplace/resolver.py"
-_SENTINEL_READ = re.compile(r"\.cross_repo_misconfig_risk\b")
+_SENTINEL_READ = re.compile(r"\.cross_repo_misconfig_risk\b|[\"']cross_repo_misconfig_risk[\"']")
+_ALIASED_IMPORT = re.compile(rf"\b(?:{_RESOLVE}|{_RAW_RESOLVE})\s+as\s+\w+")
 # Read-only consumers: display a canonical, or map an installed entry back to
 # its lock key for removal. Neither admits a package for download.
 _READ_ONLY_CONSUMERS = frozenset(
@@ -50,25 +53,27 @@ def _enclosing_function(facts: FileFacts, line: int) -> DefinitionFact | None:
 
 
 def _admits_after(facts: FileFacts, function: DefinitionFact, line: int) -> bool:
+    """True when *function* itself (not a nested def) admits after *line*."""
     return any(
-        _is_call_to(call.qualname, _OWNER_FUNCTION) and line < call.line <= function.end_line
+        _is_call_to(call.qualname, _OWNER_FUNCTION)
+        and line < call.line <= function.end_line
+        and _enclosing_function(facts, call.line) == function
         for call in facts.calls
     )
 
 
-def _sentinel_reads(path: str, facts: FileFacts) -> list[Violation]:
+def _lexical_violations(path: str, facts: FileFacts) -> list[Violation]:
     findings: list[Violation] = []
     for index, line in enumerate(facts.lines, start=1):
-        if line.lstrip().startswith("#") or not _SENTINEL_READ.search(line):
+        if line.lstrip().startswith("#"):
             continue
-        findings.append(
-            violation(
-                RULE_ID,
-                path,
-                f"only {_OWNER_FUNCTION} may read cross_repo_misconfig_risk (#1326)",
-                line=index,
-            )
-        )
+        if _SENTINEL_READ.search(line):
+            message = f"only {_OWNER_FUNCTION} may read cross_repo_misconfig_risk (#1326)"
+        elif _ALIASED_IMPORT.search(line):
+            message = "import marketplace resolvers by name so the #1326 guard can see calls"
+        else:
+            continue
+        findings.append(violation(RULE_ID, path, message, line=index))
     return findings
 
 
@@ -90,8 +95,18 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             findings.extend(failures)
             continue
         if path not in (_OWNER_PATH, _SENTINEL_PRODUCER):
-            findings.extend(_sentinel_reads(path, facts))
+            findings.extend(_lexical_violations(path, facts))
         for call in facts.calls:
+            if path != _SENTINEL_PRODUCER and _is_call_to(call.qualname, _RAW_RESOLVE):
+                findings.append(
+                    violation(
+                        RULE_ID,
+                        path,
+                        f"call {_RESOLVE}, not {_RAW_RESOLVE}, so the #1326 sentinel is computed",
+                        line=call.line,
+                    )
+                )
+                continue
             if not _is_call_to(call.qualname, _RESOLVE):
                 continue
             function = _enclosing_function(facts, call.line)

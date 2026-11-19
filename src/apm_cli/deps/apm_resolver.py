@@ -724,6 +724,7 @@ class APMDependencyResolver:
         """
         from apm_cli.marketplace.errors import (
             BuildError,
+            DependencyConfusionError,
             MarketplaceFetchError,
             MarketplaceNotFoundError,
             PluginNotFoundError,
@@ -732,6 +733,7 @@ class APMDependencyResolver:
         try:
             return self._resolve_marketplace_dep(dep_ref)
         except (
+            DependencyConfusionError,
             MarketplaceNotFoundError,
             PluginNotFoundError,
             MarketplaceFetchError,
