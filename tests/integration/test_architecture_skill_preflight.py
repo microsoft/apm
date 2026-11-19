@@ -80,12 +80,7 @@ def test_prepared_plan_cannot_bypass_canonical_target_authorization(old: str, ne
             "plugin_bin_deployable=rogue_bin_eligibility(",
         ),
         (
-            "marketplace-integrations-codex-native-lifecycle",
-            "codex_native = plan_native_codex_plugin(",
-            "codex_native = rogue_native_plan(",
-        ),
-        (
-            "marketplace-integrations-codex-native-lifecycle",
+            "marketplace-integrations-claude-ownership",
             "native_plugin_root=native_plugin.source_root if native_plugin else None,",
             "unadmitted_plugin_root=None,",
         ),

@@ -1,9 +1,8 @@
-"""Canonical Codex intent must never normalize into loose Claude components."""
+"""A Codex compatibility manifest is split-installed like any plugin (#3920)."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -28,21 +27,27 @@ def _plugin(root):
     return manifest
 
 
-def test_codex_only_manifest_keeps_native_intent_without_normalization(tmp_path):
+def test_codex_only_manifest_normalizes_into_loose_primitives(tmp_path):
     manifest = _plugin(tmp_path)
     original = manifest.read_bytes()
     kind, selected = detect_package_type(tmp_path)
     assert kind is PackageType.MARKETPLACE_PLUGIN
     assert selected == manifest
-    result = validate_apm_package(tmp_path, read_only=True)
+    result = validate_apm_package(tmp_path)
     assert result.is_valid, result.errors
-    assert result.package is not None
-    assert result.package.codex_plugin is not None
-    assert result.package.codex_plugin.name == "example"
-    assert result.package.get_mcp_dependencies() == []
-    assert not (tmp_path / "apm.yml").exists()
-    assert not (tmp_path / ".apm").exists()
+    assert result.package_type is PackageType.MARKETPLACE_PLUGIN
+    assert result.package.name == "example"
+    assert [dep.name for dep in result.package.get_mcp_dependencies()] == ["example"]
+    assert (tmp_path / "apm.yml").is_file()
+    assert (tmp_path / ".apm" / "skills" / "example" / "SKILL.md").is_file()
     assert manifest.read_bytes() == original
+
+
+def test_read_only_validation_refuses_codex_plugin_like_any_plugin(tmp_path):
+    _plugin(tmp_path)
+    result = validate_apm_package(tmp_path, read_only=True)
+    assert not result.is_valid
+    assert not (tmp_path / "apm.yml").exists()
 
 
 def test_codex_consumer_opt_in_does_not_change_producer_manifest_lookup(tmp_path):
@@ -84,34 +89,6 @@ def test_malformed_codex_manifest_does_not_fall_back_to_skills(tmp_path):
     assert not (tmp_path / "apm.yml").exists()
 
 
-@pytest.mark.parametrize("resource", ["../outside.json", "/outside.json", "./missing.json"])
-def test_codex_mcp_resource_must_be_inside_complete_bundle(tmp_path, resource):
-    manifest = _plugin(tmp_path)
-    manifest.write_text(json.dumps({"name": "example", "mcpServers": resource}))
-    result = validate_apm_package(tmp_path, read_only=True)
-    assert not result.is_valid
-    assert not (tmp_path / "apm.yml").exists()
-
-
-def test_read_only_drift_projection_keeps_native_intent(tmp_path):
-    from apm_cli.install.drift import _build_package_info
-    from apm_cli.models.apm_package import DependencyReference
-
-    _plugin(tmp_path)
-    locked = SimpleNamespace(
-        version="1.0.0",
-        repo_url="owner/example",
-        resolved_ref="main",
-        resolved_commit="abc",
-        package_type="marketplace_plugin",
-        to_dependency_ref=lambda: DependencyReference.parse("owner/example"),
-    )
-    info = _build_package_info(locked, tmp_path)
-    assert info.package.codex_plugin is not None
-    assert not (tmp_path / "apm.yml").exists()
-    assert not (tmp_path / ".apm").exists()
-
-
 def test_read_only_schema_plugin_reuses_canonical_detection(tmp_path, monkeypatch):
     from apm_cli.install.drift import _build_package_info
     from apm_cli.models.apm_package import DependencyReference
@@ -136,28 +113,3 @@ def test_read_only_schema_plugin_reuses_canonical_detection(tmp_path, monkeypatc
     monkeypatch.setattr("apm_cli.models.validation.detect_package_type", reuse_detection)
     info = _build_package_info(locked, tmp_path)
     assert info.package_type is PackageType.AGENT_PLUGIN
-    assert info.package.codex_plugin is None
-
-
-@pytest.mark.parametrize("version", [None, "0.0.0"])
-def test_git_version_stamping_preserves_codex_publisher_metadata(
-    tmp_path: Path, version: str | None
-) -> None:
-    from apm_cli.deps.package_validator import stamp_plugin_version
-
-    manifest = _plugin(tmp_path)
-    data = json.loads(manifest.read_text())
-    if version is None:
-        del data["version"]
-    else:
-        data["version"] = version
-    manifest.write_text(json.dumps(data))
-    metadata = tmp_path / "apm.yml"
-    metadata.write_text("name: publisher-metadata\nversion: 0.0.0\n")
-    before = {path: path.read_bytes() for path in (manifest, metadata)}
-    validation = validate_apm_package(tmp_path, read_only=True)
-    assert validation.is_valid, validation.errors
-    assert validation.package.codex_plugin is not None
-    stamp_plugin_version(validation.package, validation.package_type, "a" * 40, tmp_path)
-    assert validation.package.version == "0.0.0"
-    assert {path: path.read_bytes() for path in before} == before

@@ -217,15 +217,11 @@ def _native_approval(
 def native_install(package_info: Any) -> bool:
     """Whether install loads this package intact as a native plugin.
 
-    The same predicates the native paths use: an admitted Copilot Agent
-    Plugin, or a Codex compatibility bundle (which never splits).
+    The same predicate the native path uses: an admitted Copilot Agent Plugin.
+    A Codex compatibility bundle is split-installed like any plugin (#3920).
     """
-    from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
     from apm_cli.copilot_plugins.capability import admits_native_plugin
 
-    package = getattr(package_info, "package", None)
-    if isinstance(getattr(package, "codex_plugin", None), CodexCompatibilityPlugin):
-        return True
     return admits_native_plugin(package_info)
 
 
