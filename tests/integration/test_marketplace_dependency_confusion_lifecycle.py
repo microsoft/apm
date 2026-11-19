@@ -47,6 +47,19 @@ class _World:
     root: Path
     env: dict[str, str]
     runner: ApmLifecycleRunner
+    repositories: LocalGitRepositoryFactory
+    catalog: LocalGitRepository
+
+    def publish(self, bare_repo: str) -> None:
+        plugins = [
+            {"name": _BARE, "source": {"type": "github", "repo": bare_repo}},
+            {"name": _QUALIFIED, "source": {"type": "github", "repo": "github.com/acme/tools"}},
+        ]
+        (self.catalog.worktree / "marketplace.json").write_text(
+            json.dumps({"name": _MARKETPLACE, "owner": {"name": "Corp"}, "plugins": plugins}),
+            encoding="utf-8",
+        )
+        self.repositories.commit(self.catalog, message=f"publish {bare_repo}")
 
     def write_manifest(self, path: Path, dependencies: list[object]) -> None:
         path.mkdir(parents=True, exist_ok=True)
@@ -77,7 +90,7 @@ def _with_ssh_rewrite(env: dict[str, str], repository: LocalGitRepository) -> di
     return env
 
 
-def _world(tmp_path: Path, binary: Path) -> _World:
+def _world(tmp_path: Path, binary: Path, *, bare_repo: str = "acme/tools") -> _World:
     isolated = IsolatedApmEnvironment.create(
         tmp_path.resolve() / "isolated", base_env=dict(os.environ)
     )
@@ -90,21 +103,15 @@ def _world(tmp_path: Path, binary: Path) -> _World:
     skill.write_text("---\nname: pwned\ndescription: staged\n---\n# pwned\n", encoding="utf-8")
     repositories.tag(package, "v1.0.0", repositories.commit(package, message="stage"))
     catalog = repositories.create("corp-marketplace")
-    plugins = [
-        {"name": _BARE, "source": {"type": "github", "repo": "acme/tools"}},
-        {"name": _QUALIFIED, "source": {"type": "github", "repo": "github.com/acme/tools"}},
-    ]
-    (catalog.worktree / "marketplace.json").write_text(
-        json.dumps({"name": _MARKETPLACE, "owner": {"name": "Corp"}, "plugins": plugins}),
-        encoding="utf-8",
-    )
-    repositories.commit(catalog, message="catalog")
     env = repositories.url_rewrite_subprocess_env_many(((package, _ATTACKER_REMOTE),))
     world = _World(
         root=isolated.work_root / "consumer",
         env=_with_ssh_rewrite(env, catalog),
         runner=ApmLifecycleRunner((str(binary),), timeout_seconds=120),
+        repositories=repositories,
+        catalog=catalog,
     )
+    world.publish(bare_repo)
     world.root.mkdir(parents=True)
     added = world.run("marketplace", "add", f"{_CATALOG_REMOTE}.git", "--name", _MARKETPLACE)
     assert added.returncode == 0, added.stdout + added.stderr
@@ -167,3 +174,27 @@ def test_host_qualified_marketplace_entry_still_installs(
     assert _REFUSAL not in output
     assert (world.root / "apm.lock.yaml").exists()
     assert list(world.root.rglob("pwned/SKILL.md"))
+
+
+def test_apm_update_re_admits_an_entry_locked_before_its_catalog_turned_ambiguous(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A locked entry whose catalog row is now bare is refused on ``apm update``.
+
+    Plain installs replay the lock without the catalog (#3911); ``apm update``
+    re-resolves through admission, so it is the remediation for lock rows an
+    older APM wrote.
+    """
+    world = _world(tmp_path, apm_binary_path, bare_repo="github.com/acme/tools")
+    world.write_manifest(world.root, [{"name": _BARE, "marketplace": _MARKETPLACE}])
+    installed = world.run("install", *_FLAGS)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    lock_before = (world.root / "apm.lock.yaml").read_bytes()
+    world.publish("acme/tools")
+
+    result = world.run("update", "--yes", *_FLAGS)
+
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert result.returncode != 0, output
+    assert _REFUSAL in output, output
+    assert (world.root / "apm.lock.yaml").read_bytes() == lock_before

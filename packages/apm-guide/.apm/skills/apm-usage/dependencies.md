@@ -379,7 +379,8 @@ On a `*.ghe.com` marketplace, a `type: github` plugin source with a bare
 cross-repo `repo: owner/repo` is refused as a dependency-confusion risk (#1326)
 before APM contacts the package repository or writes any file. This applies to
 `apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
-`apm update`.
+`apm update`. Locked entries replay without the catalog; run `apm update` to
+re-check entries an older APM locked.
 
 Once the lockfile records an entry, `apm install` and `apm install --frozen`
 replay its locked commit without reading the catalog or needing the

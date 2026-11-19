@@ -211,7 +211,9 @@ with a bare cross-repository `repo:` would fall back to public `github.com`, so
 APM refuses that entry as a dependency-confusion risk (#1326) before contacting
 the package repository or writing any file, whether it comes from the command
 line, `apm.yml`, a transitive dependency, or `apm update`. Ask the publisher to
-host-qualify the `repo:` field.
+host-qualify the `repo:` field. `apm install` replays entries already in
+`apm.lock.yaml` without re-reading the catalog, so run `apm update` to re-check
+entries an older APM locked.
 Invalid URLs, unsafe subdirectory paths, and malformed `sha` values fail
 before manifest, lockfile, or deployment writes.
 
