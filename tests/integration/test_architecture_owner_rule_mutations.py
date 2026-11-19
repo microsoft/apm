@@ -1048,6 +1048,37 @@ def test_failed_direct_dependency_stops_before_integration() -> None:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/security/trust_fingerprint.py",
+            "return compute_native_plugin_pin(plugin_root)",
+            "return compute_native_plugin_hash(plugin_root)",
+        ),
+        (
+            "src/apm_cli/security/trust.py",
+            "def admit_native_plugin(",
+            "def _second_pin(root):\n"
+            "    return compute_native_plugin_pin(root)\n\n\n"
+            "def admit_native_plugin(",
+        ),
+    ],
+)
+def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) -> None:
+    """Approval pins leave the exec bit out and come from one owner."""
+    rule_id = "install-deployment-trust-fingerprint"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

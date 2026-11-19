@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -422,11 +423,10 @@ def test_native_plugin_seam_admits_one_whole_root_pin(tmp_path: Path) -> None:
         lambda root: (root / "hooks" / "hooks-cursor.json").write_text('{"x": 1}'),
         lambda root: (root / "skills" / "brainstorm" / "SKILL.md").write_text("# changed\n"),
         lambda root: (root / "hooks" / "new.sh").write_text("echo\n"),
-        lambda root: (root / "hooks" / "session-start").chmod(0o755),
     ],
-    ids=["sibling-script", "cursor-variant", "skill", "added-file", "mode-change"],
+    ids=["sibling-script", "cursor-variant", "skill", "added-file"],
 )
-def test_native_plugin_seam_parks_on_any_byte_or_mode_change(tmp_path: Path, change) -> None:
+def test_native_plugin_seam_parks_on_any_byte_change(tmp_path: Path, change) -> None:
     from apm_cli.security.trust import admit_native_plugin
     from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
 
@@ -436,6 +436,53 @@ def test_native_plugin_seam_parks_on_any_byte_or_mode_change(tmp_path: Path, cha
     change(plugin)
     verdict = admit_native_plugin(effective, (PKG,), plugin)
     assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
+
+
+def test_native_plugin_seam_keeps_admitting_after_a_mode_only_change(tmp_path: Path) -> None:
+    """An approval committed on one OS holds on another: the pin leaves modes out."""
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    (plugin / "hooks" / "session-start").chmod(0o644)
+    effective = materialize_exec_map(_ctx(_plugin_grant(native_plugin_fingerprint(plugin))))
+    (plugin / "hooks" / "session-start").chmod(0o755)
+    assert admit_native_plugin(effective, (PKG,), plugin).allowed
+
+
+def test_native_plugin_pin_ignores_exec_bits_but_integrity_checks_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows reads exec bits from file extensions, so pins must not depend on them."""
+    from types import SimpleNamespace
+
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    pin, integrity = native_plugin_fingerprint(plugin), compute_native_plugin_hash(plugin)
+    real_stat = Path.stat
+
+    def _flipped_exec(self: Path, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        return SimpleNamespace(st_mode=result.st_mode ^ 0o100, st_size=result.st_size)
+
+    monkeypatch.setattr(Path, "stat", _flipped_exec)
+    assert native_plugin_fingerprint(plugin) == pin
+    assert compute_native_plugin_hash(plugin) != integrity
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX exec bits")
+def test_native_plugin_integrity_hash_catches_mode_drift(tmp_path: Path) -> None:
+    """The per-machine integrity hash still sees an exec-bit-only difference."""
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    source = _superpowers_plugin(tmp_path / "source")
+    deployed = tmp_path / "deployed"
+    shutil.copytree(source, deployed)
+    (source / "hooks" / "session-start").chmod(0o644)
+    (deployed / "hooks" / "session-start").chmod(0o755)
+    assert compute_native_plugin_hash(source) != compute_native_plugin_hash(deployed)
 
 
 def test_native_plugin_seam_without_executables_needs_no_pin(tmp_path: Path) -> None:
@@ -618,7 +665,8 @@ def test_native_plugin_pin_ignores_apm_normalization_output(tmp_path: Path) -> N
 
     effective = materialize_exec_map(_ctx(_plugin_grant(pin)))
     assert admit_native_plugin(effective, (PKG,), normalized).allowed
-    (normalized / "hooks" / "run-hook.cmd").chmod(0o755)
+    for hooks in (normalized / "hooks", normalized / ".apm" / "hooks"):
+        (hooks / "run-hook.cmd").write_text("curl evil\n", encoding="utf-8")
     verdict = admit_native_plugin(effective, (PKG,), normalized)
     assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
 
