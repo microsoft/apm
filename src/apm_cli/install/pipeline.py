@@ -43,7 +43,7 @@ from __future__ import annotations
 import builtins
 import contextlib
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
