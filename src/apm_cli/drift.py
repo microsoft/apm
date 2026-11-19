@@ -362,13 +362,18 @@ def _locked_commit(locked_dep: Any) -> str | None:
     return None
 
 
-def locked_copy_proof(locked_dep: Any, package_path: Path) -> str | None:
+def locked_copy_proof(
+    locked_dep: Any, package_path: Path, *, for_deployment: bool = False
+) -> str | None:
     """Return how the copy at *package_path* proves it holds *locked_dep*, else None.
 
     This is the single owner of "is this apm_modules copy the locked
-    content". Cheapest evidence first: a ``.git`` HEAD or the ``.apm-pin``
-    marker naming the locked ``resolved_commit``, then the recorded
-    ``content_hash`` (rows without a commit, or copies without a marker).
+    content". Strongest evidence first: a readable ``.git`` HEAD decides on
+    its own; otherwise the ``.apm-pin`` marker naming the locked
+    ``resolved_commit``, then the recorded ``content_hash`` (rows without a
+    commit, or copies without a marker). The marker only catches honest
+    staleness, so *for_deployment* accepts it only for rows whose
+    ``content_hash`` is verified before the bytes are reused.
     """
     if locked_dep is None or not package_path.is_dir():
         return None
@@ -378,17 +383,19 @@ def locked_copy_proof(locked_dep: Any, package_path: Path) -> str | None:
             try:
                 from git import Repo as GitRepo
 
-                if GitRepo(package_path).head.commit.hexsha == commit:
-                    return LOCKED_COPY_GIT_HEAD
-            except Exception:  # fall back to the marker and content hash
-                pass
-        from apm_cli.install.cache_pin import CachePinError, verify_marker
+                head = GitRepo(package_path).head.commit.hexsha
+            except Exception:  # unreadable checkout: fall back to marker and hash
+                head = None
+            if head is not None:
+                return LOCKED_COPY_GIT_HEAD if head == commit else None
+        if not for_deployment or getattr(locked_dep, "content_hash", None):
+            from apm_cli.install.cache_pin import CachePinError, verify_marker
 
-        try:
-            verify_marker(package_path, commit)
-            return LOCKED_COPY_PIN
-        except CachePinError:
-            pass
+            try:
+                verify_marker(package_path, commit)
+                return LOCKED_COPY_PIN
+            except CachePinError:
+                pass
     from apm_cli.install.phases._redownload import _should_skip_redownload
 
     if _should_skip_redownload(locked_dep, package_path):
@@ -397,16 +404,24 @@ def locked_copy_proof(locked_dep: Any, package_path: Path) -> str | None:
 
 
 def locked_copy_is_stale(locked_dep: Any, package_path: Path) -> bool:
-    """Return whether an existing copy contradicts the commit or hash *locked_dep* records.
+    """Return whether an existing copy contradicts what *locked_dep* records.
 
-    A row with neither a commit nor a content hash carries no evidence to
-    contradict, so its copy is kept.
+    Only evidence can contradict a copy: a recorded content hash, an
+    ``.apm-pin`` marker or a ``.git`` checkout that does not prove the locked
+    content. A legacy copy with none of these (and a row without a content
+    hash) is kept, as before #3884; installs mark it from then on.
     """
     if locked_dep is None or not package_path.is_dir():
         return False
-    if _locked_commit(locked_dep) is None and not getattr(locked_dep, "content_hash", None):
+    if locked_copy_proof(locked_dep, package_path) is not None:
         return False
-    return locked_copy_proof(locked_dep, package_path) is None
+    from apm_cli.install.cache_pin import MARKER_FILENAME
+
+    return bool(
+        getattr(locked_dep, "content_hash", None)
+        or (_locked_commit(locked_dep) is not None and (package_path / MARKER_FILENAME).exists())
+        or (_locked_commit(locked_dep) is not None and (package_path / ".git").exists())
+    )
 
 
 def _refetches_mutable_ref_during_resolution(dep_ref: DependencyReference) -> bool:

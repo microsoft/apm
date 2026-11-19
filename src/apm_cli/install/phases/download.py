@@ -102,7 +102,7 @@ def run(ctx: InstallContext) -> None:
             and not _pd_ref_changed
         )
         if _pd_path.exists() and _pd_reuse_allowed:
-            _pd_proof = locked_copy_proof(_pd_locked_chk, _pd_path)
+            _pd_proof = locked_copy_proof(_pd_locked_chk, _pd_path, for_deployment=True)
             if _pd_proof == LOCKED_COPY_CONTENT_HASH:
                 ctx.content_hash_verified_deps.add(_pd_key)
             if _pd_proof is not None:

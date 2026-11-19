@@ -168,7 +168,7 @@ def _resolve_download_strategy(
             proof = (
                 LOCKED_COPY_CONTENT_HASH
                 if content_hash_already_verified
-                else locked_copy_proof(locked_dep, install_path)
+                else locked_copy_proof(locked_dep, install_path, for_deployment=True)
             )
             if proof is not None:
                 lockfile_match = True

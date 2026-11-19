@@ -288,3 +288,37 @@ def test_find_unpinned_remote_deps_skips_registry() -> None:
         )
     )
     assert find_unpinned_remote_deps(lockfile) == []
+
+
+@pytest.mark.parametrize("prior_marker", [None, "0" * 40])
+def test_sync_markers_never_stamps_a_copy_left_by_an_older_lock(
+    tmp_path: Path, prior_marker: str | None
+) -> None:
+    """#3884: the resolver trusts the marker, so a stale copy stays unmarked."""
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    apm_modules = tmp_path / "apm_modules"
+    pkg_dir = apm_modules / "owner" / "repo"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "apm.yml").write_text("name: repo\nversion: 2.0.0\n", encoding="utf-8")
+    locked_hash = compute_package_hash(pkg_dir)
+    (pkg_dir / "apm.yml").write_text("name: repo\nversion: 1.0.0\n", encoding="utf-8")
+    if prior_marker is not None:
+        write_marker(pkg_dir, prior_marker)
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="owner/repo",
+            host="github.com",
+            resolved_commit="cafebabe" * 5,
+            content_hash=locked_hash,
+        )
+    )
+
+    assert sync_markers_for_lockfile(lockfile, tmp_path, apm_modules) == 0
+    with pytest.raises(CachePinError):
+        verify_marker(pkg_dir, "cafebabe" * 5)
+
+    (pkg_dir / "apm.yml").write_text("name: repo\nversion: 2.0.0\n", encoding="utf-8")
+    assert sync_markers_for_lockfile(lockfile, tmp_path, apm_modules) == 1
+    verify_marker(pkg_dir, "cafebabe" * 5)
