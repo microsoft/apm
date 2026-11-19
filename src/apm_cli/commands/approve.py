@@ -572,6 +572,7 @@ def _echo_pins(decl: ExecutableDeclaration, pins: list, states: dict | None = No
     plugin = [pin for pin in pins if pin.exec_type == "plugin"]
     # A native plugin is reviewed as one unit; its split-install item pins
     # are recorded alongside but not listed.
+    pins_all = pins
     pins = plugin or pins
     width = max((len(pin.item) for pin in pins), default=0)
     for pin in pins:
@@ -579,6 +580,13 @@ def _echo_pins(decl: ExecutableDeclaration, pins: list, states: dict | None = No
         state = f"  [{states[(pin.exec_type, pin.item)]}]" if states else ""
         _rich_echo(f"      {pin.exec_type:<6} {pin.item:<{width}}  {pin.summary}  {digest}{state}")
     if plugin:
+        hooks = sum(1 for pin in pins_all if pin.exec_type == "hooks")
+        servers = sum(1 for pin in pins_all if pin.exec_type == "mcp")
+        if hooks or servers:
+            _rich_echo(
+                f"      (also pins {hooks} hook file(s) and {servers} MCP server(s) "
+                "for a split install of this package)"
+            )
         return
     for exec_type, count, noun in (
         ("bin", decl.bin_count, "executable(s)"),
@@ -605,6 +613,16 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> str | None:
         )
         return None
     pins = _pins_for(decl)
+    if decl.native_plugin and decl.install_path:
+        from ..security.trust import apm_owned_reference
+
+        reference = apm_owned_reference(Path(decl.install_path))
+        if reference is not None:
+            _rich_error(
+                f"{identity}: {reference}; APM cannot pin files under .apm/ or apm.yml, "
+                "so this plugin cannot be approved. Ask the publisher to move them."
+            )
+            return None
     via = f" (via {decl.parent_name})" if decl.parent_name else ""
     _rich_info(f"{identity}{via} declares:", symbol="info")
     _echo_pins(decl, pins)
@@ -754,6 +772,7 @@ def _item_states(ctx, decl: ExecutableDeclaration, pins: list) -> dict[tuple[str
             state = {
                 "definition-changed": "changed since approval",
                 "denied": "denied",
+                "apm-owned-reference": f"cannot be approved: {verdict.detail}",
             }.get(str(verdict.reason), "not approved")
         return {(pin.exec_type, pin.item): state for pin in pins}
     for pin in pins:

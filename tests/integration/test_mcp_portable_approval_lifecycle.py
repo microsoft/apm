@@ -211,6 +211,44 @@ def test_lockfile_depth_edit_cannot_make_a_transitive_server_direct(
     assert SERVER not in chain.servers("claude")
 
 
+def test_pinned_server_rewritten_as_a_registry_reference_is_parked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A dependency cannot escape its pin by turning into a form needing no approval."""
+    chain = Chain(tmp_path / "world", apm_binary_path, dirs=(".claude",))
+    _leaf(chain)
+    chain.write_manifest([], apm=["./pkgs/leaf"], targets=["claude"])
+    chain.ok("install")
+    _approve(chain, "./pkgs/leaf")
+    chain.ok("install")
+    assert SERVER in chain.servers("claude")
+
+    _write(
+        chain.project / "pkgs" / "leaf" / "apm.yml",
+        {
+            "name": "leaf",
+            "version": "1.0.0",
+            "dependencies": {"mcp": [{"name": SERVER, "registry": "http://127.0.0.1:9"}]},
+        },
+    )
+    chain.env["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+    output = _text(chain.ok("install"))
+    assert SERVER not in chain.servers("claude")
+    assert chain.lock()["mcp_omissions"][SERVER]["reason"] == "definition-changed"
+    assert "definition changed since approval" in output
+
+
+def test_pending_reports_a_legacy_mcp_grant_that_install_parks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """D2 at the CLI: --pending agrees with install about a transitive mcp: true."""
+    chain = _transitive(tmp_path, apm_binary_path, executables={"allow": {LEAF: {"mcp": True}}})
+    chain.ok("install")
+    assert SERVER not in chain.servers("claude")
+    pending = _text(chain.ok("approve", "--pending"))
+    assert LEAF in pending and "unapproved or changed" in pending
+
+
 def test_org_policy_beats_an_approval(tmp_path: Path, apm_binary_path: Path) -> None:
     """(f) An org executables deny parks an approved server; the reason says so."""
     chain = Chain(tmp_path / "world", apm_binary_path, dirs=(".claude",))
@@ -431,6 +469,32 @@ def test_native_plugin_is_approved_by_one_pin_over_its_whole_root(
     _approve(chain, "./pkgs/np")
     chain.ok("install", "--no-policy")
     assert _registered(chain)
+
+    # The real per-file hook pins approve recorded never register it alone.
+    manifest_path = chain.project / "apm.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["executables"]["allow"]["./pkgs/np"].pop("plugin")
+    manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    chain.ok("install", "--no-policy")
+    assert not _registered(chain)
+
+
+def test_native_plugin_reaching_apm_owned_paths_cannot_be_approved(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A plugin running .apm/ content APM cannot pin is refused, never looped."""
+    chain = _native_chain(tmp_path, apm_binary_path, {})
+    (chain.project / "pkgs" / "np" / "hooks" / "run-hook.cmd").write_text(
+        'exec "${CLAUDE_PLUGIN_ROOT}/.apm/run.sh"\n', encoding="utf-8"
+    )
+    chain.ok("install", "--no-policy")
+    assert "cannot be approved" in _text(chain.ok("approve", "--pending"))
+    before = (chain.project / "apm.yml").read_text(encoding="utf-8")
+    result = chain.run("approve", "./pkgs/np")
+    assert result.returncode == 1, _text(result)
+    assert "APM cannot pin files under .apm/ or apm.yml" in _text(result)
+    assert (chain.project / "apm.yml").read_text(encoding="utf-8") == before
+    assert not _registered(chain)
 
 
 def test_native_plugin_per_file_hook_pins_never_register_it(

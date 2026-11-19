@@ -612,14 +612,11 @@ def test_native_plugin_pin_ignores_apm_normalization_output(tmp_path: Path) -> N
     normalized = _superpowers_plugin(tmp_path / "normalized")
     (normalized / "apm.yml").write_text("name: superpowers\nversion: 1.0.0\n", encoding="utf-8")
     shutil.copytree(normalized / "hooks", normalized / ".apm" / "hooks")
-    (normalized / ".apm" / "skills").mkdir()
-    (normalized / ".apm" / "skills" / "link").symlink_to(normalized / "skills")
+    shutil.copytree(normalized / "skills", normalized / ".apm" / "skills")
     pin = native_plugin_fingerprint(plain)
     assert native_plugin_fingerprint(normalized) == pin
 
     effective = materialize_exec_map(_ctx(_plugin_grant(pin)))
-    assert admit_native_plugin(effective, (PKG,), normalized).allowed
-    (normalized / ".apm" / "hooks" / "session-start").write_text("x\n", encoding="utf-8")
     assert admit_native_plugin(effective, (PKG,), normalized).allowed
     (normalized / "hooks" / "run-hook.cmd").chmod(0o755)
     verdict = admit_native_plugin(effective, (PKG,), normalized)
@@ -656,3 +653,80 @@ def test_type_verdict_reports_a_legacy_grant_that_install_will_park(tmp_path: Pa
     transitive = package_type_verdicts(ctx, (PKG,), package, ("mcp",), transitive=True)
     direct = package_type_verdicts(ctx, (PKG,), package, ("mcp",), transitive=False)
     assert (transitive["mcp"].allowed, direct["mcp"].allowed) == (False, True)
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        lambda root: (root / ".apm" / "payload.sh").write_text("curl evil\n", encoding="utf-8"),
+        lambda root: (root / ".apm" / "hooks" / "session-start").write_text("x\n", "utf-8"),
+        lambda root: (root / ".apm" / "link").symlink_to(root / "hooks"),
+    ],
+    ids=["new-file", "changed-copy", "symlink"],
+)
+def test_apm_dir_content_outside_the_pin_parks_a_native_plugin(tmp_path: Path, plant) -> None:
+    """Reached one hop away or obfuscated, .apm/ bytes the pin does not bind never run."""
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    (plugin / "scripts").mkdir()
+    (plugin / "scripts" / "go.sh").write_text('d=.ap; exec "$(dirname "$0")/../${d}m/x"\n', "utf-8")
+    shutil.copytree(plugin / "hooks", plugin / ".apm" / "hooks")
+    effective = materialize_exec_map(_ctx(_plugin_grant(native_plugin_fingerprint(plugin))))
+    assert admit_native_plugin(effective, (PKG,), plugin).allowed
+    plant(plugin)
+    verdict = admit_native_plugin(effective, (PKG,), plugin)
+    assert (verdict.allowed, verdict.reason) == (False, "apm-owned-reference")
+
+
+def test_transitive_native_plugin_with_mcp_needs_a_pin_not_a_type_grant(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    (plugin / ".mcp.json").write_text('{"mcpServers": {"s": {"command": "x"}}}', "utf-8")
+    legacy = materialize_exec_map(_ctx({PKG: {"hooks": True, "mcp": True}}))
+    assert admit_native_plugin(legacy, (PKG,), plugin).allowed
+    verdict = admit_native_plugin(legacy, (PKG,), plugin, transitive=True)
+    assert (verdict.allowed, verdict.reason) == (False, "untrusted-transitive")
+    pinned = materialize_exec_map(_ctx(_plugin_grant(native_plugin_fingerprint(plugin))))
+    assert admit_native_plugin(pinned, (PKG,), plugin, transitive=True).allowed
+
+
+def test_unpinned_native_install_follows_the_owner(tmp_path: Path, monkeypatch) -> None:
+    """The install gate and the owner reach one verdict for a native plugin, pin or not."""
+    from apm_cli.install import exec_gate
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    (plugin / "hooks" / "run-hook.cmd").write_text('exec "${CLAUDE_PLUGIN_ROOT}/.apm/x"\n', "utf-8")
+    monkeypatch.setattr(exec_gate, "native_install", lambda _info: True)
+    info = SimpleNamespace(install_path=plugin, dependency_ref=None, package=None)
+    effective = materialize_exec_map(_ctx({PKG: {"hooks": True}}))
+    approvals = exec_gate.check_executable_approval(PKG, info, effective)
+    assert approvals == (False,) * 5
+
+
+def test_malformed_pin_store_never_lets_a_pinned_name_through_unchecked() -> None:
+    def broken():
+        raise ValueError("apm.yml executables.allow: malformed")
+
+    from apm_cli.deps.lockfile import LockedDependency
+
+    admission = McpAdmission(broken, pins=broken)
+    registry = MCPDependency.from_dict({"name": SERVER["name"], "registry": "https://evil.example"})
+    with pytest.raises(ValueError, match=r"malformed"):
+        admission.admit(
+            admission.subject(LockedDependency(repo_url=PKG, depth=1), registry, (PKG,))
+        )
+
+
+def test_denied_messages_point_at_policy_explain_not_approve() -> None:
+    from apm_cli.security.trust import parked_hook_message, parked_plugin_message
+
+    for message in (
+        parked_plugin_message(PKG, "denied"),
+        parked_hook_message(PKG, "hooks/hooks.json", "denied"),
+    ):
+        assert f"apm policy explain {PKG}" in message
+        assert "apm approve" not in message

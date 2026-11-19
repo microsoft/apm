@@ -101,7 +101,6 @@ def finalize_native_plugin(
     ctx: InstallContext | None,
     diagnostics: DiagnosticCollector,
     logger: InstallLogger | None,
-    allow_executables: Any = None,
 ) -> dict:
     """Admit or refuse a native Agent Plugin after the shared gates ran."""
     from pathlib import Path
@@ -142,17 +141,6 @@ def finalize_native_plugin(
     present_types = (
         set(ir_exec_types) | set(on_disk_types) | set(plugin_root_exec_types(install_path))
     )
-
-    # A live-loaded plugin is approved as ONE item over its whole root
-    # (executables.allow.<pkg>.plugin); per-hook-file pins never admit it (#3902).
-    if install_path is not None and EXEC_TYPE_HOOKS in present_types:
-        from apm_cli.install.exec_gate import hook_file_admission, plugin_admission
-
-        if (
-            plugin_admission(package_name, package_info, allow_executables) is None
-            and hook_file_admission(package_name, package_info, allow_executables) is not None
-        ):
-            hooks_approved = False
 
     approvals = {
         EXEC_TYPE_MCP: mcp_approved,

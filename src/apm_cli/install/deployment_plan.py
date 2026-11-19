@@ -37,12 +37,17 @@ class PackageDeploymentPlan:
         return [] if self.codex_native is not None else list(self.target_selection.targets)
 
 
-def _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger):
-    """Name a whole-plugin pin that no longer matches, with the re-approve hint."""
+def _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx):
+    """Name why the trust owner parked a native plugin, with the next step.
+
+    A plugin that is merely not approved yet is reported by the registrar's
+    own refusal, so only changed, denied, transitive and APM-owned-path
+    parking is named here.
+    """
     from .exec_gate import plugin_admission, resolve_package_key
 
-    verdict = plugin_admission(package_name, package_info, allow_executables)
-    if verdict is None or verdict.allowed:
+    verdict = plugin_admission(package_name, package_info, allow_executables, ctx=ctx)
+    if verdict is None or verdict.allowed or verdict.reason == "unapproved-executables":
         return verdict
     from apm_cli.security.executables import _strip_version
     from apm_cli.security.trust import parked_plugin_message
@@ -92,9 +97,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     from .exec_gate import hook_file_admission
 
     hook_filter = hook_file_admission(package_name, package_info, allow_executables)
-    plugin_verdict = _warn_parked_plugin(
-        package_name, package_info, allow_executables, diagnostics, logger
-    )
+    _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
@@ -109,7 +112,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         approvals={
             # A native plugin loads every hook file live: per-file pins never
             # admit it; a whole-plugin pin (or a type-level grant) does.
-            "hooks": hooks if plugin_verdict is not None else hooks and hook_filter is None,
+            "hooks": hooks,
             "mcp": mcp,
             "bin": bin_approved and not skip_bin,
             "canvas": canvas,

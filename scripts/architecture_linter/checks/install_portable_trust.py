@@ -56,22 +56,20 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
     "src/apm_cli/install/exec_gate.py": (
         "hooks_package_admissible(allow_executables, tuple(candidate_keys))",
         "return hook_file_filter(allow_executables, keys, Path(package_info.install_path))",
-        "verdict = admit_native_plugin(allow_executables, candidate_keys, install)",
-        "if native_install(package_info) and plugin_pin(",
+        "verdict = admit_native_plugin(",
+        "if native_install(package_info):",
+        "return _native_approval(",
     ),
     "src/apm_cli/install/deployment_plan.py": (
         "hook_file_admitted=hook_filter,",
-        '"hooks": hooks if plugin_verdict is not None else hooks and hook_filter is None,',
+        "_warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)",
     ),
     "src/apm_cli/integration/hook_reintegration.py": ("hook_file_admitted=hook_file_admission(",),
     "src/apm_cli/commands/approve.py": (
         "narrowed = record_pins(allow, identity",
         "return package_type_verdicts(",
     ),
-    "src/apm_cli/install/native_plugin_admission.py": (
-        "plugin_admission(package_name, package_info, allow_executables) is None",
-        "native=True,",
-    ),
+    "src/apm_cli/install/native_plugin_admission.py": ("native=True,",),
 }
 # Type-level resolvers cannot see pins; outside security/ every per-type
 # verdict comes from trust.package_type_verdicts.

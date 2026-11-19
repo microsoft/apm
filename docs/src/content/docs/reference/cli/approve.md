@@ -121,6 +121,11 @@ file and executable bit in the plugin root (as installed in `apm_modules/`).
 Any byte or mode change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
+A plugin that runs files under its root `.apm/` or `apm.yml` that are not
+copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
+with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.
+A denied plugin points at `apm policy explain <pkg>`; `apm approve` cannot
+lift a deny.
 
 ### The gate opt-in
 
@@ -217,7 +222,8 @@ identity `apm approve --pending` prints (`owner/repo`, `./pkgs/x`,
 `local:pkgs/leaf`). `hooks` and `mcp` map each item (package-relative hook
 file path, or server name) to its full `sha256:<64 hex>` fingerprint; other
 types are `true`. A native plugin gets one `plugin:` fingerprint over its
-whole root instead:
+whole root; approve also records its hook and MCP item pins, so a split
+install of the same package (a target that copies files) stays approved:
 
 ```yaml
 # apm.yml  (committed)
@@ -232,6 +238,8 @@ executables:
       bin: true
     acme/superpowers:
       plugin: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+      hooks:
+        hooks/hooks.json: sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
   deny:
     "evil/pkg":
       hooks: true

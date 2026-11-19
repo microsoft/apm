@@ -339,8 +339,9 @@ class McpAdmission:
             try:
                 self._pins_ctx = self._pins()
             except ValueError:
-                # A malformed grant is reported by the full context; fail closed.
-                return True
+                # A malformed grant: use the full context, which reports it.
+                self._pins = None
+                return pinned_layer(self.context, subject) is not None
         return pinned_layer(self._pins_ctx, subject) is not None
 
     def subject(self, locked_dependency: Any, declaration: Any, package_keys: tuple[str, ...]):
@@ -444,18 +445,17 @@ def hook_file_filter(
 
 def parked_hook_message(package: str, item: str, reason: str) -> str:
     """Return the warning for one pinned hook file the trust owner parked."""
-    if reason == "stray":
+    if reason == REASON_DENIED:
+        # apm approve cannot clear a deny; point at the deciding layer instead.
         return (
-            f"Parked hooks of {package}: '{item}' is not a hook file or a script one "
-            "references, and the plugin loads it live\n"
-            f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+            f"Parked hook file '{item}' ({package}): denied\n"
+            f"    Explain: apm policy explain {package}"
         )
-    if reason == REASON_DEFINITION_CHANGED:
-        why = "definition changed since approval"
-    elif reason == REASON_DENIED:
-        why = "denied by policy"
-    else:
-        why = "not approved"
+    why = (
+        "definition changed since approval"
+        if reason == REASON_DEFINITION_CHANGED
+        else ("not approved")
+    )
     return (
         f"Parked hook file '{item}' ({package}): {why}\n"
         f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
@@ -506,14 +506,21 @@ def native_root_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def native_plugin_exec_types(plugin_root: Path) -> tuple[str, ...]:
-    """Executable types a natively loaded plugin declares (the native gate's union)."""
+def native_plugin_exec_types(
+    plugin_root: Path, extra: tuple[str, ...] | list[str] = ()
+) -> tuple[str, ...]:
+    """Executable types a natively loaded plugin declares (the native gate's union).
+
+    *extra* adds types a caller derives from the plugin IR or manifest, so
+    every native path gates on one set.
+    """
     import json
 
     from .executables import scan_package_executables
 
     root = Path(plugin_root)
     found: dict[str, None] = dict.fromkeys(scan_package_executables(root, "", "").exec_types)
+    found.update(dict.fromkeys(extra))
     found.update(dict.fromkeys(native_root_exec_types(root)))
     markers = {
         "hooks": EXEC_TYPE_HOOKS,
@@ -575,6 +582,13 @@ def apm_owned_reference(plugin_root: Path) -> str | None:
     return None
 
 
+def unpinned_apm_copy(plugin_root: Path) -> str | None:
+    """Name a root ``.apm/`` file the plugin pin does not bind (fail closed)."""
+    from apm_cli.utils.content_hash import unpinned_apm_copy as find
+
+    return find(Path(plugin_root))
+
+
 def plugin_pin(
     ctx: ExecTrustContext | None, package_keys: tuple[str, ...]
 ) -> tuple[str, str] | None:
@@ -592,6 +606,9 @@ def admit_native_plugin(
     allow_executables: Any,
     package_keys: tuple[str, ...],
     plugin_root: Path,
+    *,
+    transitive: bool = False,
+    extra_types: tuple[str, ...] | list[str] = (),
 ) -> Admission:
     """Decide whether a natively loaded plugin may run, as one unit.
 
@@ -613,7 +630,7 @@ def admit_native_plugin(
     ctx = _trust_context(allow_executables)
     if ctx is None or not ctx.gate_enabled:
         return Admission(True, None, LAYER_GATE_DISABLED)
-    exec_types = native_plugin_exec_types(plugin_root)
+    exec_types = native_plugin_exec_types(plugin_root, extra_types)
     pinned = plugin_pin(ctx, package_keys)
     if not exec_types and pinned is None:
         return Admission(True, None, LAYER_NOT_GATED)
@@ -623,7 +640,7 @@ def admit_native_plugin(
             decision = resolve_exec_decision(ctx, key, exec_type)
             if decision.trust_state == TRUST_DENIED:
                 return Admission(False, REASON_DENIED, decision.deciding_layer)
-    reference = apm_owned_reference(Path(plugin_root))
+    reference = apm_owned_reference(Path(plugin_root)) or unpinned_apm_copy(Path(plugin_root))
     if reference is not None:
         return Admission(False, REASON_APM_REFERENCE, LAYER_DEFAULT_DENY, detail=reference)
     if pinned is not None:
@@ -635,6 +652,9 @@ def admit_native_plugin(
         if current is not None and current == pin:
             return Admission(True, None, layer)
         return Admission(False, REASON_DEFINITION_CHANGED, layer)
+    if transitive and EXEC_TYPE_MCP in exec_types:
+        # D2: a type-level grant never satisfies transitive MCP trust.
+        return Admission(False, REASON_UNTRUSTED_TRANSITIVE, LAYER_DEFAULT_DENY)
     decisions = [_type_decision(ctx, package_keys, exec_type) for exec_type in exec_types]
     if decisions and all(decision.allowed for decision in decisions):
         return Admission(True, None, decisions[0].deciding_layer)
@@ -646,13 +666,20 @@ def parked_plugin_message(package: str, reason: str, detail: str | None = None) 
     if reason == REASON_APM_REFERENCE:
         return (
             f"Parked native plugin {package}: {detail or 'an executable references .apm/'}; "
-            "APM-owned paths are outside the plugin pin and cannot be approved\n"
-            "    Ask the publisher to keep executables outside .apm/ and apm.yml"
+            "APM cannot pin files under .apm/ or apm.yml, so this plugin cannot be approved\n"
+            "    Ask the publisher to move them out of .apm/ and apm.yml"
         )
-    why = {
-        REASON_DEFINITION_CHANGED: "content changed since approval",
-        REASON_DENIED: "denied by policy",
-    }.get(reason, "not approved")
+    if reason == REASON_DENIED:
+        return f"Parked native plugin {package}: denied\n    Explain: apm policy explain {package}"
+    if reason == REASON_UNTRUSTED_TRANSITIVE:
+        return (
+            f"Parked native plugin {package}: a transitive plugin with MCP servers needs "
+            "a pinned approval; 'mcp: true' is not enough\n"
+            f"    Review: apm approve --pending  |  Pin: apm approve {package}"
+        )
+    why = (
+        "content changed since approval" if reason == REASON_DEFINITION_CHANGED else "not approved"
+    )
     return (
         f"Parked native plugin {package}: {why}\n"
         f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
@@ -837,15 +864,24 @@ def package_type_verdicts(
     """
     from .executables import LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW
 
-    if native and install_path is not None and plugin_pin(ctx, package_keys) is not None:
-        verdict = admit_native_plugin(ctx, package_keys, install_path)
+    if native and install_path is not None:
+        verdict = admit_native_plugin(ctx, package_keys, install_path, transitive=transitive)
+        pinned_plugin = plugin_pin(ctx, package_keys) is not None
         state = (
             TRUST_DEPLOYED
             if verdict.allowed
             else (TRUST_DENIED if verdict.reason == REASON_DENIED else TRUST_GATED)
         )
         return {
-            exec_type: TypeVerdict(verdict.allowed, state, verdict.layer, pinned=True)
+            exec_type: TypeVerdict(
+                verdict.allowed,
+                state,
+                verdict.layer,
+                pinned=pinned_plugin,
+                content_blind=verdict.allowed
+                and not pinned_plugin
+                and verdict.layer in (LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW),
+            )
             for exec_type in exec_types
         }
     pinned = (

@@ -128,6 +128,32 @@ def compute_native_plugin_hash(plugin_root: Path) -> str:
     return _hash_native_files(plugin_root, native_plugin_files(plugin_root))
 
 
+def unpinned_apm_copy(plugin_root: Path) -> str | None:
+    """Name a root ``.apm/`` file that is not a byte copy of a native plugin file.
+
+    APM's normalization only copies plugin files into ``.apm/``, so every
+    file there must equal some file :func:`native_plugin_files` covers;
+    anything else is content the plugin pin would not bind.
+    """
+    apm_dir = plugin_root / ".apm"
+    if not apm_dir.exists():
+        return None
+    try:
+        pinned = {
+            hashlib.sha256((plugin_root / relative).read_bytes()).digest()
+            for relative in native_plugin_files(plugin_root)
+        }
+        for path in sorted(apm_dir.rglob("*")):
+            label = path.relative_to(plugin_root).as_posix()
+            if path.is_symlink():
+                return f"'{label}' is a symlink"
+            if path.is_file() and hashlib.sha256(path.read_bytes()).digest() not in pinned:
+                return f"'{label}' is not a copy of a pinned plugin file"
+    except (OSError, ValueError):
+        return "'.apm/' cannot be read"
+    return None
+
+
 def _hash_native_files(root: Path, files: list[Path]) -> str:
     hasher = hashlib.sha256()
     for relative in files:
