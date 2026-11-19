@@ -41,9 +41,10 @@ def build_expected_install_paths(
         return dependency.get_install_path(apm_modules_dir)
 
     expected = set()
+    marketplace_index = lockfile.marketplace_index() if lockfile else None
     for dep in declared_deps:
         if dep.is_marketplace and lockfile:
-            dep = locked_marketplace_form(dep, lockfile)
+            dep = locked_marketplace_form(dep, lockfile, marketplace_index)
         if dep.is_marketplace:
             # An object-form declaration with no lock row was never materialized (#3960).
             continue
