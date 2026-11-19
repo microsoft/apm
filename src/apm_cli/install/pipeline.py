@@ -662,8 +662,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         #
         # Phase 2.1 (native Copilot plugin registration capability) shares
         # this guard: it publishes the capability so the Agent Plugin
-        # deployment boundary can admit a verified plugin (issue #2703). With
-        # lockfile_only no native plugin can be admitted, so skip the capability.
+        # deployment boundary admits a verified plugin (#2703); lockfile_only skips it.
         # --------------------------------------------------------------
         if not lockfile_only:
             from .phases import claude_plugins, codex_plugins, copilot_plugins

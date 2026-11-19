@@ -91,7 +91,7 @@ def _trust(allow: dict, deny: dict | None = None):
 def test_whole_plugin_pin_admits_and_any_change_parks(tmp_path: Path) -> None:
     """req-na-005: one pin over the plugin root; unapproved or changed is parked."""
     from apm_cli.security.trust import admit_native_plugin
-    from apm_cli.utils.content_hash import compute_native_plugin_hash
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
 
     info = _plugin(tmp_path)
     (info.install_path / "hooks").mkdir()
@@ -106,7 +106,7 @@ def test_whole_plugin_pin_admits_and_any_change_parks(tmp_path: Path) -> None:
     unapproved = plan_with({})
     assert unapproved.parked is not None and "not approved" in unapproved.parked
     assert "apm approve" in unapproved.parked
-    pin = compute_native_plugin_hash(info.install_path)
+    pin = native_plugin_fingerprint(info.install_path)
     assert plan_with({"owner/plugin": {"plugin": pin}}).parked is None
     (info.install_path / "hooks/hooks.json").write_text('{"hooks": {"changed": []}}')
     changed = plan_with({"owner/plugin": {"plugin": pin}})
@@ -156,11 +156,11 @@ def _admit(info: PackageInfo, allow: dict, deny: dict | None = None):
 
 
 def test_mcp_file_is_admitted_under_the_whole_plugin_pin(tmp_path: Path) -> None:
-    from apm_cli.utils.content_hash import compute_native_plugin_hash
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
 
     info = _with_mcp(tmp_path)
     assert "not approved" in _plan(info, admit=_admit(info, {})).parked
-    pin = {"owner/plugin": {"plugin": compute_native_plugin_hash(info.install_path)}}
+    pin = {"owner/plugin": {"plugin": native_plugin_fingerprint(info.install_path)}}
     assert _plan(info, admit=_admit(info, pin)).parked is None
 
 
@@ -174,11 +174,11 @@ def test_inline_mcp_servers_are_gated_as_mcp(tmp_path: Path) -> None:
 
 
 def test_lsp_file_is_admitted_and_an_lsp_deny_parks(tmp_path: Path) -> None:
-    from apm_cli.utils.content_hash import compute_native_plugin_hash
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
 
     info = _plugin(tmp_path)
     write_json(info.install_path / ".lsp.json", _LSP)
-    pin = {"owner/plugin": {"plugin": compute_native_plugin_hash(info.install_path)}}
+    pin = {"owner/plugin": {"plugin": native_plugin_fingerprint(info.install_path)}}
     assert _plan(info, admit=_admit(info, pin)).parked is None
     denied = _plan(info, admit=_admit(info, pin, deny={"owner/plugin": {"lsp": True}}))
     assert denied.parked is not None and "denied" in denied.parked

@@ -590,10 +590,8 @@ def _skip_unsupported_remote_transport(
         unsupported_remote_transport,
     )
     from apm_cli.factory import ClientFactory
-    from apm_cli.install.mcp.ownership import (
-        is_frozen_unrecorded_mcp_pair,
-        retire_runtime_claim,
-    )
+    from apm_cli.install.mcp.native_runtimes import retire_runtime_claim
+    from apm_cli.install.mcp.ownership import is_frozen_unrecorded_mcp_pair
 
     try:
         client = ClientFactory.create_client(

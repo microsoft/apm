@@ -476,38 +476,6 @@ def managed_unsupported_connection(
     return None
 
 
-def retire_runtime_claim(
-    client: Any,
-    runtime: str,
-    name: str,
-    requested_info: dict | None,
-    logger: Any,
-    *,
-    stored_config: dict | None,
-    managed_target_servers: dict[str, set[str]] | None,
-    native_hashes: dict[str, dict[str, str]] | None,
-) -> None:
-    """Drop APM's claim on *name* for *runtime*, removing only an entry APM wrote."""
-    from apm_cli.integration.mcp_integrator_install import _remove_native_entry
-
-    claims = (managed_target_servers or {}).get(runtime, set())
-    if name not in claims:
-        return
-    key = managed_unsupported_connection(
-        client,
-        name,
-        requested_info=requested_info,
-        stored_config=stored_config,
-        native_hash=(native_hashes or {}).get(runtime, {}).get(name),
-    )
-    if key is not None:
-        _remove_native_entry(client, key, logger)
-    # Reached only after a successful removal (cleanup failures raise).
-    claims.discard(name)
-    if native_hashes is not None:
-        native_hashes.get(runtime, {}).pop(name, None)
-
-
 def _shape_delta(current: dict, legacy: dict) -> set[str]:
     """Keys whose value differs between the current and a legacy render (the shape change)."""
     return {key for key in current.keys() | legacy.keys() if current.get(key) != legacy.get(key)}
