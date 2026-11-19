@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **139 normative statements (134 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **140 normative statements (135 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -358,7 +358,7 @@ copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-s
 
 The legacy alias `agents` MAY appear under `target:` in input manifests; when the manifest is rewritten it MUST be normalised to `copilot`, and it is not admitted under `targets:`. The legacy alias `vscode` is deprecated on adoption of proposed amendment 0.1.61: it MAY appear under `target:` and under `targets:` wherever a target identifier is accepted, including dependency-entry `targets` subsets and user-scope manifests; it denotes the `copilot` target with no MCP configuration destination of its own; and a conforming consumer MUST treat it exactly as `copilot`, including in target selection, in the [req-tg-008](#req-tg-008) effective target intersection, in the MCP configuration destination, and in recorded lockfile state. A consumer that writes a lock entry MUST record `copilot`, never `vscode`, in `target_subset` and `subset_pairings`; a consumer that reads a lock entry recording `vscode` MUST read it as `copilot`, dropping any resulting duplicate and restoring the canonical sort order, before the [req-rs-018](#req-rs-018) consistency and frozen-replay comparisons, so a recorded `vscode` alone is not a selection change. When normalising `agents` or `vscode`, an implementation that rewrites a manifest MUST replace the alias in place with `copilot` and drop any resulting duplicate, keeping the first occurrence. A consumer may emit a deprecation warning for `vscode` during the [Section 9.5](#95-migration-windows-for-consumers) window, typically for manifests the user authors, and may omit it for dependency manifests; the warning does not affect target selection. Singular `target:` is likewise deprecated in favor of `targets:` on adoption of proposed amendment 0.1.61. (Amendment 0.1.61, proposed; see [Appendix D](#appendix-d-revision-history).)
 
-> **Note (non-normative).** Per-target MCP configuration destinations are published in the OpenAPM Target Registry v0.1 companion. At this revision `copilot` (and therefore `vscode`) writes project MCP servers to the workspace-root `.mcp.json`, the same project file the `claude` target writes. Earlier companion revisions listed `.github/mcp.json` for `copilot` and `.vscode/mcp.json` for `vscode`. Because the file is shared, [req-mf-026](#req-mf-026) applies to every write to it whichever target selected the server, and entry ownership is per file: deactivating one target does not remove entries that another active target still selects. A consumer that wrote entries to a retired destination is expected to remove only the entries it can show it wrote, in the sense of req-mf-026, and to report the rest. A normative attribution rule for shared MCP documents is deferred to a later 0.1.x revision.
+> **Note (non-normative).** Per-target MCP configuration destinations are published in the OpenAPM Target Registry v0.1 companion. At this revision `copilot` (and therefore `vscode`) writes project MCP servers to the workspace-root `.mcp.json`, the same project file the `claude` target writes. Earlier companion revisions listed `.github/mcp.json` for `copilot` and `.vscode/mcp.json` for `vscode`. Because the file is shared, [req-mf-026](#req-mf-026) applies to every write to it whichever target selected the server, and entry ownership is per file under [req-mf-027](#req-mf-027): deactivating one target does not remove entries that another active target still selects. A consumer that wrote entries to a retired destination is expected to remove only the entries it can show it wrote, in the sense of req-mf-026, and to report the rest.
 
 The internal fallback value `minimal` MUST NOT be set explicitly in a
 manifest; it is reserved for the auto-detection fallback described in
@@ -747,6 +747,33 @@ naming the affected fields. Diagnostics about these references MUST
 name variables and fields only, never their values. User-scoped Claude
 Code configuration is outside this requirement.
 
+<a id="req-mf-027"></a>
+**[req-mf-027]** When two or more targets write project-scoped MCP
+servers to the same configuration file (for example, at this revision
+the Target Registry v0.1 companion lists the workspace-root `.mcp.json`
+for both `claude` and `copilot`), a conforming **consumer**
+implementation attributes each entry it wrote in that
+file to the file, not only to the target that selected the server:
+
+- (a) It MUST treat an entry it recorded as written for one of those
+  targets as its own, not as a foreign entry, when another of those
+  targets selects the same server, and MUST apply to that entry the
+  checks it applies to its own entries, including
+  [req-mf-026](#req-mf-026).
+- (b) When it stops selecting a server for one of those targets, for
+  example because that target is deactivated, it MUST NOT remove the
+  entry while another active target that writes the same file still
+  selects the server, and it MUST treat the entry as owned for that
+  remaining target from then on, retaining a native write hash
+  recorded for the entry where one exists.
+- (c) When no active target that writes the file selects the server,
+  the consumer MAY remove the entry, subject to its other ownership
+  rules, including [req-mf-026](#req-mf-026).
+
+Entries the consumer did not write, user-scoped MCP configuration, and
+targets whose project MCP configuration files are distinct are outside
+[req-mf-027](#req-mf-027).
+
 ### 4.6 Manifest extension surfaces
 
 #### 4.6.1 `policy` (consumer-side controls)
@@ -987,6 +1014,7 @@ This section's normative statements are:
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
+  [req-mf-027](#req-mf-027),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-ext-003](#req-ext-003),
@@ -4285,6 +4313,7 @@ conformance statement identifying:
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
 [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
+[req-mf-027](#req-mf-027),
 [req-ext-001](#req-ext-001), [req-ext-003](#req-ext-003),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -4741,6 +4770,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-026](#req-mf-026)                | MUST    | 4.5     | consumer    |
+| [req-mf-027](#req-mf-027)                | MUST    | 4.5     | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-ext-003](#req-ext-003)              | MUST    | 4.6.2   | consumer    |
@@ -4855,7 +4885,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 139** (134 MUST, 5 SHOULD).
+**Total normative statements: 140** (135 MUST, 5 SHOULD).
 
 ---
 
@@ -4924,11 +4954,12 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.60 (proposed) | 2026-11-17 | Amendment for accepted issue #3763. Added [req-rs-018](#req-rs-018) (new Section 7.4.1, consumer MUST): when several edges reach one dependency, its deployment selection is the union over edges of each edge's `skills` x `targets` product; omitting an axis selects all for that edge; the result and its lock entry are independent of declaration order, discovery order and depth, with no first-wins or last-wins choice; `skill_subset` and `target_subset` record the unions and a new optional `subset_pairings` lock field records the exact per-target selection in a canonical form, only when the two flat fields would over-select; a malformed or inconsistent `subset_pairings` value is invalid lock state; and frozen install fails, naming the dependency, when the derived selection differs from the recorded one. Under Section 9.2 this defines previously unspecified merge behavior, not behavior-neutral errata: a consumer that kept one edge's subsets, or unioned each field independently, now deploys different skills for divergent diamonds, and a frozen install over a lock written by such a consumer fails until the lock is regenerated when the selections differ. Locks whose flat fields are already exact are unchanged byte for byte. `subset_pairings` is additive and optional and `lockfile_version` is unchanged. The fields are typed in the distinct proposed `lockfile-v0.1.60.schema.json` (Appendix A); earlier schema bytes and IDs are unchanged, and since their entries admit additional properties, new lockfiles still validate against them. Older readers that preserve the unknown field without implementing it fall back to the flat product. Added the `target_subset` and `subset_pairings` rows to the Section 5.2 field table and req-rs-018 to the Section 10.11 lockfile-tampering row. Sections 1.3, 4.3.2, 5.2, 7.11, 10.11, 11.3.2, Appendices A and C, the requirements manifest and conformance coverage are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.61 (proposed) | 2026-11-18 | Amendment for issues #3762, #3866 and #3868, introduced in PR #3801, corrected in PR #3851 (issue #3860) and revised in PR #3875 for #3866 and #3868; the earlier proposed text of this amendment, which preserved `vscode` on rewrite and gave it an MCP configuration destination of its own, is withdrawn. Revised Section 4.2.1 in place: `vscode` is a deprecated alias of `copilot`, admitted under `target:` and `targets:`; it has no MCP configuration destination of its own, a consumer treats it exactly as `copilot` (including the [req-tg-008](#req-tg-008) effective target intersection and recorded lockfile state), a lock writer records it as `copilot` and a lock reader reads a recorded `vscode` as `copilot` before [req-rs-018](#req-rs-018) comparisons, and a manifest rewrite replaces it in place with `copilot`, dropping a resulting duplicate; `agents` still normalises to `copilot` and is not admitted under `targets:`. Revised the Section 4.2 `targets` row and [req-tg-008](#req-tg-008) in place to admit `vscode` as that alias, and added `hermes` and `grok-bot` to the Section 4.2.1 canonical-set block to match its explicit-only enumeration. Under Section 9.2 this is not behavior-neutral errata: a consumer that gave `vscode` a distinct MCP configuration destination, preserved it on rewrite, or recorded it in lock state no longer conforms, and `targets:` values containing `vscode`, `hermes` or `grok-bot`, and `target:` values `hermes` and `grok-bot`, that previously had to be rejected are now accepted. Proposed deprecation announcements under Section 9.5: the `vscode` alias and the singular `target:` field (in favor of `targets:`) become deprecated when this amendment is adopted under Section 9.3, and the 90-day window starts on the adoption date, not on this proposal date. Removing either requires a later revision after that window has elapsed; this amendment sets no removal date. The non-normative Section 4.2.1 note records that the Target Registry companion now lists the workspace-root `.mcp.json` as the `copilot` project MCP configuration destination, replacing `.github/mcp.json` and `.vscode/mcp.json`; this changes an existing companion entry rather than adding one, and cleanup of entries a consumer wrote at the retired destinations is implementation-defined under the existing ownership rules, including [req-mf-026](#req-mf-026). Manifest JSON Schema bytes are unchanged because the `targets` pattern already admits these tokens. Section 9.3 review and public comment remain pending; this proposal is not adopted. Statement count remains 139 (134 MUST, 5 SHOULD). |
 | 0.1.62 (proposed) | 2026-11-18 | Amendment for issue #3847. Revised the `fetch_failure` row of the [req-pl-006](#req-pl-006) merge table (Section 6.4, governance MUST) from "Child overrides if set" to stricter wins (`block` > `warn`, an unset value being the `warn` default per Section 6.2), so a child policy can tighten but never relax the parent's fail-closed choice, matching the tighten-only inheritance principle of Section 6.4 and the `enforcement` row. Under Section 9.2 this changes an evaluation already defined by a normative statement, so it is an amendment, not behavior-neutral errata: the only verdict class that changes is a chain whose parent sets `fetch_failure: block` and whose child sets `warn` (or leaves it unset), which now merges to `block` and fails closed on a policy fetch failure instead of warning. Chains where the child is at least as strict as the parent are unchanged. The reference implementation already merges this way. No statement is added or removed; the statement count is unchanged. Section 9.3 review and public comment remain pending; this proposal is not adopted. |
+| 0.1.63 (proposed) | 2026-11-19 | Amendment for issue #3880 (shared MCP document attribution, deferred from the 0.1.61 review). Added [req-mf-027](#req-mf-027) (Section 4.5, consumer MUST): when two or more targets write project-scoped MCP servers to the same configuration file (at this revision `claude` and `copilot` share the workspace-root `.mcp.json`), each entry the consumer wrote there is attributed to the file, not only to the target that selected the server; an entry recorded for one of those targets is not foreign to another that selects the same server, subject to the same recorded-write checks; when one of those targets stops selecting the server, for example because it is deactivated, the entry is kept and owned, retaining a recorded write hash, for any other active target that writes the file and still selects it, and is removable, under the consumer's other ownership rules including [req-mf-026](#req-mf-026), only once no such target selects it. Entries the consumer did not write and distinct (including user-scoped) configuration files are outside the requirement. The non-normative Section 4.2.1 note now points to the new requirement instead of deferring it. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: the only verdict class that changes is a consumer that removes, or treats as foreign, a shared-file entry another active target sharing that file still selects, which no longer conforms. The reference implementation already behaves this way. Sections 1.3, 4.2.1, 4.5, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 139 -> 140 (135 MUST, 5 SHOULD). |
 
-The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place and 0.1.61 revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and 0.1.62 revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
+The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58,
+0.1.60 and 0.1.63 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place and 0.1.61 revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and 0.1.62 revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
 working draft
-contains 139 statements (134 MUST, 5 SHOULD). Combining the proposals does not establish
+contains 140 statements (135 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
 Errata:
