@@ -63,3 +63,32 @@ def test_failed_direct_dependency_integrates_nothing(tmp_path, apm_binary_path) 
     assert retry.returncode == 0, output(retry)
     assert (project / ".claude/skills/good/SKILL.md").is_file()
     assert "test/good" in (project / "apm.lock.yaml").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("command", ["install", "update"])
+def test_failed_direct_local_dependency_integrates_nothing(
+    tmp_path, apm_binary_path, command
+) -> None:
+    """A direct local path that is not a package stops the apply like a failed download."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    project = isolated.work_root / "consumer"
+    project.mkdir(parents=True)
+    write(project / "pkgs/old/SKILL.md", skill("old", "Old."))
+    write(project / "pkgs/next/SKILL.md", skill("next", "Next."))
+    write(project / "pkgs/notapkg/README.md", "Not an APM package.\n")
+    manifest = {"name": "consumer", "version": "1.0.0", "targets": ["claude"]}
+    dump_yaml({**manifest, "dependencies": {"apm": ["./pkgs/old"]}}, project / "apm.yml")
+    (project / ".claude").mkdir()
+    seeded = runner.run(("install", "--no-policy"), cwd=project, env=isolated.subprocess_env())
+    assert seeded.returncode == 0, output(seeded)
+    lock_before = (project / "apm.lock.yaml").read_bytes()
+
+    deps = ["./pkgs/old", "./pkgs/next", "./pkgs/notapkg"]
+    dump_yaml({**manifest, "dependencies": {"apm": deps}}, project / "apm.yml")
+    args = ("update", "--yes", "--no-policy") if command == "update" else ("install", "--no-policy")
+    failed = runner.run(args, cwd=project, env=isolated.subprocess_env())
+
+    assert failed.returncode != 0, output(failed)
+    assert not (project / ".claude/skills/next").exists(), output(failed)
+    assert (project / "apm.lock.yaml").read_bytes() == lock_before

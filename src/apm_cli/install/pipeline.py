@@ -821,6 +821,13 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             barrier_result = result_from_install_context(ctx)
             if barrier_result.disposition is InstallDisposition.FAILED:
                 return barrier_result
+            # A failure reported only to the console (a local path that is
+            # not a package) still stops the apply before integration.
+            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
+                ctx.diagnostics.render_summary()
+            raise DirectDependencyError(
+                "One or more direct dependencies failed validation. Run with --verbose for details."
+            )
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         materialization_session = _run_integration_phase(ctx)

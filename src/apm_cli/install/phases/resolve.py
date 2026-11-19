@@ -617,6 +617,10 @@ def _resolve_dependencies(
                             None,
                         )
                     return replacement_path
+                # A path that is not a package fails like a download, so the
+                # apply barrier stops before integrating its siblings (#3874).
+                with callback_lock:
+                    callback_failures.add(dep_ref.get_unique_key())
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())
