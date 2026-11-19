@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `require_pinned_constraint` accepts exact package release tags such as `shadcn@4.12.0`. -- by @MohammedAlkindi (#3775)
 - `apm install` no longer warns about `.github-private` when your org has no policy. (#3783)
 - `PROXY_REGISTRY_ONLY=1` range errors explain the supported routes instead of claiming the proxy has no listing. (#3777)
-- Versions and tags with leading zeros or non-ASCII digits (`01.2.3`, `v1.2.3-01`) are no longer treated as exact SemVer releases by resolution or `require_pinned_constraint`. (#3894)
+- Versions and tags with leading zeros or non-ASCII digits (`v01.2.3`, `v1.2.3-01`) are no longer SemVer: resolution skips them and `require_pinned_constraint` reports them as bare branches. (#3894)
 
 ## [0.36.1] - 2026-11-18
 
