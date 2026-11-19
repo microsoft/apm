@@ -10,8 +10,8 @@
     },
     {
       "id": "marketplace-locked-selection",
-      "decision": "Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency)",
-      "owner": "drift.py (marketplace_ref_mismatch, revision_pin_mismatch); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence",
+      "decision": "Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency), and lock-first replay vs re-resolve of marketplace declarations",
+      "owner": "drift.py (marketplace_ref_mismatch, revision_pin_mismatch, locked_marketplace_row, locked_marketplace_replay); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence; deps/apm_resolver.py (_resolve_marketplace_dep) asks locked_marketplace_replay before any catalog I/O",
       "selectors": [
         "src/apm_cli/policy/ci_checks.py",
         "src/apm_cli/install/phases/lockfile.py"

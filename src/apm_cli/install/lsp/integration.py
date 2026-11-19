@@ -192,11 +192,16 @@ def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
     return {runtime: set(server_names) for runtime, server_names in target_servers.items()}
 
 
+def package_lsp_owner(resolved_by: str) -> str:
+    """Return the ``lsp_config_provenance`` token for a package's LSP servers."""
+    return f"{_PACKAGE_LSP_OWNER_PREFIX}{resolved_by}"
+
+
 def _dependency_provenance(dependencies: list["LSPDependency"]) -> dict[str, str]:
     """Map every regular install declaration to its stable owner token."""
     return {
         dependency.name: (
-            f"{_PACKAGE_LSP_OWNER_PREFIX}{dependency.resolved_by}"
+            package_lsp_owner(dependency.resolved_by)
             if dependency.resolved_by
             else _PROJECT_LSP_OWNER
         )
