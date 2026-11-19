@@ -4056,9 +4056,12 @@ actionable diagnostic naming that entry.
 
 ##### 8.5.11.3 Part C: target qualification (informative)
 
-The table records how the targets studied for issue #3094 measure against
-Part A, from vendor documentation and isolated runs on 2026-11-19 (see the
-[design record](https://github.com/microsoft/apm/issues/3094#issuecomment-7009780973)).
+The table records how every target in the consumer's target catalog
+measures against Part A, from vendor documentation and isolated runs on
+2026-11-19: Claude Code, GitHub Copilot CLI and Codex from issue #3094 (see the
+[design record](https://github.com/microsoft/apm/issues/3094#issuecomment-7009780973)),
+and the other targets from the issue #3922 survey. Catalog target names are in
+parentheses where the product name differs.
 It is not normative and does not qualify a target for a consumer; a
 consumer's conformance statement does that under [req-na-001](#req-na-001).
 
@@ -4067,7 +4070,21 @@ consumer's conformance statement does that under [req-na-001](#req-na-001).
 | Claude Code (2.1.322) | Met: user, project and local settings files with documented precedence | Met: `directory` marketplaces load in place; relative paths at project scope | Met: relative-path plugins in a local marketplace need no install; a user-scope declaration loaded and ran its SessionStart hook in the first session, with no `claude` command | Met: in-place plugins load current source at every session start | Met: Claude reads no other target's settings | Native-eligible. User scope is delivered by #3290; project scope by #3921 |
 | GitHub Copilot CLI (1.0.114) | Met: `~/.copilot/settings.json` and `.github/copilot/settings.json` (and `.local`), with managed settings taking precedence | Met: path-sourced plugins in a local directory marketplace load live | Met: repository plugins are installed if missing and turned on after folder trust | Met: auto-update applies only to `awesome-copilot`; repository `autoUpdate` is ignored | User scope: met. Project scope: Copilot documents reading `.claude/settings.json` and `.claude/settings.local.json`; same-key precedence against `.github/copilot/settings*.json` is not documented, so project-scope A5 is unknown; an observed file-priority order is Part C evidence only | Native-eligible at user scope (route migrates in #3921); project scope unknown under A5 |
 | OpenAI Codex CLI (0.170.0) | Met: user and trusted-project `config.toml` | Not met: Codex installs plugins into its own cache rather than loading them in place | **Not met** (see below) | Unknown | Unknown | Split (fails A3; A2 also not met) |
-| Every other catalog target | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown until the #3922 survey |
+| Cursor (`cursor`; IDE 3.30.14, agent CLI 2026.11.19) | Not met: plugins are installed into a project or user scope from the UI; the only settings key, user-scope `enabled_plugins` in `~/.cursor/settings.json`, appears only in a CLI changelog entry, with no schema or precedence | Not met: marketplaces are git repositories; local plugins are copied into `~/.cursor/plugins/local` | Not met: marketplace plugins need an Install step; `enabled_plugins` is keyed by folder path, not by plugin and marketplace | Unknown: refresh is documented only for GitHub-imported marketplaces | Unknown for plugin catalogs: hooks read `.claude/settings*.json` and `~/.claude/settings.json`, and skills read `.agents/skills/`, with documented precedence | Split (fails A1, A2, A3) |
+| Windsurf, now Devin Desktop (`windsurf`; Desktop 3.14.30825, Devin CLI 3000.14.30821) | Not met: project `.devin/config.json` documents only `permissions`, `read_config_from` and `hooks`; user plugin state is a personal manifest in Devin Cloud | Not met: `devin plugins install --local` links one folder in place, at user scope only; there is no directory marketplace | Not met: `devin plugins install` after sign-in, or an Install step in the UI | Met for `--local` links, which are live; git sources refresh | Met for the documented imports (`AGENTS.md`, `.claude/skills/`, MCP from `.claude/settings.json`, `.cursor/rules/`) under `read_config_from`; plugin catalogs are not covered | Split (fails A1, A2, A3) |
+| Gemini CLI (`gemini`; 0.70.0) | Not met: user and workspace `settings.json` have documented precedence, but no key declares or enables an extension | Not met: no marketplace; `gemini extensions install` copies, and `gemini extensions link` loads one directory in place by command | Not met: only `gemini extensions install`, `link` or `enable` establish or enable an extension | Unknown: the scope of `--auto-update` for local sources is not stated | Met: reads no other target's extension or settings files | Split (fails A1, A2, A3) |
+| Google Antigravity (`antigravity`; App 2.33.0, CLI `agy` 1.5.13) | Not met: `~/.gemini/antigravity-cli/settings.json` has no plugin keys, and no project settings file accepts plugin entries | Not met: only the official marketplace is accepted, and installs copy into `~/.gemini/config/plugins/`; a folder under `<workspace>/.agents/plugins/` is documented to activate in that project in place | Not met: no per-plugin enable switch; workspace plugins activate by presence | Unknown | Met: documents its reads of `.agents/`, `AGENTS.md` and `GEMINI.md`; Claude plugins are imported once by `agy plugin import`, not read live | Split (fails A1, A2, A3) |
+| Kiro (`kiro`; IDE 1.4.236, CLI 3.5.0) | Not met: Powers exist at user scope only (`~/.kiro/powers/`), and no settings key declares or enables a power | Not met: a local folder is imported into Kiro's local registry by an Install step | Not met: needs the IDE Install step, `/powers install`, or `kiro-cli powers install` | Unknown: only a manual "Check for updates" against the remote is documented | Met: reads `AGENTS.md`; no other target's plugin or settings files are documented | Split (fails A1, A2, A3) |
+| OpenCode (`opencode`; 2.3.2) | Met for the files: user, project and managed `opencode.json` with documented precedence; they take direct `plugins` entries, not a marketplace declaration and enable switch | Not met: no marketplace concept; a local plugin directory loads in place from a path relative to its config file | Not met as defined: no switch keyed by plugin and marketplace, although a `plugins` path entry loads with no install command | Met: `opencode plugin update` skips local plugins | Met: documents reads of `.claude/skills/`, `.agents/skills/` and `CLAUDE.md` with precedence; reads no other target's plugin files | Split (fails A2, A3); its plugin unit is a JavaScript or TypeScript module, not a manifest bundle |
+| Grok Build (`grok-build`; 1.0.89) | User scope: met with gaps (`~/.grok/config.toml`, and `enabledPlugins` read from `~/.claude/settings.json`). Project scope: not met; `.grok/config.toml` accepts `[plugins]` names but no marketplace declaration | Not met: local `path` marketplaces exist, but installing a marketplace plugin copies it into `~/.grok/installed-plugins/` | Not met: a declared marketplace installs nothing until `grok plugin install`; in the isolated run a declared directory marketplace, `enabledPlugins` and a trusted folder loaded no plugin | Unknown: session-start auto-update is documented globally, with no statement for local sources | Not met at project scope: reads `.claude/` settings, plugins and marketplaces, `.agents/skills/` and `AGENTS.md`, without documented precedence against `.grok/` | Split (fails A1 at project scope, A2, A3, A5 at project scope) |
+| Hermes Agent (`hermes`; 0.23.2) | Not met: one user-scope `~/.hermes/config.yaml`; project-local plugins are documented as not loaded | Not met: plugins are cloned into `~/.hermes/plugins/`; no directory marketplace | Not met: `hermes plugins install`, then enable; `plugins.enabled` is keyed by plugin name only | Met: plugins update only on `hermes plugins update` unless `plugins.auto_apply` is set | Met: documents its `.agents/skills/` and context-file reads with precedence | Split (fails A1, A2, A3); its plugin unit is a Python plugin (`plugin.yaml`) |
+| OpenClaw (`openclaw`; 2026.11.6) | User scope: met in substance; `~/.openclaw/openclaw.json` accepts `plugins.load.paths` and `plugins.entries.<id>.enabled`, with no other layer. Project scope: not met | Not met: marketplaces are install-time sources, and `openclaw plugins install --marketplace` copies into `~/.openclaw/extensions/` | Not met as defined: enable is keyed by plugin id only; in the isolated run a Claude-format plugin directory declared in `plugins.load.paths` and enabled loaded in place with no install command | Met for `plugins.load.paths`, which are operator-managed and skipped by `openclaw plugins update` | Met: reads Claude, Codex, Cursor and Agent Plugins manifests inside a plugin directory in a documented detection order; reads no other target's settings | Split (fails A1 at project scope, A2, A3) |
+| GitHub Copilot app (`copilot-app`; 1.4.3) | Unknown: the app is documented as "built on GitHub Copilot CLI", but its docs do not name the settings files it reads for plugins | Unknown: app docs add marketplaces by GitHub or Git URL; local marketplace folders appear only in the app changelog | Unknown: app docs describe a Browse and Install step | Unknown | Unknown | Unknown (A1 to A5 undocumented for the app) |
+| Microsoft 365 Copilot Cowork (`copilot-cowork`; cloud service, docs of 2026-11-18) | Not met: no local settings file; plugins are managed in the Microsoft 365 admin center and a per-user toggle | Not met: plugins are uploaded app packages; Claude plugins are converted on upload | Not met: admin-center or UI upload, or `atk install` | Not applicable: no directory source | Unknown | Split (fails A1, A2, A3) |
+| GitHub Copilot for JetBrains IDEs (`intellij`; plugin 1.21.1) | Unknown: managed policy supports `enabledPlugins` and `extraKnownMarketplaces`, but no user or project settings file is documented for JetBrains | Unknown: GitHub's plugin docs do not list JetBrains IDEs among plugin surfaces | Unknown | Unknown | Unknown | Unknown (A1 to A5 undocumented). The consumer's `intellij` target configures MCP only |
+| Grok Cloud (`grok-cloud`) | Not applicable | Not applicable | Not applicable | Not applicable | Not applicable | Not applicable: xAI documents no separate Grok Cloud product; the `.grok/skills/` location is documented by Grok Build |
+| Grok Bot (`grok-bot`; hosted) | Not applicable | Not applicable | Not applicable | Not applicable | Not applicable | Not applicable: a hosted agent whose plugins are in-app connectors; no settings files or file-based plugin loader are documented |
+| Agent Skills (`agent-skills`) | Not applicable | Not applicable | Not applicable | Not applicable | Not applicable | Not applicable: a meta target for the Agent Skills format, not a client |
 
 Codex A3 evidence, 2026-11-19, Codex 0.170.0, isolated `CODEX_HOME`,
 trusted project: a hand-written `[marketplaces.<name>]` entry with
@@ -4081,6 +4098,73 @@ gets explicit split install under [req-na-006](#req-na-006), except for a
 schema-bearing Agent Plugins v1 dependency, which [req-tg-011](#req-tg-011)
 keeps opaque at the deployment boundary: it is skipped with one actionable
 diagnostic rather than split-installed.
+
+Survey detail, issue #3922, 2026-11-19. The table below records, for each
+surveyed target, the native unit and format, the settings files and scopes,
+whether a local source loads in place or is copied, whether enabling needs an
+install step, update behaviour, and trust. It is evidence for the table above,
+not a qualification.
+
+| Target | Native unit and format | Settings files and scopes | In place or copied | Install step to enable | Update | Trust |
+|---|---|---|---|---|---|---|
+| `cursor` | Plugin: Agent Plugins root `plugin.json`, or `.cursor-plugin/plugin.json`; catalog `.cursor-plugin/marketplace.json` | Project or user scope chosen at install; team and enterprise layers in the dashboard; user `enabled_plugins` is undocumented beyond the changelog | Copied into `~/.cursor/plugins/local`; symlinks outside it are skipped; `--plugin-dir` loads one directory per run | Yes: UI Install, or reload after copying a local plugin | Marketplace re-index on Auto Refresh (GitHub imports) or manual Refresh | Workspace trust exists and is off by default; marketplace plugins are reviewed by Cursor |
+| `windsurf` | Plugin: `.devin-plugin/plugin.json`, then `.claude-plugin/plugin.json`, then root `plugin.json` | Organization, team, session, `.devin/config.local.json`, `.devin/config.json`, `~/.config/devin/config.json`; repo-level plugin lists are documented inconsistently | `--local` links in place; remote sources are fetched | Yes: `devin plugins install` (sign-in required) or the Customize page | Git sources float to the tracked branch; `sha` pins are fixed; local links are live | Install-time trust prompt (`-y` skips it); hooks do not load in Restricted Mode |
+| `gemini` | Extension: `gemini-extension.json` | System defaults, user `~/.gemini/settings.json`, workspace `.gemini/settings.json`, system overrides | `install` copies; `link` records the source path and loads it in place | Yes: `gemini extensions install`, `link` or `enable` | `--auto-update` for installed extensions | Untrusted folders cannot install or update extensions, and their MCP servers do not connect |
+| `antigravity` | Plugin: root `plugin.json` or `.antigravity-plugin/plugin.json` | User `~/.gemini/antigravity-cli/settings.json` (no plugin keys); `plugins.json` discovery manifests | Installs copy into `~/.gemini/config/plugins/`; `<workspace>/.agents/plugins/<plugin>/` is read in place | Yes for marketplace plugins (`agy plugin install`); no for workspace `.agents/plugins/` | Not documented for directory sources | `trustedWorkspaces`; gating of workspace plugins is not documented |
+| `kiro` | Power: Agent Plugins `plugin.json`, or legacy `POWER.md` | User `~/.kiro/` only for Powers; project `.kiro/` for MCP, steering, skills and hooks | Imported into a local registry; location not documented | Yes: IDE Install, `/powers install`, or `kiro-cli powers install` | Manual "Check for updates" | No trust prompt documented; tool calls follow Kiro permissions |
+| `opencode` | Plugin: JavaScript or TypeScript package (`Plugin.define`) | User `~/.config/opencode/opencode.json`, project `opencode.json` or `.opencode/opencode.json`, managed system directory (highest) | Local paths and `.opencode/plugins/` load in place; npm and git packages are cached | No for local paths; missing packages install in the background at startup | Local plugins are not updated; unpinned packages are checked at startup | No workspace trust prompt documented; managed `policies` can deny a plugin |
+| `grok-build` | Plugin: Claude-compatible `plugin.json` and `.claude-plugin/marketplace.json` (also `.grok-plugin/`) | User `~/.grok/config.toml`, `~/.claude/settings.json`; project `.grok/config.toml`, `.claude/settings.json` | Marketplace installs copy into `~/.grok/installed-plugins/`; `[plugins] paths` load in place | Yes for marketplace plugins (`grok plugin install`); no for `[plugins] paths` after folder trust | Session-start auto-update, can be pinned off | Unified folder trust |
+| `hermes` | Plugin: Python package with `plugin.yaml` and `register(ctx)` | User `~/.hermes/config.yaml` only | Cloned into `~/.hermes/plugins/`; symlinks are tolerated but untracked | Yes: `hermes plugins install`, then enable (prompt defaults to no) | Manual, or opt-in `plugins.auto_apply` | Opt-in allow-list; install-time security scan and capability consent |
+| `openclaw` | Plugin: `openclaw.plugin.json`, or a Claude, Codex, Cursor or Agent Plugins bundle | User `~/.openclaw/openclaw.json` only | `plugins.load.paths` and `install --link` load in place; `install` copies into `~/.openclaw/extensions/` | No for `plugins.load.paths`; yes for marketplace plugins (with capability consent) | Local paths skipped; managed plugins on `openclaw plugins update` | `plugins.allow` and `deny`; workspace-origin plugins off by default; provenance warning for config paths |
+| `copilot-app` | Plugin, as in Copilot CLI | Not documented for the app; managed settings list the app as a supported client | Not documented | Yes per app docs: Browse, then Install | Not documented | Not documented |
+| `copilot-cowork` | Microsoft 365 app package (`manifest.json` with `agentSkills` and `agentConnectors`) | Admin center and per-user toggle; no local file | Uploaded to the service | Yes: admin or user upload, or `atk install` | Service-managed | Admin approval |
+| `intellij` | Plugin, per the JetBrains plugin changelog | Managed policy only is documented | Not documented | Not documented | Not documented | Not documented |
+| `grok-cloud`, `grok-bot`, `agent-skills` | None that can be declared in a file | None | Not applicable | Not applicable | Not applicable | Not applicable |
+
+Primary sources for the survey, read on 2026-11-19:
+Cursor, `https://cursor.com/docs/plugins`, `https://cursor.com/docs/reference/plugins`,
+`https://cursor.com/docs/cli/changelog` and `https://cursor.com/docs/reference/third-party-hooks`;
+Windsurf, `https://docs.devin.ai/cli/extensibility/plugins/overview`,
+`https://docs.devin.ai/cli/reference/configuration/global-vs-local` and
+`https://docs.devin.ai/cli/reference/configuration/read-config-from`;
+Gemini CLI, `https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md`
+and `https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md`;
+Antigravity, `https://antigravity.google/docs/plugins`,
+`https://antigravity.google/docs/customization-discovery` and `https://antigravity.google/docs/settings`;
+Kiro, `https://kiro.dev/docs/powers/installation` and `https://kiro.dev/docs/configuration`;
+OpenCode, `https://opencode.ai/docs/plugins/` and `https://opencode.ai/docs/config/`;
+Grok Build, `https://docs.x.ai/build/features/skills-plugins-marketplaces` and
+`https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/09-plugins.md`;
+Hermes Agent, `https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins`
+and `https://hermes-agent.nousresearch.com/docs/user-guide/configuration`;
+OpenClaw, `https://docs.openclaw.ai/tools/plugin`, `https://docs.openclaw.ai/plugins/bundles`
+and `https://docs.openclaw.ai/cli/plugins/uninstall-and-update`;
+GitHub Copilot app, `https://docs.github.com/en/copilot/concepts/copilot-surfaces/github-copilot-app`
+and `https://docs.github.com/en/copilot/how-tos/github-copilot-app/customize-github-copilot-app`;
+Copilot Cowork, `https://learn.microsoft.com/en-us/copilot/cowork/cowork-plugins` and
+`https://learn.microsoft.com/en-us/copilot/cowork/cowork-manage-plugins`;
+JetBrains, `https://docs.github.com/en/copilot/concepts/customizations/plugins` and
+`https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings`;
+Grok Bot, `https://docs.x.ai/grok-bot/overview`, and for Grok Cloud no match in `https://docs.x.ai/llms-full.txt`;
+Agent Skills, `https://agentskills.io/specification`.
+
+Isolated runs used a throwaway home directory and no credentials:
+Gemini CLI 0.70.0 (`gemini extensions link` records the source path in a stub
+file rather than a symbolic link, and `install` copies); Antigravity `agy`
+1.5.13 (`agy plugin validate` reports that a directory with only
+`.claude-plugin/plugin.json` "doesn't load as is"); OpenCode 2.3.2 (a
+`plugins` path entry and a `.opencode/plugins/` directory loaded in place);
+Grok Build 1.0.89 (see A3 above); OpenClaw 2026.11.6 (see A3 above). Cursor
+agent CLI 2026.11.19 and Devin CLI 3000.14.30821 were installed, but their
+plugin commands need sign-in, so no plugin load was observed.
+
+Cross-target evidence relevant to [A5](#na-crit-a5) for the native-eligible
+targets: Antigravity documents that a plugin folder under
+`<workspace>/.agents/plugins/` activates in that project, which is the
+project-scope profile root of this subsection, and Grok Build's shipped
+documentation says it reads marketplaces declared in a project
+`.claude/settings.json`. Whether either target loads a plugin root deployed
+for another target is format dependent and is not settled here.
 
 Known residuals that do not fail Part A for Claude Code: its per-user
 marketplace registry (addressed by [req-na-007](#req-na-007)); worktrees
@@ -5544,6 +5628,7 @@ Amendments 0.1.70, 0.1.71 and 0.1.72 were adopted on 2026-11-20 by editor decisi
 
 Errata:
 
+- **2026-11-19, Section 8.5.11.3** (#3922). Informative only. Part C now has a row for every catalog target, replacing the single "Every other catalog target: Unknown" row, plus survey detail, primary sources and isolated-run evidence. No target is newly classified native-eligible. No requirement ID, keyword, or statement count changes.
 - **2026-11-17, Section 4.2.1** (#3762), withdrawn 2026-11-18. This entry was published in PR #3801 as behavior-neutral errata that preserved the legacy `vscode` alias on manifest rewrite. It is withdrawn and reclassified as amendment 0.1.61 (adopted 2026-11-19), because the same change admits `vscode` under `targets:` and is therefore not behavior-neutral under Section 9.2 (corrected in PR #3851, issue #3860). Withdrawing it changes no requirement ID, keyword, or statement count.
 
 ---
