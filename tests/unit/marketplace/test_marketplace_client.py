@@ -194,7 +194,10 @@ class TestExplicitFreshness:
 
     @pytest.mark.parametrize(
         "resolver",
-        [_api_resolver(error=Exception("Network error")), _api_resolver(data=["not", "a", "catalog"])],
+        [
+            _api_resolver(error=Exception("Network error")),
+            _api_resolver(data=["not", "a", "catalog"]),
+        ],
         ids=["unavailable", "invalid"],
     )
     def test_required_refresh_never_serves_or_replaces_cache(self, resolver):
@@ -243,6 +246,7 @@ class TestExplicitFreshness:
             assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Cached"
         assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Cached"
         resolver.try_with_fallback.assert_not_called()
+
     def test_fetch_remote_marketplace_url_records_digest_and_etag(self, monkeypatch):
         source = MarketplaceSource(
             name="catalog",

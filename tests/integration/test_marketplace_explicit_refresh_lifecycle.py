@@ -178,8 +178,14 @@ def world(tmp_path: Path, apm_binary_path: Path) -> Iterator[_World]:
 def _register(world: _World, *names: str) -> None:
     for name in names:
         world.catalogs.publish(name, [_entry("foo", "v1"), _entry("bar", "v1")])
-        added = world.run("marketplace", "add", world.catalog_url(name), "--name", name,
-                          scenario=f"register-{name}")
+        added = world.run(
+            "marketplace",
+            "add",
+            world.catalog_url(name),
+            "--name",
+            name,
+            scenario=f"register-{name}",
+        )
         assert added.returncode == 0, _evidence(added)
 
 
@@ -206,8 +212,9 @@ def test_refresh_rejects_removed_entry_that_the_cache_still_lists(world: _World)
     assert world.catalogs.count("acme") == 1, "ordinary install must keep the cached catalog"
 
     # Two selections from one source share one revalidated answer.
-    both = world.run("install", "--refresh", "foo@acme", "bar@acme", *_INSTALL,
-                     scenario="refresh-both")
+    both = world.run(
+        "install", "--refresh", "foo@acme", "bar@acme", *_INSTALL, scenario="refresh-both"
+    )
     assert "Plugin 'foo' not found in marketplace 'acme'" in _output(both), _evidence(both)
     assert "bar#v1 (already in apm.yml)" in _output(both)
     assert world.catalogs.statuses("acme") == [200, 200]

@@ -89,7 +89,9 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             and definition.line <= call.line <= definition.end_line
         ]
         if any(text not in facts.lines[line - 1] for line in lines):
-            findings.append(violation(RULE_ID, path, f"every {callee} in {function} needs {text!r}"))
+            findings.append(
+                violation(RULE_ID, path, f"every {callee} in {function} needs {text!r}")
+            )
     for path, function, callee in _FORBIDDEN_CALLS:
         facts = facts_for(path)
         if facts is None:
