@@ -24,6 +24,12 @@ Claude plugin MCP files (`.mcp.json`, `mcp.json`, `.github/.mcp.json`, or JSON
 files named by `plugin.json` `mcpServers`) may use `{"mcpServers": {...}}` or a
 flat top-level server map whose values are all server objects. A file with no
 usable server is skipped with a warning naming the file and plugin.
+`${CLAUDE_PLUGIN_ROOT}` in MCP and LSP servers is locked unexpanded and
+written per target: `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<pkg>/...` in
+`.mcp.json` (Claude, Copilot), `${workspaceFolder}/...` for Cursor and VS Code,
+`${CLAUDE_PROJECT_DIR}/...` in the Claude LSP plugin, otherwise (and with
+`--global`) the absolute path. A lockfile from an older release holding the
+absolute path still replays `--frozen`.
 
 Root `plugin.json` and `.claude-plugin/plugin.json` also precede the Codex
 compatibility overlay. The Codex route requires a native-discoverable skill

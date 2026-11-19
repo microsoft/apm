@@ -195,7 +195,7 @@ class TestExtractLspServers:
         result = _extract_lsp_servers(tmp_path, manifest)
         assert result == {}
 
-    def test_plugin_root_substitution(self, tmp_path):
+    def test_plugin_root_kept_authored(self, tmp_path):
         manifest = {
             "lspServers": {
                 "my-lsp": {
@@ -206,8 +206,7 @@ class TestExtractLspServers:
         }
         result = _extract_lsp_servers(tmp_path, manifest)
         assert "my-lsp" in result
-        abs_root = str(tmp_path.resolve())
-        assert result["my-lsp"]["command"] == f"{abs_root}/bin/lsp"
+        assert result["my-lsp"]["command"] == "${CLAUDE_PLUGIN_ROOT}/bin/lsp"
 
 
 # ===========================================================================

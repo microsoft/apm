@@ -727,6 +727,7 @@ mutation_writes.mcp_remote_transport_normalization
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.opencode_enabled_intent
+mutation_writes.plugin_root_render
 mutation_writes.user_hook_home_reference
 mutation_writes.user_root_scope
 onboarding-metadata-only

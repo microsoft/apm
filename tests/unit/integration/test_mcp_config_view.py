@@ -183,7 +183,8 @@ def test_omission_fingerprint_uses_authored_portable_declaration(
     installed_view = _derive(root, lock, installed)
     replay_view = _derive(root, lock, replay)
     assert installed_view.problems == replay_view.problems == ()
-    assert installed_view.configs["firebase"][field] != replay_view.configs["firebase"][field]
+    assert installed_view.configs["firebase"][field] == replay_view.configs["firebase"][field]
+    assert installed_view.configs["firebase"][field] == declaration[field]
     assert replay_view.declaration_fingerprints == installed_view.declaration_fingerprints
     audited = replay_view.with_recorded_omissions(lock)
     assert audited.configs == {}

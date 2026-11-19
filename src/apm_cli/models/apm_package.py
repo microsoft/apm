@@ -671,12 +671,21 @@ class APMPackage:
         data = dict(manifest_data)
         from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
 
+        # MCP and LSP declarations keep the authored ${CLAUDE_PLUGIN_ROOT}: it is
+        # bound below and rendered per target, so recorded state is portable.
         for dependency_key in ("dependencies", "devDependencies"):
-            if dependency_key in data:
-                data[dependency_key] = resolve_plugin_root_placeholders(
-                    data[dependency_key],
-                    package_path,
-                )
+            group = data.get(dependency_key)
+            if isinstance(group, dict):
+                data[dependency_key] = {
+                    kind: (
+                        entries
+                        if kind in ("mcp", "lsp")
+                        else resolve_plugin_root_placeholders(entries, package_path)
+                    )
+                    for kind, entries in group.items()
+                }
+            elif group is not None:
+                data[dependency_key] = resolve_plugin_root_placeholders(group, package_path)
         source_manifest = manifest_path or package_path / "apm.yml"
         resolved_source = source_path.resolve() if source_path is not None else None
 
@@ -709,6 +718,12 @@ class APMPackage:
 
         with manifest_host_scope_for(data) as manifest_default_host:
             dependencies, dev_dependencies = cls._parse_dependency_sections(data, source_manifest)
+
+        from ..deps.plugin_root_render import bind_plugin_roots
+
+        for parsed_group in (dependencies, dev_dependencies):
+            for kind in ("mcp", "lsp"):
+                bind_plugin_roots((parsed_group or {}).get(kind), package_path)
 
         # Merge user/policy registry URLs and config.json default routing.
         from ..deps.registry.config_loader import resolve_effective_registries

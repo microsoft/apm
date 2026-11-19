@@ -363,6 +363,8 @@ def run_mcp_integration(  # noqa: PLR0913
         no_policy=no_policy,
     )
     mcp_deps, current_view = prepared.dependencies, prepared.current_view
+    if current_view is not None:
+        old_mcp_configs = current_view.normalize_stored_configs(old_mcp_configs)
 
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP

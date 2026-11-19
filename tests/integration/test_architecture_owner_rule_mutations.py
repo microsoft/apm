@@ -940,6 +940,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Explicit false and null become omission instead of manifest intent.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-plugin-root-render",
+        rule_id="mutation_writes.plugin_root_render",
+        path="src/apm_cli/adapters/client/copilot.py",
+        old="raw = self._self_defined_stdio(server_info)",
+        new='raw = server_info.get("_raw_stdio")',
+        intent="An adapter reads raw stdio directly, writing ${CLAUDE_PLUGIN_ROOT} unrendered.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-user-hook-home-reference",
         rule_id="mutation_writes.user_hook_home_reference",
         path="src/apm_cli/integration/hook_integrator.py",
