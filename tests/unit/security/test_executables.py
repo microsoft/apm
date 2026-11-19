@@ -976,6 +976,24 @@ class TestDenyIdentitySpellings:
         ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
 
+    def test_deny_ignores_the_port_and_grants_do_not(self) -> None:
+        """#3927: denies cover every port of a package; a grant names one server."""
+        from apm_cli.security.executables import canonical_exec_identity, resolve_exec_decision
+
+        assert canonical_exec_identity("https://github.com:8443/Evil/Pkg.git") == "evil/pkg"
+        ported = "github.com:8443/acme/tool"
+        ctx = self._ctx(project_allow={"acme/tool": {"hooks": True}})
+        assert resolve_exec_decision(ctx, "acme/tool", "hooks").allowed is True
+        assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
+        allow = {ported: {"hooks": True}}
+        for ctx in (
+            self._ctx(org_deny=["acme/tool"], project_allow=allow),
+            self._ctx(org_deny=["github.com:7999/acme/*"], project_allow=allow),
+            self._ctx(project_allow=allow, project_deny={"acme/tool": {"hooks": True}}),
+        ):
+            assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
     def test_content_bound_keys_stay_exact(self) -> None:
         from apm_cli.security.executables import canonical_exec_identity
 

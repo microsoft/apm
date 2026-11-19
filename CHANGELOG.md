@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - If `apm.yml` sets `default_host:`, shorthand dependencies now resolve against it; write `github.com/owner/repo` for GitHub packages. (#3865)
 - Lockfiles with diamond `skills:`/`targets:` selections fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
 - With `mcp.transport.allow` set, registry servers on a disallowed or unresolvable transport are blocked; pick `transport:` or update the policy. (#3788)
+- Dependencies on a non-default port are keyed `host:8443/owner/repo`, so same-repo ports no longer merge; re-approve their hooks and MCP servers with `apm approve`. (#3932)
 - **BREAKING:** `copilot` moves project MCP servers to root `.mcp.json`, shared with Claude Code, which ignores Copilot `tools` allow-lists; run `apm install`, review static `env:` values, and commit. (#3875)
 - The `vscode` target is deprecated as an alias of `copilot`, and VS Code's Local mode no longer gets MCP servers; use the `copilot` target and the Copilot harness. Lockfiles that recorded `vscode` still install. (#3875)
 - Singular `target:` and the ignored `compilation.target` are deprecated and warn once per run: replace `target:` with the `targets:` value its warning prints, and delete `compilation.target`. (#3801, #3875)

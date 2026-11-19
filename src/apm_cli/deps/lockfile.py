@@ -23,6 +23,7 @@ from ..core.deployment_state import DeploymentLedger
 from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
 from ..models.dependency.identity import (
+    build_port_blind_dependency_key,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
 )
@@ -571,6 +572,7 @@ class LockedDependency:
         return build_dependency_unique_key(
             self.repo_url,
             host=self.host,
+            port=self.port,
             source=self.source,
             local_path=self.local_path,
             is_virtual=self.is_virtual,
@@ -1548,6 +1550,27 @@ class LockFile:
             if dep.resolved_by and dep.resolved_by not in known:
                 dep.resolved_by = canonical.get(dep.resolved_by.casefold(), dep.resolved_by)
 
+    def _rekey_port_blind_parents(self) -> None:
+        """Point a pre-#3927 port-blind v3 parent key at its one ported entry."""
+        ported: dict[str, list[str]] = {}
+        for key, dep in self.dependencies.items():
+            if dep.port:
+                ported.setdefault(build_port_blind_dependency_key(dep), []).append(key)
+
+        def rekey(parent: str | None) -> str | None:
+            matches = ported.get(parent or "", [])
+            if parent in self.dependencies or len(matches) != 1:
+                return parent
+            return matches[0]
+
+        for dep in self.dependencies.values() if ported else ():
+            dep.resolved_by = rekey(dep.resolved_by)
+            if dep.replacement is not None:
+                dep.replacement.requests = {
+                    replace(request, parent=rekey(request.parent)): None
+                    for request in dep.replacement.requests
+                }
+
     @classmethod
     def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
         """Construct a lockfile from an already validated YAML mapping."""
@@ -1589,6 +1612,8 @@ class LockFile:
                 raise LockfileFormatError("'replacements' must be a list")
         if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
             raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
+        if lock.replacements is not None:
+            lock._rekey_port_blind_parents()
         lock._validate_replacement_evidence()
         if lock.replacements is None:
             lock._canonicalize_legacy_parents()
