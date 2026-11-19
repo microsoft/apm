@@ -7,7 +7,10 @@ sidebar:
 
 Start with [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md)
 for issue-first scope approval, PR eligibility, small corrections, private
-security reporting, and the transition for existing contributions.
+security reporting, and the transition for existing contributions. To list your
+organization, follow
+[Adding your organization to ADOPTERS.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#adding-your-organization-to-adoptersmd):
+no issue or scope record needed.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
 The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)

@@ -78,7 +78,7 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives; at project scope, skills for `copilot`, `cursor`, `codex`, `gemini`, `opencode`, and `windsurf` land in the shared `.agents/skills/`.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `vscode` is a deprecated alias of `copilot`. `intellij` is never recorded in `apm.yml`; use `copilot` for GitHub Copilot in JetBrains IDEs. `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives; at project scope, skills for `copilot`, `cursor`, `codex`, `gemini`, `opencode`, and `windsurf` land in the shared `.agents/skills/`.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
@@ -97,7 +97,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 
 Notes per target:
 
-- **copilot** -- GitHub Copilot (CLI + IDE). User scope: instructions, prompts, agents, and hooks deploy under `~/.copilot/` (instructions as `~/.copilot/instructions/**/*.instructions.md`, mirroring the project-scope layout); skills go to `~/.agents/skills/`; a dependency canvas deploys to `~/.copilot/extensions/`.
+- **copilot** -- GitHub Copilot (CLI + IDE). Project MCP servers go to root `.mcp.json`, shared with Claude Code (which ignores Copilot's `tools` allow-list). User scope: instructions, prompts, agents, and hooks deploy under `~/.copilot/` (instructions as `~/.copilot/instructions/**/*.instructions.md`, mirroring the project-scope layout); skills go to `~/.agents/skills/`; a dependency canvas deploys to `~/.copilot/extensions/`.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
 - **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Full user-scope support; instructions deploy to `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context (see [Cursor user scope](../../reference/targets-matrix/#cursor)).

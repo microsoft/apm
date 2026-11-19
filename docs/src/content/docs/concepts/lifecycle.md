@@ -40,8 +40,8 @@ targets](../primitives-and-targets/) for what each target receives.
 
 **Common surprises**
 
-- Re-running `apm init` in a directory that already has `apm.yml` warns and asks before overwriting it; `-y` overwrites without asking.
-- `targets:` must contain at least one target. Omit the field (or leave legacy `target:` blank) when you want auto-detection at compile time.
+- Re-running `apm init` in a directory that already has `apm.yml` warns and asks before overwriting it; `-y` overwrites without asking. Existing targets carry over, with deprecated singular `target:` rewritten to `targets:`.
+- `targets:` must contain at least one target. Omit the field when you want auto-detection at compile time.
 
 **Read more:** [`apm init` reference](/apm/reference/cli/init/), [package anatomy](/apm/concepts/package-anatomy/).
 

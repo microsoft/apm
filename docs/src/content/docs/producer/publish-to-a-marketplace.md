@@ -459,11 +459,10 @@ package in it. Use separate repositories when audiences need separate access.
 
 ## Governance
 
-Org policy can restrict which marketplaces a consumer is allowed to
-register and which packages it can install from them. That gate runs
-on the consumer side at install time. See
-[Governance deep-dive](../../enterprise/governance-guide/) for the
-producer-side implications (signing, allow-listed sources).
+Org policy `dependencies` allow and deny lists gate which packages a
+consumer can install from your marketplace. That gate runs on the
+consumer side at install time. See
+[Governance deep-dive](../../enterprise/governance-guide/).
 
 ## Where next
 

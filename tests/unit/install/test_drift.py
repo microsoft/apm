@@ -970,6 +970,7 @@ def test_run_replay_threads_locked_skill_subset(
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
                 "skill_subset": kwargs.get("skill_subset"),
                 "deployment_package_root": package_info.deployment_package_root,
+                "deployment_frame": package_info.deployment_frame,
             }
         )
         return {"deployed_files": []}
@@ -1002,9 +1003,10 @@ def test_run_replay_threads_locked_skill_subset(
                 "productivity/grilling",
             ),
             "deployment_package_root": dep.to_dependency_ref().get_install_path(
-                scratch_root / ".apm" / "apm_modules"
+                project_root / ".apm" / "apm_modules"
                 if user_scope
-                else scratch_root / "apm_modules"
+                else project_root / "apm_modules"
             ),
+            "deployment_frame": (scratch_root, project_root),
         }
     ]

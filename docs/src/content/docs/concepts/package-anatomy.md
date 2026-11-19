@@ -97,7 +97,7 @@ keywords: [ai, review, python]
 type: skill
 
 # Optional target list. Pins which harnesses this package compiles to.
-# Prefer plural targets: as a YAML list; legacy target: CSV is still accepted.
+# Use plural targets: as a YAML list; singular target: is deprecated.
 targets:
   - copilot
   - claude
@@ -139,7 +139,7 @@ scripts:
 | `repository`     | no       | URL; passed through to `plugin.json` by `apm pack`.         |
 | `keywords`       | no       | List of strings; passed through to `plugin.json` by `apm pack`. |
 | `type`           | no       | `instructions`, `skill`, `hybrid`, or `prompts`.            |
-| `targets` / `target` | no   | Preferred YAML list, or legacy string/list of harness slugs. |
+| `targets` / `target` | no   | YAML list of harness slugs. Singular `target:` is deprecated; in a project `apm.yml` its warning prints the `targets:` replacement. |
 | `includes`       | no       | `"auto"` or list of repo paths.                             |
 | `dependencies`   | no       | Mapping with `apm:` and/or `mcp:` keys.                     |
 | `devDependencies`| no       | Same shape as `dependencies`. Excluded from `apm pack`.     |
