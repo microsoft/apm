@@ -803,7 +803,7 @@ def test_local_claude_source_is_never_mutated_or_waived_during_mcp_inspection(
         root,
         _lock(dependency),
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=True,
+        admission=McpAdmission(None, one_off=True),
         allow_pending=strict,
     )
     assert view.problems
