@@ -980,6 +980,22 @@ def test_object_form_declarations_map_to_their_locked_row(path: str, old: str, n
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_raw_manifest_target_readers_pass_the_manifest_path() -> None:
+    """Plugin-only pack warns about deprecated target keys like every reader (#3965)."""
+    rule_id = "registry_delegation.target_vocabulary"
+    path = "src/apm_cli/core/build_orchestrator.py"
+    old = "targets = manifest_target_restriction(data, apm_yml_path)"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "targets = manifest_target_restriction(data)")
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.
