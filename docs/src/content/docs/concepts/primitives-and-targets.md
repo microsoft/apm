@@ -88,7 +88,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `cursor` | `.cursor/` (project), `~/.cursor/` (user scope) | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
-| `antigravity` | `.agents/` (project), `~/.gemini/` (user) | agents |
+| `antigravity` | `.agents/` (project), `~/.gemini/config/` (user) | agents |
 | `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
