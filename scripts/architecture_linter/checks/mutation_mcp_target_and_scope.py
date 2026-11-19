@@ -403,11 +403,16 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             '"dependency": dependency.get_unique_key()',
             '"declaration": declaration.to_dict()',
             "if valid and name not in admitted:",
+            "def with_unapproved_executables(",
+            '"reason": "unapproved-executables"',
+            '"unapproved-executables": gated,',
         ),
         "src/apm_cli/policy/ci_checks.py": (").with_recorded_omissions(lock)",),
         "src/apm_cli/install/mcp/integration.py": (
             "include_dependency_mcp=should_install",
-            "current_view.omission_evidence(lockfile or LockFile())",
+            "return self.omission_view.omission_evidence(lockfile)",
+            "omissions = prepared.omissions(lockfile)",
+            "current_view = current_view.with_unapproved_executables(approved)",
             "current_view if should_install else None",
         ),
     }
@@ -430,7 +435,10 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             provider,
             rule_id=rule_id,
             paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
-            pattern=r"^\s*def (?:omission_evidence|with_recorded_omissions|_declaration_fingerprint)\(",
+            pattern=(
+                r"^\s*def (?:omission_evidence|with_recorded_omissions"
+                r"|with_unapproved_executables|_declaration_fingerprint)\("
+            ),
             message="MCP omission selection and comparison belong to CurrentMcpConfigView",
             exempt=False,
         )

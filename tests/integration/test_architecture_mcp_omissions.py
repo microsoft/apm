@@ -40,6 +40,16 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
             "if valid and name not in admitted:",
             "if valid:",
         ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "current_view = current_view.with_unapproved_executables(approved)",
+            "pass",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "omissions = prepared.omissions(lockfile)",
+            "omissions = dict(prepared.omission_view.omissions)",
+        ),
     ],
 )
 def test_mcp_omission_owner_bypass_is_rejected(path: str, old: str, new: str) -> None:

@@ -21,11 +21,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PreparedMcpIntegration:
-    """Selected comparison view, filtered declarations, and pre-write omission evidence."""
+    """Selected comparison view, filtered declarations, and omission candidates."""
 
     dependencies: list["MCPDependency"]
     current_view: "CurrentMcpConfigView | None"
-    omissions: dict[str, dict[str, str]] | None
+    omission_view: "CurrentMcpConfigView | None"
+
+    def omissions(self, lockfile: "LockFile") -> dict[str, dict[str, str]] | None:
+        """Evidence against the lock this run produced: a kept baseline supersedes it."""
+        if self.omission_view is None:
+            return None
+        return self.omission_view.omission_evidence(lockfile)
 
 
 def prepare_mcp_integration(
@@ -53,7 +59,6 @@ def prepare_mcp_integration(
     )
 
     current_view = None
-    omissions = None
     if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
         lockfile = LockFile.read(lock_path) if lock_path.exists() else None
         current_view = CurrentMcpConfigView.derive(
@@ -67,7 +72,6 @@ def prepare_mcp_integration(
             active_package_keys=active_package_keys,
             include_dependency_mcp=should_install,
         )
-        omissions = current_view.omission_evidence(lockfile or LockFile())
     if should_install and current_view is not None:
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)
@@ -83,10 +87,13 @@ def prepare_mcp_integration(
             no_policy=no_policy,
             logger=logger,
         )
+    approved = filter_mcp_by_allow_executables(mcp_deps, allow_map, logger)
+    if current_view is not None:
+        current_view = current_view.with_unapproved_executables(approved)
     return PreparedMcpIntegration(
-        filter_mcp_by_allow_executables(mcp_deps, allow_map, logger),
+        approved,
         current_view if should_install else None,
-        omissions,
+        current_view,
     )
 
 
@@ -653,11 +660,10 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
-    if prepared.omissions is not None and lock_path.exists():
+    if prepared.omission_view is not None and lock_path.exists():
         lockfile = LockFile.read(lock_path)
-        if lockfile is not None and prepared.omissions != lockfile.mcp_omissions:
-            replace(lockfile, mcp_omissions=prepared.omissions).write(
-                lock_path, existing_lockfile=lockfile
-            )
+        omissions = prepared.omissions(lockfile) if lockfile is not None else None
+        if lockfile is not None and omissions != lockfile.mcp_omissions:
+            replace(lockfile, mcp_omissions=omissions).write(lock_path, existing_lockfile=lockfile)
 
     return mcp_count, mcp_apm_config
