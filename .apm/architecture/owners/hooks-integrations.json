@@ -33,7 +33,7 @@
     {
       "id": "mcp-target-selection-precedence",
       "decision": "MCP target-selection precedence",
-      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes)",
+      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes; mcp_dependency_runtimes narrows each dependency by its targets: for writes, claim pruning and --frozen claims)",
       "selectors": ["src/apm_cli/integration/mcp_integrator_install.py"],
       "guards": ["hooks-integrations-mcp-target-selection"]
     },

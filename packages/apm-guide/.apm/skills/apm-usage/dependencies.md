@@ -714,6 +714,14 @@ dependencies:
       env:
         API_KEY: ${{ secrets.KEY }}
 
+    # Per-server targets: install targets INTERSECT this list (omitted = all).
+    # Never written into native config; reinstall prunes only dropped targets.
+    - name: claude-only-tools
+      registry: false
+      transport: stdio
+      command: ./bin/claude-tools
+      targets: [claude]
+
     # Self-defined HTTP server
     - name: internal-kb
       registry: false

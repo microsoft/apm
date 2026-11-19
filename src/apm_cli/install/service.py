@@ -111,10 +111,13 @@ class InstallService:
         user_scope: bool,
         project_root: Path | None = None,
         mcp_declared_transports: dict[str, str | None] | None = None,
+        mcp_target_servers: dict[str, set[str]] | None = None,
     ) -> frozenset[tuple[str, str]]:
         """Refuse unrecorded service claims before either service mutates native state.
 
-        MCP claims every server on every target. LSP claims are per target
+        MCP claims every server on every target, narrowed by
+        *mcp_target_servers* when a dependency's ``targets:`` selects fewer.
+        LSP claims are per target
         (*lsp_target_servers* maps each selected runtime to the servers it can
         express), so a server a target skips is never required to be owned there.
 
@@ -148,7 +151,10 @@ class InstallService:
                     "from the available source declarations"
                 )
         deferred: set[tuple[str, str]] = set()
-        claims = [("MCP", target, mcp_servers, mcp_ownership) for target in mcp_targets] + [
+        claims = [
+            ("MCP", target, (mcp_target_servers or {}).get(target, mcp_servers), mcp_ownership)
+            for target in mcp_targets
+        ] + [
             ("LSP", target, names, lockfile.lsp_target_servers)
             for target, names in lsp_target_servers.items()
         ]

@@ -121,6 +121,7 @@ def run_owned_mcp_integration(
         split_mcp_claims,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
     lockfile = LockFile.read(lock_path) or LockFile()
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
@@ -183,6 +184,11 @@ def run_owned_mcp_integration(
     }
     for target, names in list(managed_targets.items()):
         stale_for_target = (stale if target in selected_targets else old_owned) & names
+        if target in selected_targets:
+            # Declared servers whose `targets:` no longer select this runtime.
+            stale_for_target |= (
+                previous_targets.get(target, set()) & old_owned & new_names
+            ) - mcp_servers_for_runtime(dependencies, target)
         if stale_for_target and conflict is None:
             # An entry in a shared file (.mcp.json) stays while an active peer
             # owns it; only this runtime's claim retires.
@@ -564,11 +570,23 @@ def run_mcp_integration(  # noqa: PLR0913
             managed_target_servers.get("copilot") if "copilot" in managed_target_servers else None,
         )
         from apm_cli.install.mcp.ownership import names_owned_by_active_peers
+        from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
-        for removed_target in sorted(
-            builtins.set(old_mcp_target_servers) - builtins.set(managed_target_servers)
-        ):
-            retired_names = builtins.set(old_mcp_target_servers[removed_target])
+        retired_by_target: builtins.dict[str, builtins.set] = {}
+        for owned_target, owned in sorted(old_mcp_target_servers.items()):
+            if owned_target in managed_target_servers:
+                # Declared servers whose `targets:` no longer select this runtime.
+                admitted = mcp_servers_for_runtime(mcp_deps, owned_target)
+                retired_by_target[owned_target] = (builtins.set(owned) & new_mcp_servers) - admitted
+                continue
+            # A runtime this run does not select keeps the servers that name it.
+            kept = builtins.set(owned) & mcp_servers_for_runtime(
+                mcp_deps, owned_target, named_only=True
+            )
+            if kept:
+                managed_target_servers[owned_target] = kept
+            retired_by_target[owned_target] = builtins.set(owned) - kept
+        for removed_target, retired_names in retired_by_target.items():
             # An entry in a file the removed runtime shares (.mcp.json) stays
             # while an active runtime still owns it.
             retired_names -= names_owned_by_active_peers(
