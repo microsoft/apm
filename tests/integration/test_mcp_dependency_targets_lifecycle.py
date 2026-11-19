@@ -58,6 +58,15 @@ def test_project_dependency_targets_scope_servers_per_target(
     assert set(chain.servers("cursor")) == {"srv-claude-only", "srv-cursor-only"}
     chain.ok("install", "--no-policy", "--frozen")
 
+    # A target the manifest itself drops leaves every entry's reach.
+    chain.write_manifest(
+        [_scoped("srv-claude-only", "cursor"), _scoped("srv-cursor-only", "cursor")],
+        targets=["claude"],
+    )
+    chain.ok("install", "--no-policy")
+    assert chain.servers("cursor") == {}
+    assert chain.lock().get("mcp_target_servers", {}) == {}
+
 
 def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
     tmp_path: Path, apm_binary_path: Path
@@ -96,3 +105,8 @@ def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
     assert not re.search(r"^targets\s*=", codex_text, re.M)
     lock = yaml.safe_load((apm_home / "apm.lock.yaml").read_text("utf-8"))
     assert lock["mcp_target_servers"] == {"claude": ["srv-a"], "codex": ["srv-b"]}
+
+    # Undeclaring the server still retires it from the target outside this run.
+    write_global([_scoped("srv-b", "codex")])
+    chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "codex")
+    assert claude_servers() == {}

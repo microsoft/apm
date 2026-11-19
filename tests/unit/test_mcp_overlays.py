@@ -961,3 +961,10 @@ class TestMCPDependencyTargetsScoping:
             }
         )
         assert "targets" not in (dep.extra or {})
+
+    def test_targets_is_modeled_and_rejects_unknown_target_names(self):
+        base = {"name": "srv", "registry": False, "transport": "stdio", "command": "echo"}
+        scoped = MCPDependency.from_dict({**base, "targets": ["claude"]})
+        assert scoped.targets == ["claude"]
+        with pytest.raises(ValueError, match="Unknown target 'claud'"):
+            MCPDependency.from_dict({**base, "targets": ["claud"]})

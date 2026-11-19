@@ -572,6 +572,10 @@ def run_mcp_integration(  # noqa: PLR0913
         from apm_cli.install.mcp.ownership import names_owned_by_active_peers
         from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
+        # Targets the manifest itself stopped selecting leave every entry's reach.
+        manifest_selected = (
+            runtime is None and target_decision is not None and target_decision.source == "apm.yml"
+        )
         retired_by_target: builtins.dict[str, builtins.set] = {}
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
             if owned_target in managed_target_servers:
@@ -583,6 +587,8 @@ def run_mcp_integration(  # noqa: PLR0913
             kept = builtins.set(owned) & mcp_servers_for_runtime(
                 mcp_deps, owned_target, named_only=True
             )
+            if manifest_selected:
+                kept = builtins.set()
             if kept:
                 managed_target_servers[owned_target] = kept
             retired_by_target[owned_target] = builtins.set(owned) - kept
