@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 
 from .client import fetch_or_cache
+from .errors import MarketplaceNotCachedError
 from .registry import get_registered_marketplaces
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ def detect_shadows(
     primary_marketplace: str,
     *,
     auth_resolver: object | None = None,
+    skipped: list[str] | None = None,
 ) -> list[ShadowMatch]:
     """Check registered marketplaces for duplicate plugin names.
 
@@ -47,6 +49,8 @@ def detect_shadows(
             (excluded from the scan).
         auth_resolver: Optional ``AuthResolver`` forwarded to
             :func:`fetch_or_cache`.
+        skipped: Optional list that receives the names of marketplaces not
+            checked because an explicit refresh found no cached catalog.
 
     Returns:
         A list of :class:`ShadowMatch` instances (may be empty).
@@ -65,6 +69,9 @@ def detect_shadows(
                         plugin_name=match.name,
                     )
                 )
+        except MarketplaceNotCachedError:
+            if skipped is not None:
+                skipped.append(source.name)
         except Exception as exc:
             logger.debug(
                 "Shadow check failed for marketplace '%s': %s",
