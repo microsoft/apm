@@ -436,6 +436,34 @@ def _find_declaration(
     return None
 
 
+def _not_found_message(declarations: Sequence[ExecutableDeclaration], pkg: str) -> str:
+    """Name the ported package a port-less name almost matched (#3967).
+
+    Grants never fall back across ports, so the message points at the exact
+    key to use instead of guessing.
+    """
+    from dataclasses import replace
+
+    from ..models.dependency.reference import DependencyReference
+
+    try:
+        wanted = DependencyReference.parse(pkg).get_unique_key()
+    except ValueError:
+        return f"{pkg}: not found in installed packages"
+    ported = []
+    for decl in declarations:
+        try:
+            ref = DependencyReference.parse(decl.package_key)
+        except ValueError:
+            continue
+        if ref.port is not None and replace(ref, port=None).get_unique_key() == wanted:
+            ported.append(decl.package_key)
+    if not ported:
+        return f"{pkg}: not found in installed packages"
+    keys = " or ".join(f"'apm approve {key}'" for key in sorted(ported))
+    return f"{pkg}: not found in installed packages; it is installed with a port, run {keys}"
+
+
 def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str | None:
     """Find a key in *grant_map* that matches *pkg* (exact or prefix)."""
     if pkg in grant_map:
@@ -533,7 +561,7 @@ def _approve_packages(
         decl = _find_declaration(declarations, pkg)
 
         if decl is None:
-            _rich_warning(f"{pkg}: not found in installed packages")
+            _rich_warning(_not_found_message(declarations, pkg))
             continue
 
         if not decl.has_executables:
