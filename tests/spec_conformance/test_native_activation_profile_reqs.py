@@ -261,7 +261,7 @@ def test_enable_requires_content_bound_approval(tmp_path: Path) -> None:
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
     assert_spec_contains(
-        "identified by the root\ndigest of [req-na-002](#req-na-002) rather than by package name",
+        "identified by the approval\ndigest of that root rather than by package name",
         "MUST NOT declare it in a disabled state",
     )
     ctx = SimpleNamespace(claude_native_plugins={})
@@ -276,6 +276,45 @@ def test_enable_requires_content_bound_approval(tmp_path: Path) -> None:
     queue_native_claude(ctx, "owner/alpha", parked, diagnostics)
     assert ctx.claude_native_plugins == {}
     assert any("Parked native plugin" in d.message for d in diagnostics._diagnostics)
+
+
+@pytest.mark.req("req-na-005")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not enforced on Windows")
+def test_approval_digest_binds_paths_and_bytes_but_not_the_executable_bit(tmp_path: Path) -> None:
+    """Amendment 0.1.66: one approval covers the same content across operating systems."""
+    from apm_cli.security.executables import build_exec_trust_context, materialize_exec_map
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    assert_spec_contains(
+        "with the executable-bit byte omitted: for each file,",
+        "which includes that bit, still gates integrity between the materialized",
+    )
+    root = tmp_path / "alpha"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text('{"name": "alpha"}', encoding="utf-8")
+    (root / "hooks").mkdir()
+    script = root / "hooks/start.sh"
+    script.write_text("echo start\n", encoding="utf-8")
+    script.chmod(0o644)
+    approved = native_plugin_fingerprint(root)
+    deployed_digest = compute_native_plugin_hash(root)
+    allow = materialize_exec_map(
+        build_exec_trust_context(
+            policy=None,
+            project_data={"executables": {"allow": {"owner/alpha": {"plugin": approved}}}},
+        )
+    )
+
+    script.chmod(0o755)
+    assert native_plugin_fingerprint(root) == approved
+    assert admit_native_plugin(allow, ("owner/alpha",), root).allowed
+    # The integrity root digest still sees the mode change.
+    assert compute_native_plugin_hash(root) != deployed_digest
+
+    script.write_text("echo changed\n", encoding="utf-8")
+    assert not admit_native_plugin(allow, ("owner/alpha",), root).allowed
 
 
 @pytest.mark.req("req-na-006")

@@ -860,8 +860,9 @@
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_approval_digest_binds_paths_and_bytes_but_not_the_executable_bit",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_enable_requires_content_bound_approval"
       ]
     },
