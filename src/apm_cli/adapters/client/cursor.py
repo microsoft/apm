@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 
 from ...core.token_manager import GitHubTokenManager
+from ...mcp_transport import canonical_remote_transport
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .copilot import CopilotClientAdapter
 
 
@@ -23,6 +25,8 @@ class CursorClientAdapter(CopilotClientAdapter):
     :class:`CopilotClientAdapter` but overrides ``_format_server_config`` to
     emit Cursor-native transport discriminators instead of Copilot-only fields.
     """
+
+    remote_shape = remote_shape_row("cursor")
 
     supports_user_scope: bool = True
     target_name: str = "cursor"
@@ -203,18 +207,14 @@ class CursorClientAdapter(CopilotClientAdapter):
         if remotes:
             remote = self._select_remote_with_url(remotes) or remotes[0]
 
-            transport = (remote.get("transport_type") or "").strip()
-            if not transport:
-                transport = "http"
-            elif transport not in ("sse", "http", "streamable-http"):
-                raise ValueError(
-                    f"Unsupported remote transport '{transport}' for Cursor. "
-                    f"Server: {server_info.get('name', 'unknown')}. "
-                    f"Supported transports: http, sse, streamable-http."
-                )
-
-            config["type"] = "http"
-            config["url"] = (remote.get("url") or "").strip()
+            server_name = server_info.get("name", "unknown")
+            transport = canonical_remote_transport(
+                remote, runtime_label="Cursor", server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
+            config.update(shape.render(transport, (remote.get("url") or "").strip()))
 
             self._apply_auth_and_headers(config, remote, server_info, env_overrides, "Cursor")
             self._merge_extra(config, server_info)
@@ -278,7 +278,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if self.update_config({config_key: server_config}) is False:

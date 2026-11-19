@@ -3,7 +3,7 @@
 Reads global (apply_to-less) instructions from ~/.apm/apm_modules and
 writes each active target's user-scope root context file:
   claude  -> ~/.claude/CLAUDE.md  (or $CLAUDE_CONFIG_DIR/CLAUDE.md)
-  codex   -> ~/.codex/AGENTS.md
+  codex   -> ~/.codex/AGENTS.md  (or $CODEX_HOME/AGENTS.md)
   gemini  -> ~/.gemini/GEMINI.md
   copilot -> ~/.copilot/AGENTS.md
   vscode  -> ~/.copilot/AGENTS.md (same deploy root at user scope)

@@ -56,6 +56,7 @@ def test_receipt_requires_both_public_completion_witnesses(
     actual = integrate_package_primitives(
         package,
         tmp_path,
+        skill_subset=None,
         targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]],
         dep_target_subset=["codex"],
         integrators=bundle,
@@ -84,6 +85,7 @@ def test_receipt_requires_both_public_completion_witnesses(
     refused = integrate_package_primitives(
         package,
         tmp_path,
+        skill_subset=None,
         targets=[],
         integrators=bundle,
         force=False,

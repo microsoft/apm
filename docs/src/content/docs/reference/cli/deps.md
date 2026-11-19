@@ -17,7 +17,7 @@ apm deps SUBCOMMAND [OPTIONS]
 
 `apm deps` is the read-and-maintenance counterpart to [`apm install`](../install/). It reads `apm.lock.yaml` and the `apm_modules/` tree to show what is installed, refresh git refs, or remove the tree entirely. It does not add new packages -- use `apm install <package>` for that.
 
-All subcommands operate on the project scope (`./apm_modules/`) by default. Pass `-g` / `--global` where supported to operate on the user scope (`~/.apm/apm_modules/`).
+All subcommands operate on the project scope (`./apm_modules/`) by default. Pass `-g` / `--global` where supported to operate on `$APM_HOME/apm_modules/` (default `~/.apm/apm_modules/`). Target files do not move; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract).
 
 ## Subcommands
 
@@ -37,6 +37,11 @@ primitive counts each one contributes. Manifests embedded anywhere inside an
 installed package's source tree are parent-owned content, not separate
 dependencies. Real lockfile-resolved dependencies install at their own package
 roots and remain visible regardless of graph depth.
+
+Packages on a non-default host are listed by their host-qualified key, such as
+`gitlab.example.com/org/repo`, the key `apm deps tree` shows and
+`apm uninstall` accepts. The Source column follows the declared or locked host
+type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`.
 
 Orphan status uses the same selection as [`apm prune`](../prune/). Skills
 bundled inside a declared package, such as a whole-repository skill bundle,
@@ -63,7 +68,7 @@ apm deps list [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `-g, --global` | List user-scope dependencies in `~/.apm/` instead of the project. |
+| `-g, --global` | List user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the project. |
 | `--all` | Show both project and user-scope dependencies. |
 | `--insecure` | Show only dependencies locked to `http://` sources. Adds an `Origin` column distinguishing `direct` declarations from `via <parent>` transitive pulls. |
 
@@ -86,7 +91,7 @@ apm deps tree [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `-g, --global` | Show the user-scope tree in `~/.apm/`. |
+| `-g, --global` | Show the user-scope tree under `$APM_HOME` (default `~/.apm`). |
 
 ### `apm deps info`
 
@@ -110,11 +115,11 @@ apm deps why PACKAGE [OPTIONS]
 
 | Argument | Description |
 |---|---|
-| `PACKAGE` | The installed package to explain. Accepts the same identifier styles as `apm deps info`: unique key (`owner_repo`), repo URL (`https://github.com/owner/repo`), `owner/repo`, or bare basename when unambiguous. |
+| `PACKAGE` | The installed package to explain. Accepts the lockfile key (`owner/repo`, or `host/owner/repo` for non-GitHub hosts) or the bare repo name when unambiguous. URLs are not normalized. |
 
 | Option | Description |
 |---|---|
-| `-g, --global` | Read the user-scope lockfile at `~/.apm/apm.lock.yaml` instead of the project lockfile. |
+| `-g, --global` | Read `$APM_HOME/apm.lock.yaml` (default `~/.apm/apm.lock.yaml`) instead of the project lockfile. |
 | `--json` | Emit a machine-readable JSON document to stdout. All logs and error payloads are routed to stderr so `apm deps why pkg --json \| jq` is safe. |
 
 Exit codes: `0` on success, `1` when the package is not installed or the query matches multiple packages, `2` when no lockfile exists.
@@ -122,7 +127,7 @@ Exit codes: `0` on success, `1` when the package is not installed or the query m
 ### `apm deps update`
 
 :::caution[Deprecated]
-`apm deps update` is deprecated in favor of [`apm update`](../update/), which is now a strict superset: it supports `-g/--global`, `[PACKAGES...]`, `--force`, and `--parallel-downloads`, plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
+`apm deps update` is deprecated in favor of [`apm update`](../update/), which supports `-g/--global`, `[PACKAGES...]`, `--force`, `--parallel-downloads`, `--target`, and `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS`), plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
 :::
 
 Re-resolve git references for installed dependencies (direct and transitive), download updated content, re-integrate primitives, and regenerate `apm.lock.yaml`.
@@ -141,8 +146,8 @@ apm deps update [PACKAGES...] [OPTIONS]
 | `--force` | Overwrite locally-authored files on collision. |
 | `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `agents`, `agy`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `vscode`, `windsurf`. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
-| `-g, --global` | Update user-scope dependencies in `~/.apm/`. |
-| `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. |
+| `-g, --global` | Update user-scope dependencies under `$APM_HOME` (default `~/.apm`). |
+| `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 `apm deps update` runs the install pipeline and is gated by org `apm-policy.yml`. There is no `--no-policy` flag; the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session.
 

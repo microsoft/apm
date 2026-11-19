@@ -107,6 +107,7 @@ class TestRunMcpIntegrationInstallBranch:
             native_hashes={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -333,6 +334,29 @@ class TestRunMcpIntegrationInstallBranch:
 class TestRunMcpIntegrationEmptyDepsBranch:
     """``should_install=True`` and ``mcp_deps`` empty."""
 
+    @pytest.mark.parametrize(("version", "stamped"), [("0.35.0", True), ("0.37.0", False)])
+    @patch(_PATCH_TARGET)
+    def test_no_deps_stamps_a_lock_whose_claims_it_translated(
+        self, mock_mcp, tmp_path, version, stamped
+    ):
+        from apm_cli.deps.lockfile import LockFile
+
+        mock_mcp.get_server_names.return_value = set()
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[],
+                project_root=tmp_path,
+                old_mcp_servers={"orphan"},
+                old_mcp_configs={"orphan": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"orphan"}},
+                pre_install_lock=LockFile(
+                    apm_version=version, mcp_target_servers={"copilot": ["orphan"]}
+                ),
+            )
+        )
+
+        assert mock_mcp.update_lockfile.call_args.kwargs["stamp_version"] is stamped
+
     @patch(_PATCH_TARGET)
     def test_no_deps_no_old_servers_is_a_noop(self, mock_mcp):
         run_mcp_integration(**_base_kwargs(mcp_deps=[]))
@@ -365,6 +389,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             mcp_config_provenance={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
 
     @patch(_PATCH_TARGET)
@@ -462,6 +487,44 @@ class TestRunMcpIntegrationPolicyBlock:
 
         mock_mcp.install.assert_not_called()
         mock_mcp.update_lockfile.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_policy_block_hint_names_direct_dependency_from_view(self, mock_mcp):
+        """#3835 review: the merged-set preflight hints the direct apm.yml
+        entry the view traced, not the declaring package's display name."""
+        from apm_cli.install.mcp.integration import PreparedMcpIntegration
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+        name = "io.github.untrusted/evil-transitive"
+        evil_dep = MCPDependency(name=name, transport="stdio", resolved_by="parent-pkg")
+        view = CurrentMcpConfigView(
+            dependencies=(evil_dep,),
+            configs={},
+            provenance={name: "parent-pkg"},
+            problems=(),
+            brought_in_by={name: "acme/parent-pkg"},
+        )
+        logger = _make_logger()
+
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=self._fetch_result(),
+            ),
+            patch.object(logger, "policy_violation") as mock_violation,
+            pytest.raises(PolicyBlockError),
+        ):
+            run_mcp_integration(
+                **_base_kwargs(
+                    mcp_deps=[evil_dep],
+                    logger=logger,
+                    prepared=PreparedMcpIntegration([evil_dep], view, None),
+                )
+            )
+
+        assert {c.kwargs["declared_by"] for c in mock_violation.call_args_list} == {
+            "acme/parent-pkg"
+        }
 
     @patch(_PATCH_TARGET)
     def test_no_policy_flag_skips_preflight_and_installs(self, mock_mcp):

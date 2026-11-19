@@ -36,6 +36,11 @@ dependency list nor needed by a retained package. This preserves transitive
 dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
+A package removed from `apm.yml` by hand that another installed package still
+declares is kept; the next `apm install` records it as transitive. If a
+retained package's manifest cannot be read, prune keeps such packages rather
+than guess.
+
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or
 `apm update` trims the old checkout to the requested subdirectories.
@@ -183,6 +188,6 @@ confirm the resulting state.
 
 - [`apm install`](../install/) -- install declared dependencies
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
-- [`apm list`](../list/) -- inspect what is installed
+- [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
 - [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where

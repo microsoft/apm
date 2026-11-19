@@ -55,6 +55,77 @@ def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                     del pool[content_key]
 
 
+def read_merged_hook_config(json_path: Path, project_root: Path, *, user_scope: bool) -> dict:
+    """Return the existing merged hook config, or ``{}`` when absent or unreadable.
+
+    A project config whose path runs through a symlink is refused, so hook
+    entries are never merged into (or read from) a file outside the project.
+    """
+    if not user_scope and has_symlink_component(project_root, json_path):
+        raise PathTraversalError(
+            f"Refusing to merge hooks through a symlinked config file: {json_path.name}. "
+            "Replace the symlink with a regular file or remove it, then retry."
+        )
+    if not json_path.exists():
+        return {}
+    try:
+        with open(json_path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def drop_source_entries(
+    hooks: dict,
+    markers: frozenset[str] | set[str],
+    keep_events: frozenset[str] | set[str] = frozenset(),
+) -> None:
+    """Remove entries owned by *markers* from every event outside *keep_events*.
+
+    An event this call empties is deleted; user and sibling entries are kept.
+    Merged targets keep the events a source re-declared this run, so a hook
+    file removed from a package cannot leave its event entries behind (#3665).
+    """
+    for event_name in list(hooks):
+        entries = hooks[event_name]
+        if event_name in keep_events or not isinstance(entries, list):
+            continue
+        kept = [e for e in entries if not (isinstance(e, dict) and e.get("_apm_source") in markers)]
+        if len(kept) == len(entries):
+            continue
+        if kept:
+            hooks[event_name] = kept
+        else:
+            del hooks[event_name]
+
+
+def drop_dependency_owned_entries(hooks: dict) -> bool:
+    """Remove APM-owned entries except local-bundle ones and drop emptied events.
+
+    Return whether any entry was removed.
+    """
+    modified = False
+    for event_name in list(hooks):
+        entries = hooks[event_name]
+        if not isinstance(entries, list):
+            continue
+        kept = [
+            entry
+            for entry in entries
+            if not (
+                isinstance(entry, dict)
+                and "_apm_source" in entry
+                and not is_local_bundle_hook_source(entry["_apm_source"])
+            )
+        ]
+        modified = modified or len(kept) != len(entries)
+        if kept:
+            hooks[event_name] = kept
+        else:
+            del hooks[event_name]
+    return modified
+
+
 def extract_apm_source_sidecar(hooks: dict) -> dict[str, list[dict[str, Any]]]:
     """Extract ownership metadata and leave native hook entries schema-clean."""
     sidecar: dict[str, list[dict[str, Any]]] = {}
@@ -100,7 +171,27 @@ def canonicalize_hook_sidecar(sidecar_bytes: bytes) -> bytes:
     )
     if not isinstance(sidecar, dict):
         raise ValueError("ownership sidecar must be a JSON object")
+    sidecar = _without_local_bundle_entries(sidecar)
     return json.dumps(sidecar, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _without_local_bundle_entries(hooks: dict[str, Any]) -> dict[str, Any]:
+    """Drop local-bundle-owned entries: replay has no source to rebuild them from."""
+    kept: dict[str, Any] = {}
+    for event_name, entries in hooks.items():
+        if not isinstance(entries, list):
+            kept[event_name] = entries
+            continue
+        remaining = [
+            entry
+            for entry in entries
+            if not (
+                isinstance(entry, dict) and is_local_bundle_hook_source(entry.get("_apm_source"))
+            )
+        ]
+        if remaining or not entries:
+            kept[event_name] = remaining
+    return kept
 
 
 def project_apm_owned_hook_entries(
@@ -114,6 +205,7 @@ def project_apm_owned_hook_entries(
     documents makes unrelated user hooks look like deployment drift. The
     sidecar is APM-owned and maps matching native entries back to their
     ``_apm_source`` markers; retain only that marked slice for comparison.
+    Local-bundle entries are excluded, as replay cannot rebuild them.
     """
 
     config = json.loads(config_bytes, object_pairs_hook=_reject_duplicate_keys)
@@ -148,6 +240,7 @@ def project_apm_owned_hook_entries(
         if any(config_counts[key] > count for key, count in owned_counts.items()):
             raise ValueError("ambiguous duplicate APM-owned hook entry")
     reinject_apm_source_from_sidecar(container, sidecar)
+    container = _without_local_bundle_entries(container)
 
     owned: dict[str, list[dict[str, Any]]] = {}
     for event_name, entries in container.items():
@@ -159,6 +252,20 @@ def project_apm_owned_hook_entries(
         if owned_entries:
             owned[event_name] = owned_entries
     return json.dumps(owned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+# "::" never appears in a canonical dependency string, so no package can claim it.
+LOCAL_BUNDLE_HOOK_SOURCE_PREFIX = "local-bundle::"
+
+
+def local_bundle_hook_source_marker(bundle_id: str) -> str:
+    """Return the sidecar marker for hooks a local bundle install registered."""
+    return f"{LOCAL_BUNDLE_HOOK_SOURCE_PREFIX}{bundle_id}"
+
+
+def is_local_bundle_hook_source(marker: object) -> bool:
+    """Return whether *marker* names a local bundle rather than a dependency."""
+    return isinstance(marker, str) and marker.startswith(LOCAL_BUNDLE_HOOK_SOURCE_PREFIX)
 
 
 def dependency_hook_source_marker(dependency_ref) -> str:

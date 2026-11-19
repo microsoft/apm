@@ -11,6 +11,61 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import APMPackage, PackageType
 
 
+def proxy_only_lock_entries(lockfile: Any, *, update_refs: bool, ctx: Any) -> list:
+    """Return the lock entries a ``PROXY_REGISTRY_ONLY`` run keeps without re-resolving.
+
+    A plain install keeps every entry. A full ref update re-resolves them all.
+    A targeted update (``apm update PKG``) re-resolves only the selected subtree
+    and merges the rest back, so those retained entries still need checking.
+    """
+    entries = list(lockfile.dependencies.values())
+    if not update_refs:
+        return entries
+    if not getattr(ctx, "only_packages", None):
+        return []
+    reresolved = {dep.get_unique_key() for dep in getattr(ctx, "deps_to_install", ()) or ()}
+    return [dep for dep in entries if dep.get_unique_key() not in reresolved]
+
+
+def lockfile_refresh_command(scope: Any) -> str:
+    """Return the command that re-resolves dependencies and re-pins the lockfile."""
+    from apm_cli.core.scope import InstallScope
+
+    return "apm update -g" if scope is InstallScope.USER else "apm update"
+
+
+def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
+    """Explain a lockfile content mismatch and name the command that re-pins it.
+
+    A direct dependency gets the targeted ``apm update <dep_key>``: its key is
+    the ``replace:``-projected unique key ``apm update`` matches. A transitive
+    one cannot be named on that command line, so it gets the full refresh.
+    """
+    command = lockfile_refresh_command(ctx.scope)
+    if dep_key in (getattr(ctx, "declared_direct_refs", None) or {}):
+        return (
+            f"This may indicate a supply-chain attack. Use '{command} {dep_key}' to "
+            "accept new content for this package and re-pin it in the lockfile."
+        )
+    return (
+        f"This may indicate a supply-chain attack. Use '{command}' to accept "
+        "new content and update the lockfile."
+    )
+
+
+def ref_update_operation_label() -> str:
+    """Name the invoked ref-updating command (``update``, ``install --update``, ...)."""
+    import click
+
+    click_ctx = click.get_current_context(silent=True)
+    if click_ctx is None:
+        return "update"
+    _, _, subcommand = click_ctx.command_path.partition(" ")
+    if subcommand == "install":
+        return "install --update"
+    return subcommand or "update"
+
+
 def locked_parent_identity(ctx: InstallContext, node: DependencyNode | None) -> str | None:
     """Use exact original parent keys in the replacement-enabled lock contract."""
     from apm_cli.deps.lockfile import lockfile_parent_identity
@@ -161,8 +216,7 @@ def ensure_carried_licenses_match(
     raise DirectDependencyError(
         f"Licence file mismatch for {dep_key}: the licence files carried "
         "from the repository differ from the lockfile record. "
-        "This may indicate a supply-chain attack. Use "
-        "'apm install --update' to accept new content and update the lockfile."
+        + supply_chain_mismatch_hint(ctx, dep_key)
     )
 
 

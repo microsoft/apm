@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+from functools import wraps
 from pathlib import Path
 
 import click
@@ -19,9 +20,10 @@ from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
     detect_signals,
-    manifest_targets_from_target_option,
 )
 from ..install.locking import serialized_lifecycle_unless
+from ..models.manifest_io import InvalidManifestError
+from ..models.manifest_targets import IdeTargetError, option_target_names, rewrite_target_names
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -79,6 +81,38 @@ def _invalid_project_name_message(name: str) -> str:
     )
 
 
+def _refuse_ide_target_first(source):
+    """Refuse an IDE ``--target`` before the lifecycle lock is taken (#3878).
+
+    Applied outside the lifecycle decorator so a refused ``apm init`` or
+    ``apm plugin init`` creates no lock, project directory or manifest.
+    """
+
+    def decorate(run):
+        @wraps(run)
+        def wrapped(*args, **kwargs):
+            target_flag = kwargs.get("target_flag")
+            if target_flag is not None:
+                logger = CommandLogger(source, verbose=kwargs.get("verbose", False))
+                _option_targets_or_exit(target_flag, logger)
+            return run(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
+
+
+def _option_targets_or_exit(target_flag, logger):
+    """Map ``--target`` through the declaration owner; refuse IDE targets (#3878)."""
+    try:
+        targets = option_target_names(target_flag)
+    except IdeTargetError as exc:
+        logger.error(f"Cannot record --target {exc.token} in {APM_YML_FILENAME}: {exc}")
+        logger.progress("Nothing was written.", symbol="info")
+        sys.exit(1)
+    return targets
+
+
 @click.command(help="Initialize a new APM project")
 @click.option(
     "--discover",
@@ -123,6 +157,7 @@ def _invalid_project_name_message(name: str) -> str:
 @click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
+@_refuse_ide_target_first("init")
 @serialized_lifecycle_unless("discover_flag")
 def init(
     ctx: click.Context,
@@ -302,6 +337,10 @@ def _perform_init(
                 "Provide a version such as '1.0.0', or omit --version to use the default."
             )
             sys.exit(1)
+
+        # Refuse a --target that apm.yml cannot record before creating anything.
+        if target_flag is not None:
+            _option_targets_or_exit(target_flag, logger)
 
         # Determine project directory and name
         if project_name:
@@ -573,11 +612,8 @@ def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) 
     mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
     with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
         staged_root = Path(stage)
-        _create_minimal_apm_yml(
-            config,
-            plugin=True,
-            target_path=staged_root / APM_YML_FILENAME,
-        )
+        staged_manifest = staged_root / APM_YML_FILENAME
+        _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest)
         _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
         (staged_root / "mcp.json").write_text(
             json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
@@ -693,7 +729,7 @@ def _confirm_setup_summary(config: dict, logger) -> None:
 
     Aborts via ``sys.exit(0)`` if the user declines.
     """
-    targets = config.get("targets")
+    targets = config.get("targets")  # architecture-authority-exempt: bootstrap-writer
     targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
 
     try:
@@ -755,7 +791,7 @@ def _resolve_init_targets(
     """
     # Case 1: --target flag provided -- wins unconditionally
     if target_flag is not None:
-        targets = manifest_targets_from_target_option(target_flag)
+        targets = _option_targets_or_exit(target_flag, logger)
         if not targets:
             return None
         logger.progress(f"Targets set: {', '.join(targets)} (via --target flag)", symbol="info")
@@ -764,10 +800,27 @@ def _resolve_init_targets(
     # Determine pre-check state
     prechecked: set[str] = set()
     signal_hints: dict[str, str] = {}
+    is_tty = _stdin_is_tty()
 
     if apm_yml_exists:
         # Re-init: seed from existing apm.yml target field
-        existing_targets = _read_existing_targets(project_root)
+        try:
+            existing_targets = _read_existing_targets(project_root)
+        except (ValueError, click.UsageError) as exc:
+            detail = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+            message = (
+                f"Cannot carry the targets of the existing {APM_YML_FILENAME} into the new "
+                f"one: {detail.strip()}"
+            )
+            if yes or not is_tty:
+                logger.error(message)
+                logger.progress(
+                    "Re-run 'apm init --target <target,...>' to choose the targets explicitly.",
+                    symbol="info",
+                )
+                sys.exit(1)
+            logger.warning(message)
+            existing_targets = []
         if existing_targets:
             prechecked = set(existing_targets)
             for t in existing_targets:
@@ -783,7 +836,6 @@ def _resolve_init_targets(
 
     # Case 2: non-interactive (--yes OR non-TTY stdin -- never block CI on
     # this prompt; emit explicit provenance so users see what was chosen).
-    is_tty = _stdin_is_tty()
     if yes or not is_tty:
         if not yes and not is_tty:
             logger.progress(
@@ -793,7 +845,7 @@ def _resolve_init_targets(
             )
         if prechecked:
             targets = sorted(prechecked)
-            sources = ", ".join(signal_hints.get(t, "") for t in targets)
+            sources = ", ".join(dict.fromkeys(signal_hints.get(t, "") for t in targets))
             logger.progress(
                 f"Auto-detected targets: {', '.join(targets)} {sources}".rstrip(),
                 symbol="info",
@@ -807,38 +859,34 @@ def _resolve_init_targets(
 
 
 def _read_existing_targets(project_root: Path) -> list[str]:
-    """Read targets/target field from existing apm.yml if present.
+    """Return the ``targets:`` a re-init writes for the existing apm.yml.
 
-    Reads the canonical plural ``targets:`` list first; falls back to the
-    legacy singular ``target:`` CSV/scalar form for backwards compatibility
-    with apm.yml files written before plural became canonical.
+    Routes through the declaration owner's one target rewrite mapping
+    (``rewrite_target_names``): for example legacy ``target: agents`` becomes
+    ``copilot``. An unreadable manifest yields no targets, since re-init
+    replaces it.
+
+    Raises:
+        ValueError, click.UsageError: The declaration is invalid, a declared
+            target has no ``targets:`` equivalent (``TargetRewriteError``), or
+            the manifest uses a YAML anchor, alias or duplicate top-level key
+            (``InvalidManifestError``).
     """
-    apm_yml_path = project_root / APM_YML_FILENAME
-    if not apm_yml_path.exists():
-        return []
-    try:
-        # Bounded loader so a hostile apm.yml cannot wedge target parsing with a
-        # merge/alias expansion bomb (fails closed -> empty target list).
-        from apm_cli.utils.yaml_io import load_yaml
+    import yaml
 
-        data = load_yaml(apm_yml_path)
-        if not isinstance(data, dict):
-            return []
-        # Canonical plural form
-        raw = data.get("targets")
-        if raw is not None:
-            if isinstance(raw, list):
-                return [str(t).strip() for t in raw if str(t).strip()]
-            return [t.strip() for t in str(raw).split(",") if t.strip()]
-        # Legacy singular form
-        raw = data.get("target")
-        if raw is None:
-            return []
-        if isinstance(raw, list):
-            return [str(t).strip() for t in raw if str(t).strip()]
-        return [t.strip() for t in str(raw).split(",") if t.strip()]
-    except Exception:
+    from ..models.manifest_io import load_manifest
+    from ..models.manifest_targets import ManifestTargetDeclaration
+
+    apm_yml_path = project_root / APM_YML_FILENAME
+    try:
+        data = load_manifest(apm_yml_path) if apm_yml_path.is_file() else None
+    except InvalidManifestError:
+        raise
+    except (OSError, ValueError, yaml.YAMLError):
         return []
+    return list(
+        rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path)) or ()
+    )
 
 
 def _parse_toggle_input(response: str, max_n: int) -> tuple[list[int], str | None]:

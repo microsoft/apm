@@ -39,6 +39,7 @@ from ..utils.git_env import (
     git_no_hooks_args,
     git_no_templates_args,
     redact_git_diagnostic,
+    run_git_text,
 )
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 
@@ -269,12 +270,11 @@ class GitSparseFileTransport:
         from ..utils.git_env import git_subprocess_env, redact_git_diagnostic
 
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 cmd,
                 cwd=str(self._work_dir),
                 env=git_subprocess_env(self._git_env),
                 capture_output=True,
-                text=True,
                 timeout=self._timeout,
             )
         except subprocess.TimeoutExpired as exc:

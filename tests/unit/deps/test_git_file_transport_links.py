@@ -6,12 +6,14 @@ tracked link would otherwise come back as its target-path text.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from apm_cli.deps.git_file_transport import GitFileTransportError, GitSparseFileTransport
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils import git_sparse
 from tests.utils.git_link_fixture import bare_clone, build_link_origin, neutral_git_env
 
 pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
@@ -52,3 +54,27 @@ def test_sparse_file_fetch_rejects_escaping_link(tmp_path: Path) -> None:
         pytest.raises(GitFileTransportError, match="resolves outside the repository"),
     ):
         transport.fetch_file("pkg/escape.md")
+
+
+def test_out_of_sparse_eol_target_keeps_checkout_bytes_without_attr_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Git without ``--attr-source`` still yields the checkout bytes (#3457).
+
+    The link's ``eol=crlf`` target lies outside the sparse set, so its
+    ``.gitattributes`` is not in the work tree. Resolving it must not depend
+    on a version-gated option or fall back to a read that skips attributes.
+    """
+    real_run = git_sparse.subprocess.run
+
+    def run(args: list[str], *pargs: object, **kwargs: object) -> object:
+        if any(str(arg).startswith("--attr-source") for arg in args):
+            raise subprocess.CalledProcessError(129, args, stderr=b"unknown option")
+        return real_run(args, *pargs, **kwargs)
+
+    monkeypatch.setattr(git_sparse.subprocess, "run", run)
+    with _transport(tmp_path) as transport:
+        link = transport.fetch_file("pkg/notes.crlf")
+        target = transport.fetch_file("shared/notes.crlf")
+
+    assert link == target == b"line one\r\nline two\r\n"

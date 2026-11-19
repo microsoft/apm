@@ -158,3 +158,32 @@ def test_codex_agent_native_models_and_dropped_metadata_reach_cli_output(
     assert "not translated by APM for Codex" in output
     assert "otherwise do not rely on" in output
     assert "field 'tools' was dropped" not in output
+    assert "Claude model" not in output
+
+
+def test_codex_agent_claude_model_warning_reaches_cli_output(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A Claude model alias is kept verbatim and the names-only warning reaches the CLI."""
+    result, project = _install_codex_agent(
+        tmp_path / "claude-model",
+        apm_binary_path,
+        name="claude-reviewer",
+        tools=None,
+        metadata={"model": "sonnet"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _read_toml(project / ".codex" / "agents" / "claude-reviewer.toml") == {
+        "name": "claude-reviewer",
+        "description": "Codex agent claude-reviewer",
+        "developer_instructions": "Review the requested change.",
+        "model": "sonnet",
+    }
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "[!]" in output
+    assert "1 lossy agent compilation warning" in output
+    assert "claude-reviewer.agent.md" in output
+    assert "frontmatter field 'model' names a Claude model alias or id" in output
+    assert "kept as written" in output
+    assert "sonnet" not in output

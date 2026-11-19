@@ -91,8 +91,7 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
             ]
         },
         "allowExecutables": {
-            f"github.com/{dependency}/plugins/{label}#{revision}": {"hooks": True}
-            for label in sources
+            f"{dependency}/plugins/{label}#{revision}": {"hooks": True} for label in sources
         },
     }
     (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
@@ -231,9 +230,7 @@ def test_installed_hook_source_reinstall_and_removal(
             ]
         },
         "allowExecutables": {
-            str(source) if local else f"github.com/{dependency}/plugins/context#{revision}": {
-                "hooks": True
-            }
+            str(source) if local else f"{dependency}/plugins/context#{revision}": {"hooks": True}
         },
     }
     (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")

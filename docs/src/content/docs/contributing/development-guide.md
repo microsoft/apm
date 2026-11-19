@@ -63,6 +63,10 @@ uses `triage/recommended` after the canonical label is provisioned and
 this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
+PR triage may recommend deferral in its advisory comment, but applying
+`status/deferred` remains a human decision. Issue-triage and PR-review workers
+also stop and report missing active companion personas under
+`.github/agents/` rather than silently omitting a required lens.
 
 The scheduled Triage Panel (also used by a blank manual dispatch) fetches
 labels and complete comments before selecting at most five issues. It
@@ -376,7 +380,7 @@ cannot mask a missed release.
 For instant feedback before pushing, install the pre-commit hooks:
 
 ```bash
-uv run pre-commit install
+uvx pre-commit install
 ```
 
 This is optional -- CI is the authoritative gate. The pre-commit hook rev may lag behind the CI version; check `.pre-commit-config.yaml` against `uv.lock` if you see discrepancies.
@@ -418,6 +422,7 @@ consistency with the repository pin, and action-pin consistency.
 
 The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
 pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Python uses a standard Ubuntu ARM64 runner; Actions analysis stays on x86_64.
 Keep the workflow path, `analyze` job ID, and language matrix stable: they
 identify the analysis configurations GitHub compares against the base branch.
 PR results do not replace results for the merge queue's separate commit.
@@ -496,7 +501,7 @@ coupled edits in the same PR:
 1. **Spec:** add or change a `<a id="req-XXX"></a>` anchor and its prose in
    `docs/src/content/docs/specs/openapm-v0.1.md`, plus the matching Appendix C row.
 2. **Manifest:** update
-   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
 3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
    `tests/spec_conformance/`. If a real assertion is not yet possible, call

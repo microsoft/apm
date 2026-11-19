@@ -746,6 +746,46 @@ class TestGrokBuildLocalBundleDeployment:
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
+    def test_packed_markdown_agents_are_skipped_for_codex_with_one_warning_each(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.services import integrate_local_bundle
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"agents/rev.agent.md": "# Rev\n", "agents/lint.md": "# Lint\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+        diagnostics = DiagnosticCollector()
+        bundle_info = LocalBundleInfo(
+            source_dir=bundle,
+            plugin_json={"id": "test-plugin"},
+            package_id="test-plugin",
+            lockfile=yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8")),
+            pack_targets=["claude"],
+        )
+
+        result = integrate_local_bundle(
+            bundle_info,
+            project,
+            targets=(KNOWN_TARGETS["codex"],),
+            diagnostics=diagnostics,
+            scope=InstallScope.PROJECT,
+        )
+
+        assert result["deployed_files"] == []
+        assert result["skipped"] == 2
+        assert not (project / ".codex" / "agents").exists()
+        warnings = sorted(w.message for w in diagnostics.by_category()[CATEGORY_WARNING])
+        assert len(warnings) == 2
+        assert "'agents/lint.md' for target codex" in warnings[0]
+        assert "'agents/rev.agent.md' for target codex" in warnings[1]
+        assert all("codex_agent (.toml)" in message for message in warnings)
+
     @pytest.mark.parametrize(
         "target_name",
         sorted(KNOWN_TARGETS),
@@ -800,6 +840,122 @@ class TestLocalBundlePathRouting:
         original_path = project / target.root_dir / "commands/test-command.md"
         if original_path != expected:
             assert not original_path.exists()
+
+    @pytest.mark.parametrize("rel", ["hooks.json", "hooks/scripts/fmt.sh", "hooks/fmt.json"])
+    def test_plugin_hook_paths_are_left_to_the_hook_integrator(self, rel: str) -> None:
+        """Plugin hook files are never file-copied; local_bundle_hooks registers them."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        for target in (KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]):
+            prefixes = frozenset({f"{target.root_dir}/"})
+            assert bundle_deploy_relative_path(rel, prefixes, prefixes, target=target) is None
+            assert bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target) is None
+
+    def test_target_rooted_hook_files_keep_routing(self) -> None:
+        """Deployed-layout bundles keep their target hook files (not plugin hooks)."""
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        assert (
+            bundle_deploy_relative_path(".github/hooks/pkg.json", prefixes, prefixes, target=target)
+            == "hooks/pkg.json"
+        )
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            ".claude/settings.json",
+            ".claude/settings.local.json",
+            ".cursor/mcp.json",
+            ".github/workflows/ci.yml",
+            "settings.json",
+        ],
+    )
+    def test_only_primitive_paths_are_routed(self, rel: str) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        known = known_bundle_deploy_prefixes()
+        for name in ("claude", "copilot", "cursor"):
+            target = KNOWN_TARGETS[name]
+            allowed = target_bundle_deploy_prefixes(target)
+            assert bundle_deploy_relative_path(rel, allowed, known, target=target) is None
+            warning = bundle_deploy_skip_warning(rel, allowed, known, target=target)
+            if warning is not None:
+                assert "not a primitive file" in warning
+
+    def test_target_rooted_hook_files_follow_hook_approval(self) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        rel = ".github/hooks/pkg.json"
+        assert (
+            bundle_deploy_relative_path(
+                rel, prefixes, prefixes, target=target, hooks_approved=False
+            )
+            is None
+        )
+        warning = bundle_deploy_skip_warning(
+            rel, prefixes, prefixes, target=target, hooks_approved=False
+        )
+        assert warning is not None and "not approved" in warning
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "extensions/x/extension.mjs",
+            ".github/extensions/x/extension.mjs",
+            "com.microsoft.apm/extensions/x/extension.mjs",
+        ],
+    )
+    def test_canvas_files_follow_canvas_approval(self, rel: str) -> None:
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            bundle_deploy_skip_warning,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        assert (
+            bundle_deploy_relative_path(
+                rel, prefixes, prefixes, target=target, canvas_approved=False
+            )
+            is None
+        )
+        warning = bundle_deploy_skip_warning(
+            rel, prefixes, prefixes, target=target, canvas_approved=False
+        )
+        assert warning is not None and "not approved" in warning
+
+    def test_primitive_directories_keep_routing(self) -> None:
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["copilot"]
+        prefixes = frozenset({".github/"})
+        assert (
+            bundle_deploy_relative_path(
+                ".github/prompts/review.prompt.md", prefixes, prefixes, target=target
+            )
+            == "prompts/review.prompt.md"
+        )
 
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
@@ -1031,3 +1187,41 @@ class TestLocalBundleCanvasTrust:
         assert not (project / ".github" / "extensions" / "widget").exists()
         # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output
+
+
+def test_bundle_without_integrity_manifest_skips_hooks(tmp_path: Path) -> None:
+    """Hooks register only from bytes ``pack.bundle_files`` covers (#3700)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_hooks import integrate_local_bundle_hooks
+
+    bundle = tmp_path / "bundle"
+    (bundle / "hooks").mkdir(parents=True)
+    (bundle / "hooks.json").write_text('{"hooks": {}}')
+    (bundle / "hooks" / "x.sh").write_text("echo x\n")
+    (bundle / "plugin.json").write_text('{"name": "b", "hooks": "./hooks.json"}')
+    info = types.SimpleNamespace(source_dir=bundle, lockfile=None)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    logger = MagicMock()
+
+    result = integrate_local_bundle_hooks(
+        info,
+        {"hooks.json": "a", "hooks/x.sh": "b"},
+        project,
+        targets=[KNOWN_TARGETS["claude"]],
+        slug="b",
+        hooks_approved=True,
+        approval_key=None,
+        force=False,
+        dry_run=False,
+        scope=InstallScope.PROJECT,
+        logger=logger,
+    )
+
+    assert (result.skipped, result.scripts) == (2, [])
+    (message,), _ = logger.warning.call_args
+    assert "no integrity manifest" in message
+    assert "apm pack" in message
+    assert not (project / ".claude" / "settings.json").exists()

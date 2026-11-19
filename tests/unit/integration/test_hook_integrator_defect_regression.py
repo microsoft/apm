@@ -12,9 +12,10 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration import hook_integrator as hook_integrator_module
 from apm_cli.integration.hook_integrator import HookIntegrator
-from apm_cli.integration.hook_ownership import dependency_hook_source_marker
+from apm_cli.integration.hook_ownership import dependency_hook_source_marker, drop_source_entries
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.reference import DependencyReference
@@ -544,7 +545,12 @@ def test_hook_bundle_stale_sibling_removed_from_target_paths(tmp_path: Path) -> 
     assert stale_sibling in result.target_paths
     managed_files = {path.relative_to(project).as_posix() for path in result.target_paths}
 
-    sync_result = integrator.sync_integration(None, project, managed_files=managed_files)
+    sync_result = integrator.sync_integration(
+        None,
+        project,
+        managed_files=managed_files,
+        managed_file_hashes=compute_deployed_hashes(managed_files, project),
+    )
 
     assert sync_result["files_removed"] >= 4
     assert not stale_sibling.exists()
@@ -828,3 +834,81 @@ def test_reconcile_validates_survivor_targets_before_destructive_wipe(
 
     assert config.read_bytes() == config_bytes
     assert sidecar.read_bytes() == sidecar_bytes
+
+
+def test_drop_source_entries_retires_only_undeclared_events_of_one_source() -> None:
+    """#3665: a source's entries leave events it no longer declares; others stay."""
+    mine = {"_apm_source": "pkg", "hooks": [{"command": "old"}]}
+    kept_event = {"_apm_source": "pkg", "hooks": [{"command": "new"}]}
+    sibling = {"_apm_source": "other", "hooks": [{"command": "sib"}]}
+    user = {"hooks": [{"command": "user"}]}
+    hooks = {
+        "PreToolUse": [mine],
+        "Stop": [mine, user],
+        "SessionStart": [kept_event],
+        "Notification": [sibling],
+        "Empty": [],
+    }
+
+    drop_source_entries(hooks, {"pkg"}, keep_events={"SessionStart"})
+
+    assert hooks == {
+        "Stop": [user],
+        "SessionStart": [kept_event],
+        "Notification": [sibling],
+        "Empty": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("locked", "legacy_retired"),
+    [(("org-a/hooks",), True), (("org-a/hooks", "org-b/hooks"), False)],
+    ids=["unambiguous-leaf", "ambiguous-leaf"],
+)
+def test_undeclared_event_retires_safe_legacy_leaf_marker(
+    tmp_path: Path, locked: tuple[str, ...], legacy_retired: bool
+) -> None:
+    """#3665: an upgraded sidecar's leaf marker retires a dropped event only when safe."""
+    project = tmp_path / "project"
+    claude = project / ".claude"
+    claude.mkdir(parents=True)
+    install_path = project / "apm_modules" / "org-a" / "hooks"
+    hooks_dir = install_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    stop = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo stop"}]}]}}
+    (hooks_dir / "stop.json").write_text(json.dumps(stop), encoding="utf-8")
+    old_pre = {"matcher": "Bash", "hooks": [{"type": "command", "command": "sh old.sh"}]}
+    old_stop = {"matcher": "*", "hooks": [{"type": "command", "command": "echo stop"}]}
+    user = {"hooks": [{"type": "command", "command": "echo user"}]}
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [old_pre], "Stop": [old_stop, user]}}),
+        encoding="utf-8",
+    )
+    (claude / "apm-hooks.json").write_text(
+        json.dumps(
+            {
+                "PreToolUse": [{**old_pre, "_apm_source": "hooks"}],
+                "Stop": [{**old_stop, "_apm_source": "hooks"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock = LockFile()
+    for repo_url in locked:
+        lock.add_dependency(LockedDependency(repo_url=repo_url))
+    lock.write(project / "apm.lock.yaml")
+    package = PackageInfo(
+        package=APMPackage(name="hooks", version="1.0.0", source="org-a/hooks"),
+        install_path=install_path,
+        dependency_ref=DependencyReference.parse("org-a/hooks"),
+    )
+
+    HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["claude"], package, project)
+
+    hooks = json.loads((claude / "settings.json").read_text(encoding="utf-8"))["hooks"]
+    assert ("PreToolUse" not in hooks) is legacy_retired
+    stop_commands = [h["command"] for entry in hooks["Stop"] for h in entry["hooks"]]
+    assert "echo user" in stop_commands
+    assert stop_commands.count("echo stop") == (1 if legacy_retired else 2)
+    sidecar = json.loads((claude / "apm-hooks.json").read_text(encoding="utf-8"))
+    assert ("PreToolUse" in sidecar) is not legacy_retired

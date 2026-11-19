@@ -31,6 +31,7 @@ first failure to skip expensive I/O.
 | ID | Severity | Source | Always on? |
 |---|---|---|---|
 | `manifest-parse` | block | `ci_checks.py` | only when `apm.yml` cannot be parsed |
+| `manifest-missing` | block in `--ci`, advisory otherwise | `ci_checks.py` | only when `apm.yml` is absent |
 | `lockfile-exists` | block | `ci_checks.py` | yes |
 | `ref-consistency` | block | `ci_checks.py` | yes |
 | `deployment-ledger-owners` | block | `ci_checks.py` | yes |
@@ -58,6 +59,12 @@ the [policy schema](../policy-schema/).
 - **Effect.** Skips every other check and exits `1`. This is the only check that runs before the lockfile gate.
 - **Remediation.** Fix the YAML syntax error reported in the message and re-run.
 
+### `manifest-missing`
+
+- **What it verifies.** That the current directory holds the `apm.yml` to audit. APM does not search parent directories.
+- **Fails when.** In `--ci` mode, `apm.yml` is absent: from a subdirectory or a wrong checkout path the gate would otherwise pass without auditing anything. Without `--ci` it is an advisory warning, shown only when `.apm/`, `apm.lock.yaml` or `apm.lock` suggests a deleted manifest.
+- **Remediation.** Run `apm audit --ci` from the project root that contains `apm.yml`, or restore the deleted manifest.
+
 ### `lockfile-exists`
 
 - **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies (including `devDependencies`), or whenever an existing lockfile records local content under the synthesized self-entry.
@@ -78,7 +85,7 @@ the [policy schema](../policy-schema/).
   Audit reads this evidence without fetching today's catalog or changing the
   manifest, lockfile, or deployment. An unavailable catalog does not invalidate
   an otherwise valid installed dependency.
-- **Remediation.** Run the command the check message names: `apm install --update`
+- **Remediation.** Run the command the check message names: `apm update`
   when the lockfile already holds a resolution that must be refreshed or re-keyed
   (the source-identity rewrite and commit-pin mismatch cases), or plain `apm install`
   for a first resolution -- so the lockfile re-resolves to the manifest, then commit
@@ -87,7 +94,7 @@ the [policy schema](../policy-schema/).
   identity check is evaluated ahead of the internal ledger-owner check on purpose.
   A source-identity tamper (a rewritten dependency `host`/`repo_url` in the lockfile)
   trips both, but only `ref-consistency` points at the safe fix -- re-resolving from
-  the trusted manifest via `apm install --update`. The ledger-owner remedy (`apm prune`)
+  the trusted manifest via `apm update`. The ledger-owner remedy (`apm prune`)
   reconciles ownership toward the *current* lockfile, so it must never be the surfaced
   cause when the manifest and lockfile disagree about a dependency's identity.
 
@@ -130,8 +137,8 @@ the [policy schema](../policy-schema/).
 
 ### `skill-subset-consistency`
 
-- **What it verifies.** That each `skills:` selection in `apm.yml` matches the `skill_subset` recorded in the lockfile, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
-- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset`, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
+- **What it verifies.** That each locked dependency's `skill_subset`, `target_subset` and `subset_pairings` equal the merge of every `skills:`/`targets:` declaration in `apm.yml` and the installed dependency manifests, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
+- **Fails when.** The merged declarations differ from the recorded selection, `subset_pairings` is malformed or disagrees with the flat fields, a declaring manifest cannot be read, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
 - **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
 
 ### `config-consistency`

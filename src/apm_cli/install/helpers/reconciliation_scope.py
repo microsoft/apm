@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.deployment_state import DeploymentLedger
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -73,7 +74,7 @@ def _scoped_known_targets_for_reconciliation(
     declared_targets: Iterable[TargetProfile] | None,
 ) -> dict[str, TargetProfile]:
     """Return known targets without running inactive experimental resolvers."""
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     active_by_name = _profiles_by_name(active_targets)
     declared_by_name = _profiles_by_name(declared_targets)
@@ -86,7 +87,36 @@ def _scoped_known_targets_for_reconciliation(
         if _has_gated_resolver(profile):
             scoped_known_targets[name] = profile
             continue
-        scoped = profile.for_scope(user_scope=user_scope)
+        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
         if scoped is not None:
             scoped_known_targets[name] = scoped
     return scoped_known_targets
+
+
+def _retain_dropped(
+    files: list[str],
+    hashes: dict[str, str],
+    ledger: DeploymentLedger,
+    paths: set[str],
+    prior_hashes: dict[str, str],
+    prior_ledger: DeploymentLedger | None,
+) -> DeploymentLedger:
+    """Keep *paths* in the returned rows, hashes and ledger instead of pruning them."""
+    for path in paths:
+        if path not in files:
+            files.append(path)
+        if path in prior_hashes:
+            hashes[path] = prior_hashes[path]
+    if prior_ledger is None:
+        return ledger
+    from apm_cli.core.deployment_state import DeploymentLedger
+
+    records = dict(ledger.records)
+    records.update(
+        {
+            key: record
+            for key, record in prior_ledger.records.items()
+            if record.locator.value in paths
+        }
+    )
+    return DeploymentLedger(records=records)

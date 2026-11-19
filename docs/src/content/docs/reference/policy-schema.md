@@ -37,7 +37,7 @@ Those controls are owned by the **agent harness** that runs your agents, not by 
 Discovery order, in priority:
 
 1. Explicit policy source on `apm audit --ci` via `--policy <ref>` or `apm policy status` via `--policy-source <ref>`. `apm install` auto-discovers from the project's git remote and supports `--no-policy`; it does not accept `--policy` today.
-2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404).
+2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; see the `absent` row in [Discovery outcomes](../../enterprise/policy-reference/#discovery-outcomes) for the `.github-private` hint.
 
 The `<ref>` accepts:
 
@@ -67,7 +67,7 @@ possible.
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
-| `security`         | object              | see section      | no       | Rules over APM's security checks (install-time content audit + external scanners; requires `external-scanners` flag). |
+| `security`         | object              | see section      | no       | Rules over APM's security checks: install-time audit and external scanners (require the `external-scanners` flag), lockfile hashes and drift. |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, LSP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
@@ -104,11 +104,11 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
 | `allow`              | list of patterns or null | `null`        | `null` = no opinion. `[]` = nothing allowed. `[...]` = only these.                          |
-| `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Always wins over `allow`. |
-| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
+| `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Always wins over `allow`. |
+| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
-| `require_pinned_constraint` | boolean        | `false`          | When `true`, every APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Transitive deps are also classified and pass when their parent manifests pinned them. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
+| `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, exact package release tag such as `name@1.2.3` or `@scope/name@1.2.3`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
 
 ### `require_pinned_constraint` reference
 
@@ -128,6 +128,9 @@ dependencies:
     - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
     - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
     - seventh/lib#v1.5.3       # OK: literal tag
+    - acme/mono/packages/pkg-a#pkg-a-v1.5.3  # OK: this package's own release tag
+    - shadcn/ui#shadcn@4.12.0  # OK: exact package release tag (name@X.Y.Z)
+    - acme/mono/packages/pkg-a#pkg-b-v1.5.3  # FAIL: another package's tag (BARE_BRANCH)
     - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
     - ./packages/local         # OK: local-path dep (no version surface)
 ```
@@ -135,16 +138,17 @@ dependencies:
 Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 
 ```text
-[x] Policy violation: dependency-pinned-constraint
-    4 dependency(ies) use unbounded constraints
-    (hint: pin to a semver range, literal tag, or SHA)
-    - acme/skills: no ref; resolves to default branch
-    - other/lib: unbounded upper; pair with '<X.Y' or use a caret range
-    - third/lib: wildcard '*' matches any version
-    - acme/lib: bare branch 'main' tracks a moving tip
+[x] Policy violation: acme/lib -- bare branch 'main' tracks a moving tip
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/lib` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Policy violation: acme/skills -- no ref; resolves to default branch
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/skills` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 ```
 
-Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
+`apm audit --ci` lists the same dependencies under `dependency-pinned-constraint details:`.
+
+A range is classified as the author wrote it: `fourth/lib#^1.2.0` stays `OK` after the install selects `v1.4.0` for it, and `acme/lib#main` stays `FAIL` whatever commit it resolves to. The package name used for `{name}-v{version}` and `{name}--v{version}` tags is the final path segment of a subdirectory dependency, otherwise the repository name. An exact `name@X.Y.Z` or `@scope/name@X.Y.Z` tag (optional `v`, semver prerelease/build allowed, at most one scope segment) counts for any name, because monorepo tags often name the published package rather than the directory. `release@next`, `feature/x@1.2.3`, `name@^1.2.0` and `name@1.x` are not exact releases and still fail. The check judges declared release intent, not immutability: a tag can be moved. Replaying a committed lockfile with `apm install --frozen` installs the locked commit; [`security.integrity.require_hashes`](#integrity-and-drift-enforcement) only requires every locked entry to carry a content hash, so an update can still record a moved tag's new commit.
+
+Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; see [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns)). Wildcards via shell-style globs, e.g. `contoso/*`.
 
 ## mcp
 
@@ -154,7 +158,7 @@ Rules over MCP server references, including transitive ones declared by deep dep
 |--------------------|-----------------------|---------|--------------------------------------------------------------------------------------|
 | `allow`            | list or null          | `null`  | Same null/empty/list semantics as `dependencies.allow`.                              |
 | `deny`             | list                  | `[]`    | Always wins.                                                                         |
-| `transport.allow`  | list or null          | `null`  | Allowed transports: `stdio`, `sse`, `http`, `streamable-http`. `null` = no opinion. |
+| `transport.allow`  | list or null          | `null`  | Allowed transports: `stdio`, `streamable-http`, `sse` (`http` is an alias of `streamable-http`). Checked against the effective transport APM writes, including registry servers. `null` = no opinion. |
 | `self_defined`     | enum                  | `warn`  | `allow` / `warn` / `deny` -- treatment of MCP servers defined inline in `apm.yml`.   |
 | `trust_transitive` | boolean               | `false` | When `false`, transitive MCP servers must be explicitly allow-listed.                |
 
@@ -162,8 +166,8 @@ Rules over MCP server references, including transitive ones declared by deep dep
 
 | Field                  | Type                  | Default | Notes                                                                          |
 |------------------------|-----------------------|---------|--------------------------------------------------------------------------------|
-| `target.allow`         | list or null          | `null`  | Allowed `apm compile` targets, e.g. `vscode`, `claude`, `all`.                |
-| `target.enforce`       | string or null        | `null`  | If set, `apm compile` must select this target.                                 |
+| `target.allow`         | list or null          | `null`  | Allowed targets, e.g. `copilot`, `claude`. Aliases resolve (`vscode` is `copilot`); `all` allows every target. |
+| `target.enforce`       | string or null        | `null`  | If set, the target selection must include this target.                         |
 | `strategy.enforce`     | enum or null          | `null`  | `distributed` / `single-file`. Pins the compilation strategy.                  |
 | `source_attribution`   | boolean               | `false` | Require source-attribution headers in compiled outputs.                        |
 
@@ -203,8 +207,10 @@ proving a supply-chain attack. Every finding is enriched in place:
 
 ## security
 
-Rules over APM's security checks. Requires the `external-scanners`
-experimental flag to take effect; ignored otherwise.
+Rules over APM's security checks. The `audit.on_install`, `audit.external`
+and `audit.scanners` keys take effect only when the `external-scanners`
+experimental flag is enabled; they are ignored otherwise.
+`audit.fail_on_drift` and `integrity.require_hashes` always apply.
 
 | Field                | Type            | Default | Notes                                                                            |
 |----------------------|-----------------|---------|----------------------------------------------------------------------------------|
@@ -241,7 +247,7 @@ The floor is enforced during `apm install` (where org policy is loaded). A bare
 allowlist validation for arg safety.
 
 `audit.on_install` is a floor: it can only raise the effective mode chosen by
-`apm install --audit` / `apm config audit-on-install`, never relax it. `apm
+`apm install --audit` / `apm config set audit-on-install`, never relax it. `apm
 install --force` downgrades a `block` to `warn` for that invocation; `apm
 install --no-policy` skips the policy floor entirely.
 
@@ -278,17 +284,19 @@ closed. APM never applies the weaker subset that happened to resolve.
 
 ### Merge rules
 
-Most fields tighten as the policy chain descends. The exceptions are
-`deny`/`require` lists, where a child may use `[]` to explicitly clear an
-inherited list (see the tri-state table below).
+A child can add restrictions but never remove a parent's. A child `[]` on a
+`deny` or `require` list adds nothing and does not clear the inherited
+entries. One field widens instead: `unmanaged_files.exclude` entries are
+unioned, so a child can exclude more paths from the parent's
+unmanaged-files check.
 
 | Field family                | Merge rule                                                                       |
 |-----------------------------|----------------------------------------------------------------------------------|
 | `enforcement`               | Stricter wins (`block` > `warn` > `off`).                                        |
-| `fetch_failure`             | Child overrides if set.                                                          |
+| `fetch_failure`             | Stricter wins (`block` > `warn`).                                                |
 | `cache.ttl`                 | `min(parent, child)`.                                                            |
 | `*.allow` lists             | Set intersection. `null` is transparent (no opinion).                            |
-| `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
+| `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field, `null` and `[]` all leave the parent list unchanged; a child cannot drop a parent entry. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
 | `manifest.require_explicit_includes` | Logical OR; once enabled, descendants cannot relax it.                 |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
@@ -297,7 +305,7 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
-| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list  --  unlike `deny`/`require`, a child cannot clear an inherited `exclude`. |
+| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list; a child cannot clear an inherited `exclude`. |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
@@ -320,19 +328,19 @@ For every `allow:` field, the three states are distinct:
 | `[]`     | "explicitly nothing"                         | Intersects to nothing downstream. |
 | `[...]`  | "only these patterns"                        | Intersected with child list.    |
 
-`deny` and `require` lists support the same three-state semantics as `allow`:
+`deny` and `require` lists distinguish the same three values, but merge by union, so no value removes a parent entry:
 
 | Value    | Meaning                    | Inheritance behavior                                     |
 |----------|----------------------------|----------------------------------------------------------|
 | omitted / `null` | "no opinion"     | Transparent during merge  --  parent value passes through. |
-| `[]`     | "explicitly empty"         | Overrides parent; no entries accumulate.                |
+| `[]`     | "nothing to add"           | Adds nothing; parent entries still apply.               |
 | `[...]`  | "these entries"            | Unioned with parent list (parent order preserved).      |
 
 ### Identity casing
 
 `allow`, `deny`, and exact `require` patterns match on each dependency's canonical identity casing, not the pattern's literal case. GitHub owner/repository identities, and registry-backed identities (already canonicalized that way), compare case-insensitively -- `Contoso/Repo` and `contoso/repo` are the same package. Non-GitHub git hosts, ADO, local paths, marketplace identities, virtual in-repository subpaths (the path segment after `owner/repo`), Git refs/version strings (after `#`), MCP server names, and registry *names* stay case-sensitive.
 
-Dependency patterns use host-blind package names, so write `owner/repo` rather than `github.com/owner/repo`. Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
+A hostless pattern such as `owner/repo` matches that package on any host; a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. See [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns). Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
 
 For example, a mixed-case `deny` written as `**/Secure-Baseline` does not fire against the canonical lowercase repository name; write the owner/repository prefix first. A mixed-case owner-prefix deny that older releases failed to match can correctly surface new violations after upgrade.
 
@@ -381,7 +389,7 @@ mcp:
 compilation:
   target:
     allow:
-      - vscode
+      - copilot
       - claude
   strategy:
     enforce: distributed
@@ -467,7 +475,7 @@ commands that write project and personal trust, see
 There is no `enforce` mandate runtime or cryptographic signing in this release:
 an `executables.enforce` rung is accepted in policy but fail-safe degrades to
 `recommend` (allowed, still overridable by a deny). Ordinary dependency grants
-remain package-scoped. Local bundle MCP, LSP, and canvas grants use the exact
+remain package-scoped. Local bundle hook, MCP, LSP, and canvas grants use the exact
 SHA-256 content key printed by `apm install`; changed bundle content requires a
 new grant.
 

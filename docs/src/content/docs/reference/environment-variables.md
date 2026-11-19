@@ -29,9 +29,9 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`, then path-scoped `git credential fill`. Azure DevOps Server uses the PAT then fill; it does not use `az`. |
 | `ADO_HOST` | Single on-prem Azure DevOps Server FQDN (e.g. `ado.company.com`). Registers the host as ADO-class for auth and API routing. | unset | Hostname only: no scheme, port, or path. Takes precedence over an overlapping `GITHUB_HOST`. |
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, all classified as ADO-class. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
-| `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Also used by the registry-proxy resolver. |
+| `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Deprecated alias of `PROXY_REGISTRY_TOKEN`; sent only to the `PROXY_REGISTRY_URL` (or `ARTIFACTORY_BASE_URL`) origin; ignored with a warning when no proxy URL is set. |
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
-| `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
+| `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | `60` | Integer-like string, clamped to 1-180; invalid values are ignored. |
 
 ## Transport and credential order
 
@@ -39,9 +39,9 @@ Controls how APM clones packages and enumerates refs on Git hosts: `APM_GIT_PROT
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
-| `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
-| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github-auth-first` in `~/.apm/config.json`, then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
+| `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https` (`http` is accepted as an alias for `https`). | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer_ssh` in `~/.apm/config.json` (set with `apm config set prefer-ssh`) → git `insteadOf` rules → HTTPS. |
+| `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow_protocol_fallback` in `~/.apm/config.json` (set with `apm config set allow-protocol-fallback`) → `false`. |
+| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github_auth_first` in `~/.apm/config.json` (set with `apm config set github-auth-first`), then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 
 ## TLS trust
 
@@ -68,7 +68,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token for `PROXY_REGISTRY_URL`. | unset | Required for authenticated proxies. |
-| `PROXY_REGISTRY_ALLOW_HTTP` | Allow `http://` for `PROXY_REGISTRY_URL` (development only). | unset | Mirrors the MCP registry's HTTP opt-in. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to silence the plaintext-token warning when `PROXY_REGISTRY_TOKEN` is sent to an `http://` `PROXY_REGISTRY_URL`. | unset | `http://` proxy URLs are accepted without it; use only for a trusted internal proxy. |
 | `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any download not served by the proxy. | unset | Air-gapped deployments. |
 | `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is normalized to uppercase with non-alphanumerics replaced by `_`. |
 | `APM_REGISTRY_USER_<NAME>` / `APM_REGISTRY_PASS_<NAME>` | Basic-auth credentials for configured package registry `<NAME>`. | unset | Used when a bearer token is not supplied. |
@@ -83,17 +83,96 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. See [`apm cache`](../cli/cache/). |
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
-| `APM_HOME` | Override the APM home directory used for user config and state. | platform default | Must be writable. |
+| `APM_HOME` | Override the root for APM-owned user metadata and configuration. | `~/.apm` | Must be writable. Does not redirect files deployed to agent targets. |
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
-| `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
-| `CODEX_HOME` | Override the Codex home used by Codex target detection and user-scope writes. | platform auto-detect | Read by the Codex integration target. |
-| `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | Used by the explicit `hermes` target; it does not enable auto-detection. |
+| `COPILOT_HOME` | Override the GitHub Copilot CLI home for user-scope detection and writes: `apm install -g` instructions, agents, hooks, MCP config (`mcp-config.json`), LSP config (`lsp-config.json`), plugin settings, and skills with `--legacy-skill-paths`. | `~/.copilot` | See [harness home variables](#harness-home-variables). Default skills stay in `~/.agents/skills/`, which Copilot CLI also reads. The Copilot desktop app (`copilot-app`) and `copilot-cowork` targets ignore it; global canvas installs are refused when it is non-default. |
+| `CODEX_HOME` | Override the Codex home used for user-scope writes: `apm compile --global` (`AGENTS.md`) and `apm install -g` agents, hooks, and MCP config (`config.toml`). | `~/.codex` | See [harness home variables](#harness-home-variables). Codex skills stay in `~/.agents/skills/`. User-scope auto-detection checks the same directory (`$CODEX_HOME` when set, else `~/.codex/`). |
+| `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | See [harness home variables](#harness-home-variables). Used by the explicit `hermes` target; it does not enable auto-detection. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
-| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
+| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, LSP plugin, and MCP config. | `~/.claude` | See [harness home variables](#harness-home-variables). User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
+
+### Harness home variables
+
+`COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HERMES_HOME` follow one
+rule for user-scope (`-g`) commands:
+
+- Unset or blank: the harness default (`~/.copilot`, `~/.codex`, `~/.claude`,
+  `~/.hermes`).
+- Absolute path (`~` is expanded): that directory, inside or outside your home.
+- Relative path: rejected with an error naming the variable. APM never resolves
+  it against the current directory.
+
+Each value is a separate profile of the same harness. Profiles share one user
+lockfile; a global install or uninstall changes files only under the selected
+profile. Files written to another profile, such as `~/.copilot` before you set
+`COPILOT_HOME`, stay in place.
+
+### `APM_HOME` path contract
+
+`APM_HOME` is the single root for APM-owned user metadata. When it is unset or
+empty, the root is `~/.apm`. When set, global commands and lifecycle processing
+use the same overridden root:
+
+| State | Path |
+|---|---|
+| User manifest | `$APM_HOME/apm.yml` |
+| User lockfile | `$APM_HOME/apm.lock.yaml` |
+| Installed package metadata and content | `$APM_HOME/apm_modules/` |
+| User configuration | `$APM_HOME/config.json` |
+| Marketplace registrations | `$APM_HOME/marketplaces.json` |
+| Marketplace cache and version pins | `$APM_HOME/cache/marketplace/` |
+| Lifecycle trust | `$APM_HOME/scripts-trust.json` |
+| Lifecycle logs | `$APM_HOME/logs/` |
+| Lifecycle lock and deployment receipts | `$APM_HOME/.apm-lifecycle.lock`, `$APM_HOME/deployment-receipts/` |
+
+This applies to user-scope operations such as `apm install --global`, `apm
+update --global`, `apm uninstall --global`, `apm lock --global`, `apm deps ...
+--global`, `apm compile --global`, `apm marketplace`, `apm lifecycle`, and `apm
+config`. `apm prune` is project-scope only. Other pages write `~/.apm` for the
+default location.
+
+A leading `~` is expanded, and a relative `APM_HOME` resolves against the
+directory APM started in, so commands that change directory keep using the same
+root. If that directory no longer exists, APM exits with an error; set an
+absolute `APM_HOME` instead. Changing `APM_HOME` does not
+move an existing `~/.apm`; copy the files yourself if you want to keep them.
+
+These paths are outside the contract:
+
+- The download cache follows `APM_CACHE_DIR` (see above); the update-check
+  timestamp stays in the operating-system cache directory.
+- Runtimes installed by `apm runtime setup` stay under `~/.apm/runtimes/`.
+- `apm install --global` keeps its installation identity at `~/.apm-local/`,
+  beside the deployment root, like deployed target files.
+- State-changing commands also hold `~/.apm-local/.apm-lifecycle.lock`, so
+  commands run with different `APM_HOME` values wait for each other instead of
+  racing on the same project or target directories.
+
+`APM_HOME` does **not** redirect target deployment. Precedence:
+
+1. APM metadata: `APM_HOME`, then `~/.apm`.
+2. Target files: the target's own home variable when it has one (for example
+   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, or `HERMES_HOME`), then the
+   operating-system home.
+
+The two families never fall back to each other: a target variable does not
+move APM metadata, and `APM_HOME` does not move target files.
+
+To isolate APM metadata for a temporary global install:
+
+```bash
+export APM_HOME="$(mktemp -d)/apm"
+apm install --global example-org/example-package
+```
+
+The manifest, lockfile, modules, configuration, and lifecycle state remain
+under `$APM_HOME`; deployed target files still go to their normal user-scope
+destinations. For complete filesystem isolation, also run with an isolated
+operating-system home and/or set the selected targets' home variables.
 
 ## Policy
 
@@ -126,6 +205,15 @@ experimental flag.
 | `APM_PROGRESS` | Force the install TUI on or off: `always`/`on`/`1`/`true`/`yes` to force on; `never`/`quiet`/`off`/`0`/`false`/`no` to force off; `auto` (default) lets APM decide based on `CI`, `TERM`, and TTY. | `auto` | The CLI sets `APM_PROGRESS=quiet` when `--quiet` is passed. |
 | `CI` | Standard CI marker. When truthy (`1`/`true`/`yes`), APM disables the install TUI and adjusts a few interactive defaults. | unset | Read; never written. |
 | `TERM` | Standard terminal type. `""` or `dumb` disables the install TUI. | OS-provided | Read; never written. |
+
+## Documented elsewhere
+
+These variables are documented with the command that reads them.
+
+| Variable | Read by | See |
+|---|---|---|
+| `GITHUB_URL`, `APM_REPO`, `VERSION`, `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, `APM_NO_DIRECT_FALLBACK` | Installer scripts and `apm self-update` | [Installation](../../getting-started/installation/#installer-options), [`apm self-update`](../cli/self-update/#enterprise-bootstrap-mirrors) |
+| `SOURCE_DATE_EPOCH` | `apm lock export` (default SBOM timestamp) and `apm pack --format agent-plugin` (`packed_at`) | [`apm lock`](../cli/lock/#export-sbom-inventory) |
 
 ## Experimental and internal
 

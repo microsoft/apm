@@ -17,7 +17,7 @@
     },
     {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; root-owned exact source replacement and original ownership; embedded git URL subpath validation",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
@@ -63,10 +63,13 @@
     },
     {
       "id": "cached-policy-shape",
-      "decision": "Cached policy shape",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)",
+      "decision": "Cached policy shape and the APM_POLICY_DISABLE switch reader",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
       "selectors": ["src/apm_cli/policy/discovery.py"],
-      "guards": ["contracts-tooling-cached-policy-shape"]
+      "guards": [
+        "contracts-tooling-cached-policy-shape",
+        "install-deployment-policy-disable-switch-owner"
+      ]
     },
     {
       "id": "policy-content-hash",
@@ -106,6 +109,7 @@
       "selectors": ["src/apm_cli/deps/lockfile.py"],
       "guards": [
         "contracts-tooling-lockfile-read",
+        "contracts-tooling-lockfile-symlink-write-guard",
         "contracts-tooling-lockfile-timestamp",
         "contracts-tooling-lockfile-timestamp-constructor",
         "contracts-tooling-lockfile-timestamp-fallback",
@@ -118,6 +122,16 @@
       "owner": "compilation/footer.py (build_generation_footer)",
       "selectors": ["src/apm_cli/compilation/footer.py"],
       "guards": ["contracts-tooling-generation-footer"]
+    },
+    {
+      "id": "literal-affix-removal",
+      "decision": "Literal prefix/suffix removal on identity and path text (str.removeprefix/removesuffix; multi-character strip arguments are allowlisted character sets only)",
+      "owner": "models/dependency/reference.py (repository segment .git suffix) and marketplace/output_mappers.py (pluginRoot prefix); allowlist in scripts/architecture_linter/checks/contracts_strip_charset.py",
+      "selectors": [
+        "src/apm_cli/marketplace/output_mappers.py",
+        "scripts/architecture_linter/checks/contracts_strip_charset.py"
+      ],
+      "guards": ["contracts-tooling-strip-charset"]
     }
   ]
 }

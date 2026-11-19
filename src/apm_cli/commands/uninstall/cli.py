@@ -13,8 +13,10 @@ import click
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...hook_contract import HookContractError
 from ...install.locking import serialized_lifecycle
 from ...models.apm_package import APMPackage
+from ...models.dependency.selection import manifest_declarations_of
 from ...utils.path_security import PathTraversalError
 from .engine import (
     IntegrationCleanupOutcome,
@@ -29,6 +31,7 @@ from .engine import (
     _preflight_uninstall_survivors,
     _project_transitive_orphans,
     _remove_packages_from_disk,
+    _shrink_surviving_selections,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
@@ -95,19 +98,18 @@ def _persist_uninstall_lockfile(
     an interrupted last-package native cleanup can retry from authoritative
     survivors; the caller removes it afterwards (``removal_pending``).
     """
-    from ...deps.lockfile import LockfileSymlinkError
+    from ...deps.lockfile import LockfileSymlinkError, ensure_lockfile_writable
     from .lockfile_state import lockfile_has_persisted_state
 
     removal_pending = False
     try:
         if lockfile_has_persisted_state(lockfile):
             lockfile.write(lockfile_path)
-        elif lockfile_path.is_symlink():
-            raise LockfileSymlinkError(lockfile_path)
         elif defer_empty_removal:
             lockfile.write(lockfile_path)
             removal_pending = True
         else:
+            ensure_lockfile_writable(lockfile_path)
             lockfile_path.unlink(missing_ok=True)
     except LockfileSymlinkError:
         raise
@@ -218,10 +220,32 @@ def _sync_integrations_for_manifest(
         )
     except Exception as sync_err:
         logger.warning("Integration cleanup did not finish.")
-        logger.warning("Run 'apm install' to resync remaining integrations.")
+        if isinstance(sync_err, HookContractError):
+            # The survivor preflight refused before any hook settings changed;
+            # 'apm install' would refuse the same package until it is migrated.
+            logger.warning(str(sync_err))
+            logger.warning("Migrate the package above, then run 'apm install' to resync.")
+        else:
+            logger.warning("Run 'apm install' to resync remaining integrations.")
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
         logger.verbose_detail(traceback.format_exc().rstrip())
         return default_outcome, sync_err
+
+
+def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) -> None:
+    """Resolve shorthand against the manifest's ``default_host`` (req-mf-019, #3843).
+
+    Uninstall must parse declarations exactly as ``apm install`` recorded them,
+    so ``apm uninstall acme/x`` finds the ``gitlab.com/acme/x`` lock entry.
+    """
+    from ...models.dependency.manifest_host import manifest_host_scope_for
+
+    try:
+        scope = manifest_host_scope_for(data)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    stack.enter_context(scope)
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
@@ -238,6 +262,19 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
     return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
+
+
+def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
+    """Refuse before scripts, deletions or apm.yml edits when the lock cannot be rewritten."""
+    from ...deps.lockfile import refuse_lockfile_before_mutation
+
+    refuse_lockfile_before_mutation(
+        lockfile,
+        lockfile_path,
+        would_mutate=any(lockfile.get_dependency(key) for key in removed_keys)
+        if lockfile
+        else False,
+    )
 
 
 def _cleanup_stale_lsp(
@@ -275,17 +312,30 @@ def _cleanup_stale_lsp(
         return False, cleanup_error
 
 
-def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], logger: Any) -> None:
-    """Stop before ownership release when owned target files remain."""
-    if retained_cleanup_paths:
-        logger.error(
-            "Uninstall could not remove tracked target files; manifest and lockfile "
-            "ownership were preserved. Package directories may already have been removed."
-        )
-        for path in sorted(retained_cleanup_paths):
-            logger.error(f"  - {path}")
-        logger.error("Resolve or remove the listed files, then retry uninstall.")
-        sys.exit(1)
+def _abort_if_retained_target_cleanup_paths(
+    outcome: Any, lockfile: Any, lockfile_path: Any, logger: Any
+) -> None:
+    """Stop before ownership release when owned target files remain.
+
+    Files already removed are dropped from the lockfile so it records exactly
+    what is still on disk; apm.yml keeps the package for the retry (#3656).
+    """
+    if not outcome.retained_paths:
+        return
+    outcome.apply_to(lockfile)
+    try:
+        lockfile.write(lockfile_path)
+        lock_state = "apm.lock.yaml now records only the files still on disk"
+    except OSError as exc:
+        lock_state = f"apm.lock.yaml could not be updated ({exc}) and may list removed files"
+    logger.error(
+        "Uninstall could not remove tracked target files; apm.yml still declares the "
+        f"package and {lock_state}. Package directories may already have been removed."
+    )
+    for path in sorted(outcome.retained_paths):
+        logger.error(f"  - {path}")
+    logger.error("Resolve or remove the listed files, then retry uninstall.")
+    sys.exit(1)
 
 
 def _report_package_removal_failure(
@@ -328,8 +378,8 @@ def _split_selected_profile_packages(
 ) -> tuple[list, list]:
     """Split requested packages into full removals and selected-profile removals.
 
-    A package still deployed to another Claude/Hermes profile is removed only
-    from the selected profile and stays declared (#3425).
+    A package still deployed to another Claude/Hermes/Codex profile is removed
+    only from the selected profile and stays declared (#3425).
     """
     if not user_scope or not lockfile:
         return packages_to_remove, []
@@ -482,7 +532,7 @@ def _finish_selected_profile_uninstall(
     "global_",
     is_flag=True,
     default=False,
-    help="Remove from user scope (~/.apm/) instead of the current project",
+    help="Remove from the APM user home instead of the current project",
 )
 @click.pass_context
 @serialized_lifecycle
@@ -519,6 +569,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     staged_local_refreshes = {}
     apm_package = None
     registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
+    host_scope = contextlib.ExitStack()
     try:
         # Check if apm.yml exists
         if not manifest_path.exists():
@@ -536,19 +587,21 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             sys.exit(1)
 
         if scope is InstallScope.USER:
-            logger.progress("Uninstalling from user scope (~/.apm/)")
+            logger.progress(f"Uninstalling from user scope ({manifest_path.parent}/)")
 
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 
         # Read current apm.yml
-        from ...utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
+        from ...models.manifest_io import load_manifest_roundtrip
+        from ...utils.yaml_io import dump_yaml_roundtrip
 
         apm_yml_path = manifest_path
         try:
-            data = load_yaml_roundtrip(apm_yml_path) or {}
+            data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to read {apm_yml_path}: {e}")
             sys.exit(1)
+        _enter_manifest_host_scope(host_scope, data, logger)
 
         # Track whether devDependencies was synthesised so we don't leave
         # an empty section behind for projects that never used --dev.
@@ -586,9 +639,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             _dependency_public_label(package) for package in packages_to_remove
         )
         surviving_deps = list(current_deps)
+        for declaration in manifest_declarations_of(current_deps, packages_to_remove):
+            surviving_deps.remove(declaration)
         removed_keys = builtins.set()
         for package in packages_to_remove:
-            surviving_deps.remove(package)
             removed_keys.add(_parse_dependency_entry(package).get_unique_key())
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
@@ -605,6 +659,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             excluded_keys=removed_keys | builtins.set(projected_orphans),
             source_root=manifest_path.parent,
         )
+        if not dry_run:
+            _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys)
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.
@@ -622,7 +678,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Reload both, then revalidate without repeating success diagnostics so
         # those edits are preserved rather than overwritten by a stale snapshot.
         try:
-            data = load_yaml_roundtrip(apm_yml_path) or {}
+            data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to re-read {apm_yml_path} after pre-uninstall: {e}")
             sys.exit(1)
@@ -650,9 +706,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             packages_to_remove, lockfile, user_scope=scope is InstallScope.USER
         )
         surviving_deps = list(current_deps)
+        for declaration in manifest_declarations_of(current_deps, packages_to_remove):
+            surviving_deps.remove(declaration)
         removed_keys = builtins.set()
         for package in packages_to_remove:
-            surviving_deps.remove(package)
             removed_keys.add(_parse_dependency_entry(package).get_unique_key())
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
@@ -721,6 +778,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
+            # Survivors whose selection shrinks are redeployed in full below.
+            refreshed_survivor_keys |= _shrink_surviving_selections(
+                lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
+            )
         except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
             sys.exit(1)
@@ -730,18 +791,25 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # still recoverable. The post-removal manifest can omit a removed
         # package's target, so its target must not be reconstructed from it.
         if lockfile and (removed_keys or profile_keys):
-            from ...install.manifest_reconcile import reconcile_target_deployed_files
-            from ...integration.targets import resolve_targets
+            from ...install.manifest_reconcile import (
+                SelectedCleanupOutcome,
+                reconcile_target_deployed_files,
+            )
+            from ...integration.skill_layout import (
+                recorded_deployed_paths,
+                resolve_reintegration_targets,
+            )
             from ...utils.diagnostics import DiagnosticCollector
 
             cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
-            cleanup_targets = resolve_targets(
+            cleanup_targets = resolve_reintegration_targets(
                 deploy_root,
                 user_scope=scope is InstallScope.USER,
                 explicit_target=cleanup_target_names or None,
+                recorded_paths=recorded_deployed_paths(lockfile),
             )
             cleanup_keys = removed_keys | builtins.set(projected_orphans) | profile_keys
-            retained_cleanup_paths = builtins.set()
+            cleanup_outcome = SelectedCleanupOutcome()
             reconcile_target_deployed_files(
                 project_root=deploy_root,
                 lockfile=lockfile,
@@ -750,12 +818,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 diagnostics=DiagnosticCollector(verbose=verbose),
                 dependency_keys=cleanup_keys,
                 remove_selected_ownership=True,
-                retained_selected_paths=retained_cleanup_paths,
+                selected_outcome=cleanup_outcome,
                 user_scope=scope is InstallScope.USER,
                 logger=logger,
                 preserved_selected_values=profile_survivors,
             )
-            _abort_if_retained_target_cleanup_paths(retained_cleanup_paths, logger)
+            _abort_if_retained_target_cleanup_paths(
+                cleanup_outcome, lockfile, lockfile_path, logger
+            )
 
         profile_lock_updated = _retire_selected_profile_packages(
             lockfile, profile_keys, profile_survivors, retained_packages, logger
@@ -776,15 +846,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             return
 
         # Step 4: Remove from apm.yml
-        for package in packages_to_remove:
-            package_label = _dependency_public_label(package)
-            if package in dev_deps:
-                dev_deps.remove(package)
-                section = "devDependencies.apm"
-            elif package in prod_deps:
-                prod_deps.remove(package)
-                section = "dependencies.apm"
-            logger.progress(f"Removed {package_label} from {section} in apm.yml")
+        for section, declarations in (
+            ("dependencies.apm", prod_deps),
+            ("devDependencies.apm", dev_deps),
+        ):
+            for declaration in manifest_declarations_of(declarations, packages_to_remove):
+                declarations.remove(declaration)
+                package_label = _dependency_public_label(declaration)
+                logger.progress(f"Removed {package_label} from {section} in apm.yml")
         data["dependencies"]["apm"] = prod_deps
         data["devDependencies"]["apm"] = dev_deps
         # Drop empty devDependencies wrappers so the manifest stays clean
@@ -1007,6 +1076,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.error(f"Error uninstalling packages: {e}")
         sys.exit(1)
     finally:
+        host_scope.close()
         _retire_native_registration(registration_token)
         _cleanup_staged_local_refreshes(staged_local_refreshes, modules_dir)
 

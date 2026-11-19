@@ -486,6 +486,15 @@ class TestPackCmdFlags:
         assert "agent-plugin" in result.output
         assert not any(line.strip().startswith("--plugin ") for line in result.output.splitlines())
 
+    def test_help_exit_codes_match_behavior_one_per_line(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert result.exit_code == 0
+        lines = [line.strip() for line in result.output.splitlines()]
+        assert any(line.startswith("1  Build or runtime error") for line in lines)
+        assert any(line.startswith("2  Usage error") for line in lines)
+        assert any(line.startswith("3  Version alignment") for line in lines)
+        assert "Manifest schema validation error" not in result.output
+
     def test_redundant_format_selectors_are_usage_error(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--claude-plugin", "--format", "plugin"])
         assert result.exit_code == 2

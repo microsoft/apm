@@ -197,10 +197,10 @@ and lockfiles invalid for other reasons keep their existing behavior.
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
 
 ```bash
-apm install --update
+apm update
 ```
 
-This is the only flag that will move pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
+This is the only command that will move pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
 
 ### Detecting drift in CI
 
@@ -273,6 +273,10 @@ apm install
 ```
 
 The cache short-circuits already-downloaded packages and the integrate phase overwrites partially-deployed files.
+
+A failed install does not remove files it already deployed to harness directories such as `.claude/agents/`, and `apm.lock.yaml` does not track them. APM lists those paths in the failure output. Remove them, or re-run `apm install` (`apm install -g` for user scope); add `--force` if the re-run skips them as not managed by APM.
+
+Ctrl+C and SIGTERM (for example a cancelled CI job) take the same path: APM rolls back `apm.yml` and `apm_modules/` staging and stops running lifecycle scripts before it exits. A second SIGTERM terminates immediately.
 
 If resolution rejects a cyclic dependency graph, fix the package manifests and run `apm install` again. APM rolls back only the package snapshots staged by the rejected resolution, so no manual `apm_modules/` deletion is required.
 

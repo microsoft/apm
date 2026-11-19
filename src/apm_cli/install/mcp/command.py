@@ -24,7 +24,16 @@ if TYPE_CHECKING:
 
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
+from .ownership import names_owned_by_active_peers
 from .registry import registry_env_override
+from .retired_destinations import (
+    RetiredMcpClaims,
+    heal_retired_project_mcp_destinations,
+    healable_names,
+    report_retired_mcp_heal,
+    restore_pending_retired_claims,
+    split_mcp_claims,
+)
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
 
@@ -48,6 +57,59 @@ except ImportError:
     pass
 
 
+def user_manifest_bootstrap_config(
+    manifest_path: Path,
+    supported_runtimes: list[str],
+    target: str | Sequence[str] | None,
+    runtime: str | Sequence[str] | None,
+) -> dict | None:
+    """Config for the user manifest ``apm install -g --mcp`` creates, if any.
+
+    ``None`` when the user manifest already exists.
+
+    An explicit ``--target`` / ``--runtime`` is recorded under ``targets:``
+    through the manifest target declaration owner, so the new manifest never
+    holds a token the reader rejects (#3870); a target with no ``targets:``
+    spelling is refused here, before anything is written.
+    """
+    from ...core.project_name import resolve_bootstrap_project_name
+    from ...models.manifest_bootstrap import bootstrap_config
+    from ...models.manifest_targets import (
+        IdeTargetError,
+        TargetRewriteError,
+        bootstrap_target_names,
+    )
+
+    if manifest_path.exists():
+        return None
+    config = bootstrap_config(resolve_bootstrap_project_name(Path.home().name))
+    flag, requested = ("--target", target) if target is not None else ("--runtime", runtime)
+    if requested is None:
+        return config
+    try:
+        config["targets"] = list(bootstrap_target_names(supported_runtimes))
+    except TargetRewriteError as exc:
+        if exc.token is None:
+            raise
+        rendered = requested if isinstance(requested, str) else ",".join(requested)
+        label = manifest_path.as_posix()
+        reason = (
+            f"{exc}"
+            if isinstance(exc, IdeTargetError)
+            else f"target '{exc.token}' has no 'targets:' equivalent, so later "
+            "'apm install -g' runs could not read the new manifest."
+        )
+        # An IDE is a refused value, not a usage mistake: exit 1 like every
+        # other apm.yml writer (#3878).
+        error = click.ClickException if isinstance(exc, IdeTargetError) else click.UsageError
+        raise error(
+            f"Cannot create {label} for {flag} {rendered}: {reason} Nothing was written. "
+            f"Create {label} with just 'name:' and 'version:', then rerun; {flag} "
+            f"{rendered} will apply to that install only."
+        ) from None
+    return config
+
+
 def run_mcp_policy_preflight(
     *,
     mcp_name: str,
@@ -57,9 +119,15 @@ def run_mcp_policy_preflight(
     no_policy: bool,
     logger,
     target_decision: EffectiveTargetDecision,
+    registry: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    """Run policy checks for a direct MCP install before any persistent write."""
-    from ...core.target_detection import normalize_policy_targets
+    """Run policy checks for a direct MCP install before any persistent write.
+
+    *registry* is the ``(url, source)`` pair from ``_resolve_registry_url``;
+    the registry override is active so the transport check resolves a
+    registry server against the same registry the install will query.
+    """
+    registry_url, registry_source = registry
     from ...models.dependency.mcp import MCPDependency
     from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
 
@@ -76,14 +144,20 @@ def run_mcp_policy_preflight(
         url=url,
     )
     try:
-        run_policy_preflight(
-            project_root=Path.cwd(),
-            mcp_deps=[dependency],
-            no_policy=no_policy,
-            logger=logger,
-            dry_run=logger.dry_run,
-            effective_target=normalize_policy_targets(target_decision.value),
-        )
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_source == "flag",
+            source=registry_source,
+        ):
+            run_policy_preflight(
+                project_root=Path.cwd(),
+                mcp_deps=[dependency],
+                no_policy=no_policy,
+                logger=logger,
+                dry_run=logger.dry_run,
+                effective_target=target_decision.canonical_targets,
+                effective_target_source=target_decision.source,
+            )
     except PolicyBlockError:
         logger.render_summary()
         raise click.exceptions.Exit(1) from None
@@ -195,10 +269,10 @@ def run_mcp_install(  # noqa: PLR0913
         return
 
     if initial_manifest_config is not None:
-        from ...commands._helpers import _create_minimal_apm_yml
+        from ...models.manifest_bootstrap import write_minimal_manifest
 
         apm_dir.mkdir(parents=True, exist_ok=True)
-        _create_minimal_apm_yml(initial_manifest_config, target_path=manifest_path)
+        write_minimal_manifest(initial_manifest_config, target_path=manifest_path)
         logger.success(f"Created {manifest_path}")
 
     status, _diff = add_mcp_to_apm_yml(
@@ -259,6 +333,7 @@ def run_mcp_install(  # noqa: PLR0913
                 from ...core.scope import InstallScope
 
                 user_scope = scope is InstallScope.USER
+                retired = RetiredMcpClaims({}, {})
                 if _existing_lock:
                     from .ownership import resolve_mcp_target_servers
 
@@ -269,6 +344,16 @@ def run_mcp_install(  # noqa: PLR0913
                         stored_configs=old_configs,
                         project_root=apm_dir,
                         user_scope=user_scope,
+                    )
+                    # Claims naming the retired Copilot MCP files are healed by
+                    # proof, never compared or cleaned as .mcp.json ownership.
+                    retired = split_mcp_claims(
+                        old_target_servers,
+                        native_hashes,
+                        apm_version=_existing_lock.apm_version,
+                        project_root=apm_dir,
+                        user_scope=user_scope,
+                        stored_configs=old_configs,
                     )
                 requested_target_servers = {
                     target_name: server_names & {mcp_name}
@@ -322,6 +407,31 @@ def run_mcp_install(  # noqa: PLR0913
                 for target_name, server_names in requested_target_servers.items():
                     merged_target_servers.setdefault(target_name, set()).discard(mcp_name)
                     merged_target_servers.setdefault(target_name, set()).update(server_names)
+                if retired.names:
+                    healed = healable_names(
+                        {runtime: names & {mcp_name} for runtime, names in retired.names.items()},
+                        declared={mcp_name},
+                        copilot_claims=requested_target_servers.get("copilot")
+                        if "copilot" in requested_target_servers
+                        else None,
+                    )
+                    report_retired_mcp_heal(
+                        heal_retired_project_mcp_destinations(
+                            healed,
+                            stored_configs=old_configs,
+                            native_hashes=retired.hashes,
+                            project_root=apm_dir,
+                        ),
+                        logger,
+                    )
+                    restore_pending_retired_claims(
+                        retired,
+                        healed,
+                        target_servers=merged_target_servers,
+                        native_hashes=native_hashes,
+                        project_root=apm_dir,
+                        stored_configs=old_configs,
+                    )
                 retired_targets = {
                     previous_target: {mcp_name}
                     for previous_target, server_names in old_target_servers.items()
@@ -341,16 +451,25 @@ def run_mcp_install(  # noqa: PLR0913
                         fail_on_write_error=True,
                     )
                     for previous_target, retired in retired_targets.items():
-                        MCPIntegrator.remove_stale(
+                        # An entry in a shared file (.mcp.json) stays while the
+                        # newly selected peer owns it; only the claim retires.
+                        removable = retired - names_owned_by_active_peers(
+                            previous_target,
                             retired,
-                            runtime=previous_target,
-                            project_root=apm_dir,
+                            requested_target_servers,
                             user_scope=user_scope,
-                            scope=scope,
-                            fail_on_write_error=True,
-                            stored_configs=old_configs,
-                            native_hashes=old_native_hashes,
                         )
+                        if removable:
+                            MCPIntegrator.remove_stale(
+                                removable,
+                                runtime=previous_target,
+                                project_root=apm_dir,
+                                user_scope=user_scope,
+                                scope=scope,
+                                fail_on_write_error=True,
+                                stored_configs=old_configs,
+                                native_hashes=old_native_hashes,
+                            )
                         merged_target_servers[previous_target].difference_update(retired)
                 MCPIntegrator.update_lockfile(
                     merged_names,

@@ -68,6 +68,7 @@ _RID_GIT_DIAGNOSTIC_OWNER = "transport-platform-git-diagnostic-sanitizer-ownersh
 _RID_GIT_DIAGNOSTIC_DELEGATE = "transport-platform-git-diagnostic-sanitizer-ownership-downloader"
 _RID_GIT_DIAGNOSTIC_TOKENS = "transport-platform-git-diagnostic-token-shapes"
 _RID_GIT_DIAGNOSTIC_JWT = "transport-platform-git-diagnostic-token-shapes-jwt"
+_RID_GIT_OUTPUT_DECODING = "transport-platform-git-output-decoding"
 _RID_GIT_SINGLE_REMOTE = "transport-platform-git-single-remote-fetch"
 _RID_GIT_URL_CREDENTIALS = "transport-platform-git-url-credentials-out-of-argv"
 _RID_GIT_URL_HEADER = "transport-platform-git-url-header-specificity"
@@ -83,6 +84,7 @@ _RID_GIT_URL_VALIDATION_ROUTING = "transport-platform-git-url-rewrite-routing-va
 _RID_GIT_URL_REWRITE = "transport-platform-git-url-rewrite-safety"
 _RID_GIT_URL_RECOVERY = "transport-platform-git-url-rewrite-recovery"
 _RID_ARTIFACTORY_NETRC = "transport-platform-artifactory-netrc-isolation"
+_RID_CREDENTIAL_ORIGIN = "transport-platform-credential-origin-scope"
 
 
 _AUTH_OWNER = "src/apm_cli/core/auth.py"
@@ -92,6 +94,10 @@ _HOST_PROVIDER_LOCK_SEED_CONSUMER = "src/apm_cli/deps/tiered_ref_resolver.py"
 _HOST_REFERENCE_OWNER = "src/apm_cli/models/dependency/host_virtual.py"
 _ARTIFACTORY_NETRC_OWNER = "src/apm_cli/deps/artifactory_entry.py"
 _ARTIFACTORY_NETRC_CONSUMER = "src/apm_cli/deps/download_strategies.py"
+_CREDENTIAL_HEADER_OWNER = "src/apm_cli/utils/http_credentials.py"
+_REGISTRY_ORIGIN_OWNER = "src/apm_cli/deps/registry_proxy.py"
+_MARKETPLACE_HTTP_CONSUMER = "src/apm_cli/marketplace/client.py"
+_GITHUB_MCP_HOST_CONSUMER = "src/apm_cli/adapters/client/copilot.py"
 
 
 _PUBLIC_GH_CONSUMERS: tuple[str, ...] = (
@@ -198,11 +204,38 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
                 "from apm_cli.core.host_providers import effective_host_provider_identity",
                 "manifest_provider = effective_host_provider_identity(",
                 "locked_provider = effective_host_provider_identity(",
-                "if manifest_provider != locked_provider:",
+                "if manifest_provider != locked_provider and not _routes_to_locked_proxy(",
+                "return ArtifactoryRouter.routes_to_locked_proxy(dep_ref, locked_dep)",
             ),
             "Dependency drift must route provider comparison through the canonical "
-            "effective identity owner",
+            "effective identity owner and proxy-route equivalence through ArtifactoryRouter",
             parse=True,
+        )
+    )
+    # #3657 -- proxy routing targets have one owner; drift and the resolver reuse it.
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            "src/apm_cli/deps/artifactory_orchestrator.py",
+            (
+                ("sub", "def routing_target(", 1, "eq"),
+                ("sub", "target = cls.routing_target(dep_ref)", 1, "eq"),
+            ),
+            "Proxy route equivalence must reuse ArtifactoryRouter.routing_target",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _src_python(provider, exclude={"src/apm_cli/deps/artifactory_orchestrator.py"}),
+            re.compile(r"def _?proxy_routing_target\("),
+            "Proxy routing targets belong to ArtifactoryRouter.routing_target",
+            exempt=False,
         )
     )
     findings.extend(
@@ -321,8 +354,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             "src/apm_cli/deps/github_downloader_validation.py",
             (
                 "downloader.auth_resolver.git_env_for_remote(",
-                "downloader.auth_resolver.execute_with_bearer_fallback(",
-                "downloader.auth_resolver.build_ado_bearer_git_env(",
+                "downloader.auth_resolver.try_with_fallback(",
             ),
         ),
         (
@@ -352,16 +384,15 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
         (
             "src/apm_cli/install/validation.py",
             (
-                "auth_resolver.execute_with_bearer_fallback(",
-                "auth_resolver.build_ado_bearer_git_env(",
+                "run_result = auth_resolver.try_with_fallback(",
+                "base_env=ado_downloader.git_env,",
             ),
         ),
         (
             "src/apm_cli/deps/clone_engine.py",
             (
                 "host.auth_resolver.git_env_for_remote(",
-                "host.auth_resolver.execute_with_bearer_fallback(",
-                "host.auth_resolver.build_ado_bearer_git_env(",
+                'host.auth_resolver.try_with_fallback(\n                        dep_host or "dev.azure.com",',
                 "attempt.effective_url or attempt_url,\n                    base_env=host.git_env,",
             ),
         ),
@@ -369,7 +400,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             "src/apm_cli/deps/git_reference_resolver.py",
             (
                 "host.auth_resolver.git_env_for_remote(",
-                "host.auth_resolver.execute_with_bearer_fallback(",
+                "host.auth_resolver.try_with_fallback(",
                 "transport_attempt.effective_url or rewrite_candidate,\n"
                 "                base_env=host.git_env,",
             ),
@@ -736,7 +767,7 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             (
                 "self.trust_env = False",
                 "def rebuild_auth(",
-                "self.should_strip_auth(",
+                "strip_cross_origin_credential_headers(self, prepared_request, response)",
             ),
             "Artifactory requests must preserve redirects without ambient netrc auth",
         )
@@ -747,7 +778,8 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             inv,
             _RID_ARTIFACTORY_NETRC,
             _ARTIFACTORY_NETRC_CONSUMER,
-            (("sub", "allow_netrc=False", 3, "eq"),),
+            # Three Artifactory paths plus the Azure DevOps Items API download.
+            (("sub", "allow_netrc=False", 4, "eq"),),
             "Every Artifactory resilient GET path must suppress ambient netrc auth",
         )
     )
@@ -759,6 +791,59 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             _ARTIFACTORY_NETRC_CONSUMER,
             ("from .artifactory_entry import _NoNetrcSession",),
             "Download strategies must reuse the Artifactory netrc-isolation owner",
+        )
+    )
+    return tuple(findings)
+
+
+def _check_credential_origin_scope(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Credentials attach only to the origin they were configured or built for."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    contracts: tuple[tuple[str, tuple[str, ...], str], ...] = (
+        (
+            _CREDENTIAL_HEADER_OWNER,
+            (
+                '"PRIVATE-TOKEN"',
+                "def strip_cross_origin_credential_headers(",
+                "session.should_strip_auth(",
+                "class CredentialScopedSession(",
+            ),
+            "http_credentials.py must own cross-origin credential header removal",
+        ),
+        (
+            _REGISTRY_ORIGIN_OWNER,
+            ("def headers_for(", "if not self.serves(scheme, host):"),
+            "RegistryConfig must scope the registry token to its configured origin",
+        ),
+        (
+            _ARTIFACTORY_NETRC_CONSUMER,
+            ("return cfg.headers_for(scheme, host)",),
+            "Artifactory downloads must request registry headers per target origin",
+        ),
+        (
+            _MARKETPLACE_HTTP_CONSUMER,
+            ("_HTTP_SESSION = CredentialScopedSession()",),
+            "Marketplace fetches must reuse the credential-scoped session",
+        ),
+        (
+            _GITHUB_MCP_HOST_CONSUMER,
+            ("hostname = unambiguous_https_hostname(url)",),
+            "GitHub MCP token injection must use the parser-agreed host",
+        ),
+    )
+    for path, needles, message in contracts:
+        findings.extend(
+            _require_subs(provider, inv, _RID_CREDENTIAL_ORIGIN, path, needles, message)
+        )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_CREDENTIAL_ORIGIN,
+            _ARTIFACTORY_NETRC_CONSUMER,
+            (("sub", ".get_headers()", 0, "eq"),),
+            "Artifactory downloads must not attach registry headers without an origin check",
         )
     )
     return tuple(findings)
@@ -840,7 +925,9 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 'return ("--template=",)',
                 "def validate_git_url_rewrite_safety(",
                 "def git_symlink_pin_args(",
-                "retained.append(git_symlink_pin_entry())",
+                "pinned = (git_symlink_pin_entry(), *git_line_ending_pin_entries())",
+                "retained.extend(pinned)",
+                "def git_line_ending_pin_args(",
                 '_SYMLINK_PIN_VALUE = "false"',
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
@@ -1061,11 +1148,22 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
     for path, needles in (
         (
             "src/apm_cli/cache/git_cache.py",
-            ("git_symlink_pin_args(", "git_symlink_pin_entry(", "materialize_tracked_symlinks("),
+            (
+                "git_symlink_pin_args(",
+                "git_symlink_pin_entry(",
+                "git_line_ending_pin_args(",
+                "git_line_ending_pin_entries(",
+                "materialize_tracked_symlinks(",
+            ),
         ),
         (
             "src/apm_cli/deps/bare_cache.py",
-            ("git_symlink_pin_args(", "materialize_tracked_symlinks("),
+            (
+                "git_symlink_pin_args(",
+                "git_line_ending_pin_args(",
+                "git_line_ending_pin_entries(",
+                "materialize_tracked_symlinks(",
+            ),
         ),
     ):
         findings.extend(
@@ -1075,7 +1173,8 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 _RID_GIT_CHILD_ENV,
                 path,
                 needles,
-                "Dependency checkouts must write link text and materialize it from Git objects",
+                "Dependency checkouts must write link text, materialize it from Git objects,"
+                " and pin deterministic line endings",
             )
         )
     findings.extend(
@@ -1086,6 +1185,17 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
             _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
             re.compile(r"core\.symlinks=|[\"']core\.symlinks[\"']"),
             "The core.symlinks pin must route through utils/git_env.git_symlink_pin_*",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(r"core\.eol=|[\"']core\.eol[\"']"),
+            "The core.eol pin must route through utils/git_env.git_line_ending_pin_*",
             exempt=False,
         )
     )
@@ -1359,6 +1469,54 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "except (GitUrlRewriteError, GitUrlRewriteProbeError):",
             ),
             "Positional validation must reuse canonical transport and rewrite policy",
+        )
+    )
+    findings.extend(_check_git_output_decoding(provider, inv))
+    return tuple(findings)
+
+
+_GIT_TEXT_OUTPUT_CONSUMERS: tuple[str, ...] = (
+    "src/apm_cli/cache/git_cache.py",
+    "src/apm_cli/deps/bare_cache.py",
+    "src/apm_cli/deps/git_file_transport.py",
+    "src/apm_cli/deps/github_downloader.py",
+    "src/apm_cli/deps/github_downloader_validation.py",
+    "src/apm_cli/deps/tiered_ref_resolver.py",
+    "src/apm_cli/marketplace/ref_resolver.py",
+    "src/apm_cli/utils/git_sparse.py",
+)
+
+
+def _check_git_output_decoding(
+    provider: FactsProvider, inv: frozenset[str]
+) -> tuple[Violation, ...]:
+    """Install-path Git text output decodes as UTF-8 via run_git_text (#3056)."""
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            "src/apm_cli/utils/git_env.py",
+            (
+                'GIT_OUTPUT_ENCODING = "utf-8"',
+                "def run_git_text(",
+                'errors="surrogateescape",',
+                "result.stdout = _strict_git_text(command, result.stdout)",
+                'errors="backslashreplace",',
+            ),
+            "utils/git_env.py must own locale-independent Git output decoding",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _GIT_TEXT_OUTPUT_CONSUMERS,
+            re.compile(r"\b(?:text|universal_newlines)\s*=\s*True\b"),
+            "Install-path Git text output must use run_git_text, not the locale codec",
+            exempt=False,
         )
     )
     return tuple(findings)
@@ -1746,6 +1904,13 @@ RULES: tuple[Rule, ...] = (
         check=_check_artifactory_netrc_isolation,
     ),
     Rule(
+        id=_RID_CREDENTIAL_ORIGIN,
+        group=GROUP,
+        guard_ids=(_RID_CREDENTIAL_ORIGIN,),
+        description="Credentials attach only to the origin they were configured for.",
+        check=_check_credential_origin_scope,
+    ),
+    Rule(
         id=_RID_HOST_CRED,
         group=GROUP,
         guard_ids=(
@@ -1778,6 +1943,7 @@ RULES: tuple[Rule, ...] = (
             _RID_GIT_DIAGNOSTIC_DELEGATE,
             _RID_GIT_DIAGNOSTIC_TOKENS,
             _RID_GIT_DIAGNOSTIC_JWT,
+            _RID_GIT_OUTPUT_DECODING,
             _RID_GIT_SINGLE_REMOTE,
             _RID_GIT_URL_CREDENTIALS,
             _RID_GIT_URL_HEADER,

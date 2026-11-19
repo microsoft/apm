@@ -99,7 +99,7 @@ def _report_retained_watch_outputs(
             else "Would "
         )
         logger.progress(
-            f"{generated_note}retain {protected_count} hand-authored root {noun}; "
+            f"{generated_note}retain {protected_count} hand-authored context {noun}; "
             "no files written.",
             symbol="info",
         )
@@ -109,7 +109,7 @@ def _report_retained_watch_outputs(
     )
     logger.progress(
         f"Compilation completed;{generated_note} retained {protected_count} "
-        f"hand-authored root {noun}.",
+        f"hand-authored context {noun}.",
         symbol="info",
     )
     return True

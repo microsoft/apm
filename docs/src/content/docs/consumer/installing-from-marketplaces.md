@@ -21,7 +21,7 @@ or when the runtime owns the install surface (VS Code Copilot Chat).
 
 | Runtime                         | Install command                                                         | Auth                                | Cache layout                                                                 |
 |---------------------------------|-------------------------------------------------------------------------|-------------------------------------|------------------------------------------------------------------------------|
-| APM (recommended)               | `apm marketplace add <owner>/<repo>` then `apm install <pkg>@<marketplace>` | HTTPS: host token or git credential helper. SSH: local key or agent. | `apm_modules/` in the project; `~/.apm/cache/` for fetched refs.             |
+| APM (recommended)               | `apm marketplace add <owner>/<repo>` then `apm install <pkg>@<marketplace>` | HTTPS: host token or git credential helper. SSH: local key or agent. | `apm_modules/` in the project; fetched refs in the platform cache (`apm cache info`); catalogs in `~/.apm/cache/marketplace/`. |
 | VS Code (GitHub Copilot Chat)   | Plugin marketplace UI; or `code --install-extension` for the marketplace itself. | VS Code GitHub sign-in.             | Per-user extension store managed by VS Code. APM artifacts stream from the marketplace at activation. |
 | Cursor                          | Settings -> Plugins -> add marketplace URL.                             | Cursor account.                     | `~/.cursor/extensions/` per-user.                                            |
 | GitHub Copilot CLI              | `gh copilot marketplace add <owner>/<repo>` then `gh copilot plugin install <pkg>`. | `gh auth login`.                    | `~/.config/gh/copilot/` per-user.                                            |
@@ -32,6 +32,15 @@ Native commands above read whichever artifact the runtime expects.
 Most read `.claude-plugin/marketplace.json` (Anthropic-compatible
 schema); Codex reads `.agents/plugins/marketplace.json`. Producers
 who enable both outputs reach every runtime from one repo.
+
+## Local authoring previews through APM
+
+To preview an author's catalog before it is published, run
+`apm marketplace add ./apm.yml --name alice-dev`, then
+`apm install my-tool@alice-dev`. APM rereads the file on each command;
+registration does not install its inventory or publish anything. See
+[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
+for offline and locked-replay rules.
 
 ## Codex compatibility bundles through APM
 
@@ -120,7 +129,7 @@ fingerprint utility. This does not extend either route's runtime qualification.
 
 ### APM-managed Claude user plugins
 
-With Claude Code **2.1.291** on `PATH`, `apm install --global --target claude`
+With Claude Code **2.1.291** or **2.1.322** on `PATH`, `apm install --global --target claude`
 prepares eligible intact Claude plugins through a local `apm-claude`
 marketplace. APM still owns dependency acquisition, the lockfile, source
 security checks, and the materialized package under `~/.apm/apm_modules`.
@@ -132,7 +141,7 @@ onboarding and workspace trust remain user decisions; APM does not run hooks.
 
 :::note[Runtime qualification]
 Reported qualification covers only the metadata lifecycle on Claude Code
-**2.1.291**, macOS arm64. Runtime witnesses are **absent**: `SessionStart`,
+**2.1.291** and **2.1.322**, macOS arm64. Runtime witnesses are **absent**: `SessionStart`,
 `SubagentStart` and `UserPromptSubmit` execution, distinct effective plugin
 roots/resources, and native command loading/invocation/namespacing remain
 unverified. Metadata and unit/mock results do not establish execution.
@@ -320,6 +329,20 @@ tokens, authorization headers, askpass programs, or registry credentials to
 that subprocess. See
 [Authentication](../../getting-started/authentication/).
 
+**Several catalogs in one repository.** To register a catalog stored outside
+the default locations, pass its repository-relative path:
+
+```bash
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json --name acme-backend
+```
+
+APM saves the path with the registration, so `browse`, `update`, and
+`apm install pkg@acme-frontend` keep reading that catalog. See
+[`marketplace add --path`](../../reference/cli/marketplace/) for the default
+discovery order and path rules. Separate catalogs are not access control:
+repository read access covers all of them.
+
 **Lockfile note.** Relative package sources from a local marketplace record a
 local-path source in `apm.lock.yaml`; lockfiles produced this way are
 machine-specific -- do not commit them into a shared repo. Remote
@@ -327,6 +350,52 @@ package entries in the same local marketplace remain remote, host-qualified
 dependencies. Remote `marketplace.json` installs record `source_url` and
 `source_digest` provenance. See
 [lockfile reference](../../reference/lockfile-spec/).
+
+## Declare marketplaces in your user manifest
+
+Instead of running `apm marketplace add` on every machine, list your
+marketplaces once in the user manifest (`$APM_HOME/apm.yml`, default
+`~/.apm/apm.yml`; see the [`APM_HOME` path contract](../../reference/environment-variables/#apm_home-path-contract))
+and run `apm install -g`:
+
+```yaml
+# $APM_HOME/apm.yml (default ~/.apm/apm.yml)
+name: me
+version: 1.0.0
+marketplaces:
+  - name: acme
+    source: https://github.com/acme-org/agent-marketplace#v1.2.0
+  - name: internal
+    source: git@gitea.example.com:platform/marketplace.git
+    ref: v3.0.0
+```
+
+Each entry takes a `name` and a `source` in any SOURCE form
+`apm marketplace add` accepts, plus an optional `ref` that works like
+`--ref`. There is no `--host` equivalent: use a full URL for hosts other
+than the default. Local paths must be absolute or start with `~/`. `apm install -g`
+then:
+
+- registers declared marketplaces that are missing, and re-registers
+  entries whose `source` or `ref` changed;
+- removes marketplaces it registered earlier that you deleted from the
+  list;
+- keeps marketplaces you added with `apm marketplace add`. If a declared
+  `name` matches one of them, APM reports the conflict and leaves your
+  manual registration alone. Run `apm marketplace remove NAME` and re-run
+  `apm install -g` to hand it over to the manifest.
+
+The output lists each marketplace registered, updated, removed or kept.
+If an entry cannot be fetched, or the user manifest or an entry is
+invalid, `apm install -g` exits with an error and removes nothing.
+`apm install -g --dry-run` previews the changes without fetching or
+writing. Registering a marketplace only makes it searchable with
+`apm search QUERY@NAME` and installable with `apm install PKG@NAME`. It
+installs nothing and grants no trust.
+
+Only the user manifest may declare marketplaces. A project or package
+`apm.yml` that contains `marketplaces:` fails with an error pointing to the
+user manifest.
 
 ## Where next
 

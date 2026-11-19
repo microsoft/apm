@@ -149,14 +149,14 @@ class TestFinalizeBareSuccessFallback:
 
     def test_no_logger_calls_rich_success(self) -> None:
         ctx = _make_ctx(installed_count=2, logger=None)
-        with patch("apm_cli.commands.install._rich_success") as mock_success:
+        with patch("apm_cli.install.phases.finalize._rich_success") as mock_success:
             run(ctx)
         mock_success.assert_called_once_with("Installed 2 APM dependencies")
 
     def test_with_logger_does_not_call_rich_success(self) -> None:
         logger = MagicMock()
         ctx = _make_ctx(installed_count=1, logger=logger)
-        with patch("apm_cli.commands.install._rich_success") as mock_success:
+        with patch("apm_cli.install.phases.finalize._rich_success") as mock_success:
             run(ctx)
         mock_success.assert_not_called()
 

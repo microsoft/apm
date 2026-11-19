@@ -13,7 +13,8 @@ from ..core.deployment_state import LocatorKind
 from ..core.scope import InstallScope
 
 # APM Dependencies
-from ..deps.lockfile import LockFile, get_lockfile_path
+from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+from ..deps.reachability import retained_lock_keys
 from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
@@ -119,7 +120,7 @@ def prune(ctx, dry_run):
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
-        except MaterializationPathCollisionError as e:
+        except (MaterializationPathCollisionError, LockfileFormatError) as e:
             logger.error(str(e))
             sys.exit(1)
         except Exception as e:
@@ -131,10 +132,8 @@ def prune(ctx, dry_run):
         )
         expected_lock_keys = {dependency.get_unique_key() for dependency in declared_deps}
         if lockfile is not None:
-            expected_lock_keys.update(
-                dep_key
-                for dep_key, dependency in lockfile.dependencies.items()
-                if dependency.depth is not None and dependency.depth > 1
+            expected_lock_keys |= retained_lock_keys(
+                lockfile, project_root, apm_modules_dir, declared_deps
             )
         lock_keys_by_path = (
             _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
@@ -167,7 +166,18 @@ def prune(ctx, dry_run):
             else ()
         )
 
-        if not orphaned_packages and not missing_orphaned_keys and not owner_violations:
+        # Staging records whose root is already gone must not keep authorizing
+        # compile if the directory is recreated (#3705).
+        absent_staging = (
+            lockfile.absent_staging_slugs(apm_modules_dir) if lockfile is not None else []
+        )
+
+        if (
+            not orphaned_packages
+            and not missing_orphaned_keys
+            and not owner_violations
+            and not absent_staging
+        ):
             if not apm_modules_dir.exists():
                 logger.progress("No apm_modules/ directory found. Nothing to prune.")
             else:
@@ -210,11 +220,20 @@ def prune(ctx, dry_run):
                 f"Found {len(missing_orphaned_keys)} stale lockfile dependency "
                 "record(s) without removable package content."
             )
+        if absent_staging:
+            logger.progress(
+                f"Found {len(absent_staging)} stale local bundle staging record(s) "
+                f"without a staging directory: {', '.join(absent_staging)}."
+            )
 
         if dry_run:
             if missing_orphaned_keys:
                 logger.dry_run_notice(
                     f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
+                )
+            if absent_staging:
+                logger.dry_run_notice(
+                    f"forget {len(absent_staging)} stale local bundle staging record(s)"
                 )
             planned_owner_repairs = (
                 DeploymentLedgerCodec.owner_reference_violations(
@@ -330,6 +349,7 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
+            lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
             if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
                 from .uninstall.engine import _cleanup_stale_mcp

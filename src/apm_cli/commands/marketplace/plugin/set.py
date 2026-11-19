@@ -68,6 +68,7 @@ def set_cmd(
 
     # Resolve mutable refs to concrete SHAs.
     if ref is not None and not _SHA_RE.match(ref):
+        from ....marketplace.ref_resolver import package_entry_coordinates
         from ....marketplace.yml_schema import (
             load_marketplace_from_apm_yml,
             load_marketplace_yml,
@@ -77,15 +78,12 @@ def set_cmd(
             yml_data = load_marketplace_from_apm_yml(yml)
         else:
             yml_data = load_marketplace_yml(yml)
-        source = None
-        for pkg in yml_data.packages:
-            if pkg.name.lower() == name.lower():
-                source = pkg.source
-                break
-        if source is None:
+        entry = next((pkg for pkg in yml_data.packages if pkg.name.lower() == name.lower()), None)
+        if entry is None:
             logger.error(f"Package '{name}' not found", symbol="error")
             sys.exit(2)
-        ref = _resolve_ref(logger, source, ref, version, no_verify=False)
+        host, owner_repo, _org, _url = package_entry_coordinates(entry, yml_data.source_base)
+        ref = _resolve_ref(logger, owner_repo, ref, version, no_verify=False, host=host)
 
     parsed_tags = _parse_tags(tags)
 

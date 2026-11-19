@@ -21,7 +21,7 @@ import fnmatch
 import hashlib
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +62,9 @@ class ExecutableDeclaration:
         is_transitive: Whether this package is a transitive dependency.
         parent_name: Name of the direct dependency that pulled this in
             (only set when *is_transitive* is True).
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            so commands can find the package by its declared name while the
+            grant names the selected source.
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
         lsp_count: Number of LSP server entries discovered.
@@ -78,6 +81,7 @@ class ExecutableDeclaration:
     package_name: str
     is_transitive: bool = False
     parent_name: str | None = None
+    original_identity: str | None = None
     hook_count: int = 0
     mcp_count: int = 0
     lsp_count: int = 0
@@ -295,6 +299,42 @@ def _is_content_bound_key(package_key: str) -> bool:
     return "@sha256:" in package_key
 
 
+# Placeholder tokens let glob deny patterns pass through DependencyReference
+# parsing; they are plain lowercase words that never occur in real identities.
+_GLOB_PLACEHOLDERS = (("*", "apmglobstar"), ("?", "apmglobqmark"))
+
+
+def canonical_exec_identity(package_key: object) -> str:
+    """Return the version-blind package identity used for deny matching.
+
+    Shorthand, host-qualified, and URL spellings of one package map to its
+    lockfile identity; GitHub-family and Azure DevOps identities are
+    case-folded because those hosts resolve owner/repo case-insensitively. Glob
+    wildcards survive normalization; content-bound keys and spellings that do
+    not parse are returned unchanged.
+    """
+    name = _strip_version(str(package_key or "").strip())
+    if not name or _is_content_bound_key(name):
+        return name
+    probe = name
+    for char, token in _GLOB_PLACEHOLDERS:
+        probe = probe.replace(char, token)
+    try:
+        from apm_cli.models.apm_package import DependencyReference
+        from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
+
+        reference = DependencyReference.parse(probe)
+        canonical = reference.get_unique_key()
+    except ValueError:
+        return name
+    if is_github_hostname(reference.host) or is_azure_devops_hostname(reference.host):
+        # GitHub-family and Azure DevOps hosts resolve owner/repo case-insensitively.
+        canonical = canonical.lower()
+    for char, token in _GLOB_PLACEHOLDERS:
+        canonical = canonical.replace(token, char)
+    return canonical
+
+
 def normalize_bin_deploy_deny_key(value: object) -> str:
     """Normalize package identity for ``bin_deploy.deny`` storage and lookup."""
     raw = str(value or "").strip()
@@ -336,10 +376,31 @@ def _map_grants(
     return False
 
 
-def _deny_glob_match(name: str, patterns: Any) -> bool:
-    """Return True if *name* matches any DENY *pattern* (exact or glob).
+def _map_denies(
+    deny_map: dict[str, dict[str, bool]] | None,
+    package_key: str,
+    exec_type: str,
+) -> bool:
+    """Return True if *deny_map* denies *exec_type* for any spelling of the package."""
+    if _map_grants(deny_map, package_key, exec_type):
+        return True
+    if not deny_map or _is_content_bound_key(package_key):
+        return False
+    identity = canonical_exec_identity(package_key)
+    return any(
+        isinstance(entry, dict)
+        and bool(entry.get(exec_type, False))
+        and not _is_content_bound_key(stored_key)
+        and canonical_exec_identity(stored_key) == identity
+        for stored_key, entry in deny_map.items()
+    )
 
-    Deny is the org ceiling, so in v1 it supports ``fnmatch`` globs such as
+
+def _deny_glob_match(name: str, patterns: Any) -> bool:
+    """Return True if *name* matches any DENY *pattern* (exact, glob, or parent).
+
+    A pattern also covers sub-packages below it (``owner/repo`` covers
+    ``owner/repo/skills/x``). Deny is the org ceiling, so in v1 it supports ``fnmatch`` globs such as
     ``evil/*`` to block a whole publisher fleet-wide. Allow / recommend /
     require remain exact-match only -- widening the GRANT side with a glob is
     a larger blast radius (a typo over-trusts), whereas broad denial is
@@ -347,7 +408,11 @@ def _deny_glob_match(name: str, patterns: Any) -> bool:
     """
     if name in patterns:
         return True
-    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+    return any(
+        fnmatch.fnmatchcase(name, p) or name.startswith(f"{str(p).rstrip('/')}/")
+        for p in patterns
+        if str(p).rstrip("/")
+    )
 
 
 def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool, str | None]:
@@ -356,7 +421,9 @@ def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool,
         return True, LAYER_ORG_DENY_ALL
     if exec_type == EXEC_TYPE_BIN and ctx.org_bin_deny_all:
         return True, LAYER_ORG_DENY_ALL
-    if _deny_glob_match(name, ctx.org_deny):
+    if _deny_glob_match(name, ctx.org_deny) or _deny_glob_match(
+        canonical_exec_identity(name), ctx.org_deny
+    ):
         return True, LAYER_ORG_DENY
     if exec_type == EXEC_TYPE_BIN:
         normalized_name = normalize_bin_deploy_deny_key(name)
@@ -397,11 +464,11 @@ def resolve_exec_decision(
         return ExecDecision(False, layer, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type))
 
     # 2. USER deny / PROJECT deny (narrowing; both win over any grant).
-    if _map_grants(ctx.user_deny, package_key, exec_type):
+    if _map_denies(ctx.user_deny, package_key, exec_type):
         return ExecDecision(
             False, LAYER_USER_DENY, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type)
         )
-    if _map_grants(ctx.project_deny, package_key, exec_type):
+    if _map_denies(ctx.project_deny, package_key, exec_type):
         return ExecDecision(
             False, LAYER_PROJECT_DENY, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type)
         )
@@ -459,11 +526,69 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
+@dataclass(frozen=True)
+class LockedApproval:
+    """The trust principal a locked dependency is granted under.
+
+    Attributes:
+        identity: Approval name the install gate checks.
+        version: Version bound into the grant key; empty for a replaced row,
+            whose identity already carries the selected ``with:`` ref.
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            or None for a row that was not replaced.
+    """
+
+    identity: str
+    version: str
+    original_identity: str | None = None
+
+    @property
+    def key(self) -> str:
+        """Return the full approval key (``identity#version``)."""
+        return build_approval_key(self.identity, self.version)
+
+
+def locked_dependency_approval(dependency: Any, version: str | None = None) -> LockedApproval:
+    """Return the trust principal for a locked dependency.
+
+    A replaced row is keyed by its selected source, exactly as the install
+    gate keys the resolved reference, so an upstream grant never unlocks the
+    replacement and ``apm approve`` writes the key the gate checks. *version*
+    overrides the locked version for a row that was not replaced; ``apm
+    approve`` passes the package's ``apm.yml`` version there, as it always has.
+    """
+    if getattr(dependency, "replacement", None) is not None:
+        return LockedApproval(
+            identity=dependency_approval_key(dependency.to_dependency_ref()),
+            version="",
+            original_identity=dependency.get_unique_key(),
+        )
+    if version is None:
+        version = dependency.version or ""
+    return LockedApproval(identity=dependency.get_unique_key(), version=version)
+
+
 def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     """Return trust keys derived only from a locked package identity."""
-    identity = dependency.get_unique_key()
-    versioned = build_approval_key(identity, dependency.version or "")
-    return tuple(dict.fromkeys((identity, versioned)))
+    approval = locked_dependency_approval(dependency)
+    if approval.original_identity is not None:
+        return tuple(dict.fromkeys((approval.key, _strip_version(approval.key))))
+    return tuple(dict.fromkeys((approval.identity, approval.key)))
+
+
+def dependency_approval_key(dependency_ref: Any) -> str:
+    """Return the trust key for a resolved dependency reference.
+
+    Uses the lockfile identity domain that ``apm approve`` writes (bare
+    ``owner/repo`` for github.com), bound to the selected source so a
+    replacement never inherits upstream approval. A replacement is keyed by
+    the ``with:`` source the consumer declared; its absolute local anchor is
+    a materialization coordinate, not a trust principal.
+    """
+    source = dependency_ref.source_reference
+    if dependency_ref.replacement is not None:
+        source = replace(source, anchored_local_path=None)
+    return build_approval_key(source.get_unique_key(), source.reference or "")
 
 
 def local_bundle_approval_key(
@@ -524,6 +649,7 @@ def scan_package_executables(
     manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
+    original_identity: str | None = None,
 ) -> ExecutableDeclaration:
     """Scan a materialised package directory for executable primitives.
 
@@ -621,6 +747,7 @@ def scan_package_executables(
         package_name=package_name,
         is_transitive=is_transitive,
         parent_name=parent_name,
+        original_identity=original_identity,
         hook_count=len(hook_files),
         mcp_count=mcp_count,
         lsp_count=lsp_count,
@@ -805,8 +932,9 @@ def write_allow_executables(
 ) -> None:
     """Persist *allow_executables* back to the project's ``apm.yml``.
 
-    Reads the existing YAML, updates the ``allowExecutables`` key, and
-    writes it back using the standard ``dump_yaml`` helper.
+    Reads the existing YAML through the manifest owner, updates the
+    ``allowExecutables`` key, and writes it back round-trip so comments,
+    key order and anchors survive.
 
     Note: this writes only the project gate opt-in signal
     (``allowExecutables: {}``) and the CI/automated-context approvals that are
@@ -814,9 +942,10 @@ def write_allow_executables(
     ``~/.apm/config.json`` under ``executables: {allow, deny}`` (see
     :func:`save_user_executables`); there is no standalone approvals file.
     """
-    from ..utils.yaml_io import dump_yaml, load_yaml
+    from ..models.manifest_io import load_manifest_roundtrip
+    from ..utils.yaml_io import dump_yaml_roundtrip
 
-    data = load_yaml(manifest_path)
+    data = load_manifest_roundtrip(manifest_path)
     if not isinstance(data, dict):
         return
 
@@ -825,7 +954,7 @@ def write_allow_executables(
     elif "allowExecutables" in data:
         del data["allowExecutables"]
 
-    dump_yaml(data, manifest_path)
+    dump_yaml_roundtrip(data, manifest_path)
 
 
 def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
@@ -928,12 +1057,12 @@ def exec_trust_context_for_project(
     migrate_user_legacy: bool = True,
 ) -> ExecTrustContext:
     """Resolve project, user, and policy executable trust through one owner."""
-    from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.models.manifest_io import load_manifest
 
     project_data: dict[str, Any] | None = None
     manifest_path = project_root / "apm.yml"
     if manifest_path.is_file():
-        data = load_yaml(manifest_path)
+        data = load_manifest(manifest_path)
         if isinstance(data, dict):
             project_data = data
             if data.get("allowExecutables") is not None:
@@ -967,82 +1096,53 @@ def effective_exec_map_for_project(
     )
 
 
-def effective_allow_executables(
-    project_allow_executables: dict[str, dict[str, bool]] | None,
-) -> dict[str, dict[str, bool]] | None:
-    """Return the effective allow-map for an install run (deny-wins).
-
-    Back-compat shim around :func:`build_effective_exec_map`: the historical
-    ``{**project, **user}`` user-wins merge is replaced by the #1873 deny-wins
-    precedence. Callers that only have the legacy ``allowExecutables`` block
-    (no org policy) reach the resolver through here; the install template uses
-    :func:`build_effective_exec_map` directly so the org-deny ceiling applies.
-
-    Returns ``None`` when the gate is disabled (no block), preserving the
-    backward-compatible "deploy everything" behaviour.
-    """
-    if isinstance(project_allow_executables, dict):
-        data: dict[str, Any] = {"allowExecutables": project_allow_executables}
-    else:
-        # ``allow_executables`` is ``dict | None`` by contract; any other shape
-        # (an absent/unparsed in-memory signal) means "no project layer".
-        data = {}
-    return build_effective_exec_map(policy=None, project_data=data)
-
-
-def _filter_service_dependencies_by_allow_executables(
-    dependencies: list,
-    project_allow_execs: dict | None,
-    logger: Any,
+def resolve_project_exec_allow_map(
+    project_root: Path,
+    apm_package: Any,
     *,
-    exec_type: str,
-    service_label: str,
-) -> list:
-    """Filter named service dependencies through the executable approval map."""
-    if project_allow_execs is None or not dependencies:
-        return dependencies
-    _allow_execs = effective_allow_executables(project_allow_execs)
-    if _allow_execs is None:
-        return dependencies
-    _filtered = []
-    for _dep in dependencies:
-        _slug = _dep.name
-        # Fail-closed: keep a server only when it carries a name AND that name
-        # is approved.  A falsy/missing name is treated as NOT approved so an
-        # unnamed dep can never slip past the gate.
-        if _slug and is_package_approved(_allow_execs, _slug, exec_type):
-            _filtered.append(_dep)
-        elif _slug:
-            logger.verbose_detail(
-                f"Skipping {service_label} server from '{_slug}': executables not trusted yet. "
-                f"Run 'apm approve {_slug}' to trust it."
-            )
-        else:
-            logger.verbose_detail(
-                f"Skipping an unnamed {service_label} server: executables not trusted yet. "
-                "Identify it in apm.yml and run 'apm approve <package>' to trust it."
-            )
-    if len(_filtered) < len(dependencies):
-        logger.warning(
-            f"Filtered {len(dependencies) - len(_filtered)} {service_label} server(s) whose "
-            "executables are not trusted yet.",
-            symbol="warning",
-        )
-    return _filtered
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
+    no_policy: bool = False,
+    logger: Any | None = None,
+) -> dict[str, dict[str, bool]] | None:
+    """Return the deny-wins executables map for one project command.
+
+    Reuses a map the caller already resolved (``executable_context`` is
+    ``(map, resolved)``); otherwise resolves org policy (unless disabled),
+    project, and user layers through :func:`effective_exec_map_for_project`.
+    """
+    allow_map, resolved = executable_context
+    if resolved:
+        return allow_map
+    policy = None
+    if not no_policy:
+        from apm_cli.policy.discovery import discover_policy_with_chain
+
+        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+    return effective_exec_map_for_project(
+        project_root,
+        policy=policy,
+        fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+        logger=logger,
+    )
 
 
 def filter_mcp_by_allow_executables(
     mcp_deps: list,
-    project_allow_execs: dict | None,
+    effective_allow_execs: dict | None,
     logger: Any,
 ) -> list:
-    """Filter MCP deps not approved in allowExecutables."""
-    return _filter_service_dependencies_by_allow_executables(
+    """Filter package-declared self-defined MCP servers by their package's decision.
+
+    Root-declared servers and registry servers pass; a self-defined server
+    from a dependency passes only when its declaring package is approved.
+    """
+    return _filter_declared_services(
         mcp_deps,
-        project_allow_execs,
+        effective_allow_execs,
         logger,
         exec_type=EXEC_TYPE_MCP,
         service_label="MCP",
+        gated=lambda dependency: bool(getattr(dependency, "is_self_defined", False)),
     )
 
 
@@ -1052,15 +1152,38 @@ def filter_lsp_by_allow_executables(
     logger: Any,
 ) -> list:
     """Filter transitive LSP deps by their declaring package's decision."""
-    if effective_allow_execs is None or not lsp_deps:
-        return lsp_deps
+    return _filter_declared_services(
+        lsp_deps,
+        effective_allow_execs,
+        logger,
+        exec_type=EXEC_TYPE_LSP,
+        service_label="LSP",
+    )
+
+
+def _filter_declared_services(
+    dependencies: list,
+    effective_allow_execs: dict | None,
+    logger: Any,
+    *,
+    exec_type: str,
+    service_label: str,
+    gated: Any = None,
+) -> list:
+    """Keep root-declared services and services whose declaring package is approved."""
+    if effective_allow_execs is None or not dependencies:
+        return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
-    for dependency in lsp_deps:
+    for dependency in dependencies:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
-        if owner is None or any(
-            is_package_approved(effective_allow_execs, key, EXEC_TYPE_LSP) for key in approval_keys
+        if (
+            owner is None
+            or (gated is not None and not gated(dependency))
+            or any(
+                is_package_approved(effective_allow_execs, key, exec_type) for key in approval_keys
+            )
         ):
             filtered.append(dependency)
             continue
@@ -1068,18 +1191,18 @@ def filter_lsp_by_allow_executables(
         dependency_name = getattr(dependency, "name", "(unnamed)")
         if approval_keys:
             logger.verbose_detail(
-                f"Skipping LSP server '{dependency_name}' from '{owner}': "
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
                 f"executables not trusted. Run 'apm policy explain {owner}'; "
                 f"if policy permits, run 'apm approve {owner}'."
             )
         else:
             logger.verbose_detail(
-                f"Skipping LSP server '{dependency_name}' from '{owner}': package "
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
                 "identity cannot be verified without lock state. Run 'apm install' "
                 "to regenerate apm.lock.yaml, then approve the package."
             )
-    if len(filtered) < len(lsp_deps):
-        skipped_count = len(lsp_deps) - len(filtered)
+    if len(filtered) < len(dependencies):
+        skipped_count = len(dependencies) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
@@ -1102,7 +1225,7 @@ def filter_lsp_by_allow_executables(
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
         logger.warning(
-            f"Filtered {skipped_count} LSP {noun} from {owners}: "
+            f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
             f"{package_clause} not trusted yet.{remediation}",
             symbol="warning",
         )
@@ -1261,12 +1384,14 @@ def _user_config_file() -> Path:
 
 
 def _legacy_approvals_path() -> Path:
-    """Return the path to the deprecated ``~/.apm/approvals.yml`` store.
+    """Return the path to the deprecated user ``approvals.yml`` store.
 
-    Read-only: the file is migrated into ``~/.apm/config.json`` on first read
-    and deleted. There is no writer for this path anymore (#1873).
+    Read-only: the file is migrated into the adjacent ``config.json`` on first
+    read and deleted. There is no writer for this path anymore (#1873).
     """
-    return Path.home() / ".apm" / "approvals.yml"
+    from ..core.scope import get_apm_home
+
+    return get_apm_home() / "approvals.yml"
 
 
 def _migrate_legacy_approvals(
@@ -1393,7 +1518,10 @@ def build_exec_trust_context(
         execs = getattr(policy, "executables", None)
         if execs is not None:
             org_deny_all = bool(getattr(execs, "deny_all", False))
-            org_deny = frozenset(getattr(execs, "deny", ()) or ())
+            raw_deny = tuple(getattr(execs, "deny", ()) or ())
+            org_deny = frozenset(raw_deny) | frozenset(
+                canonical_exec_identity(entry) for entry in raw_deny
+            )
             org_require = frozenset(getattr(execs, "require", ()) or ())
             org_recommend = frozenset(getattr(execs, "recommend", ()) or ())
             org_enforce = frozenset(getattr(execs, "enforce", ()) or ())
@@ -1431,11 +1559,11 @@ def load_project_executables(
     manifest_path: Path,
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]], bool]:
     """Read the project ``executables`` block (and alias) from ``apm.yml``."""
-    from ..utils.yaml_io import load_yaml
+    from ..models.manifest_io import load_manifest
 
     if not manifest_path.is_file():
         return {}, {}, False
-    data = load_yaml(manifest_path)
+    data = load_manifest(manifest_path)
     if not isinstance(data, dict):
         return {}, {}, False
     return parse_project_executables(data)
@@ -1453,9 +1581,11 @@ def write_project_executables(
     sub-blocks are omitted; an empty ``executables: {}`` is still written when
     the gate was already opted-in so the signal is not lost.
     """
-    from ..utils.yaml_io import dump_yaml, load_yaml
+    from ..models.manifest_io import load_manifest_roundtrip
+    from ..utils.yaml_io import dump_yaml_roundtrip
 
-    data = load_yaml(manifest_path)
+    # Round-trip keeps the user's comments and layout (#2000, #2012).
+    data = load_manifest_roundtrip(manifest_path)
     if not isinstance(data, dict):
         return
 
@@ -1468,4 +1598,4 @@ def write_project_executables(
 
     if block or had_alias or "executables" in data:
         data["executables"] = block
-    dump_yaml(data, manifest_path)
+    dump_yaml_roundtrip(data, manifest_path)

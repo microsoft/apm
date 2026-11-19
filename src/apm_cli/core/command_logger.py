@@ -22,6 +22,8 @@ from apm_cli.utils.console import (
 
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
+    from apm_cli.install.failure_residue import FailedInstallResidue
+    from apm_cli.policy.models import PolicyRemedy
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -166,7 +168,10 @@ class CommandLogger:
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
-        _rich_warning(f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.")
+        _rich_warning(
+            f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.",
+            symbol="warning",
+        )
 
     def tree_item(self, message: str):
         """Log a tree sub-item (└─ line) under a package block.
@@ -179,6 +184,10 @@ class CommandLogger:
     def blank_line(self):
         """Log a blank line through the shared console output path."""
         _rich_echo("")
+
+    def preformatted(self, text: str):
+        """Render preformatted text (a diff or snippet) without a status symbol."""
+        _rich_echo(text.rstrip("\n"), soft_wrap=True)
 
     def package_inline_warning(self, message: str):
         """Log an inline warning under a package block (verbose only).
@@ -247,6 +256,45 @@ class InstallLogger(CommandLogger):
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        self._failed_install_residue_note = ""
+
+    def failed_install_residue(self, residue: FailedInstallResidue) -> None:
+        """List native target output a failed install left behind, with one next step.
+
+        Native target integrations are outside the install transaction, so
+        this output is neither removed nor tracked by apm.lock.yaml.
+        """
+        files, entries = residue.files, residue.entries
+        if not files and not entries:
+            return
+        if files:
+            noun = "file" if len(files) == 1 else "files"
+            self.warning(
+                f"This failed install left {len(files)} native target {noun} on disk "
+                "that apm.lock.yaml does not track:"
+            )
+            for path in files:
+                self.error_detail(f"  {path}")
+        if entries:
+            noun = "entry" if len(entries) == 1 else "entries"
+            lead = "also wrote" if files else "wrote"
+            self.warning(
+                f"This failed install {lead} {len(entries)} native target {noun} "
+                "that apm.lock.yaml does not track (not plain files):"
+            )
+            for entry in entries:
+                self.error_detail(f"  {entry}")
+        command = "apm install -g" if residue.user_scope else "apm install"
+        force_hint = "(add --force if it skips them as not managed by APM)."
+        if files:
+            self.info(f"Remove these files, or re-run '{command}' {force_hint}")
+        else:
+            self.info(f"Re-run '{command}' {force_hint}")
+        total = len(files) + len(entries)
+        self._failed_install_residue_note = (
+            f"{total} native target {'item' if total == 1 else 'items'} listed above "
+            f"{'remains' if total == 1 else 'remain'} in place."
+        )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -574,6 +622,14 @@ class InstallLogger(CommandLogger):
         noun = "file" if count == 1 else "files"
         _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
 
+    def frozen_orphans_kept(self, dep_keys: list[str]) -> None:
+        """Name undeclared packages a frozen install left in place (#3662)."""
+        _rich_info(
+            "Kept packages no longer in apm.yml because --frozen does not change "
+            f"apm.lock.yaml: {', '.join(dep_keys)}. Run 'apm install' to remove them.",
+            symbol="info",
+        )
+
     def orphan_cleanup(self, count: int):
         """Log post-install orphan-file cleanup outcome at default verbosity.
 
@@ -615,15 +671,23 @@ class InstallLogger(CommandLogger):
         cached: bool,
         enforcement: str,
         age_seconds: int | None = None,
+        subgroup_scoped: bool = False,
+        chain: list[str] | None = None,
     ):
         """Log policy discovery outcome.
 
         Verbose by default; always shown when ``enforcement == "block"``
-        (users must know blocking is active).
+        (users must know blocking is active) or when ``subgroup_scoped``
+        is set and enforcement is not ``off`` -- a GitLab subgroup policy
+        composed with its ancestors names its ordered extends chain even at
+        default verbosity (#2753).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
         parts = [f"Policy: {source}"]
+        if chain and len(chain) > 1:
+            # The leaf is already the source; show its ancestors root first.
+            parts.append(f"(extends chain: {' -> '.join(chain[:-1])})")
 
         if cached:
             cache_detail = "cached"
@@ -643,9 +707,12 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose:
+        elif self.verbose or (subgroup_scoped and enforcement != "off"):
+            # GitLab subgroup composition: show the chain even in non-verbose
+            # warn mode so the dev sees which namespaces applied (#2753);
+            # an ``off`` policy needs no action and stays silent.
             _rich_info(message, symbol="info")
-        # Non-verbose + non-block: silent (no noise for warn/off)
+        # Non-verbose + non-block + top-level: silent (no noise for warn/off)
 
     def policy_discovery_miss(
         self,
@@ -653,6 +720,7 @@ class InstallLogger(CommandLogger):
         source: str = "",
         error: str | None = None,
         host_org: str | None = None,
+        hint: str | None = None,
     ):
         """Log a policy-discovery non-success outcome.
 
@@ -670,6 +738,8 @@ class InstallLogger(CommandLogger):
                 cache_miss_fetch_fail, garbage_response, cached_stale).
             host_org: Optional org slug for ``absent`` outcome (verbose
                 hint).  Auto-derived from ``source`` when not provided.
+            hint: Optional discovery diagnostic (``PolicyFetchResult.
+                discovery_hint``), shown with ``absent`` in verbose mode only.
         """
         err_text = error or "unknown"
 
@@ -680,6 +750,8 @@ class InstallLogger(CommandLogger):
                 return
             org = host_org or _strip_source_prefix(source) or "this project"
             _rich_info(f"No org policy found for {org}", symbol="info")
+            if hint:
+                _rich_info(hint, symbol="info")
             return
 
         if outcome == "no_git_remote":
@@ -768,6 +840,10 @@ class InstallLogger(CommandLogger):
         reason: str,
         severity: str,
         source: str | None = None,
+        *,
+        remedy: PolicyRemedy | None = None,
+        declared_by: str | None = None,
+        rule: str | None = None,
     ):
         """Record a policy violation for a dependency.
 
@@ -784,6 +860,14 @@ class InstallLogger(CommandLogger):
             source: Optional policy source (used for block-mode next-step
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
+            remedy: apm.yml edit the hint suggests, a
+                :class:`~apm_cli.policy.models.PolicyRemedy` member. ``None``
+                (the default) or any other value suggests no apm.yml edit.
+            declared_by: Direct apm.yml dependency (lock key) that brings
+                in a transitive MCP server; the hint names it instead of
+                *dep_ref*.
+            rule: Policy check (category) that fired, named in the hint
+                so the user can find the policy field.
         """
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
@@ -803,7 +887,10 @@ class InstallLogger(CommandLogger):
             _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
             if source:
                 _rich_echo(
-                    f"  {self._policy_reason_blocked(dep_ref, source)}",
+                    "  "
+                    + self._policy_reason_blocked(
+                        dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
+                    ),
                     color="dim",
                 )
 
@@ -845,11 +932,35 @@ class InstallLogger(CommandLogger):
         return f"Policy at {source} is malformed -- contact your org admin to fix the policy file"
 
     @staticmethod
-    def _policy_reason_blocked(dep_ref: str, source: str) -> str:
-        """Actionable reason for a blocked dependency."""
+    def _policy_reason_blocked(
+        dep_ref: str,
+        source: str,
+        *,
+        remedy: PolicyRemedy | None = None,
+        declared_by: str | None = None,
+        rule: str | None = None,
+    ) -> str:
+        """Actionable reason for a blocked dependency.
+
+        Only :class:`~apm_cli.policy.models.PolicyRemedy` members render an
+        apm.yml edit; ``None`` or an unknown remedy renders none.
+        """
+        from apm_cli.policy.models import PolicyRemedy
+
+        if remedy == PolicyRemedy.ADD:
+            edit = f"add `{dep_ref}` to apm.yml, "
+        elif remedy == PolicyRemedy.PIN:
+            edit = f"pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, "
+        elif remedy == PolicyRemedy.REMOVE and declared_by:
+            edit = f"remove `{declared_by}` (it brings in `{dep_ref}`) from apm.yml, "
+        elif remedy == PolicyRemedy.REMOVE:
+            edit = f"remove `{dep_ref}` from apm.yml, "
+        else:
+            edit = ""
+        rule_part = f" ({rule})" if rule and rule != dep_ref else ""
         return (
-            f"Blocked by org policy at {source} "
-            f"-- remove `{dep_ref}` from apm.yml, contact admin to update policy, "
+            f"Blocked by org policy at {source}{rule_part} "
+            f"-- {edit}contact admin to update policy, "
             "or use `--no-policy` for one-off bypass"
         )
 
@@ -946,10 +1057,12 @@ class InstallLogger(CommandLogger):
             )
         elif disposition is InstallDisposition.FAILED:
             error_suffix = f" with {errors} error(s)" if errors > 0 else ""
+            state_note = (
+                self._failed_install_residue_note
+                or "No install transaction changes were committed."
+            )
             _rich_error(
-                "Installation failed"
-                f"{error_suffix}{timing_suffix}. "
-                "No install transaction changes were committed.",
+                f"Installation failed{error_suffix}{timing_suffix}. {state_note}",
                 symbol="error",
             )
         elif parts:

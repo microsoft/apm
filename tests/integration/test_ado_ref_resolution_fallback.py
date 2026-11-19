@@ -135,3 +135,54 @@ def test_bearer_fallback_scrubs_inherited_authorization_header(
     assert not any(sentinel in header for header in auth_headers)
     assert len(auth_headers) == 1
     assert env["SAFE_CONTEXT_SENTINEL"] == "preserved"
+
+
+def test_ado_ref_listing_reports_every_chain_step_when_exhausted(monkeypatch) -> None:
+    """An exhausted ADO chain surfaces as GitLsRemoteError naming each step and the fix."""
+    import pytest
+
+    from apm_cli.core.token_manager import GitHubTokenManager
+    from apm_cli.marketplace.errors import GitLsRemoteError
+    from apm_cli.marketplace.ref_resolver import RefResolver
+
+    monkeypatch.setenv("ADO_APM_PAT", "stale-test-pat")
+    provider = SimpleNamespace(
+        is_available=lambda: True,
+        get_bearer_token=lambda: "rejected-test-bearer",
+        last_error=None,
+    )
+    monkeypatch.setattr(
+        GitHubTokenManager,
+        "resolve_git_helper_credential",
+        staticmethod(lambda *_args, **_kwargs: None),
+    )
+
+    def _rejected(_args, **_kwargs):
+        return SimpleNamespace(
+            returncode=128,
+            stdout="",
+            stderr="fatal: The requested URL returned error: 401",
+        )
+
+    resolver = RefResolver(
+        host="dev.azure.com",
+        token="stale-test-pat",
+        auth_resolver=AuthResolver(),
+        auth_target="dev.azure.com",
+    )
+    with (
+        patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
+        patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_rejected),
+        pytest.raises(GitLsRemoteError) as raised,
+    ):
+        resolver.list_remote_refs("example/project/package")
+
+    message = str(raised.value)
+    steps = [
+        message.find("ADO_APM_PAT was rejected"),
+        message.find("az CLI bearer was rejected"),
+        message.find("git credential fill returned no credential"),
+    ]
+    assert all(position >= 0 for position in steps), message
+    assert steps == sorted(steps), message
+    assert "Git Credential Manager" in raised.value.hint

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -398,15 +398,23 @@ class LockfileBuilder:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
-                merged = effective_deploy_skill_subset(
-                    skill_subset_from_cli=self.ctx.skill_subset_from_cli,
-                    cli_subset=self.ctx.skill_subset,
-                    persisted_subset=locked_dep.skill_subset,
-                )
+                # Record what was deployed: the same owner the deploy used (#3760).
+                merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
+                try:
+                    pairing = locked_dep.selection()
+                except ValueError:
+                    pairing = None
                 # merged is never None here: the guard above returns for
                 # --skill '*' (empty ctx.skill_subset), so a real named
                 # subset always survives the union.
                 locked_dep.skill_subset = list(merged) if merged else []
+                if pairing is not None and not pairing.is_product:
+                    # The CLI overlay is one more edge over the entry's targets
+                    # (req-rs-018), as effective_dependency_selection deploys it.
+                    pairing = pairing.with_edge(self.ctx.skill_subset, locked_dep.target_subset)
+                    locked_dep.subset_pairings = pairing.to_lock_records()
+                else:
+                    locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():
@@ -516,16 +524,26 @@ class LockfileBuilder:
                         # OR package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
                     elif retained := retained_orphans.get(dep_key):
-                        self._keep_retained_orphan(lockfile, dep_key, dep, retained)
+                        self._keep_retained_orphan(
+                            lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
+                        )
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the
                     # lockfile stays in sync with what apm.yml declares.
 
     @staticmethod
     def _keep_retained_orphan(
-        lockfile: LockFile, dep_key: str, dep: object, retained: dict[str, str | None]
+        lockfile: LockFile,
+        dep_key: str,
+        dep: object,
+        retained: dict[str, str | None],
+        source: LockFile | None = None,
     ) -> None:
-        """Keep an orphan's undeleted files owned so the next install can retry."""
+        """Keep an orphan's undeleted files owned so the next install can retry.
+
+        *source* is the lockfile the orphan came from when *lockfile* is a fresh
+        build; its rows keep the orphan's concrete target attribution.
+        """
         retained_files = [path for path in dep.deployed_files if path in retained]
         retained_hashes = {
             path: dep.deployed_file_hashes[path]
@@ -540,6 +558,7 @@ class LockfileBuilder:
             dep_key,
             retained_files,
             retained_hashes,
+            provenance=DeploymentLedgerCodec.from_lockfile(source) if source else None,
         )
 
     def _reconcile_partial_subtree(self, existing: LockFile) -> None:
@@ -606,6 +625,16 @@ class LockfileBuilder:
                 self.ctx.existing_lockfile.mcp_config_provenance
             )
             target_servers = self.ctx.existing_lockfile.mcp_target_servers
+            from apm_cli.install.mcp.retired_destinations import (
+                lock_holds_untranslated_mcp_claims,
+            )
+
+            # Until the MCP phase translates them, these claims mean what the
+            # recorded version meant; restamping would make the heal skip them.
+            if lock_holds_untranslated_mcp_claims(
+                self.ctx.existing_lockfile.apm_version, target_servers
+            ):
+                lockfile.apm_version = self.ctx.existing_lockfile.apm_version
             # The codec rebuild is linear in deployment rows and also marks the
             # compatibility view present, so skip it when there is no target
             # state to preserve.
@@ -671,6 +700,7 @@ class LockfileBuilder:
                 provenance=DeploymentLedgerCodec.from_lockfile(self.ctx.existing_lockfile),
                 current_targets=self.ctx.targets or (),
             )
+            lockfile.local_staged_files = list(self.ctx.existing_lockfile.local_staged_files)
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(
                     self.ctx.existing_lockfile.dependencies["."]
@@ -708,8 +738,8 @@ class LockfileBuilder:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail("apm.lock.yaml unchanged -- skipping write")
         else:
-            lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
-            if self.ctx.logger:
+            persisted = lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
+            if persisted and self.ctx.logger:
                 self.ctx.logger.record_lockfile_write()
                 self.ctx.logger.verbose_detail(
                     f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies"

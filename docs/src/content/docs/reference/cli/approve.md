@@ -22,13 +22,13 @@ one noun, `executables`, across three layers:
 | Layer | Store | Who manages it | Committed? | Authority |
 |-------|-------|----------------|------------|-----------|
 | Project | `apm.yml` `executables.{allow,deny}` | Maintainer / CI setup (`apm approve`/`apm deny`) | Yes | Admin (shared) |
-| User | `~/.apm/config.json` `executables.{allow,deny}` | `apm approve --user` / `apm deny --user` | No | Lowest; below org/project deny |
+| User | `$APM_HOME/config.json` `executables.{allow,deny}` | `apm approve --user` / `apm deny --user` | No | Lowest; below org/project deny |
 | Org | `apm-policy.yml` `executables:` | Org admin | Yes (policy repo) | Ceiling on deny |
 
 `apm approve` adds a grant; [`apm deny`](../deny/) adds a block. By default,
 both commands write the **project** `apm.yml` (committed, so the whole team
 inherits the decision). `--user` writes your personal
-`~/.apm/config.json` instead -- a machine-local grant with lower authority than
+`$APM_HOME/config.json` instead -- a machine-local grant with lower authority than
 org or project denies. Use `apm deny --user` to narrow trust on one machine.
 
 Text primitives (skills, agents, instructions) are never gated. Local project
@@ -68,8 +68,14 @@ anywhere is parked until you approve it, and `apm install` still succeeds (see
 
 There is no `enforce` mandate runtime or cryptographic signing in this release.
 An org `executables.enforce` rung degrades to `recommend` (allowed but still
-overridable by a deny). Local bundle MCP, LSP, and canvas approvals are bound to
+overridable by a deny). Local bundle hook, MCP, LSP, and canvas approvals are bound to
 the exact SHA-256 content key printed by `apm install`.
+
+A dependency redirected by a [`replace:` rule](../../../consumer/manage-dependencies/#replace-a-source-candidate)
+is trusted by its selected source, never by the original. `apm approve` and
+`apm deny` accept either name and write the selected source key, for example
+`../local-hooky` or `my-org/hooky-fork#patched`. `apm deny` also denies the
+original name, so removing the `replace:` rule does not revive an old grant.
 
 ### The gate opt-in
 
@@ -89,7 +95,7 @@ The gate is enabled when any layer opts in: the project declares an
 | `--all` | Approve all currently blocked packages. |
 | `--recommended` | Bulk-accept the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
-| `--user` | Write the grant to `~/.apm/config.json` instead of `apm.yml`. |
+| `--user` | Write the grant to `$APM_HOME/config.json` instead of `apm.yml`. |
 
 ### `apm policy explain`
 
@@ -136,9 +142,9 @@ read as an alias for `executables.allow` for one minor cycle and is migrated to
 `executables.allow`.
 
 The personal store uses the same shape under `executables` in
-`~/.apm/config.json`. The standalone `~/.apm/approvals.yml` file has been
-**removed**; its contents are migrated into `~/.apm/config.json` automatically
-on first read.
+`$APM_HOME/config.json` (default `~/.apm/config.json`). The standalone
+`$APM_HOME/approvals.yml` file has been **removed**; its contents are migrated
+into `$APM_HOME/config.json` automatically on first read.
 
 Ordinary dependency grant keys are package-scoped in v1: a bare `owner/repo`
 key and an `owner/repo#1.2.0` key both match the package name regardless of the

@@ -610,11 +610,11 @@ class TestFrozenInfoMessage:
         with patch("apm_cli.commands.install._rich_info") as mock_info:
             if frozen and apm_count > 0:
                 _install_mod._rich_info(
-                    "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
+                    "Deployed files verified against apm.lock.yaml.",
                     symbol="info",
                 )
             mock_info.assert_called_once()
-            assert "Lockfile" in mock_info.call_args[0][0]
+            assert "apm.lock.yaml" in mock_info.call_args[0][0]
 
     def test_frozen_apm_count_zero_no_info(self) -> None:
         """frozen=True but apm_count=0 should not emit info."""

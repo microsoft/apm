@@ -43,7 +43,7 @@ See the [targets matrix](../../reference/targets-matrix/) for the full map.
 
 Commands ship as prompts (`.apm/prompts/*.prompt.md`); there is no separate `.apm/commands/` directory. See [Hooks and commands](./hooks-and-commands/).
 
-Markdown-based primitive types use a markdown file (or directory containing a primary markdown file). Frontmatter requirements vary by primitive type and declare metadata such as the primitive's name and trigger conditions. `apm compile` reads `.apm/`, applies any policy, and writes per-target output to the right directories on the target's filesystem.
+Markdown-based primitive types use a markdown file (or directory containing a primary markdown file). Frontmatter requirements vary by primitive type and declare metadata such as the primitive's name and trigger conditions. `apm install` deploys each primitive to the right directories for each target; `apm compile` rolls instructions into context files such as `AGENTS.md`.
 
 :::note[Frontmatter fence]
 Encode primitive Markdown as UTF-8. When a Markdown primitive has frontmatter, its opening fence of at least three hyphens (for example, `---`) must be the first content on line 1; an optional UTF-8 BOM may precede it and is stripped before parsing. Without that opening fence, APM treats the document as body content and later `---` lines remain Markdown horizontal rules. Malformed instruction frontmatter stops the package before deployment. Critical hidden characters decoded from metadata also prevent installation by default; `--force` overrides only that critical finding, while warning-level findings do not prevent installation. See [`apm install`](../../reference/cli/install/#behavior).

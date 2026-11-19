@@ -43,18 +43,14 @@ import pytest
 
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+from tests.utils.xdist_shared import shared_session_value, sources_digest
 
 pytestmark = [
     pytest.mark.component,
-    # The module-scoped baseline fixture below pays for one linter run across
-    # every guard-less rule. `--dist loadgroup` (the xdist scheduler this
-    # repo's sharded integration runs use) is the only scheduler that honors
-    # `xdist_group`; without it these cases could be split across workers and
-    # each worker would recompute that baseline.
-    pytest.mark.xdist_group(name="architecture_semantic_rule_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
+ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm/architecture")
 
 
 @dataclass(frozen=True)
@@ -107,8 +103,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-audit-policy-discovery",
         path="src/apm_cli/commands/audit.py",
-        old="fetch_result = discover_policy_with_chain(cfg.project_root)",
-        new="fetch_result = discover_policy(cfg.project_root)",
+        old="fetch_result = discover_policy_with_chain(\n            cfg.project_root,",
+        new="fetch_result = discover_policy(\n            cfg.project_root,",
         intent="Audit resolves policy without the chain-aware discovery entry point.",
     ),
     MutationCase(
@@ -142,7 +138,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-gitlab-facade-orchestration",
         path="src/apm_cli/policy/discovery.py",
-        old="result = _gitlab._fetch_from_gitlab_repo(",
+        old="result = _gitlab._fetch_gitlab_ancestry(",
         new="result = _gitlab._fetch_gitlab_contents(",
         intent="The policy facade reaches into GitLab transport internals directly.",
     ),
@@ -151,7 +147,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/policy/_gitlab.py",
         old="def _fetch_gitlab_contents(",
         new="def _fetch_gitlab_contents_impl(",
-        intent="The GitLab adapter drops one of its four owned fetch/state helpers.",
+        intent="The GitLab adapter drops one of its five owned fetch/state helpers.",
     ),
     MutationCase(
         rule_id="install-deployment-incomplete-chain-routing",
@@ -312,13 +308,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         replace_all=True,
     ),
     MutationCase(
-        rule_id="marketplace-integrations-source-parsing",
-        path="src/apm_cli/marketplace/resolver.py",
-        old="dependency = DependencyReference.parse_from_dict(entry)",
-        new="dependency = DependencyReference.parse_from_mapping(entry)",
-        intent="Packed marketplace sources stop parsing through DependencyReference.",
-    ),
-    MutationCase(
         rule_id="mutation_writes.drift_hook_membership",
         path="src/apm_cli/install/manifest_reconcile.py",
         old="paths = merge_hook_config_projection_specs(targets)",
@@ -477,10 +466,20 @@ def _mutate(case: MutationCase) -> str:
 
 
 @pytest.fixture(scope="module")
-def baseline_violated_rule_ids() -> frozenset[str]:
-    """Run every guard-less rule once, unmutated, so each case can prove attribution."""
-    report = run_selected_rules(ROOT, tuple(sorted(CASE_IDS)))
-    return frozenset(violation.rule_id for violation in report.violations)
+def baseline_violated_rule_ids(tmp_path_factory: pytest.TempPathFactory) -> frozenset[str]:
+    """Run every guard-less rule once per session, unmutated, so each case can prove attribution.
+
+    The cases spread across xdist workers; the first worker computes the
+    baseline and the others reuse it, keyed by the rule set and source hash.
+    """
+    rule_ids = tuple(sorted(CASE_IDS))
+
+    def compute() -> list[str]:
+        report = run_selected_rules(ROOT, rule_ids)
+        return sorted({violation.rule_id for violation in report.violations})
+
+    key = sources_digest(ROOT, ARCHITECTURE_SOURCE_ROOTS, rule_ids)
+    return frozenset(shared_session_value(tmp_path_factory, "semantic-baseline", key, compute))
 
 
 def test_matrix_covers_every_guardless_rule_exactly_once() -> None:

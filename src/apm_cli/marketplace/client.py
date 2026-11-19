@@ -20,7 +20,6 @@ Artifactory Archive Entry Download proxy first. Cache lives at
 ``~/.apm/cache/marketplace/`` with a 1-hour TTL.
 """
 
-import base64
 import contextlib
 import hashlib
 import json
@@ -36,6 +35,12 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
+)
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
@@ -62,8 +67,7 @@ _CACHE_TTL_SECONDS = 3600  # 1 hour
 _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
-_HTTP_SESSION = requests.Session()
-_HTTP_SESSION.max_redirects = 5
+_HTTP_SESSION = CredentialScopedSession()
 
 # Candidate locations for marketplace.json in a repository (priority order)
 _MARKETPLACE_PATHS = [
@@ -226,12 +230,33 @@ def _read_stale_meta(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def _http_get(url: str, **kwargs: object):
-    """Issue HTTP GET through a shared session without persisting cookies."""
+def _http_get(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    follow_cross_origin_without_credentials: bool = True,
+    **kwargs: object,
+):
+    """Issue HTTP GET through a shared session without persisting cookies.
+
+    Redirects follow the shared origin-bounded owner: credentials are re-sent
+    only within the request's origin, and by default a hop to another HTTPS
+    origin is followed without any credential header. Callers whose redirects
+    carry an auth signal (Azure DevOps sign-in) pass
+    ``follow_cross_origin_without_credentials=False`` to get the refusal.
+    """
     cookies = getattr(_HTTP_SESSION, "cookies", None)
     if cookies is not None:
         cookies.clear()
-    response = _HTTP_SESSION.get(url, **kwargs)
+    response = origin_bounded_request(
+        _HTTP_SESSION,
+        "GET",
+        url,
+        base_url=origin_root(url),
+        headers=headers,
+        follow_cross_origin_without_credentials=follow_cross_origin_without_credentials,
+        **kwargs,
+    )
     if cookies is not None:
         cookies.clear()
     return response
@@ -311,10 +336,6 @@ def _fetch_url_direct(
         raise MarketplaceFetchError(url, str(exc)) from exc
 
     try:
-        final_url = getattr(resp, "url", url)
-        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
         if resp.status_code == 304:
             return None
         if resp.status_code == 404:
@@ -432,8 +453,11 @@ def _try_proxy_fetch(
 def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
     """Build the GitHub Contents API URL for a file (GitHub / GHES / generic)."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(source.ref, safe="")
-    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={encoded_ref}"
+    return (
+        f"{api_base}/repos/{source.owner}/{source.repo}/contents/{encoded_path}?ref={encoded_ref}"
+    )
 
 
 def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -> str:
@@ -451,8 +475,9 @@ def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -
 
 def _github_headers(token: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github.v3.raw", "User-Agent": "apm-cli"}
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth import AuthResolver
+
+    headers.update(AuthResolver.github_rest_headers(token))
     return headers
 
 
@@ -718,42 +743,6 @@ class _AdoItemNotFound(Exception):
     """
 
 
-def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
-    """Build the Azure DevOps ``Authorization`` header for a resolved token.
-
-    ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
-    pair but not the auth scheme. Bearer contexts carry the full
-    ``Authorization: Bearer <jwt>`` header in a ``GIT_CONFIG_VALUE_<i>`` slot
-    (see ``AuthResolver._build_git_env``); detect that and emit the Bearer
-    scheme. The slot index is not fixed -- since #2368 the header is appended
-    after any retained non-auth entries -- so the whole indexed set is scanned.
-
-    Only indices below ``GIT_CONFIG_COUNT`` are read, because that is all git
-    itself reads. A slot above the count is either a leftover from an env this
-    process did not build or an injected one, and honouring it would send an
-    ADO PAT under the Bearer scheme, which the server rejects.
-
-    Otherwise treat the token as an ADO PAT and use HTTP Basic with
-    ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
-    password). Returns an empty dict for an anonymous request.
-
-    The returned dict carries the credential -- callers MUST NOT log it.
-    """
-    if not token:
-        return {}
-    env = git_env or {}
-    try:
-        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
-    except (TypeError, ValueError):
-        count = 0
-    for index in range(count):
-        value = str(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
-        if value.strip().lower().startswith("authorization: bearer "):
-            return {"Authorization": f"Bearer {token}"}
-    encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
-    return {"Authorization": f"Basic {encoded}"}
-
-
 def _fetch_ado_rest(
     source: MarketplaceSource,
     file_path: str,
@@ -786,30 +775,48 @@ def _fetch_ado_rest(
         port,
     )
 
+    from ..core.auth_chain import authorization_headers
+    from ..core.auth_outcome import raise_for_auth_outcome
+
     def _do_fetch(token, git_env):
-        headers = {"User-Agent": "apm-cli"}
-        headers.update(_ado_auth_header(token, git_env))
-        resp = _http_get(url, headers=headers, timeout=30, stream=True)
+        # Only the chain-selected credential is sent; ambient netrc never
+        # replaces it. A sign-in redirect is the auth signal: it is refused,
+        # not followed, and the classifier escalates on the refused 3xx.
+        refused: RedirectRefusedError | None = None
         try:
+            resp = _http_get(
+                url,
+                headers={"User-Agent": "apm-cli", **authorization_headers(git_env)},
+                ambient_credentials=False,
+                follow_cross_origin_without_credentials=False,
+                timeout=30,
+                stream=True,
+            )
+        except RedirectRefusedError as exc:
+            if exc.response is None:
+                raise
+            refused, resp = exc, exc.response
+        try:
+            if refused is not None:
+                # Sign-in redirects classify as auth failures; any other
+                # refused hop is a plain transport failure.
+                raise_for_auth_outcome(
+                    resp,
+                    host_kind="ado",
+                    credential_presented=bool(token),
+                )
+                raise refused
             if resp.status_code == 404:
-                # No message: this sentinel flows through ``try_with_fallback`` ->
-                # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
-                # trips an auth-failure keyword, so a 404 never wastes a bearer
-                # retry.
+                # Not an auth outcome: the classifier never escalates on it.
                 raise _AdoItemNotFound
-            # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
-            # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
-            # failure so try_with_fallback can attempt the AAD bearer before we
-            # give up and clone. The word "unauthorized" is load-bearing: it makes
-            # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
-            # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
-            if resp.status_code == 200:
-                content_type = resp.headers.get("Content-Type", "").lower()
-                if "text/html" in content_type:
-                    raise MarketplaceFetchError(
-                        source.name,
-                        "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
-                    )
+            # 401/403, a sign-in redirect, and a 200/203 HTML sign-in page all
+            # classify as auth failures so the chain escalates to the next
+            # credential before we give up and clone.
+            raise_for_auth_outcome(
+                resp,
+                host_kind="ado",
+                credential_presented=bool(token),
+            )
             resp.raise_for_status()
             return _read_capped_json(resp, source.name)
         finally:
@@ -819,7 +826,7 @@ def _fetch_ado_rest(
 
     fallback_kwargs = {
         "org": org,
-        "path": f"{org}/{project}/{repo}",
+        "path": f"{org}/{project}/_git/{repo}",
         "unauth_first": False,
     }
     if port is not None:
@@ -1060,8 +1067,9 @@ _FETCHERS: dict[str, Callable] = {
 def _github_raw_contents_url(host_info, owner: str, repo: str, file_path: str, ref: str) -> str:
     """Build the GitHub Contents API URL for an arbitrary file."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(ref, safe="")
-    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={encoded_ref}"
+    return f"{api_base}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
 
 
 def fetch_raw(
@@ -1216,12 +1224,18 @@ def _auto_detect_path(
 # ---------------------------------------------------------------------------
 
 
+def is_local_authoring_source(source: MarketplaceSource) -> bool:
+    """Only explicitly selected local apm.yml files use authoring semantics."""
+    return source.kind == "local" and Path(source.local_path).name == "apm.yml"
+
+
 def fetch_marketplace(
     source: MarketplaceSource,
     *,
     force_refresh: bool = False,
     auth_resolver: object | None = None,
     discovery_payload: dict | None = None,
+    offline: bool = False,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -1239,6 +1253,8 @@ def fetch_marketplace(
             and the discovery response is parsed and cached instead.  The
             payload MUST come from the same source URL and ref; callers
             that cannot guarantee that must pass ``None``.
+        offline: For an explicitly selected local apm.yml, forbid network ref
+            resolution. Other source kinds reject this option.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -1246,6 +1262,16 @@ def fetch_marketplace(
     Raises:
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
+    if is_local_authoring_source(source):
+        from .authoring_source import load_authoring_catalog
+
+        return load_authoring_catalog(source, offline=offline, auth_resolver=auth_resolver)
+    if offline:
+        raise MarketplaceFetchError(
+            source.name,
+            "--offline is supported here only for explicitly selected local apm.yml catalogs",
+            retry_hint="Omit --offline to use the existing JSON or repository workflow.",
+        )
     cache_name = _cache_key(source)
     use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
 

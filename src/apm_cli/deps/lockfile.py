@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -22,7 +22,10 @@ import yaml
 from ..core.deployment_state import DeploymentLedger
 from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
-from ..models.dependency.identity import normalize_package_repo_url
+from ..models.dependency.identity import (
+    is_case_insensitive_package_identity,
+    normalize_package_repo_url,
+)
 from ..models.dependency.object_fields import parse_alias_override
 from ..models.dependency.reference import (
     build_canonical_dependency_string,
@@ -36,6 +39,7 @@ from ..models.dependency.replacement import (
     parse_replace_block,
     project_effective_reference,
 )
+from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 
 logger = logging.getLogger(__name__)
@@ -51,8 +55,15 @@ def lockfile_parent_identity(
     dependency: DependencyReference | LockedDependency,
     replacements: Sequence[object] | None,
 ) -> str:
-    """Encode exact original parent keys for v3, retaining legacy repo-url parents."""
-    return dependency.get_unique_key() if replacements is not None else dependency.repo_url
+    """Encode exact original parent keys for v3, retaining legacy repo-url parents.
+
+    Legacy parents use the canonical repository identity, so a parent declared
+    with different casing (``Owner/Repo``) still names its locked entry. A lock
+    written before this rule self-heals on the next install that records it.
+    """
+    return (
+        dependency.get_unique_key() if replacements is not None else dependency.canonical_repo_url
+    )
 
 
 def _copy_extension_map(value: object) -> dict[str, Any]:
@@ -64,6 +75,39 @@ def _copy_extension_map(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or not value:
         return {}
     return {str(key): item for key, item in value.items()}
+
+
+def _copy_subset_pairings(value: object) -> Any:
+    """Copy raw ``subset_pairings`` records without validating them.
+
+    Malformed values survive the round trip so audit and frozen install can
+    reject them through ``LockedDependency.selection()`` (req-rs-018).
+    """
+    if value is None or value == []:
+        return None
+    if isinstance(value, list):
+        return [
+            {key: list(item) if isinstance(item, list) else item for key, item in record.items()}
+            if isinstance(record, dict)
+            else record
+            for record in value
+        ]
+    return value
+
+
+def _replay_pairing(
+    skill_subset: list[str], target_subset: list[str], records: Any
+) -> SkillTargetSelection | None:
+    """Return the exact pairing a lock entry replays, or ``None`` for a product.
+
+    Invalid records degrade to the flat product (what earlier writers
+    deployed); audit and frozen install reject them via ``selection()``.
+    """
+    try:
+        pairing = SkillTargetSelection.from_lock_fields(skill_subset, target_subset, records)
+    except ValueError:
+        return None
+    return None if pairing.is_product else pairing
 
 
 class _ExistingLockfileUnset:
@@ -174,6 +218,41 @@ class LockfileSymlinkError(OSError):
         )
 
 
+def ensure_lockfile_writable(path: Path) -> None:
+    """Raise :class:`LockfileSymlinkError` when *path* cannot be written.
+
+    Single owner of the "never write through a symlinked lockfile" rule:
+    :meth:`LockFile.write` enforces it, and commands that will rewrite the
+    lockfile call it before any other project write so a refusal is atomic.
+    """
+    if path.is_symlink():
+        raise LockfileSymlinkError(path)
+
+
+def refuse_lockfile_before_mutation(
+    lockfile: LockFile | None,
+    lockfile_path: Path,
+    *,
+    would_mutate: bool,
+) -> None:
+    """Pre-mutation guard: refuse an unwritable lockfile before side effects.
+
+    Commands that rewrite ``apm.lock.yaml`` (install --update, uninstall)
+    must call this *before* scripts, file deletions, or manifest edits so
+    that a symlinked lockfile stops the operation while it is still a no-op.
+
+    Args:
+        lockfile: The loaded lockfile, or ``None`` when no lockfile exists.
+        lockfile_path: On-disk path to be rewritten.
+        would_mutate: ``True`` when the operation will definitely change
+            the lockfile (e.g. at least one locked key is being removed,
+            or the update plan has changes).
+    """
+    if lockfile is None or not would_mutate:
+        return
+    ensure_lockfile_writable(lockfile_path)
+
+
 # Git writes each marker at the start of a line, followed by a space and a label
 # (or nothing, for a bare ``=======`` separator). A separator alone is not
 # evidence of a conflict, so only the labelled markers are matched here.
@@ -186,10 +265,16 @@ def has_conflict_markers(text: str) -> bool:
 
 
 def require_supported_lockfile_version(data: object) -> str:
-    """Return a supported declared version or fail closed."""
+    """Return a supported declared version or fail closed.
+
+    An unquoted integer (``lockfile_version: 1``, as left by hand edits or
+    YAML tools that drop quotes) denotes the same version as its string form.
+    """
     if not isinstance(data, dict):
         raise LockfileFormatError("Lockfile root must be a mapping")
     version = data.get("lockfile_version", "1")
+    if type(version) is int:
+        version = str(version)
     if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
         supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
         raise UnsupportedLockfileVersionError(
@@ -204,14 +289,15 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         raise LockfileFormatError("Lockfile root must be a mapping")
     data = dict(data)
     # Pre-versioned lockfiles are a supported legacy v1 migration input.
-    # Explicit unknown/newer versions still fail closed below.
-    require_supported_lockfile_version(data)
+    # Explicit unknown/newer versions still fail closed here.
+    data["lockfile_version"] = require_supported_lockfile_version(data)
     list_fields = (
         "dependencies",
         "deployments",
         "mcp_servers",
         "lsp_servers",
         "local_deployed_files",
+        "local_staged_files",
     )
     mapping_fields = (
         "mcp_configs",
@@ -358,6 +444,9 @@ class LockedDependency:
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
     target_subset: list[str] = field(default_factory=list)  # Audit-only consumer target subset
+    # Exact per-edge skills x targets pairing (req-rs-018), recorded only when
+    # skill_subset x target_subset would over-select. Decode via ``selection()``.
+    subset_pairings: list[dict[str, list[str]]] | None = None
 
     # Registry resolver fields (design §6.1).
     # Populated when source == "registry"; absent otherwise. resolved_hash is
@@ -447,6 +536,11 @@ class LockedDependency:
         self.materialization_repo_url = (
             materialization_repo_url if materialization_repo_url != canonical_repo_url else None
         )
+
+    @property
+    def canonical_repo_url(self) -> str:
+        """Return the repository identity; ``__post_init__`` already canonicalised it."""
+        return self.repo_url
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -543,6 +637,8 @@ class LockedDependency:
             result["skill_subset"] = sorted(self.skill_subset)
         if self.target_subset:
             result["target_subset"] = sorted(self.target_subset)
+        if self.subset_pairings:
+            result["subset_pairings"] = _copy_subset_pairings(self.subset_pairings)
         if self.resolved_url:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
@@ -636,6 +732,7 @@ class LockedDependency:
             "allow_insecure",
             "skill_subset",
             "target_subset",
+            "subset_pairings",
             "resolved_url",
             "resolved_hash",
             "constraint",
@@ -687,7 +784,9 @@ class LockedDependency:
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
-            target_subset=list(data.get("target_subset") or []),
+            # Locks written before canonical recording may hold ``vscode``.
+            target_subset=canonical_target_subset(data.get("target_subset")),
+            subset_pairings=_copy_subset_pairings(data.get("subset_pairings")),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),
@@ -867,9 +966,14 @@ class LockedDependency:
             skill_subset=sorted(dep_ref.skill_subset)
             if isinstance(getattr(dep_ref, "skill_subset", None), list)
             else [],
-            target_subset=sorted(dep_ref.target_subset)
+            target_subset=canonical_target_subset(dep_ref.target_subset)
             if isinstance(getattr(dep_ref, "target_subset", None), list)
             else [],
+            subset_pairings=(
+                dep_ref.subset_pairings.to_lock_records()
+                if getattr(dep_ref, "subset_pairings", None) is not None
+                else None
+            ),
             resolved_url=(
                 registry_resolution.resolved_url if registry_resolution is not None else None
             ),
@@ -926,14 +1030,30 @@ class LockedDependency:
             source=self.source,
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
+            subset_pairings=_replay_pairing(
+                self.skill_subset, self.target_subset, self.subset_pairings
+            ),
         ).with_derived_provider_coordinates()
         if not effective or self.replacement is None:
             return dep
         selected = project_effective_reference(self.replacement.original, self.replacement.rule)
         selected.replacement = self.replacement
+        # The binding's original carries the merged flat selection; the exact
+        # per-edge pairing comes from the lock entry (req-rs-018).
+        selected.subset_pairings = dep.subset_pairings
         if not selected.is_local:
             selected.reference = self.resolved_ref or selected.reference
         return selected
+
+    def selection(self) -> SkillTargetSelection:
+        """Decode this entry's skills x targets selection through the owner.
+
+        Raises ``ValueError`` for malformed ``subset_pairings`` or records
+        that disagree with the flat fields (invalid lock state, req-rs-018).
+        """
+        return SkillTargetSelection.from_lock_fields(
+            self.skill_subset, self.target_subset, self.subset_pairings
+        )
 
     def matches_replacement(self, dep: DependencyReference) -> bool:
         """Whether this pin belongs to the same root-selected source contract."""
@@ -957,6 +1077,21 @@ class LockedDependency:
             if self.replacement is not None
             else self.source == "local"
         )
+
+
+def local_staging_slug(path: str) -> str | None:
+    """Return the bundle slug when *path* is local staging under ``apm_modules/<slug>/.apm/``.
+
+    Unsafe slugs (empty, ``.``, ``..``, separators or drive markers) are never a
+    staging root; discovery also confines roots to ``apm_modules`` (defense in depth).
+    """
+    parts = Path(path).parts
+    if len(parts) < 3 or parts[0] != "apm_modules" or parts[2] != ".apm":
+        return None
+    slug = parts[1]
+    if slug in {"", ".", ".."} or any(sep in slug for sep in "/\\:"):
+        return None
+    return slug
 
 
 @dataclass
@@ -984,6 +1119,9 @@ class LockFile:
     lsp_config_provenance: dict[str, str] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
+    # Local bundle compile input under apm_modules/<slug>/.apm/ (#3705): proves
+    # a staging root for ``apm compile`` without being a deployment claim.
+    local_staged_files: list[str] = field(default_factory=list)
     deployment_ledger: DeploymentLedger = field(
         default_factory=lambda: DeploymentLedger(records={})
     )
@@ -1074,6 +1212,35 @@ class LockFile:
     def get_package_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
+
+    def local_staging_slugs(self) -> list[str]:
+        """Return bundle slugs whose ``apm_modules/<slug>/.apm/`` staging is lockfile-proven.
+
+        Lockfiles written before #3705 recorded staging in
+        ``local_deployed_files``; both views prove a root.
+        """
+        paths = (*self.local_staged_files, *self.local_deployed_files)
+        return sorted({slug for path in paths if (slug := local_staging_slug(path))})
+
+    def records_modules_content(self) -> bool:
+        """Return whether this lockfile records content installed under ``apm_modules/``.
+
+        Package dependencies and lockfile-proven local bundle staging both live
+        there; the virtual self-entry and MCP/LSP servers do not (#3781).
+        """
+        return bool(self.get_package_dependencies() or self.local_staging_slugs())
+
+    def absent_staging_slugs(self, modules_dir: Path) -> list[str]:
+        """Return recorded staging slugs whose ``modules_dir/<slug>`` root no longer exists."""
+        slugs = {slug for path in self.local_staged_files if (slug := local_staging_slug(path))}
+        return sorted(slug for slug in slugs if not (modules_dir / slug).exists())
+
+    def retire_local_staging(self, slugs: Collection[str]) -> None:
+        """Forget staged compile input under removed ``apm_modules/<slug>`` roots."""
+        removed = {("apm_modules", slug) for slug in slugs}
+        self.local_staged_files = [
+            path for path in self.local_staged_files if Path(path).parts[:2] not in removed
+        ]
 
     def project_self_entry(self) -> LockedDependency:
         """Build the virtual self-entry for the project's own local content.
@@ -1221,6 +1388,8 @@ class LockFile:
                 data["local_deployed_file_hashes"] = dict(
                     sorted(self.local_deployed_file_hashes.items())
                 )
+            if self.local_staged_files:
+                data["local_staged_files"] = sorted(self.local_staged_files)
             if self.replacements is not None:
                 data["replacements"] = self.replacements
             from ..utils.yaml_io import yaml_to_str
@@ -1245,6 +1414,24 @@ class LockFile:
             raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
         return cls._from_validated_data(data)
+
+    def _canonicalize_legacy_parents(self) -> None:
+        """Point a mixed-case legacy ``resolved_by`` at its locked parent's identity.
+
+        Locks written before parents were recorded canonically (#3698) may name
+        a case-insensitive parent ``Owner/Repo`` while its entry is ``owner/repo``.
+        """
+        known = {dep.repo_url for dep in self.dependencies.values()}
+        canonical = {
+            dep.repo_url.casefold(): dep.repo_url
+            for dep in self.dependencies.values()
+            if is_case_insensitive_package_identity(
+                host=dep.host, source=dep.source, registry_prefix=dep.registry_prefix
+            )
+        }
+        for dep in self.dependencies.values():
+            if dep.resolved_by and dep.resolved_by not in known:
+                dep.resolved_by = canonical.get(dep.resolved_by.casefold(), dep.resolved_by)
 
     @classmethod
     def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
@@ -1275,6 +1462,7 @@ class LockFile:
         lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        lock.local_staged_files = list(data.get("local_staged_files", []))
         # Root replacement rules (issue #3180).  ``None`` = no replacement
         # section in lockfile; ``[]`` = explicitly cleared replacement state.
         raw_replacements = data.get("replacements")
@@ -1286,6 +1474,8 @@ class LockFile:
         if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
             raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
         lock._validate_replacement_evidence()
+        if lock.replacements is None:
+            lock._canonicalize_legacy_parents()
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
@@ -1308,12 +1498,13 @@ class LockFile:
         path: Path,
         *,
         existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
-    ) -> None:
+    ) -> bool:
         """Write lock file to disk, preserving legacy timestamp behavior.
 
         Inside :func:`suppress_lockfile_writes` (``apm install --frozen``,
         req-lk-006) the serialised content is recorded for the caller and
-        the file on disk is left byte-for-byte untouched.
+        the file on disk is left byte-for-byte untouched.  Returns whether
+        the file was persisted, so callers never report a withheld write.
 
         New lockfiles omit ``generated_at``.  When the on-disk lockfile already
         carries the field, keep it stable for semantic no-ops and refresh it for
@@ -1327,9 +1518,8 @@ class LockFile:
         suppressed = _suppressed_writes.get()
         if suppressed is not None:
             suppressed.append(self.to_yaml())
-            return
-        if path.is_symlink():
-            raise LockfileSymlinkError(path)
+            return False
+        ensure_lockfile_writable(path)
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
@@ -1369,6 +1559,7 @@ class LockFile:
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
+        return True
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
@@ -1483,9 +1674,9 @@ class LockFile:
         path: Path,
         *,
         existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
-    ) -> None:
-        """Save lock file to disk (alias for write)."""
-        self.write(path, existing_lockfile=existing_lockfile)
+    ) -> bool:
+        """Save lock file to disk (alias for write); return whether it persisted."""
+        return self.write(path, existing_lockfile=existing_lockfile)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP/LSP servers, and configs.
@@ -1537,9 +1728,11 @@ class LockFile:
             return False
         # Issue #887: include hash dict in equivalence so post-install
         # hash updates persist even when the file list is unchanged.
-        return sorted(self.local_deployed_files) == sorted(other.local_deployed_files) and dict(
-            self.local_deployed_file_hashes
-        ) == dict(other.local_deployed_file_hashes)
+        return (
+            sorted(self.local_deployed_files) == sorted(other.local_deployed_files)
+            and dict(self.local_deployed_file_hashes) == dict(other.local_deployed_file_hashes)
+            and sorted(self.local_staged_files) == sorted(other.local_staged_files)
+        )
 
     @classmethod
     def installed_paths_for_project(cls, project_root: Path) -> list[str]:

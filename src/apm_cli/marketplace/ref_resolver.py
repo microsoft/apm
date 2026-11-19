@@ -24,16 +24,18 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.auth_outcome import AuthAttemptFailed
 from ..deps.git_remote_ops import tag_commit_shas
-from ..utils.git_env import redact_git_diagnostic
+from ..utils.git_env import redact_git_diagnostic, run_git_text
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
     build_https_clone_url,
     build_ssh_url,
     default_host,
-    is_ado_auth_failure_signal,
     is_azure_devops_hostname,
     is_visualstudio_legacy_hostname,
 )
@@ -41,11 +43,16 @@ from ._git_utils import redact_token as _redact_token  # noqa: F401
 from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
 
+if TYPE_CHECKING:
+    from .yml_schema import PackageEntry
+
 __all__ = [
     "RefCache",
     "RefResolver",
     "RemoteRef",
+    "explicit_ref_error",
     "is_commit_pin_ref",
+    "package_entry_coordinates",
 ]
 
 # ---------------------------------------------------------------------------
@@ -119,13 +126,13 @@ class RemoteRef:
     peeled_sha: str | None = None  # commit behind an annotated tag, when advertised
 
 
-class _RemoteAttemptError(RuntimeError):
+class _RemoteAttemptError(AuthAttemptFailed):
     """Carry one failed ls-remote result through AuthResolver fallback."""
 
     def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
-        self.result = result
         super().__init__(
-            redact_git_diagnostic(result.stderr or f"git ls-remote exited {result.returncode}")
+            redact_git_diagnostic(result.stderr or f"git ls-remote exited {result.returncode}"),
+            result=result,
         )
 
 
@@ -506,6 +513,44 @@ class RefResolver:
                         )
                     except _RemoteAttemptError as exc:
                         result = exc.result
+                elif self._ado_chain_eligible():
+                    org, _project, _repo = _ado_coordinates_from_owner_repo(
+                        host=self._host,
+                        owner_repo=owner_repo,
+                    )
+
+                    def _ado_attempt(
+                        _token: str | None,
+                        attempt_env: dict[str, str],
+                    ) -> subprocess.CompletedProcess[str]:
+                        # auth-delegated: try_with_fallback walks PAT -> az
+                        # bearer -> path-scoped helper and classifies failures.
+                        attempt = _run_remote(attempt_env)
+                        if attempt.returncode != 0:
+                            raise _RemoteAttemptError(attempt)
+                        return attempt
+
+                    try:
+                        result = self._auth_resolver.try_with_fallback(
+                            self._host,
+                            _ado_attempt,
+                            org=org,
+                            port=self._port,
+                            path=owner_repo,
+                            remote_url=url,
+                            base_env=self._git_env,
+                        )
+                    except _RemoteAttemptError as exc:
+                        result = exc.result
+                    except AdoAuthChainExhaustedError as exc:
+                        raise GitLsRemoteError(
+                            package="",
+                            summary=str(exc),
+                            hint=(
+                                "Set ADO_APM_PAT, run 'az login', or store a repository "
+                                "credential in Git Credential Manager."
+                            ),
+                        ) from exc
                 else:
                     result = _run_remote(env)
             except subprocess.TimeoutExpired:
@@ -520,15 +565,6 @@ class RefResolver:
                     summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
                 )
-
-            fallback_refs = self._retry_rejected_ado_pat(
-                result,
-                owner_repo,
-                remote_url=remote_url,
-            )
-            if fallback_refs is not None:
-                self._cache.put(cache_key, fallback_refs)
-                return fallback_refs
 
             if result.returncode != 0:
                 stderr = redact_git_diagnostic(result.stderr)
@@ -554,78 +590,13 @@ class RefResolver:
             self._cache.put(cache_key, refs)
             return refs
 
-    def _retry_rejected_ado_pat(
-        self,
-        result: subprocess.CompletedProcess,
-        owner_repo: str,
-        *,
-        remote_url: str | None = None,
-    ) -> list[RemoteRef] | None:
-        """Retry one rejected ADO basic credential with an Azure CLI bearer."""
-        eligible = (
-            result.returncode != 0
-            and self._auth_resolver is not None
-            and self._auth_target is not None
-            and self._auth_scheme == "basic"
-            and bool(self._token)
+    def _ado_chain_eligible(self) -> bool:
+        """Return whether ls-remote must run under the AuthResolver ADO chain."""
+        return (
+            self._auth_resolver is not None
             and is_azure_devops_hostname(self._host)
             and self._transport_scheme != "ssh"
         )
-        if not eligible:
-            return None
-
-        def _bearer_op(bearer: str) -> list[RemoteRef]:
-            from apm_cli.core.auth import AuthResolver
-
-            base_env = (
-                dict(self._git_env)
-                if self._git_env is not None
-                else (
-                    self._auth_resolver.hardened_git_base_env()
-                    if self._auth_resolver is not None
-                    and callable(
-                        getattr(
-                            self._auth_resolver,
-                            "hardened_git_base_env",
-                            None,
-                        )
-                    )
-                    else AuthResolver._build_git_env()
-                )
-            )
-            bearer_env = AuthResolver._build_git_env(
-                bearer,
-                scheme="bearer",
-                host_kind="ado",
-                base_env=base_env,
-            )
-            resolver = RefResolver(
-                timeout_seconds=self._timeout,
-                offline=self._offline,
-                stderr_translator_enabled=self._stderr_translator,
-                host=self._host,
-                token=bearer,
-                auth_scheme="bearer",
-                git_env=bearer_env,
-                port=self._port,
-            )
-            try:
-                return resolver.list_remote_refs(owner_repo, remote_url=remote_url)
-            finally:
-                resolver.close()
-
-        fallback = self._auth_resolver.execute_with_bearer_fallback(
-            self._auth_target,
-            lambda: result,
-            _bearer_op,
-            lambda outcome: (
-                getattr(outcome, "returncode", 0) != 0
-                and is_ado_auth_failure_signal(getattr(outcome, "stderr", ""))
-            ),
-        )
-        if isinstance(fallback.outcome, list):
-            return fallback.outcome
-        return None
 
     # -----------------------------------------------------------------
     # Single-ref resolution (no cache)
@@ -758,7 +729,7 @@ class RefResolver:
                 timeout=timeout,
             )
             fetch_env = git_network_env(url, env, git_dir=bare)
-            fetch = subprocess.run(
+            fetch = run_git_text(
                 [
                     git_exe,
                     "--git-dir",
@@ -771,14 +742,13 @@ class RefResolver:
                     sha,
                 ],
                 capture_output=True,
-                text=True,
                 env=fetch_env,
                 stdin=subprocess.DEVNULL,
                 timeout=timeout,
             )
             if fetch.returncode != 0:
                 return False
-            verify = subprocess.run(
+            verify = run_git_text(
                 [
                     git_exe,
                     "--git-dir",
@@ -789,7 +759,6 @@ class RefResolver:
                     sha + "^{commit}",
                 ],
                 capture_output=True,
-                text=True,
                 env=git_subprocess_env(env),
                 stdin=subprocess.DEVNULL,
                 timeout=timeout,
@@ -816,3 +785,84 @@ class RefResolver:
         self._cache.clear()
         with self._lock:
             self._remote_locks.clear()
+
+
+def package_entry_coordinates(
+    entry: PackageEntry, source_base: str | None
+) -> tuple[str | None, str, str | None, str | None]:
+    """Return ``(host, owner_repo, org, display_url)`` for *entry*, mirroring the build-time
+    routing in ``MarketplaceBuilder._remote_source_coordinates`` so that
+    ``check``, ``package set`` and ``pack`` resolve every entry against the
+    same host AND the same per-org auth hint.
+
+    - Full HTTPS entries retain their encoded display URL while
+      ``DependencyReference`` supplies decoded repository and ADO coordinates.
+    - A host-prefixed shorthand (``host.tld/owner/repo``) is an override with
+      no org hint, matching the builder.
+    - Otherwise, when ``marketplace.sourceBase`` is set, a host-less source
+      composes onto the base. ``DependencyReference`` supplies its decoded
+      identity and ADO org hint, while a non-ADO sourceBase keeps its decoded
+      leading path segment as the per-org hint.
+    - Otherwise the source stays a default-host ``owner/repo`` with no hint.
+    """
+    from ..models.dependency.host_virtual import repository_owner
+    from ..models.dependency.reference import DependencyReference
+
+    if entry.host:
+        if entry.source_url is not None:
+            dependency = DependencyReference.parse(entry.source_url)
+            return (
+                dependency.host,
+                dependency.repo_url,
+                dependency.ado_organization,
+                entry.source_url,
+            )
+        return entry.host, entry.source, None, None
+    if source_base:
+        source_url = f"{source_base}/{entry.source}"
+        dependency = DependencyReference.parse(source_url)
+        org = dependency.ado_organization or repository_owner(dependency.repo_url)
+        return dependency.host, dependency.repo_url, org, source_url
+    return None, entry.source, None, None
+
+
+_HEX_REF_RE = re.compile(r"[0-9a-fA-F]{7,64}")
+
+
+def explicit_ref_error(
+    ref: str,
+    refs: list[RemoteRef],
+    *,
+    resolver: RefResolver,
+    owner_repo: str,
+    offline: bool,
+) -> str:
+    """Return an error for an explicit ``ref``, or ``""`` when it resolves.
+
+    Shared by ``apm marketplace check`` and ``apm marketplace package
+    add/set`` so authoring never stores a ref that check would reject.
+
+    Tag and branch names match first, as before. A full commit SHA that no
+    name matches is accepted when it is a branch tip or when the
+    remote serves that commit; ``ls-remote`` alone never lists it.
+    """
+    for r in refs:
+        short = r.name
+        if short.startswith("refs/tags/"):
+            short = short[len("refs/tags/") :]
+        elif short.startswith("refs/heads/"):
+            short = short[len("refs/heads/") :]
+        if ref in (short, r.name):
+            return ""
+    if is_commit_pin_ref(ref):
+        # Only a branch tip is necessarily a commit; a tag may name a tree or blob.
+        if any(r.name.startswith("refs/heads/") and r.sha == ref for r in refs):
+            return ""
+        if offline:
+            return f"Commit '{ref}' cannot be verified offline"
+        if resolver.commit_exists(owner_repo, ref):
+            return ""
+        return f"Commit '{ref}' not reachable on remote"
+    if _HEX_REF_RE.fullmatch(ref):
+        return f"Ref '{ref}' not found; commit pins need the full 40-char lowercase SHA"
+    return f"Ref '{ref}' not found"

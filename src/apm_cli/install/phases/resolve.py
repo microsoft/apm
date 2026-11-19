@@ -363,6 +363,8 @@ def _build_dependency_graph(ctx: InstallContext, resolver):
     )
     ctx.dependency_graph = dependency_graph
     _attach_resolver_marketplace_provenance(ctx, resolver)
+    for warning in dependency_graph.dependency_tree.resolution_warnings if ctx.logger else ():
+        ctx.logger.warning(warning)
     return dependency_graph
 
 
@@ -436,9 +438,7 @@ def _resolve_dependencies(
     # which may restructure the whole graph).
     update_refs = _requires_remote_ref_resolution(ctx)
     update_keys = (
-        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps)
-        if update_refs and ctx.only_packages
-        else None
+        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps) if ctx.only_packages else None
     )
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")

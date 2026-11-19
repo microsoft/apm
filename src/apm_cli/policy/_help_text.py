@@ -25,7 +25,9 @@ POLICY_SOURCE_FORMS_HELP = (
 # .github/instructions/encoding.instructions.md.
 REQUIRE_PINNED_CONSTRAINT_HELP = (
     "When true, every direct APM dep must declare a bounded constraint "
-    "(exact version, '^'/'~'/bounded range, literal tag, or SHA). "
+    "(exact version, '^'/'~'/bounded range, literal tag such as 'v1.2.3' "
+    "or 'pkg-a-v1.2.3' for a package named pkg-a, or SHA). The declared "
+    "constraint is judged, not the tag a range resolved to. "
     "Unbounded refs (missing ref, '*', bare branch, bare '>=X.Y') are "
     "reported through 'policy.enforcement' (warn | block). "
     "Default: false. Recommend rolling out with 'enforcement: warn' first."

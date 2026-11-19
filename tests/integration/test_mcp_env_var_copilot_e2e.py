@@ -3,7 +3,7 @@ must contain ``${VAR}`` runtime placeholders for env-var references in
 apm.yml -- never the literal value resolved at install time.
 
 This exercises the full pipeline:
-    apm.yml  ->  apm install --runtime copilot  ->  .github/mcp.json
+    apm.yml  ->  apm install --runtime copilot  ->  .mcp.json
 
 The unit tests in tests/unit/test_copilot_adapter.py cover translation in
 isolation; this test pins the integration boundary so plaintext secrets
@@ -63,13 +63,13 @@ class TestMcpEnvVarHeadersCopilot:
         self, tmp_path, apm_binary_path
     ):
         """``${VAR}`` and ``${env:VAR}`` syntaxes in apm.yml headers must
-        land in .github/mcp.json as ``${VAR}`` (Copilot CLI's native runtime
+        land in .mcp.json as ``${VAR}`` (Copilot CLI's native runtime
         substitution syntax). No host env values may leak into the file.
         """
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         # Copilot target signal: presence of .github/ activates the
-        # copilot/vscode runtime detection chain.
+        # copilot runtime detection chain.
         (project_dir / ".github").mkdir()
 
         # Isolated HOME guards against accidental writes outside project scope.
@@ -115,9 +115,9 @@ class TestMcpEnvVarHeadersCopilot:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
-        mcp_config = project_dir / ".github" / "mcp.json"
+        mcp_config = project_dir / ".mcp.json"
         assert mcp_config.exists(), (
-            f"Expected .github/mcp.json to exist after install.\n"
+            f"Expected .mcp.json to exist after install.\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
@@ -147,7 +147,7 @@ class TestMcpEnvVarHeadersCopilot:
 
     def test_self_defined_stdio_server_translates_env_vars_in_args(self, tmp_path, apm_binary_path):
         """Self-defined stdio server with env-var placeholders in BOTH the
-        ``env`` block and ``args`` list must land in .github/mcp.json with
+        ``env`` block and ``args`` list must land in .mcp.json with
         ``${VAR}`` runtime placeholders. Closes the integration-tier gap
         flagged by test-coverage review for the ``_raw_stdio`` branch of
         ``_format_server_config`` and the supply-chain regression where
@@ -202,9 +202,9 @@ class TestMcpEnvVarHeadersCopilot:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
-        mcp_config = project_dir / ".github" / "mcp.json"
+        mcp_config = project_dir / ".mcp.json"
         assert mcp_config.exists(), (
-            f"Expected .github/mcp.json to exist after install.\n"
+            f"Expected .mcp.json to exist after install.\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
@@ -450,7 +450,9 @@ class TestMcpEnvVarHeadersCursor:
         before = cursor_config.read_bytes()
         env["CURSOR_TOKEN"] = "current-cursor-sentinel"
         result = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
-        assert result.returncode == 0, result.stdout + result.stderr
+        # An unowned differing same-name entry is preserved and reported (#3681).
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "conflicts with the existing" in " ".join(result.stdout.split())
         assert cursor_config.read_bytes() == before
         document["mcpServers"]["repair-probe"]["headers"]["x-probe"] = "${env:CURSOR_TOKEN}"
         document["mcpServers"]["repair-probe"]["headers"]["Authorization"] = (
@@ -461,7 +463,7 @@ class TestMcpEnvVarHeadersCursor:
         repeated = runner.run(
             ("install", "--target", "cursor", "--no-policy"), cwd=project, env=env
         )
-        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+        assert repeated.returncode == 1, repeated.stdout + repeated.stderr
         assert cursor_config.read_bytes() == repaired
         stored = json.loads(repaired)
         assert stored["mcpServers"]["unrelated"] == unrelated
@@ -492,7 +494,8 @@ class TestMcpEnvVarHeadersCursor:
         cursor_config.write_text(json.dumps(stored), encoding="utf-8")
         restored = cursor_config.read_bytes()
         final = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
-        assert final.returncode == 0, final.stdout + final.stderr
+        # A user edit to the managed entry is preserved and reported, never overwritten.
+        assert final.returncode == 1, final.stdout + final.stderr
         assert cursor_config.read_bytes() == restored
         assert "current-cursor-sentinel" not in final.stdout + final.stderr
 

@@ -126,7 +126,12 @@ FROZEN_RULE = "install-deployment-frozen-mutation-eligibility"
         ),
         (
             "src/apm_cli/install/pipeline.py",
-            "plan = build_resolved_update_plan(ctx, _early_lockfile)",
+            "if not confirm_update_plan(ctx, _early_lockfile, plan_callback):",
+            "if not True:",
+        ),
+        (
+            "src/apm_cli/install/helpers/plan_inputs.py",
+            "plan = build_resolved_update_plan(ctx, lockfile)",
             "plan = None",
         ),
         (

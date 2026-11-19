@@ -40,6 +40,8 @@ _REFERENCE = "./.claude/skills/review"
 _DISCOVER = ("init", "--discover", "--format", "json")
 _APPLY = (*_DISCOVER, "--apply", "--yes")
 _INSTALL = ("install", "--target", "copilot", "--no-policy")
+# The OS-user deployment-root lock that serializes every APM_HOME.
+_DEPLOYMENT_ROOT_LOCK_PATHS = (".apm-local", ".apm-local/.apm-lifecycle.lock")
 
 
 @dataclass(frozen=True)
@@ -138,7 +140,10 @@ def test_discover_declare_install_rerun_state_machine(
     assert_only_snapshot_paths_changed(
         original,
         onboarding.artifacts(),
-        {"project": {"apm.yml"}, "home": {".apm/.apm-lifecycle.lock"}},
+        {
+            "project": {"apm.yml"},
+            "home": {".apm/.apm-lifecycle.lock", *_DEPLOYMENT_ROOT_LOCK_PATHS},
+        },
     )
     assert _declared_local_paths(onboarding.root) == [_REFERENCE]
     assert declared.lockfile_bytes is None
@@ -286,6 +291,6 @@ def test_global_declaration_reports_matching_install_scope(
     assert_only_snapshot_paths_changed(
         before,
         onboarding.artifacts(),
-        {"home": {".apm/apm.yml", ".apm/.apm-lifecycle.lock"}},
+        {"home": {".apm/apm.yml", ".apm/.apm-lifecycle.lock", *_DEPLOYMENT_ROOT_LOCK_PATHS}},
     )
     assert _declared_local_paths(onboarding.isolated.home / ".apm") == [str(source)]

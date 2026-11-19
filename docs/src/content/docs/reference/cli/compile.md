@@ -92,9 +92,11 @@ and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
 Every accepted project target is also accepted by `compile`. `grok-build`
-produces `AGENTS.md`. Targets without root-context output, including
-`agent-skills`, `grok-bot`, and the experimental `grok-cloud` target, are
-successful no-ops.
+produces `AGENTS.md`. Targets without root-context output (`agent-skills`,
+`grok-bot`, and the experimental `grok-cloud`, `openclaw`, `copilot-app`, and
+`copilot-cowork`) are successful no-ops that write nothing. An experimental
+target whose flag is off also prints the `apm experimental enable` hint. See
+[Output layout per target](#output-layout-per-target).
 `antigravity`, `hermes`, and `grok-bot` are explicit-only, while `intellij`
 is MCP-only.
 None is included in `all`.
@@ -119,8 +121,9 @@ Keep them on the same filesystem drive.
 For frozen replay, see [install's deploy location](../install/#deploy-location).
 
 Project compilation protects root `AGENTS.md`, `CLAUDE.md`, and
-`.github/copilot-instructions.md` files, including
-destinations selected with `--root`. If an existing root file has no
+`.github/copilot-instructions.md` files, and distributed `AGENTS.md` and
+`CLAUDE.md` outputs in subdirectories, including
+destinations selected with `--root`. If an existing file has no
 exact APM-generated marker line among its first five lines, full-file compilation
 retains it and prints a warning. Live compiles leave the file unchanged; dry
 runs report that it would be retained without writing it. Delete or rename that
@@ -173,13 +176,17 @@ globally installed instruction packages -- one command, no per-tool setup.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Writes targets declared by `target:` or `targets:` in `~/.apm/apm.yml`, or every supported user-scope target when neither field is declared. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
+| `-g, --global` | Compile user-scope root context files from `$APM_HOME/apm_modules` (default `~/.apm/apm_modules`). Writes targets declared by `target:` or `targets:` in `$APM_HOME/apm.yml`, or every supported user-scope target when neither field is declared. `APM_HOME` selects the input metadata only; compiled files use each target's home variable or the operating-system home. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if the user-scope modules directory does not exist. |
 
 `apm compile --global` is explicit. `apm install -g` does not run it; instead,
 when global instructions land on a root-context-only target, install prints a
 one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
+
+For Codex, a non-blank `CODEX_HOME` selects `$CODEX_HOME/AGENTS.md` instead of
+`~/.codex/AGENTS.md`. The value must be an absolute path; a relative value
+fails before anything is written. Project-scope compile is unaffected.
 
 For Claude, each unconditional instruction is omitted from the compiled root
 only when its expected native rule matches the install renderer's output.
@@ -206,7 +213,7 @@ coverage still produces fallback content rather than deleting the root.
 Dry-run never writes or deletes files.
 
 Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
-`~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target
+`$APM_HOME/apm.yml` is how you narrow user-scope output. When it declares a target
 set, `apm compile -g` writes only those targets. If you install with an explicit
 `apm install -g --target`, update the manifest declaration before compiling;
 the explicit install flag does not replace it. Declare nothing and every
@@ -217,7 +224,7 @@ before any target output is written; fix the reported manifest problem and
 rerun the command.
 
 ```yaml
-# ~/.apm/apm.yml
+# $APM_HOME/apm.yml
 targets: [claude, codex]
 ```
 
@@ -262,7 +269,7 @@ cloud agents, and contributors who do not run `apm compile` locally
 and rely on the checked-in artifacts.
 
 For the full list of accepted `targets:` values, see
-[manifest schema -- targets](../../../reference/manifest-schema/#36-target).
+[manifest schema -- targets](../../../reference/manifest-schema/#36-target-and-targets).
 
 ## Examples
 
@@ -377,8 +384,8 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `hermes` | `AGENTS.md` |
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
-| `grok-cloud` | none |
 | `grok-bot` | none |
+| `grok-cloud`, `openclaw`, `copilot-app`, `copilot-cowork` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first

@@ -10,6 +10,8 @@ from uuid import uuid4
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile, lockfile_parent_identity
+from ...install.orphans import build_children_index as _build_children_index  # noqa: F401
+from ...install.orphans import collect_orphan_candidates as _collect_orphan_candidates
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
@@ -41,40 +43,6 @@ def _is_marketplace_ref(package: str) -> bool:
     from ...marketplace.resolver import parse_marketplace_ref
 
     return parse_marketplace_ref(package) is not None
-
-
-def _build_children_index(lockfile):
-    """Index every recorded original parent in one pass over the locked edges."""
-    children = {}
-    for dep in lockfile.get_package_dependencies():
-        for parent in dep.parent_keys:
-            if parent is not None:
-                children.setdefault(parent, []).append(dep)
-    return children
-
-
-def _collect_orphan_candidates(
-    lockfile: LockFile, packages_to_remove: list[object]
-) -> tuple[set[str], set[str]]:
-    """Share the backward edge scan without changing preview's cold-cache behavior."""
-    removed_parents: set[str] = set()
-    for package in packages_to_remove:
-        try:
-            reference = _parse_dependency_entry(package)
-            removed_parents.add(lockfile_parent_identity(reference, lockfile.replacements))
-        except (ValueError, TypeError, AttributeError, KeyError):
-            removed_parents.add(str(package))
-    children = _build_children_index(lockfile)
-    candidates: set[str] = set()
-    queue = list(removed_parents)
-    while queue:
-        for dependency in children.get(queue.pop(), ()):
-            key = dependency.get_unique_key()
-            if key in candidates:
-                continue
-            candidates.add(key)
-            queue.append(lockfile_parent_identity(dependency, lockfile.replacements))
-    return candidates, removed_parents
 
 
 def _dependency_public_label(dep_entry: object) -> str:
@@ -322,13 +290,14 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     correct post-removal survivor set, mirroring the identity
     matching ``_validate_uninstall_packages`` already uses.
 
-    Returns an empty list -- never raises -- if *apm_yml_path* is ``None``,
+    Returns ``(production_refs, dev_refs)`` so the walk can apply install's
+    ``is_dev`` rule. Returns empty lists -- never raises -- if *apm_yml_path* is ``None``,
     missing, or malformed; the project's own manifest is a Step-1/3
     concern here, not part of this walk's fail-closed contract, which
     covers the manifests visited DURING the walk, not this seed step.
     """
     if apm_yml_path is None:
-        return []
+        return [], []
 
     removed_identities = builtins.set()
     for pkg in packages_to_remove:
@@ -344,18 +313,18 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     try:
         data = load_yaml(apm_yml_path) or {}
     except (FileNotFoundError, yaml.YAMLError):
-        return []
+        return [], []
 
-    refs = []
-    for section_name in ("dependencies", "devDependencies"):
+    refs: dict[str, list] = {"dependencies": [], "devDependencies": []}
+    for section_name, section_refs in refs.items():
         for dep_entry in data.get(section_name, {}).get("apm", []) or []:
             try:
                 ref = _parse_dependency_entry(dep_entry)
             except (ValueError, TypeError, AttributeError, KeyError):
                 continue
             if ref.get_identity() not in removed_identities:
-                refs.append(ref)
-    return refs
+                section_refs.append(ref)
+    return refs["dependencies"], refs["devDependencies"]
 
 
 def _warn_reachability_incomplete(reachability, logger):
@@ -412,9 +381,10 @@ def _compute_actual_orphans(
         A ``(actual_orphans, repairs)`` tuple. *actual_orphans* is the
         frozenset of keys safe to delete this run, unchanged in meaning
         from before this docstring update. *repairs* maps each RESCUED
-        candidate's key to the ``(parent_repo_url, local_path)`` of the
-        surviving node that rescued it (see
-        ``ReachabilityResult.reachable_via``) -- a rescued candidate's
+        candidate's key to the ``(parent_repo_url, local_path, dev_only)`` of
+        the surviving node that rescued it (see
+        ``ReachabilityResult.reachable_via`` and ``dev_only``, which keeps
+        ``is_dev`` what install would write) -- a rescued candidate's
         ``resolved_by``/``local_path`` are otherwise left pointing at a
         parent that may no longer exist in the lockfile, which would
         silently defeat the NEXT uninstall's backward orphan-candidate
@@ -428,10 +398,10 @@ def _compute_actual_orphans(
     if not orphans:
         return builtins.frozenset(), {}
 
-    direct_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
 
     remaining_deps = builtins.set()
-    for ref in direct_refs:
+    for ref in (*direct_refs, *dev_refs):
         remaining_deps.add(ref.get_unique_key())
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
@@ -449,7 +419,7 @@ def _compute_actual_orphans(
 
     project_root = apm_yml_path.parent if apm_yml_path else Path(".")
     reachability = compute_forward_reachable_keys(
-        lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans
+        lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans, dev_refs=dev_refs
     )
     if not reachability.complete:
         if lockfile.replacements is not None:
@@ -468,7 +438,9 @@ def _compute_actual_orphans(
 
     rescued = candidate_orphans & reachability.reachable
     repairs = {
-        key: reachability.reachable_via[key] for key in rescued if key in reachability.reachable_via
+        key: (*reachability.reachable_via[key], key in reachability.dev_only)
+        for key in rescued
+        if key in reachability.reachable_via
     }
     return candidate_orphans - reachability.reachable, repairs
 
@@ -925,11 +897,12 @@ def _cleanup_transitive_orphans(
     # fail-closes any later reachability walk needing to re-resolve this
     # same entry's on-disk directory (see _compute_actual_orphans'
     # docstring). Real removal path only -- --dry-run never reaches here.
-    for rescued_key, (new_parent_repo_url, new_local_path) in resolved_by_repairs.items():
+    for rescued_key, (new_parent, new_local_path, dev_only) in resolved_by_repairs.items():
         rescued_dep = lockfile.get_dependency(rescued_key)
         if rescued_dep is None:
             continue
-        rescued_dep.resolved_by = new_parent_repo_url
+        rescued_dep.resolved_by = new_parent
+        rescued_dep.is_dev = dev_only
         if new_local_path is not None:
             rescued_dep.local_path = new_local_path
 
@@ -977,6 +950,55 @@ def _cleanup_transitive_orphans(
     finally:
         BaseIntegrator.cleanup_empty_parents(deleted_orphan_paths, stop_at=apm_modules_dir)
     return removed, actual_orphans
+
+
+def _shrink_surviving_selections(
+    lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger
+) -> builtins.set[str]:
+    """Narrow survivors' locked selections to what surviving edges still declare.
+
+    A node's ``skill_subset``/``target_subset`` is the merge over every edge
+    that declares it (#3735). Once a parent is uninstalled its contribution
+    must leave the union. The merge is recomputed from the surviving
+    manifests through the canonical owner; an incomplete walk keeps the
+    locked union, because missing evidence is not proof a selection is unused.
+
+    Returns the lock keys whose selection changed; their deployed files must
+    be removed and re-integrated with the new selection.
+    """
+    if not lockfile or apm_yml_path is None or not apm_modules_dir.exists():
+        return builtins.set()
+    from ...deps.reachability import declared_node_selections
+
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    declared = declared_node_selections(
+        lockfile, apm_yml_path.parent, apm_modules_dir, direct_refs, dev_refs=dev_refs
+    )
+    if not declared.complete:
+        logger.verbose_detail(
+            "    Kept recorded skill and target selections: "
+            f"{len(declared.unverifiable)} package manifest(s) could not be verified"
+        )
+        return builtins.set()
+    changed = builtins.set()
+    for key, selection in declared.selections.items():
+        locked = lockfile.get_dependency(key)
+        if locked is None:
+            continue
+        try:
+            unchanged = locked.selection() == selection.lock_selection()
+        except ValueError:
+            unchanged = False  # invalid recorded pairing: rewrite it from the survivors
+        if unchanged:
+            continue
+        locked.skill_subset = list(selection.skill_subset or ())
+        locked.target_subset = list(selection.target_subset or ())
+        exact = selection.subset_pairings
+        locked.subset_pairings = exact.to_lock_records() if exact is not None else None
+        changed.add(key)
+        label = "local dependency" if _is_private_local_identity(key) else key
+        logger.verbose_detail(f"    Updated selection of {label} to its surviving declarations")
+    return changed
 
 
 def _project_transitive_orphans(
@@ -1131,6 +1153,7 @@ def _sync_integrations_after_uninstall(
     packages just removed from the selected profile only.
     """
     from ...core.deployment_ledger import DeploymentMaterializationSession
+    from ...install.package_resolution import effective_dependency_selection
     from ...install.services import (
         IntegratorBundle,
         integrate_package_primitives,
@@ -1138,15 +1161,27 @@ def _sync_integrations_after_uninstall(
     from ...install.target_filter import resolve_effective_package_targets
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
-    from ...integration.targets import resolve_targets
+    from ...integration.hook_reintegration import preflight_survivor_hooks
+    from ...integration.skill_layout import (
+        recorded_deployed_paths,
+        resolve_reintegration_targets,
+        resolve_skill_layout,
+        with_every_skill_layout,
+    )
     from ...primitives.discovery import clear_discovery_cache
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     config_target = list(apm_package.canonical_targets)
     _explicit = config_target or None
-    _resolved_targets = resolve_targets(
+    # Survivors are rebuilt in the skill layout they recorded; cleanup of the
+    # removed packages' paths recognises both layouts.
+    _base_targets = resolve_reintegration_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    _resolved_targets = resolve_skill_layout(
+        _base_targets, recorded_paths=recorded_deployed_paths(lockfile)
+    )
+    _skill_cleanup_targets = with_every_skill_layout(_base_targets)
     require_valid_survivors = bool(all_deployed_files) or _native_hook_state_exists(
         project_root,
         _resolved_targets,
@@ -1189,7 +1224,7 @@ def _sync_integrations_after_uninstall(
             continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
-            dep_ref.target_subset,
+            effective_dependency_selection(dep_ref).target_subset,
             pkg_info,
             None,
             dep_ref.get_identity(),
@@ -1199,18 +1234,29 @@ def _sync_integrations_after_uninstall(
             authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
+    # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
+    # their known-good merged settings (#3226).
+    from ...security.executables import resolve_project_exec_allow_map
+
+    # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
+    _allow_executables = None
+    if target_survivor_plan:
+        _allow_executables = resolve_project_exec_allow_map(
+            project_root, apm_package, logger=logger
+        )
+    preflight_survivor_hooks(target_survivor_plan, _allow_executables)
+
     # An empty lockfile inventory still authorizes no file removal. Only
     # installations without a lockfile may need legacy orphan detection.
     sync_managed = all_deployed_files if lockfile is not None or all_deployed_files else None
     if sync_managed is not None:
         # Partition against default KNOWN_TARGETS for legacy/project-scope
-        # paths, then merge with resolved targets for user-scope paths.
-        # This ensures both .github/ (legacy) and .copilot/ (resolved)
-        # prefixes are recognized during uninstall cleanup.
+        # paths, then merge with resolved targets in both skill layouts for
+        # user-scope paths and --legacy-skill-paths roots (.github/skills/).
         _buckets = BaseIntegrator.partition_managed_files(sync_managed)
-        if user_scope and _resolved_targets:
+        if _resolved_targets:
             _scope_buckets = BaseIntegrator.partition_managed_files(
-                sync_managed, targets=_resolved_targets
+                sync_managed, targets=_skill_cleanup_targets
             )
             for _bname, _bpaths in _scope_buckets.items():
                 _existing = _buckets.get(_bname)
@@ -1254,7 +1300,7 @@ def _sync_integrations_after_uninstall(
     # Skills (multi-target, handled by SkillIntegrator)
     # Check the target's effective skills root (deploy_root + skills subdir)
     _skill_dirs_exist = False
-    for t in _resolved_targets:
+    for t in _skill_cleanup_targets:
         if t.supports("skills"):
             if (project_root / t.skills_rel_root).exists():
                 _skill_dirs_exist = True
@@ -1290,7 +1336,7 @@ def _sync_integrations_after_uninstall(
         # set).  Using _resolved_targets alone would yield only the local
         # prefix (.copilot/skills/) and cowork:// paths would be silently
         # skipped by the startswith() guard inside sync_integration.
-        _sync_targets = None if _has_cowork_skills else _resolved_targets
+        _sync_targets = None if _has_cowork_skills else _skill_cleanup_targets
         removed_skill_paths: list[Path] = []
         try:
             result = _integrators["skills"].sync_integration(
@@ -1391,7 +1437,6 @@ def _sync_integrations_after_uninstall(
     from ...utils.diagnostics import DiagnosticCollector
 
     _rebuild_scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    _allow_executables = getattr(apm_package, "allow_executables", None)
     reintegration_diagnostics = DiagnosticCollector()
     materialization_session = (
         DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)
@@ -1402,6 +1447,8 @@ def _sync_integrations_after_uninstall(
         for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
             dep_key = dep_ref.get_unique_key()
             deployed_files = package_deployed_files.setdefault(dep_key, [])
+            # Survivors redeploy exactly the selection install deployed (#3760).
+            selection = effective_dependency_selection(dep_ref)
 
             try:
                 integration_result = integrate_package_primitives(
@@ -1415,6 +1462,8 @@ def _sync_integrations_after_uninstall(
                     package_name=dep_ref.get_identity(),
                     logger=logger,
                     scope=_rebuild_scope,
+                    skill_subset=selection.skill_subset,
+                    skill_pairing=selection.skill_pairing,
                     allow_executables=_allow_executables,
                     trust_bin=False,
                     bin_skip_reason_override="not_retrusted_on_uninstall",
@@ -1524,7 +1573,8 @@ def _cleanup_stale_mcp(
         apm_modules_path,
         trust_transitive_self_defined=True,
     )
-    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies)
+    # Uninstall never admits a server: only previously managed servers survive.
+    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers
     stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 
@@ -1539,6 +1589,27 @@ def _cleanup_stale_mcp(
         project_root=project_root,
         user_scope=user_scope,
     )
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    from ...install.mcp.retired_destinations import (
+        heal_retired_project_mcp_destinations,
+        restore_pending_retired_claims,
+        split_mcp_claims,
+    )
+
+    # Claims that name the retired Copilot MCP files are never live .mcp.json
+    # ownership: a stale one is healed by proof, the rest are carried forward.
+    deploy_root = Path(project_root) if project_root is not None else Path.cwd()
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+    retired = split_mcp_claims(
+        target_servers,
+        native_hashes,
+        apm_version=lockfile.apm_version,
+        project_root=deploy_root,
+        user_scope=user_scope,
+        stored_configs=lockfile.mcp_configs,
+    )
+    stale_retired = {runtime: names & stale_servers for runtime, names in retired.names.items()}
     retained_unowned: set[str] = set()
     if stale_servers:
         _remove_stale_mcp_from_recorded_targets(
@@ -1549,30 +1620,57 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
-        owned_servers = {server for servers in target_servers.values() for server in servers}
+        heal_retired_project_mcp_destinations(
+            stale_retired,
+            stored_configs=lockfile.mcp_configs,
+            native_hashes=retired.hashes,
+            project_root=deploy_root,
+        )
+        owned_servers = {
+            server
+            for claims in (*target_servers.values(), *retired.names.values())
+            for server in claims
+        }
         retained_unowned = stale_servers - owned_servers
-    contracted_target_servers = {
-        runtime: sorted(servers.intersection(new_mcp_servers))
+    contracted_claims = {
+        runtime: servers.intersection(new_mcp_servers)
         for runtime, servers in target_servers.items()
-        if servers.intersection(new_mcp_servers)
     }
+    restore_pending_retired_claims(
+        retired,
+        stale_retired,
+        target_servers=contracted_claims,
+        native_hashes=native_hashes,
+        project_root=deploy_root,
+        stored_configs=lockfile.mcp_configs,
+    )
+    contracted_target_servers = {
+        runtime: sorted(servers) for runtime, servers in contracted_claims.items() if servers
+    }
+    contracted_hashes = native_hashes if retired.names else None
     surviving_mcp_servers = new_mcp_servers | retained_unowned
+    surviving_configs = {
+        name: config for name, config in view.configs.items() if name in surviving_mcp_servers
+    }
+    surviving_provenance = {
+        name: source for name, source in view.provenance.items() if name in surviving_mcp_servers
+    }
     if persist:
         MCPIntegrator.update_lockfile(
             surviving_mcp_servers,
             lockfile_path,
-            mcp_configs=dict(view.configs),
-            mcp_config_provenance=dict(view.provenance),
+            mcp_configs=surviving_configs,
+            mcp_config_provenance=surviving_provenance,
             mcp_target_servers=contracted_target_servers,
+            native_hashes=contracted_hashes,
         )
         return
 
     lockfile.mcp_servers = sorted(surviving_mcp_servers)
-    lockfile.mcp_configs = dict(view.configs)
-    lockfile.mcp_config_provenance = dict(view.provenance)
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
+    lockfile.mcp_configs = surviving_configs
+    lockfile.mcp_config_provenance = surviving_provenance
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         contracted_target_servers,
+        native_hashes=contracted_hashes,
     )

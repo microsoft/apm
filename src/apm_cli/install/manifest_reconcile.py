@@ -36,9 +36,11 @@ from .helpers.reconciliation_scope import (
     _is_manifest_target,
     _profiles_by_name,
     _record_inactive_resolver_skip,
+    _retain_dropped,
     _scoped_known_targets_for_reconciliation,
 )
 from .presentation import surface_target_cleanup
+from .selected_cleanup import SelectedCleanupOutcome
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -395,20 +397,16 @@ def declared_target_profiles(
     diagnostics: DiagnosticCollector | None = None,
 ) -> list[TargetProfile] | None:
     """Resolve the target universe declared by a project manifest."""
-    from apm_cli.core.apm_yml import parse_targets_field
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.core.target_catalog import normalize_target_name
-    from apm_cli.integration.targets import KNOWN_TARGETS
-    from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    try:
-        data = load_yaml(project_root / "apm.yml")
-    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-        return None
-    if not isinstance(data, dict):
+    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    if declaration is None:
         return None
     try:
-        names = parse_targets_field(data)
+        names = declaration.restriction() or []
     except TargetResolutionError:
         return None
     active_by_name = _profiles_by_name(active_targets)
@@ -435,7 +433,7 @@ def declared_target_profiles(
             else:
                 profiles.append(active_profile)
             continue
-        scoped = profile.for_scope(user_scope=user_scope)
+        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
         profiles.append(scoped if scoped is not None else profile)
     return profiles or None
 
@@ -553,6 +551,7 @@ def surviving_deployed_paths(
         )
         survivors.update(files)
     survivors.update(lockfile.local_deployed_files)
+    survivors.update(lockfile.local_staged_files)
     survivors.update(DeploymentLedgerCodec.local_bundle_values(ledger))
     # A directory claim cannot authorize removal of a surviving member.
     parents = {
@@ -665,6 +664,16 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         dropped |= (set(prior_files) & prior_owned) - surviving
     # Absence permits only metadata retirement, never a later unlink if a file appears.
     dropped -= verified_absent
+    if prior_ledger is not None and dropped:
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        # Imperative bundle output is never re-produced by an install (#3700).
+        bundle_kept = DeploymentLedgerCodec.local_bundle_scope(
+            dropped, DeploymentLedgerCodec.local_bundle_values(prior_ledger)
+        )
+        if bundle_kept:
+            dropped -= bundle_kept
+            ledger = _retain_dropped(files, hashes, ledger, bundle_kept, prior_hashes, prior_ledger)
     if not dropped:
         if include_ledger:
             return files, hashes, ledger
@@ -675,24 +684,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         # Retain every dropped path (row, hash, and prior ledger record) so the
         # lockfile keeps mirroring what remains on disk and the drop signal is
         # preserved for the next `apm install`, which does the physical prune.
-        for path in dropped:
-            if path not in files:
-                files.append(path)
-            if path in prior_hashes:
-                hashes[path] = prior_hashes[path]
-        if prior_ledger is not None:
-            from apm_cli.core.deployment_state import DeploymentLedger
-
-            dropped_values = set(dropped)
-            records = dict(ledger.records)
-            records.update(
-                {
-                    key: record
-                    for key, record in prior_ledger.records.items()
-                    if record.locator.value in dropped_values
-                }
-            )
-            ledger = DeploymentLedger(records=records)
+        ledger = _retain_dropped(files, hashes, ledger, dropped, prior_hashes, prior_ledger)
         if include_ledger:
             return files, hashes, ledger
         return files, hashes
@@ -708,6 +700,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
+        live_paths=files,
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
@@ -753,7 +746,7 @@ def reconcile_target_deployed_files(
     diagnostics: DiagnosticCollector,
     dependency_keys: set[str] | None = None,
     remove_selected_ownership: bool = False,
-    retained_selected_paths: set[str] | None = None,
+    selected_outcome: SelectedCleanupOutcome | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
     preserved_selected_values: frozenset[str] = frozenset(),
@@ -770,7 +763,8 @@ def reconcile_target_deployed_files(
 
     With *remove_selected_ownership*, *preserved_selected_values* lists rows
     of the selected dependencies that must stay on disk, such as rows a
-    selected-profile uninstall keeps for another profile.
+    selected-profile uninstall keeps for another profile, and
+    *selected_outcome* collects what each selected dependency still owns.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import DeploymentLedger
@@ -865,9 +859,14 @@ def reconcile_target_deployed_files(
             user_scope=user_scope,
         )
         if selected_owner_removal:
-            if retained_selected_paths is not None:
-                retained_selected_paths.update(
-                    path for path in files if path not in survivor_files and "://" not in path
+            if selected_outcome is not None:
+                selected_outcome.record(
+                    dep_key,
+                    dependency,
+                    files,
+                    hashes,
+                    survivors=survivor_files,
+                    preserved=preserved_selected_values,
                 )
             continue
         if files != prior_files or hashes != prior_hashes:

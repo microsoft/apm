@@ -232,29 +232,29 @@ class TestBaseAdapterHelpers:
 class TestMCPClientAdapterInfrastructure:
     """Tests for MCPClientAdapter base class methods."""
 
-    def test_determine_config_key_with_server_name(self) -> None:
+    def testdetermine_config_key_with_server_name(self) -> None:
         """server_name takes precedence over server_url."""
-        key = MCPClientAdapter._determine_config_key("owner/repo", "my-server")
+        key = MCPClientAdapter.determine_config_key("owner/repo", "my-server")
         assert key == "my-server"
 
-    def test_determine_config_key_scoped_npm_package(self) -> None:
+    def testdetermine_config_key_scoped_npm_package(self) -> None:
         """Scoped npm packages like @scope/name are preserved."""
-        key = MCPClientAdapter._determine_config_key("@scope/mcp-server", None)
+        key = MCPClientAdapter.determine_config_key("@scope/mcp-server", None)
         assert key == "@scope/mcp-server"
 
-    def test_determine_config_key_owner_repo_fallback(self) -> None:
+    def testdetermine_config_key_owner_repo_fallback(self) -> None:
         """owner/repo falls back to repo name."""
-        key = MCPClientAdapter._determine_config_key("owner/my-server", None)
+        key = MCPClientAdapter.determine_config_key("owner/my-server", None)
         assert key == "my-server"
 
-    def test_determine_config_key_plain_name(self) -> None:
+    def testdetermine_config_key_plain_name(self) -> None:
         """Plain name (no slash) is returned as-is."""
-        key = MCPClientAdapter._determine_config_key("my-server", None)
+        key = MCPClientAdapter.determine_config_key("my-server", None)
         assert key == "my-server"
 
-    def test_determine_config_key_self_defined(self) -> None:
+    def testdetermine_config_key_self_defined(self) -> None:
         """Self-defined servers with slashes keep their declared name."""
-        key = MCPClientAdapter._determine_config_key(
+        key = MCPClientAdapter.determine_config_key(
             "com.azure.dev/mcp-remote",
             None,
             {"name": "com.azure.dev/mcp-remote", "is_self_defined": True},
@@ -2212,15 +2212,15 @@ class TestClaudeAdapterEdgeCases:
         assert "new" in data["mcpServers"]
 
     def test_update_config_handles_corrupted_json(self, tmp_path: Path) -> None:
-        """update_config recovers from corrupted .mcp.json."""
+        """update_config keeps an unparsable .mcp.json and reports the write failed."""
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         mcp_json = tmp_path / ".mcp.json"
         mcp_json.write_text("NOT JSON!!!")
         adapter = ClaudeClientAdapter(project_root=tmp_path)
         result = adapter.update_config({"server": {"command": "npx"}})
-        # Should still succeed by starting fresh
-        assert result is True
+        assert result is False
+        assert mcp_json.read_text() == "NOT JSON!!!"
 
     def test_get_current_config_handles_invalid_json(self, tmp_path: Path) -> None:
         """get_current_config returns empty mcpServers for corrupted JSON."""

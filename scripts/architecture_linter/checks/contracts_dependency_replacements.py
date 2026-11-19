@@ -100,8 +100,8 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
             "dep = dep.source_reference",
             "local_cleanup_pending=(\n            not lockfile_only\n"
             "            and local_rows_need_reconciling(",
-            "from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan",
-            "plan = build_resolved_update_plan(ctx, _early_lockfile)",
+            "from apm_cli.install.helpers.plan_inputs import confirm_update_plan",
+            "if not confirm_update_plan(ctx, _early_lockfile, plan_callback):",
             "apm_package=apm_package,\n        logger=logger,\n    ):",
         ),
         "src/apm_cli/commands/install.py": (
@@ -121,6 +121,7 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
             "report_resolved_dependencies(ctx, resolver, deps_to_install, dependency_graph.dependency_tree)",
         ),
         PLAN_INPUTS: (
+            "plan = build_resolved_update_plan(ctx, lockfile)",
             "from apm_cli.install.plan import build_update_plan",
             "from apm_cli.utils.content_hash import compute_package_hash",
             "dependency.replacement is not None and dependency.is_local",

@@ -33,7 +33,7 @@ def discover_options(command: Any) -> Any:
                 "-g",
                 "global_",
                 is_flag=True,
-                help="Discover under home and declare packages in ~/.apm/apm.yml",
+                help="Discover under home and declare packages in the APM user manifest",
             ),
         )
     ):

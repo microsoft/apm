@@ -55,6 +55,7 @@ from ..models.apm_package import (
     GitReferenceType,
     ResolvedReference,
 )
+from ..utils.git_env import run_git_text
 from ..utils.github_host import default_host
 
 if TYPE_CHECKING:
@@ -334,10 +335,9 @@ class L2BareRevParse:
         candidates = (f"refs/heads/{ref}", f"refs/tags/{ref}", ref)
         for candidate in candidates:
             try:
-                result = subprocess.run(
+                result = run_git_text(
                     [git_exe, "--git-dir", str(bare_dir), "rev-parse", "--verify", candidate],
                     capture_output=True,
-                    text=True,
                     timeout=5,
                     env=env,
                 )

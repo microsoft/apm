@@ -37,7 +37,7 @@ Local dependencies and Artifactory-hosted deps are skipped.
 
 | Option | Description |
 |---|---|
-| `-g, --global` | Check user-scope dependencies in `~/.apm/` instead of the current project. |
+| `-g, --global` | Check user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the current project. |
 | `-v, --verbose` | List up to 10 newer Git tags or matching registry versions within the constraint; lockfile-only registry rows list newer versions. |
 | `-j, --parallel-checks N` | Max concurrent remote checks. Default `4`. `0` forces sequential. |
 
@@ -77,7 +77,7 @@ declaration, then run `apm install`.
 
 ### Other checks
 
-Check user-scope deps installed under `~/.apm/`:
+Check user-scope dependencies installed under `$APM_HOME` (default `~/.apm`):
 
 ```bash
 apm outdated --global

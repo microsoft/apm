@@ -76,6 +76,7 @@ class InstallContext:
     trust_transitive_mcp: bool = False
     transaction: Any = None  # InstallTransaction
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
+    lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
 
     dry_run: bool = False
     lockfile_only: bool = False
@@ -142,6 +143,13 @@ class InstallContext:
     # consumed by install/sources.py to plumb the resolution into the
     # lockfile via InstalledPackage.git_semver_resolution.
     git_semver_resolutions: dict[str, Any] = field(default_factory=dict)
+    # A snapshot of every declaration of each direct dep after ``replace:``
+    # source selection, keyed by unique key
+    # (``policy._constraint_pinning.collect_declared_refs``). The pipeline
+    # fills this before semver resolution rewrites ``dep_ref.reference`` to
+    # the selected tag, so the policy gate judges the authored constraint
+    # while everything else keeps the resolved ref (#3224).
+    declared_direct_refs: dict[str, tuple[Any, ...]] = field(default_factory=dict)
     # Run-scoped cache of RefResolver instances keyed by (host, token-fingerprint)
     # so semver deps sharing an upstream repo reuse one ``git ls-remote`` tag
     # listing (RefResolver memoizes per instance) instead of one per dep.
@@ -242,6 +250,11 @@ class InstallContext:
     # Cowork integration state
     # ------------------------------------------------------------------
     cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)
+
+    # ------------------------------------------------------------------
+    # Failed-install residue report (#3525)
+    # ------------------------------------------------------------------
+    install_finished: bool = False  # finalize returned a non-FAILED result
 
     # ------------------------------------------------------------------
     # TUI controller (PR #1116, workstream B): one Live region for the

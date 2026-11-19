@@ -2,14 +2,24 @@
   "version": 1,
   "owners": [
     {
+      "id": "local-authoring-catalog",
+      "decision": "Live local authoring catalog interpretation without generation",
+      "owner": "marketplace/authoring_source.py coordinates yml_schema, MarketplaceBuilder and resolver path authority",
+      "selectors": ["src/apm_cli/marketplace/authoring_source.py", "src/apm_cli/marketplace/client.py"],
+      "guards": ["marketplace-integrations-authoring-source"]
+    },
+    {
       "id": "marketplace-locked-selection",
-      "decision": "Marketplace requested-ref consistency against locked selection evidence",
-      "owner": "drift.py (marketplace_ref_mismatch); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence",
+      "decision": "Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency)",
+      "owner": "drift.py (marketplace_ref_mismatch, revision_pin_mismatch); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence",
       "selectors": [
         "src/apm_cli/policy/ci_checks.py",
         "src/apm_cli/install/phases/lockfile.py"
       ],
-      "guards": ["marketplace-integrations-locked-evidence"]
+      "guards": [
+        "marketplace-integrations-locked-evidence",
+        "transport-platform-revision-pin-lock-consistency"
+      ]
     },
     {
       "id": "marketplace-tag-pattern",
@@ -20,10 +30,24 @@
     },
     {
       "id": "marketplace-source-admission",
-      "decision": "Marketplace source admission and transport identity",
-      "owner": "marketplace/source_identity.py (parse_marketplace_source)",
-      "selectors": ["src/apm_cli/marketplace/source_identity.py"],
+      "decision": "Marketplace source admission, transport identity, and repository-relative catalog path",
+      "owner": "marketplace/source_identity.py (parse_marketplace_source, admit_marketplace_catalog_path); marketplace/registration.py (parse_registration_source) owns the registration SOURCE grammar (#ref fragment, ref precedence, direct-URL classification) for marketplace add and the user-manifest marketplaces reconcile",
+      "selectors": [
+        "src/apm_cli/marketplace/source_identity.py",
+        "src/apm_cli/marketplace/registration.py"
+      ],
       "guards": ["marketplace-integrations-source-admission"]
+    },
+    {
+      "id": "marketplace-entry-ref-verification",
+      "decision": "Which remote an authored marketplace entry resolves against, and whether its explicit ref exists there",
+      "owner": "marketplace/ref_resolver.py (package_entry_coordinates, explicit_ref_error); consumers: apm marketplace check and marketplace package add/set. Build-time sibling: builder._remote_source_coordinates",
+      "selectors": [
+        "src/apm_cli/commands/marketplace/check.py",
+        "src/apm_cli/commands/marketplace/plugin/__init__.py",
+        "src/apm_cli/commands/marketplace/plugin/set.py"
+      ],
+      "guards": ["marketplace-integrations-source-parsing"]
     },
     {
       "id": "local-marketplace-version-precedence",

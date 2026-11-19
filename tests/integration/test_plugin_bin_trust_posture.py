@@ -174,6 +174,7 @@ def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path)
     clean_result = integrate_package_primitives(
         clean_info,
         project_root,
+        skill_subset=None,
         targets=[KNOWN_TARGETS["claude"]],
         integrators=bundle,
         force=False,
@@ -190,6 +191,7 @@ def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path)
     result = integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=[KNOWN_TARGETS["claude"]],
         integrators=bundle,
         force=False,

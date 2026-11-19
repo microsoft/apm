@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **138 normative statements (133 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **140 normative statements (135 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -334,8 +334,8 @@ The manifest top-level fields are:
 | `author`        | no       | string                                                                                        |
 | `license`       | no       | string (SPDX identifier RECOMMENDED)                                                          |
 | `default_host`  | no       | string; see [Section 4.2.4](#424-default_host) and [req-mf-019](#req-mf-019)                  |
-| `target`        | no       | string, list of strings, or null; mutually exclusive with `targets` (see [req-tg-008](#req-tg-008)) |
-| `targets`       | no       | string or non-empty list of lowercase canonical identifiers or `all`; mutually exclusive with `target` (see [req-tg-008](#req-tg-008)) |
+| `target`        | no       | string, list of strings, or null; deprecated in favor of `targets` on adoption of proposed amendment 0.1.61 (Appendix D); mutually exclusive with `targets` (see [req-tg-008](#req-tg-008)) |
+| `targets`       | no       | string or non-empty list of lowercase canonical identifiers, the alias `vscode` (deprecated on adoption of proposed amendment 0.1.61; denotes `copilot`), or `all`; mutually exclusive with `target` (see [Section 4.2.1](#421-target) and [req-tg-008](#req-tg-008)) |
 | `type`          | no       | string (advisory, see [Section 4.2.2](#422-type-advisory))                                    |
 | `scripts`       | no       | mapping `string -> string`                                                                    |
 | `includes`      | no       | literal `auto` or list of paths                                                               |
@@ -353,11 +353,13 @@ The canonical set of `target` identifiers registered by this
 specification at v0.1 is:
 
 ```
-copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all
+copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, hermes, grok-bot, all
 ```
 
-The legacy aliases `vscode` and `agents` MAY appear in input manifests
-and MUST be normalised to `copilot` when the manifest is rewritten.
+The legacy alias `agents` MAY appear under `target:` in input manifests; when the manifest is rewritten it MUST be normalised to `copilot`, and it is not admitted under `targets:`. The legacy alias `vscode` is deprecated on adoption of proposed amendment 0.1.61: it MAY appear under `target:` and under `targets:` wherever a target identifier is accepted, including dependency-entry `targets` subsets and user-scope manifests; it denotes the `copilot` target with no MCP configuration destination of its own; and a conforming consumer MUST treat it exactly as `copilot`, including in target selection, in the [req-tg-008](#req-tg-008) effective target intersection, in the MCP configuration destination, and in recorded lockfile state. A consumer that writes a lock entry MUST record `copilot`, never `vscode`, in `target_subset` and `subset_pairings`; a consumer that reads a lock entry recording `vscode` MUST read it as `copilot`, dropping any resulting duplicate and restoring the canonical sort order, before the [req-rs-018](#req-rs-018) consistency and frozen-replay comparisons, so a recorded `vscode` alone is not a selection change. When normalising `agents` or `vscode`, an implementation that rewrites a manifest MUST replace the alias in place with `copilot` and drop any resulting duplicate, keeping the first occurrence. A consumer may emit a deprecation warning for `vscode` during the [Section 9.5](#95-migration-windows-for-consumers) window, typically for manifests the user authors, and may omit it for dependency manifests; the warning does not affect target selection. Singular `target:` is likewise deprecated in favor of `targets:` on adoption of proposed amendment 0.1.61. (Amendment 0.1.61, proposed; see [Appendix D](#appendix-d-revision-history).)
+
+> **Note (non-normative).** Per-target MCP configuration destinations are published in the OpenAPM Target Registry v0.1 companion. At this revision `copilot` (and therefore `vscode`) writes project MCP servers to the workspace-root `.mcp.json`, the same project file the `claude` target writes. Earlier companion revisions listed `.github/mcp.json` for `copilot` and `.vscode/mcp.json` for `vscode`. Because the file is shared, [req-mf-026](#req-mf-026) applies to every write to it whichever target selected the server, and entry ownership is per file under [req-mf-027](#req-mf-027): deactivating one target does not remove entries that another active target still selects. A consumer that wrote entries to a retired destination is expected to remove only the entries it can show it wrote, in the sense of req-mf-026, and to report the rest.
+
 The internal fallback value `minimal` MUST NOT be set explicitly in a
 manifest; it is reserved for the auto-detection fallback described in
 [Section 8.4](#84-target-detection-signals-normative). In an
@@ -374,8 +376,10 @@ explicitly. At v0.1 the explicit-only targets are `agent-skills`,
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
 (see [Section 8](#8-primitive-type-system-and-target-matrix)); the
-companion holds the table contents and is amended additively; this
-specification binds the schema only.
+companion holds the table contents and is amended additively, except
+where an Appendix D row announces a change to an existing entry (as
+proposed amendment 0.1.61 does for the `copilot` project MCP
+configuration destination); this specification binds the schema only.
 
 <a id="req-mf-005"></a>
 **[req-mf-005]** A conforming **producer** implementation MUST reject
@@ -545,7 +549,7 @@ and MUST NOT use both on the same entry.
 | `ref`    | no                                      | Branch, tag, semver range, or commit SHA (git form).                  |
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
 | `alias`  | no                                      | Local install-directory override; see [req-mf-025](#req-mf-025).        |
-| `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
+| `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)); merged across edges per [req-rs-018](#req-rs-018). |
 
 <a id="req-mf-025"></a>
 **[req-mf-025]** A conforming **consumer** implementation that supports
@@ -743,6 +747,33 @@ naming the affected fields. Diagnostics about these references MUST
 name variables and fields only, never their values. User-scoped Claude
 Code configuration is outside this requirement.
 
+<a id="req-mf-027"></a>
+**[req-mf-027]** When two or more targets write project-scoped MCP
+servers to the same configuration file (for example, at this revision
+the Target Registry v0.1 companion lists the workspace-root `.mcp.json`
+for both `claude` and `copilot`), a conforming **consumer**
+implementation attributes each entry it wrote in that
+file to the file, not only to the target that selected the server:
+
+- (a) It MUST treat an entry it recorded as written for one of those
+  targets as its own, not as a foreign entry, when another of those
+  targets selects the same server, and MUST apply to that entry the
+  checks it applies to its own entries, including
+  [req-mf-026](#req-mf-026).
+- (b) When it stops selecting a server for one of those targets, for
+  example because that target is deactivated, it MUST NOT remove the
+  entry while another active target that writes the same file still
+  selects the server, and it MUST treat the entry as owned for that
+  remaining target from then on, retaining a native write hash
+  recorded for the entry where one exists.
+- (c) When no active target that writes the file selects the server,
+  the consumer MAY remove the entry, subject to its other ownership
+  rules, including [req-mf-026](#req-mf-026).
+
+Entries the consumer did not write, user-scoped MCP configuration, and
+targets whose project MCP configuration files are distinct are outside
+[req-mf-027](#req-mf-027).
+
 ### 4.6 Manifest extension surfaces
 
 #### 4.6.1 `policy` (consumer-side controls)
@@ -896,8 +927,9 @@ including alias, skill and target selections and every incoming request,
 while using the selected source for transport, authentication, ref
 resolution, cache acquisition, content scanning, integrity and policy
 evaluation. Replacement MUST NOT grant executable consent or bypass
-existing security checks. Existing host-blind policy matching remains
-host-blind, but evaluates the selected package, not the original package.
+existing security checks. Policy matching, including the effective host
+under [req-pl-018](#req-pl-018) clause (g), evaluates the selected package,
+not the original package.
 Original ref constraints are provenance, not constraints on the fully
 substituted source; immutable obligations introduced by the selected
 source's own dependencies still apply.
@@ -982,6 +1014,7 @@ This section's normative statements are:
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
+  [req-mf-027](#req-mf-027),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-ext-003](#req-ext-003),
@@ -1057,7 +1090,9 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
 | `resolved_by`             | `repo_url` of the parent that pulled this transitive dep.                       |
 | `package_type`            | One of `apm_package`, `skill_bundle`, etc.                                      |
-| `skill_subset`            | Selected skill names for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
+| `skill_subset`            | Selected skill names for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)); the union over all declaring edges per [req-rs-018](#req-rs-018). |
+| `target_subset`           | Consumer-side per-dependency target subset; the union over all declaring edges per [req-rs-018](#req-rs-018). |
+| `subset_pairings`         | Optional exact per-target skill selection, present only when `skill_subset` x `target_subset` would over-select. See [req-rs-018](#req-rs-018). |
 | `deployed_files`          | Project-relative paths the consumer wrote for this entry.                       |
 | `deployed_file_hashes`    | `path -> <algo>:<hex>` for the files in `deployed_files`.                       |
 | `source`                  | `local` for path deps, `registry` for registry deps; absent for git.            |
@@ -1707,8 +1742,8 @@ The `dependencies` policy block governs APM dependency declarations.
 
 | Field                  | Semantic                                                                                  |
 |------------------------|-------------------------------------------------------------------------------------------|
-| `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
-| `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
+| `allow`                | List of patterns matched against the canonical dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded; a host-qualified pattern also requires the effective host per [req-pl-018](#req-pl-018) clause (g). Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
+| `deny`                 | Always wins over `allow`; host-qualified pattern matching per [req-pl-018](#req-pl-018) clause (g); case treatment per [req-pl-018](#req-pl-018). |
 | `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
@@ -1735,9 +1770,11 @@ range (containing an upper bound); (d) a dependency with
 **[req-pl-018]** A conforming **governance** implementation MUST apply
 the following dependency-policy identity rules:
 
-(a) The match subject is the canonical, host-blind dependency package
-path: its repository coordinate plus any virtual in-repository path,
-with any `#` reference suffix excluded. A registry name is never part
+(a) The match subject is the canonical dependency package path, which
+omits the host: its repository coordinate plus any virtual
+in-repository path, with any `#` reference suffix excluded. A
+host-qualified pattern additionally constrains the host under clause
+(g); a hostless pattern matches the path on every host. A registry name is never part
 of this match subject and is compared literally wherever it appears in
 policy operands. This
 statement governs glob matching for `dependencies.allow` and
@@ -1798,6 +1835,33 @@ pattern-bearing policy field named in
 [Section 6.5](#65-allow-list--deny-list-tri-state-semantics) under that
 section's pattern grammar. It MUST NOT add character-class, brace, or
 escape expansion.
+
+(g) A `dependencies.allow` or `dependencies.deny` pattern whose first
+U+002F-separated segment contains U+002E and does not begin with
+U+002E is host-qualified; a pattern beginning with `./` or `../` is
+therefore a hostless local-path pattern. That segment, with any
+trailing colon followed by one to five ASCII digits (U+0030 through
+U+0039) removed, and any single trailing U+002E removed, names a host;
+the remaining segments are the path pattern matched under clauses (a)
+through (f). A host-qualified pattern matches a dependency only when
+the dependency's effective host equals the named host after mapping
+only U+0041 through U+005A to U+0061 through U+007A. The effective
+host is the host written in the dependency reference or, when none is
+written, the implementation-default host
+([Section 1.4](#14-terminology-preliminaries)), with any trailing colon
+followed by one to five ASCII digits (U+0030 through U+0039) removed,
+and any single trailing U+002E removed. Ports are ignored on both
+sides; the host segment is compared literally with no wildcard
+expansion, and no other host (including a subdomain or a longer name
+sharing a prefix) matches. Local-path dependencies have no host and
+never match a host-qualified pattern. Shorthand, HTTPS and SSH
+references to the same repository MUST yield the same result. This
+clause applies to direct and transitive dependencies wherever
+`dependencies.allow` and `dependencies.deny` are evaluated. This
+clause does not apply to `dependencies.require`. A `require` entry
+whose first segment resembles a host is compared literally under
+clause (a) and matches no dependency whose canonical path omits the
+host.
 
 #### 6.3.2 `mcp`
 
@@ -1906,7 +1970,7 @@ merge a policy chain per the following table:
 | Field family                          | Merge rule                                                             |
 |---------------------------------------|------------------------------------------------------------------------|
 | `enforcement`                         | Stricter wins (`block` > `warn` > `off`).                              |
-| `fetch_failure`                       | Child overrides if set.                                                |
+| `fetch_failure`                       | Stricter wins (`block` > `warn`; unset is the `warn` default).         |
 | `*.allow` lists                       | Set intersection, byte-exact on each entry's UTF-8 text. `null` is transparent. |
 | `*.deny` lists                        | Union, deduplicated byte-exact, parent order preserved.                |
 | `*.require` lists                     | Union, deduplicated byte-exact, parent order preserved.                |
@@ -2439,6 +2503,103 @@ dependencies:
     depth: 3
 ```
 
+#### 7.4.1 Per-edge subset merging
+
+Several **edges** can reach one dependency identity: a root manifest
+entry plus transitive manifest entries, or several transitive entries.
+Each edge can narrow what the consumer deploys from that dependency
+with an object-form `skills:` subset ([Section 4.3.2](#432-object-form))
+and a consumer-side per-dependency target subset (item (b) of
+[req-tg-008](#req-tg-008)). An edge's **selection** is the product of
+its skill set and its target set. An omitted skill subset selects every
+selectable skill; an omitted target subset selects every target.
+
+<a id="req-rs-018"></a>
+**[req-rs-018]** A conforming **consumer** implementation that supports
+per-dependency skill or target subsets MUST derive the deployment
+selection of a dependency reached by more than one edge from all of
+those edges:
+
+1. **Exact pairing.** A selectable skill is selected for a target if
+   and only if at least one edge selects both that skill and that
+   target. The consumer MUST NOT deploy a skill into a target that no
+   single edge pairs with it, even when one edge selects the skill and
+   another edge selects the target. It MUST NOT omit a skill-target
+   pair that any edge selects.
+2. **All absorbs.** An edge that omits an axis selects everything on
+   that axis for that edge. A narrower selection on another edge MUST
+   NOT reduce it.
+3. **Order independence.** The derived selection, and the lock fields
+   that record it (`skill_subset`, `target_subset`, and
+   `subset_pairings`), MUST be identical for every manifest declaration
+   order, edge discovery order, and edge depth. The consumer MUST NOT
+   substitute a first-wins or last-wins choice among edges.
+4. **Lock recording.** The lock entry MUST record the derived selection
+   so that replay, audit, and removal can reconstruct each target's
+   skills without re-reading manifests. `skill_subset` records the
+   union of selected skill names and `target_subset` the union of
+   selected targets; each is omitted when any edge selects all on that
+   axis. When those two fields, read as a product, would select a pair
+   that no edge selects, the entry MUST also carry `subset_pairings` in
+   the canonical form below. Writers MUST omit `subset_pairings` when
+   the product of the two fields is exact.
+5. **Consistency.** A reader MUST treat a malformed `subset_pairings`
+   value, or one whose skill and target unions differ from
+   `skill_subset` and `target_subset`, as invalid lock state: a
+   non-frozen install re-derives the selection, while frozen install
+   and audit fail with a diagnostic naming the dependency. An entry
+   without `subset_pairings` denotes the product of its two flat
+   fields.
+6. **Frozen replay.** Under frozen install, when the selection derived
+   from the current manifests differs from the recorded selection, the
+   consumer MUST fail before deployment with a diagnostic naming the
+   dependency and stating that its subset selection changed. It MUST
+   NOT deploy either selection.
+
+**Canonical `subset_pairings` form.** Each element is a mapping with
+optional `skills` and `targets` keys, each a non-empty list sorted in
+ascending code-point order; an omitted key means all on that axis. The
+union of the elements' products equals the derived selection. When the
+derived selection includes skills that apply to every target (because
+at least one edge omits its target subset), the first element has no
+`targets` key and carries those skills. Each further element carries
+one complete skill set that some target receives when that set differs
+from the first element's skills (or every distinct set, when there is
+no such first element), with the sorted list of exactly the targets
+that receive it. Elements with a `targets` key are ordered
+lexicographically by their `targets` lists (element-wise ascending
+code-point comparison; a shorter list sorts before a longer list it
+prefixes). Two equal selections therefore canonicalize to identical
+data structures. Vendor-extension keys ([req-ext-001](#req-ext-001))
+inside `subset_pairings` elements are not part of the canonical form:
+writers MUST NOT emit them, and readers MUST treat their presence as a
+malformed value under clause 5.
+
+The derived target union is item (b) of [req-tg-008](#req-tg-008);
+items (a) and (c) still narrow it, and within the resulting effective
+target intersection each target receives only the skills paired with
+it. A `skills:` subset narrows skills only. This requirement does not
+change dependency identity ([req-rs-016](#req-rs-016)), deduplication,
+or `resolved_by` ([req-rs-010](#req-rs-010)). Per-dependency subset
+selection support follows the optional-feature disclosure in
+[Section 11.2](#112-how-to-claim-conformance).
+
+Example (informative): `acme/a` declares `acme/bundle` with
+`skills: [alpha]` and `targets: [claude]`, and `acme/b` declares it with
+`skills: [gamma]` and `targets: [copilot]`. `alpha` deploys only for
+`claude` and `gamma` only for `copilot`:
+
+```yaml
+- repo_url: github.com/acme/bundle
+  skill_subset: [alpha, gamma]
+  target_subset: [claude, copilot]
+  subset_pairings:
+    - skills: [alpha]
+      targets: [claude]
+    - skills: [gamma]
+      targets: [copilot]
+```
+
 ### 7.5 Lockfile replay semantics
 
 <a id="req-rs-004"></a>
@@ -2713,7 +2874,7 @@ This section's normative statements are:
   [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
   [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
   [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
-  [req-rs-017](#req-rs-017).
+  [req-rs-017](#req-rs-017), [req-rs-018](#req-rs-018).
 - Producer: [req-pr-004](#req-pr-004).
 - Producer (SHOULD): [req-pr-005](#req-pr-005).
 
@@ -3175,14 +3336,20 @@ expand either (a) or (b). Omitting both package fields, or including the
 universal `all` value, adds no package-side restriction. Scalar and list
 spellings under `target:` accept the aliases defined in
 [Section 4.2.1](#421-target); `targets:` accepts lowercase identifiers
-from the canonical set in Section 4.2.1 and the literal `all` sentinel.
+from the canonical set in Section 4.2.1, the deprecated alias `vscode`
+(which a consumer treats exactly as `copilot`, including in recorded
+lockfile state, per Section 4.2.1), and the literal `all` sentinel. In
+the effective target intersection, a declared set containing `vscode`
+restricts deployment exactly as the same set with `vscode` replaced by
+`copilot` would, and `vscode` does not activate, add, or remove any
+other target.
 The `all` token remains a literal no-restriction sentinel and MUST NOT
 be expanded to the auto-detectable target set during this intersection.
 A null value under singular `target:` is treated as field omission for
 legacy compatibility; a consumer MUST reject an empty string or empty
 list. A declaration with both fields (even when either value is null),
-a null or empty `targets:` value, a `targets:` token that is neither
-canonical nor `all`, or a `target:` token that does not satisfy
+a null or empty `targets:` value, a `targets:` token that is not
+canonical, `vscode`, or `all`, or a `target:` token that does not satisfy
 [req-mf-005](#req-mf-005) MUST be rejected before target-scoped
 deployment with a diagnostic naming the invalid declaration or token.
 
@@ -3852,10 +4019,11 @@ they intend to deny. The same normalization widens `dependencies.allow`
 matching on a case-insensitive source, so an upgrade can admit a
 case-variant spelling that previously missed. Clause (d) of
 [req-pl-018](#req-pl-018) leaves segments at and after recursive-glob
-ambiguity byte-exact, including on a case-insensitive source. The
-match subject is host-blind, so one policy entry governs the same
-repository path on every reachable host; governance authors relying
-on host separation need an independent host-level control.
+ambiguity byte-exact, including on a case-insensitive source. A
+hostless pattern governs the same repository path on every reachable
+host; clause (g) of [req-pl-018](#req-pl-018) lets governance authors
+bind a pattern to one exact host, including the default host used for
+references written without one.
 
 ### 10.9 Archive path-traversal (zip-slip / symlink escape)
 
@@ -3892,7 +4060,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 1 | Dependency confusion                        | [req-pl-005](#req-pl-005), [req-pl-006](#req-pl-006), [req-pl-007](#req-pl-007) | Governance-only   |
 | 2 | Typosquatting                               | [req-mf-009](#req-mf-009), [req-pl-005](#req-pl-005), [req-pl-007](#req-pl-007) | Governance-only   |
 | 3 | Token leakage across hosts                  | [req-sc-003](#req-sc-003), [req-sc-005](#req-sc-005), [req-sc-007](#req-sc-007), [req-sc-008](#req-sc-008), [req-sc-013](#req-sc-013) | Consumer-default  |
-| 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
+| 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001); [req-rs-018](#req-rs-018) for subset-selection scope (re-derived outside frozen mode, rejected under frozen install) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
 | 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
@@ -4145,6 +4313,7 @@ conformance statement identifying:
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
 [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
+[req-mf-027](#req-mf-027),
 [req-ext-001](#req-ext-001), [req-ext-003](#req-ext-003),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -4166,7 +4335,7 @@ conformance statement identifying:
 [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
 [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
 [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
-[req-rs-017](#req-rs-017),
+[req-rs-017](#req-rs-017), [req-rs-018](#req-rs-018),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007),
@@ -4482,9 +4651,11 @@ The schemas below define this specification's normative structural contract.
 
 > **Planned.** Amendment 0.1.48 selects a corrected manifest resource;
 > amendment 0.1.46 selects an independent lockfile resource that adds manifest
-> extensions to the 0.1.41 lockfile contract. Both use distinct `$id` URLs.
-> The earlier v0.1 and 0.1.41 manifest resources and the 0.1.41 lockfile
-> resource remain available with unchanged IDs and bytes.
+> extensions to the 0.1.41 lockfile contract, and amendment 0.1.60 selects a
+> further lockfile resource that adds `target_subset` and `subset_pairings`
+> ([req-rs-018](#req-rs-018)) to the 0.1.46 contract. All use distinct `$id`
+> URLs. The earlier v0.1 and 0.1.41 manifest resources and the 0.1.41 and
+> 0.1.46 lockfile resources remain available with unchanged IDs and bytes.
 > Human approval and the public comment period under
 > [Section 9.3](#93-amendment-process) remain pending; listing these URLs does
 > not establish approval or publication.
@@ -4492,7 +4663,7 @@ The schemas below define this specification's normative structural contract.
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
 | Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.48.schema.json`](/apm/specs/schemas/manifest-v0.1.48.schema.json) (JSON Schema 2020-12; proposed). |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.46.schema.json`](/apm/specs/schemas/lockfile-v0.1.46.schema.json) (JSON Schema 2020-12). |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.60.schema.json`](/apm/specs/schemas/lockfile-v0.1.60.schema.json) (JSON Schema 2020-12; proposed). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Proposed replacement manifest | [`schemas/manifest-source-replacements-v1.schema.json`](/apm/specs/schemas/manifest-source-replacements-v1.schema.json), distinct opt-in candidate, not ratified. |
 | Proposed replacement lock version 3 | [`schemas/lockfile-source-replacements-v1.schema.json`](/apm/specs/schemas/lockfile-source-replacements-v1.schema.json), distinct candidate, not ratified. |
@@ -4599,6 +4770,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-026](#req-mf-026)                | MUST    | 4.5     | consumer    |
+| [req-mf-027](#req-mf-027)                | MUST    | 4.5     | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-ext-003](#req-ext-003)              | MUST    | 4.6.2   | consumer    |
@@ -4663,6 +4835,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rs-015](#req-rs-015)                | MUST    | 7.5     | consumer    |
 | [req-rs-016](#req-rs-016)                | MUST    | 7.2     | consumer    |
 | [req-rs-017](#req-rs-017)                | MUST    | 7.7     | consumer    |
+| [req-rs-018](#req-rs-018)                | MUST    | 7.4.1   | consumer    |
 | [req-pr-001](#req-pr-001)                | MUST    | 8.2     | consumer    |
 | [req-pr-002](#req-pr-002)                | MUST    | 8.3     | consumer    |
 | [req-pr-003](#req-pr-003)                | MUST    | 8.3     | consumer    |
@@ -4712,7 +4885,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 138** (133 MUST, 5 SHOULD).
+**Total normative statements: 140** (135 MUST, 5 SHOULD).
 
 ---
 
@@ -4777,14 +4950,21 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. The revision also pins the zero-pattern boundary, the per-pattern re-encoding and the frontmatter byte layout. Under Section 9.2 this changes an already-defined emitted target representation, not a manifest, lockfile or policy field; the replaced representations were refused or discarded by the target, so no working deployment relied on them. Migration: deployed bytes, and therefore [req-lk-012] deployed_file_hashes, change for `.agents/rules/*.md` files whose `applyTo` resolves to zero patterns or to two or more patterns, and for single-pattern rules containing a literal backslash or a top-level literal comma; other single-pattern rules are byte-identical. One non-frozen `apm install` re-renders affected files and re-records their hashes; [req-lk-006] and [req-lk-017] are unchanged by this amendment. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived. |
 | 0.1.57 (proposed) | 2026-11-12 | Spec-citation fold for PR #3377 (closes the #3252 Mode-B silent-extension gate on MCP install and ownership). Added [req-mf-026](#req-mf-026) (Section 4.5, consumer MUST): a project-scoped Claude Code `.mcp.json` keeps `${VAR}` references (with `${env:VAR}` written as `${VAR}`) in `command`, `args`, `env`, `url` and `headers` instead of resolved values, and keeps static values and `${VAR:-default}` as declared. An existing entry holding values where the rendered server has references is replaced only when the consumer can show it wrote it (recorded native write hash, or exact expansion of the declared references from the current environment); otherwise it is left unchanged, the install fails, and the diagnostic names the affected fields. Diagnostics name variables and fields, never values. User scope keeps install-time resolution. The Section 4.5 dispatch matrix rows for `${VAR}` and `${env:VAR}` point to the new requirement. Under Section 9.2 this changes generated bytes for the Claude Code project target only. Sections 4.5, 4.9, 11.3.2 and Appendix C are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 136 -> 137 (132 MUST, 5 SHOULD). |
 | 0.1.58 (proposed) | 2026-11-12 | Amendment for accepted issue #1744 in PR #2030. Added [req-tg-018](#req-tg-018) (Section 8.5.10, consumer MUST): at project and user scope, a Cursor instruction whose normalized `applyTo` is exactly one universal `**` pattern (scalar, padded scalar, or single-item sequence) emits `alwaysApply: true` with no `globs`; every other non-empty set, including `**` mixed with scoped patterns, keeps `globs` and never `alwaysApply`; absent, empty, or null `applyTo` emits neither key. Under Section 9.2 this changes generated bytes for the Cursor target only: rules previously emitted as `globs: **` are replaced on reinstall. No source frontmatter field, scoped-glob serialization, or other target changes. Sections 1.3, 8.7, 11.3.2 and Appendix C, the requirements manifest and conformance test binding are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
+| 0.1.59 (proposed) | 2026-11-12 | Amendment for accepted issue #3509 in PR #3606. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place with clause (g): a `dependencies.allow` or `dependencies.deny` pattern whose first segment contains U+002E and does not begin with it is host-qualified and matches only when the dependency's effective host (written host, or the implementation-default host), after port and trailing-dot removal and ASCII case folding, equals the named host. Hostless patterns still match every host; `dependencies.require` is unchanged. Updated the Section 6.3.1 table, the source-replacement policy sentence, the Section 10.8 note and the requirements-manifest notes. No new normative statement; count unchanged at 138 (133 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
+| 0.1.60 (proposed) | 2026-11-17 | Amendment for accepted issue #3763. Added [req-rs-018](#req-rs-018) (new Section 7.4.1, consumer MUST): when several edges reach one dependency, its deployment selection is the union over edges of each edge's `skills` x `targets` product; omitting an axis selects all for that edge; the result and its lock entry are independent of declaration order, discovery order and depth, with no first-wins or last-wins choice; `skill_subset` and `target_subset` record the unions and a new optional `subset_pairings` lock field records the exact per-target selection in a canonical form, only when the two flat fields would over-select; a malformed or inconsistent `subset_pairings` value is invalid lock state; and frozen install fails, naming the dependency, when the derived selection differs from the recorded one. Under Section 9.2 this defines previously unspecified merge behavior, not behavior-neutral errata: a consumer that kept one edge's subsets, or unioned each field independently, now deploys different skills for divergent diamonds, and a frozen install over a lock written by such a consumer fails until the lock is regenerated when the selections differ. Locks whose flat fields are already exact are unchanged byte for byte. `subset_pairings` is additive and optional and `lockfile_version` is unchanged. The fields are typed in the distinct proposed `lockfile-v0.1.60.schema.json` (Appendix A); earlier schema bytes and IDs are unchanged, and since their entries admit additional properties, new lockfiles still validate against them. Older readers that preserve the unknown field without implementing it fall back to the flat product. Added the `target_subset` and `subset_pairings` rows to the Section 5.2 field table and req-rs-018 to the Section 10.11 lockfile-tampering row. Sections 1.3, 4.3.2, 5.2, 7.11, 10.11, 11.3.2, Appendices A and C, the requirements manifest and conformance coverage are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
+| 0.1.61 (proposed) | 2026-11-18 | Amendment for issues #3762, #3866 and #3868, introduced in PR #3801, corrected in PR #3851 (issue #3860) and revised in PR #3875 for #3866 and #3868; the earlier proposed text of this amendment, which preserved `vscode` on rewrite and gave it an MCP configuration destination of its own, is withdrawn. Revised Section 4.2.1 in place: `vscode` is a deprecated alias of `copilot`, admitted under `target:` and `targets:`; it has no MCP configuration destination of its own, a consumer treats it exactly as `copilot` (including the [req-tg-008](#req-tg-008) effective target intersection and recorded lockfile state), a lock writer records it as `copilot` and a lock reader reads a recorded `vscode` as `copilot` before [req-rs-018](#req-rs-018) comparisons, and a manifest rewrite replaces it in place with `copilot`, dropping a resulting duplicate; `agents` still normalises to `copilot` and is not admitted under `targets:`. Revised the Section 4.2 `targets` row and [req-tg-008](#req-tg-008) in place to admit `vscode` as that alias, and added `hermes` and `grok-bot` to the Section 4.2.1 canonical-set block to match its explicit-only enumeration. Under Section 9.2 this is not behavior-neutral errata: a consumer that gave `vscode` a distinct MCP configuration destination, preserved it on rewrite, or recorded it in lock state no longer conforms, and `targets:` values containing `vscode`, `hermes` or `grok-bot`, and `target:` values `hermes` and `grok-bot`, that previously had to be rejected are now accepted. Proposed deprecation announcements under Section 9.5: the `vscode` alias and the singular `target:` field (in favor of `targets:`) become deprecated when this amendment is adopted under Section 9.3, and the 90-day window starts on the adoption date, not on this proposal date. Removing either requires a later revision after that window has elapsed; this amendment sets no removal date. The non-normative Section 4.2.1 note records that the Target Registry companion now lists the workspace-root `.mcp.json` as the `copilot` project MCP configuration destination, replacing `.github/mcp.json` and `.vscode/mcp.json`; this changes an existing companion entry rather than adding one, and cleanup of entries a consumer wrote at the retired destinations is implementation-defined under the existing ownership rules, including [req-mf-026](#req-mf-026). Manifest JSON Schema bytes are unchanged because the `targets` pattern already admits these tokens. Section 9.3 review and public comment remain pending; this proposal is not adopted. Statement count remains 139 (134 MUST, 5 SHOULD). |
+| 0.1.62 (proposed) | 2026-11-18 | Amendment for issue #3847. Revised the `fetch_failure` row of the [req-pl-006](#req-pl-006) merge table (Section 6.4, governance MUST) from "Child overrides if set" to stricter wins (`block` > `warn`, an unset value being the `warn` default per Section 6.2), so a child policy can tighten but never relax the parent's fail-closed choice, matching the tighten-only inheritance principle of Section 6.4 and the `enforcement` row. Under Section 9.2 this changes an evaluation already defined by a normative statement, so it is an amendment, not behavior-neutral errata: the only verdict class that changes is a chain whose parent sets `fetch_failure: block` and whose child sets `warn` (or leaves it unset), which now merges to `block` and fails closed on a policy fetch failure instead of warning. Chains where the child is at least as strict as the parent are unchanged. The reference implementation already merges this way. No statement is added or removed; the statement count is unchanged. Section 9.3 review and public comment remain pending; this proposal is not adopted. |
+| 0.1.63 (proposed) | 2026-11-19 | Amendment for issue #3880 (shared MCP document attribution, deferred from the 0.1.61 review). Added [req-mf-027](#req-mf-027) (Section 4.5, consumer MUST): when two or more targets write project-scoped MCP servers to the same configuration file (at this revision `claude` and `copilot` share the workspace-root `.mcp.json`), each entry the consumer wrote there is attributed to the file, not only to the target that selected the server; an entry recorded for one of those targets is not foreign to another that selects the same server, subject to the same recorded-write checks; when one of those targets stops selecting the server, for example because it is deactivated, the entry is kept and owned, retaining a recorded write hash, for any other active target that writes the file and still selects it, and is removable, under the consumer's other ownership rules including [req-mf-026](#req-mf-026), only once no such target selects it. Entries the consumer did not write and distinct (including user-scoped) configuration files are outside the requirement. The non-normative Section 4.2.1 note now points to the new requirement instead of deferring it. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: the only verdict class that changes is a consumer that removes, or treats as foreign, a shared-file entry another active target sharing that file still selects, which no longer conforms. The reference implementation already behaves this way. Sections 1.3, 4.2.1, 4.5, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 139 -> 140 (135 MUST, 5 SHOULD). |
 
-The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57 and 0.1.58
-proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises
-[req-tg-005](#req-tg-005) in place and adds none. Together, this working draft
-contains 138 statements (133 MUST, 5 SHOULD). Combining the proposals does not establish
+The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58,
+0.1.60 and 0.1.63 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place and 0.1.61 revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and 0.1.62 revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
+working draft
+contains 140 statements (135 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
-Errata (none at publication).
+Errata:
+
+- **2026-11-17, Section 4.2.1** (#3762), withdrawn 2026-11-18. This entry was published in PR #3801 as behavior-neutral errata that preserved the legacy `vscode` alias on manifest rewrite. It is withdrawn and reclassified as proposed amendment 0.1.61, because the same change admits `vscode` under `targets:` and is therefore not behavior-neutral under Section 9.2 (corrected in PR #3851, issue #3860). Withdrawing it changes no requirement ID, keyword, or statement count.
 
 ---
 
@@ -4820,3 +5000,5 @@ is excluded from canonical-emission stability checks per
 [Section 5.6](#56-git-semver-fields-constraint-resolved_tag-resolved_at). Round-
 trip conformance ([req-cf-001](#req-cf-001)) treats this field as
 permitted-to-vary.
+
+**E.5 Legacy target aliases.** [Section 4.2.1](#421-target) admits two legacy aliases. `agents` is admitted under `target:` only and is normalised to `copilot` on manifest rewrite. `vscode` is deprecated on adoption of proposed amendment 0.1.61: it is admitted under `target:` and `targets:`, it denotes `copilot` with no MCP configuration destination of its own, it is recorded as `copilot` in lock state, and on rewrite it is replaced in place with `copilot`, a resulting duplicate being dropped. Some implementations accept further spellings, such as `agy` for `antigravity`; this specification does not yet register them, and a normative alias table is planned for a later 0.1.x revision. The manifest JSON Schema `targets` pattern is intentionally permissive: a value that validates against the schema is not therefore accepted under [req-tg-008](#req-tg-008), which also rejects any `targets:` token that is not canonical, `vscode`, or `all` (for example `agents`). The `targets` description in the published manifest JSON Schemas ("Canonical target restriction set or all sentinel") predates the `vscode` alias and is not normative; the schema bytes are unchanged, and a later schema revision may mark `vscode` with a deprecation annotation.

@@ -32,6 +32,7 @@ _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE = r"^(?:[a-zA-Z0-9._~-]|%[0-9A-Fa-f]{2})+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+_POLICY_HOST_PORT_RE = re.compile(r":[0-9]{1,5}$")
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 _ASCII_LOWER_TRANSLATION = str.maketrans(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -179,6 +180,41 @@ def normalize_package_policy_identity(
 
     normalized_name = "/".join(normalized)
     return f"{normalized_name}{separator}{reference}"
+
+
+def normalize_policy_host(host: str) -> str:
+    """Return the host name compared by host-qualified dependency-policy patterns.
+
+    Host names are case-insensitive. Ports are transport details, so the
+    shorthand, HTTPS and SSH spellings of one host share a policy identity; a
+    ``:`` followed by one to five digits (including one on a configured default
+    host such as ``GITHUB_HOST=ghes.corp.example:8443``) is removed, and so is one
+    trailing DNS root dot (``ghes.corp.example.`` names the same host).
+    """
+    host = _POLICY_HOST_PORT_RE.sub("", host.strip())
+    if host.endswith("."):
+        host = host[:-1]
+    return host.translate(_ASCII_LOWER_TRANSLATION)
+
+
+@lru_cache(maxsize=512)
+def split_policy_pattern_host(pattern: str) -> tuple[str | None, str]:
+    """Split a dependency-policy pattern into ``(host, path_pattern)``.
+
+    The first ``/``-separated segment is a host if and only if it contains a
+    dot and does not begin with one, mirroring host-qualified dependency
+    shorthand. Owner names on the default host never contain a dot, so a
+    dotted GitLab group must be written with its host
+    (``gitlab.com/my.group/**``). Host names never begin with a dot, so
+    relative local-path patterns (``./packages/**``, ``../shared/**``) stay
+    hostless. A hostless pattern returns ``None`` as its host. The host
+    segment is matched literally: wildcards are not expanded there, and an
+    optional ``:port`` suffix is ignored.
+    """
+    head, separator, rest = pattern.partition("/")
+    if not separator or "." not in head or head.startswith("."):
+        return None, pattern
+    return normalize_policy_host(head), rest
 
 
 def build_dependency_unique_key(

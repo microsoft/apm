@@ -53,10 +53,11 @@ applyTo: "**/*.py"
 | `description` | yes | One-line summary; used in compiled context indexes |
 | `applyTo` | yes for instructions | Glob (or comma-separated globs) the rule binds to |
 
-`applyTo` is the load-bearing field. Without it the rule is treated as
-unconditional and gets folded into compiled context files
-(`AGENTS.md`, `GEMINI.md`) instead of a per-file rule directory. With
-it, each harness wraps the body in its own scoping syntax.
+`applyTo` is the load-bearing field. Without it the rule has no scope:
+compiled context files (`AGENTS.md`, `GEMINI.md`) include it, and Cursor
+gets neither `globs` nor `alwaysApply`, so it may not load the rule. Use
+`applyTo: "**"` for an always-on rule. With it, each harness wraps the
+body in its own scoping syntax.
 
 `applyTo` accepts either a single glob or a comma-separated list of
 globs. Commas inside brace alternation (`**/*.{css,scss}`) are part of
@@ -110,7 +111,7 @@ under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
 |---|---|---|
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
-| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
+| grok-build | `.grok/rules/<name>.instructions.md` and folded into `AGENTS.md` | native rule plus compiled root context |
 | cursor | `.cursor/rules/<name>.mdc` | exactly one universal `**` (scalar, padded, or single-item list) -> `alwaysApply: true`, no `globs:`; other non-empty `applyTo`, including `**` mixed with scoped globs -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); absent, empty, or null `applyTo` -> neither key (Cursor decides from `description`); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
@@ -210,7 +211,11 @@ rewritten for the generated agent's location. Supplied string values for `model`
 as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
 Omitted fields remain absent; APM does not translate model names, choose
 defaults, or validate which models and effort values your Codex supports.
-Non-string values are dropped with a warning naming the field.
+Non-string values are dropped with a warning naming the field. The one
+model check is by name only: a Claude model alias (`opus`, `sonnet`,
+`haiku`, `inherit`) or `claude-*` id is still kept as written, with a
+warning naming the agent, because Codex does not recognize it; use a
+Codex-specific agent source or remove `model`.
 
 Other frontmatter fields are dropped with a warning that APM does not
 translate them for Codex. This includes other native Codex settings and
@@ -238,9 +243,8 @@ offending package and field so you can fix the source.
 Agent files and model identifiers belong to each harness vendor. APM
 writes a string `model` value verbatim to every target that receives
 agent files, so a Claude alias such as `sonnet` also lands in the Codex
-TOML. A warning for Claude-specific
-values in Codex output is tracked in
-[#3477](https://github.com/microsoft/apm/issues/3477). APM does not add
+TOML, with a warning naming the agent (see the Codex paragraph above).
+APM does not add
 a per-target model map or a `codex:` override block
 ([#3324](https://github.com/microsoft/apm/issues/3324)): no other tool
 could read it. Workarounds:
@@ -284,7 +288,6 @@ For a portable fix, raise it upstream with
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | `name`, `description`, and supplied string `model` / `model_reasoning_effort` -> top-level TOML; body becomes `developer_instructions`; dropped metadata emits warnings |
 | kiro | `.kiro/agents/<relative-stem>.md` | `description`, `model`, `tools` kept; `name` and unknown fields stripped; identity from path; fail closed on unsupported tools (ref: [kiro.dev/docs/custom-agents](https://kiro.dev/docs/custom-agents/), accessed 2026-08-03) |
-| grok-build | `.grok/agents/<name>.md` | verbatim |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 
@@ -327,8 +330,6 @@ dedicated persona.
   scope-attached and gets folded into the compiled context file. If
   you wanted Cursor or Copilot to scope it to `**/*.ts`, the rule
   will not bind.
-- **Agent named `default` or `start`.** These collide with script
-  resolution in `apm run`. Pick a descriptive name.
 - **Targeting an agent at Windsurf or Gemini.** Neither harness has an
   agents primitive. Cascade auto-invokes skills by description and
   Gemini folds context into `GEMINI.md`. If a persona must reach those

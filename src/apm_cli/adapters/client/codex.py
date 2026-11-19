@@ -11,13 +11,14 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import InlineTable, Item, String, Table
 
+from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
-from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -62,9 +63,19 @@ class CodexClientAdapter(MCPClientAdapter):
     server configuration.
     """
 
+    remote_shape = remote_shape_row("codex")
+
+    @classmethod
+    def selected_remote(cls, server_info) -> dict | None:
+        """Codex renders a published stdio package before any remote."""
+        if isinstance(server_info, dict) and server_info.get("packages"):
+            return None
+        return super().selected_remote(server_info)
+
     supports_user_scope: bool = True
     target_name: str = "codex"
     mcp_servers_key: str = "mcp_servers"
+    refreshes_environment_renders: bool = True
 
     def __init__(
         self,
@@ -92,16 +103,9 @@ class CodexClientAdapter(MCPClientAdapter):
     def _get_codex_dir(self) -> Path:
         """Return the root directory used for Codex config in the current scope."""
         if self.user_scope:
-            codex_home = os.environ.get("CODEX_HOME", "")
-            if codex_home.strip():
-                codex_home_path = Path(codex_home).expanduser()
-                if not codex_home_path.is_absolute():
-                    raise PathTraversalError(
-                        "CODEX_HOME is set to a non-absolute path; cannot locate the "
-                        "Codex CLI configuration directory."
-                    )
-                return codex_home_path
-            return Path.home() / ".codex"
+            from ...integration.targets import resolve_user_root
+
+            return resolve_user_root("codex")
         return self.project_root / ".codex"
 
     def get_config_path(self) -> str:
@@ -195,7 +199,7 @@ class CodexClientAdapter(MCPClientAdapter):
         servers = config.get("mcp_servers", {})
         migrated: set[str] = set()
         for name in sorted(managed_names):
-            config_key = self._determine_config_key(name, None)
+            config_key = self.determine_config_key(name, None)
             entry = servers.get(config_key)
             if not isinstance(entry, dict) or "id" not in entry:
                 continue
@@ -362,7 +366,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -482,14 +486,12 @@ class CodexClientAdapter(MCPClientAdapter):
         if remotes and not packages:
             remote = self._select_remote_with_url(remotes) or remotes[0]
             server_name = server_info.get("name", "")
-            if (remote.get("transport_type") or "").strip() == "sse":
-                _rich_warning(
-                    f"Skipping MCP server '{server_name}' for Codex CLI: SSE transport "
-                    "is deprecated by the MCP spec and not supported by Codex. "
-                    "Switch to `transport: streamable-http`.",
-                    symbol="warning",
-                )
-                return None
+            transport = canonical_remote_transport(
+                remote, runtime_label="Codex CLI", server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
 
             remote_url = (remote.get("url") or "").strip()
             if not remote_url:
@@ -520,7 +522,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            remote_config = {"url": remote_url}
+            remote_config = shape.render(transport, remote_url)
             http_headers: dict[str, str] = {}
             env_http_headers: dict[str, str] = {}
             bearer_token_env_var = ""

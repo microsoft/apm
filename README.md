@@ -173,13 +173,13 @@ Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemin
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS
 ```
 
+Teach your coding agent to use APM with the [official guide](https://github.com/microsoft/apm/tree/main/packages/apm-guide) (an expert agent plus the `apm-usage` skill):
+
+```bash
+apm install microsoft/apm/packages/apm-guide#v0.36.1
+```
+
 See the **[Getting Started guide](https://microsoft.github.io/apm/quickstart/)** for the full walkthrough.
-
-## Works with agentrc
-
-[agentrc](https://github.com/microsoft/agentrc) analyzes your codebase and generates tailored agent instructions — architecture, conventions, build commands — from real code, not templates.
-
-Use agentrc to author high-quality instructions, then package them with APM to share across your org. The `.instructions.md` format is shared by both tools — no conversion needed when moving instructions into APM packages.
 
 ## Community
 

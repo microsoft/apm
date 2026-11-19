@@ -6,7 +6,7 @@ local-package stale-file deletion. These tests pin its invariants:
 * path validation rejects unmanaged prefixes
 * directory entries are refused (defeats poisoned-lockfile rmtree)
 * recorded-hash mismatch skips deletion (treats as user-edited)
-* missing recorded hash falls through (back-compat with legacy lockfiles)
+* a claim without a recorded hash is kept (#3663)
 * unlink failures are retained for retry on next install
 """
 
@@ -45,6 +45,10 @@ def _make_managed_file(project_root: Path, rel: str, content: str = "hi\n") -> P
     return p
 
 
+def _recorded(project_root: Path, *rels: str) -> dict[str, str]:
+    return {rel: compute_file_hash(project_root / rel) for rel in rels}
+
+
 def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger):
     target = _make_managed_file(project_root, ".github/prompts/old.prompt.md")
     result = remove_stale_deployed_files(
@@ -53,6 +57,7 @@ def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        recorded_hashes=_recorded(project_root, ".github/prompts/old.prompt.md"),
     )
     assert result.deleted == [".github/prompts/old.prompt.md"]
     assert not result.failed
@@ -169,8 +174,8 @@ def test_hash_match_deletes_file(project_root, diagnostics, logger):
     assert not target.exists()
 
 
-def test_no_recorded_hashes_falls_through_to_delete(project_root, diagnostics, logger):
-    """Backward compat with legacy lockfiles -- no hash means delete."""
+def test_claim_without_recorded_hash_is_kept(project_root, diagnostics, logger):
+    """A lockfile row alone never authorizes deleting a file (#3663)."""
     rel = ".github/prompts/legacy.prompt.md"
     target = _make_managed_file(project_root, rel)
     result = remove_stale_deployed_files(
@@ -181,8 +186,12 @@ def test_no_recorded_hashes_falls_through_to_delete(project_root, diagnostics, l
         diagnostics=diagnostics,
         recorded_hashes=None,
     )
-    assert result.deleted == [rel]
-    assert not target.exists()
+    assert result.deleted == []
+    assert result.skipped_unmanaged == [rel]
+    assert rel in result.retained
+    assert target.exists()
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any(f"Kept {rel}" in m and "no content hash" in m for m in msgs)
 
 
 def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monkeypatch):
@@ -236,6 +245,7 @@ def test_unlink_failure_is_retained_for_retry(project_root, diagnostics, logger,
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        recorded_hashes=_recorded(project_root, rel),
     )
     assert result.deleted == []
     assert result.failed == [rel]
@@ -265,6 +275,7 @@ def test_orphan_failure_message_does_not_promise_retry(
         dep_key="some/orphan-pkg",
         targets=None,
         diagnostics=diagnostics,
+        recorded_hashes=_recorded(project_root, rel),
         failed_path_retained=False,
     )
     assert result.failed == [rel]
@@ -518,3 +529,66 @@ def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(tmp_path, diag
     assert stale in result.failed
     msgs = [d.message for d in diagnostics._diagnostics]
     assert any("failed path resolution" in m for m in msgs)
+
+
+def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, diagnostics):
+    """A stale spelling that is the live file's directory entry is renamed, never deleted."""
+    rules = project_root / ".github" / "instructions"
+    rules.mkdir(parents=True)
+    old = rules / "Guide.instructions.md"
+    old.write_text("v1")
+    recorded = {".github/instructions/Guide.instructions.md": compute_file_hash(old)}
+    case_insensitive = (rules / "guide.instructions.md").exists()
+    if case_insensitive:
+        (rules / "guide.instructions.md").write_text("v2")  # writer keeps old spelling
+
+    result = remove_stale_deployed_files(
+        [".github/instructions/Guide.instructions.md"],
+        project_root,
+        dep_key="acme/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        recorded_hashes=recorded,
+        live_paths=[".github/instructions/guide.instructions.md"],
+    )
+
+    if case_insensitive:
+        assert result.aliased == [".github/instructions/Guide.instructions.md"]
+        assert result.deleted == [] and result.retained == []
+        assert sorted(p.name for p in rules.iterdir()) == ["guide.instructions.md"]
+        assert (rules / "guide.instructions.md").read_text() == "v2"
+    else:
+        assert result.deleted == [".github/instructions/Guide.instructions.md"]
+        assert result.aliased == []
+
+
+def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkeypatch):
+    """Existing stale files cost O(stale + live) spelling keys, not O(stale x live)."""
+    from apm_cli.utils import paths
+
+    rules = project_root / ".github" / "instructions"
+    rules.mkdir(parents=True)
+    stale = []
+    for i in range(30):
+        (rules / f"old{i}.instructions.md").write_text("x")
+        stale.append(f".github/instructions/old{i}.instructions.md")
+    live = [f".github/instructions/new{i}.instructions.md" for i in range(300)]
+    recorded = {rel: compute_file_hash(project_root / rel) for rel in stale}
+    calls = {"key": 0}
+    real_key = paths._spelling_key
+    monkeypatch.setattr(
+        paths, "_spelling_key", lambda p: calls.__setitem__("key", calls["key"] + 1) or real_key(p)
+    )
+
+    result = remove_stale_deployed_files(
+        stale,
+        project_root,
+        dep_key="acme/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        recorded_hashes=recorded,
+        live_paths=live,
+    )
+
+    assert sorted(result.deleted) == sorted(stale)
+    assert calls["key"] <= len(stale) + len(live)

@@ -82,7 +82,10 @@ class TestUpdateConfig:
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
         logger = MagicMock()
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "apm_cli.adapters.client.base.atomic_write_text",
+            side_effect=PermissionError("denied"),
+        ):
             result = adapter.update_config({"servers": {}}, logger=logger)
         assert result is False
         logger.error.assert_called_once()
@@ -90,7 +93,10 @@ class TestUpdateConfig:
     def test_write_error_no_logger_prints(self, tmp_path, capsys):
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "apm_cli.adapters.client.base.atomic_write_text",
+            side_effect=PermissionError("denied"),
+        ):
             result = adapter.update_config({"servers": {}})
         assert result is False
         captured = capsys.readouterr()

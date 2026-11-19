@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "srv": {
+      "url": "https://mcp.example.com/mcp"
+    }
+  }
+}

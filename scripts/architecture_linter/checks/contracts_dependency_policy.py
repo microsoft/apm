@@ -39,13 +39,22 @@ def _unique_definitions(
 def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     """Policy evaluation and index keys must share the dependency identity owner."""
     findings = _unique_definitions(
-        provider, POLICY_RULE, IDENTITY, ("normalize_package_policy_identity",)
+        provider,
+        POLICY_RULE,
+        IDENTITY,
+        (
+            "normalize_package_policy_identity",
+            "normalize_policy_host",
+            "split_policy_pattern_host",
+        ),
     )
     required = {
         IDENTITY: ("classify_package_identity_case", "case_insensitive_identity_prefix_segments"),
         MATCHER: (
             "normalize_package_policy_identity(",
             "dependency.case_insensitive_identity_prefix_segments",
+            "split_policy_pattern_host(pattern)",
+            "dependency.policy_host",
         ),
         CHECKS: (
             "check_dependency_allowed(dep, policy)",
@@ -69,7 +78,8 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 _summary(
                     POLICY_RULE,
                     path,
-                    "Dependency policy casing must route through models/dependency/identity.py",
+                    "Dependency policy casing and hosts must route through "
+                    "models/dependency/identity.py",
                 )
             )
         if path == MATCHER and facts.tree_index is not None:

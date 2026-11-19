@@ -13,13 +13,25 @@ check function's definition order) stays visible and auditable in one place.
 
 from __future__ import annotations
 
+from scripts.architecture_linter.checks.install_agent_render_adopt import (
+    GUARD_AGENT_RENDER_ADOPT,
+    check_agent_render_then_adopt,
+)
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
+    _GUARD_CLEANUP_RELEASE,
     _GUARD_PROVENANCE,
     _GUARD_TARGET_CONTRACTION,
     check_base_integrator,
+    check_cleanup_ownership_release,
     check_provenance_state,
     check_target_file_contraction,
+)
+from scripts.architecture_linter.checks.install_bundle_compile_staging import (
+    GUARD as _GUARD_BUNDLE_STAGING,
+)
+from scripts.architecture_linter.checks.install_bundle_compile_staging import (
+    check_bundle_compile_staging,
 )
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
@@ -29,6 +41,10 @@ from scripts.architecture_linter.checks.install_deployment_shared import _rule
 from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
     check_prospective_dry_run_plan,
+)
+from scripts.architecture_linter.checks.install_effective_selection import (
+    GUARD_EFFECTIVE_SELECTION,
+    check_effective_selection,
 )
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
@@ -46,10 +62,16 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
 )
+from scripts.architecture_linter.checks.install_lsp_capability_gate import (
+    GUARD_LSP_CAPABILITY_GATE,
+    check_lsp_capability_gate,
+)
 from scripts.architecture_linter.checks.install_lsp_plugin import (
+    GUARD_CONSUMER_MANIFEST_REWRITE,
     GUARD_EXECUTABLE_TRUST,
     GUARD_LSP_LIFECYCLE,
     GUARD_LSP_TARGET_CONTRACT,
+    check_consumer_manifest_rewrite,
     check_executable_trust_context,
     check_lsp_lifecycle,
     check_lsp_target_contract,
@@ -75,11 +97,19 @@ from scripts.architecture_linter.checks.install_request_and_source import (
     check_request_defaults,
     check_source_plan,
 )
+from scripts.architecture_linter.checks.install_selection_merge import (
+    GUARD_SELECTION_MERGE,
+    check_selection_merge,
+)
 from scripts.architecture_linter.checks.install_single_file import (
     GUARD as _GUARD_SINGLE_FILE,
 )
 from scripts.architecture_linter.checks.install_single_file import (
     check_single_file_materialization,
+)
+from scripts.architecture_linter.checks.install_skill_layout import (
+    GUARD_SKILL_LAYOUT,
+    check_skill_layout,
 )
 from scripts.architecture_linter.checks.install_skill_preflight import (
     GUARD_SKILL_PREFLIGHT,
@@ -102,6 +132,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        _GUARD_BUNDLE_STAGING,
+        "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
+        check_bundle_compile_staging,
+    ),
     _rule(
         _GUARD_SINGLE_FILE,
         "Local and remote single-file dependencies share package materialization and admission.",
@@ -168,9 +203,19 @@ RULES: tuple[Rule, ...] = (
         check_source_plan,
     ),
     _rule(
+        GUARD_EFFECTIVE_SELECTION,
+        "Every package deployment takes its skill and target selection from one owner.",
+        check_effective_selection,
+    ),
+    _rule(
         GUARD_SKILL_PREFLIGHT,
         "The complete selected skill plan is checked before native deployment.",
         check_skill_preflight,
+    ),
+    _rule(
+        GUARD_SELECTION_MERGE,
+        "Every resolver edge reaches the single dependency selection-merge owner.",
+        check_selection_merge,
     ),
     _rule(
         _GUARD_PRIMITIVE_CLASSIFICATION,
@@ -193,9 +238,24 @@ RULES: tuple[Rule, ...] = (
         check_base_integrator,
     ),
     _rule(
+        _GUARD_CLEANUP_RELEASE,
+        "Stale cleanup releases skill directories that hold only user content.",
+        check_cleanup_ownership_release,
+    ),
+    _rule(
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
+    ),
+    _rule(
+        GUARD_AGENT_RENDER_ADOPT,
+        "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
+        check_agent_render_then_adopt,
+    ),
+    _rule(
+        GUARD_CONSUMER_MANIFEST_REWRITE,
+        "Consumer apm.yml rewrites route through the round-trip YAML pair.",
+        check_consumer_manifest_rewrite,
     ),
     _rule(
         GUARD_EXECUTABLE_TRUST,
@@ -211,6 +271,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LSP_LIFECYCLE,
         "LSP collection and reconciliation route through install/lsp/integration.py.",
         check_lsp_lifecycle,
+    ),
+    _rule(
+        GUARD_LSP_CAPABILITY_GATE,
+        "Declared LSP without a capable target fails before any target write.",
+        check_lsp_capability_gate,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,
@@ -241,6 +306,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_SKILLS_ROOT,
         "Skills roots come from TargetProfile.skills_rel_root, not open-coded <root>/skills.",
         check_skills_root_derivation,
+    ),
+    _rule(
+        GUARD_SKILL_LAYOUT,
+        "Skill layout routes through resolve_skill_layout; rebuilds recover the recorded layout.",
+        check_skill_layout,
     ),
     *EXTRA_RULES,
 )

@@ -7,7 +7,7 @@ import shutil
 import stat
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
@@ -19,6 +19,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
+from apm_cli.utils.paths import stored_alias
 
 
 def discover_primitives(*args: Any, **kwargs: Any) -> Any:
@@ -34,7 +35,7 @@ def _managed_absolute_target_root(
     allow_final_symlink: bool = False,
 ) -> Path | None:
     """Return the managed root for *candidate*, or ``None`` if unmanaged."""
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     source = targets
     if source is None:
@@ -42,7 +43,7 @@ def _managed_absolute_target_root(
         for profile in KNOWN_TARGETS.values():
             if not profile.user_supported or profile.user_root_resolver is not None:
                 continue
-            scoped = profile.for_scope(user_scope=True)
+            scoped = scoped_profile_or_none(profile, user_scope=True)
             if scoped is not None:
                 source.append(scoped)
     try:
@@ -232,15 +233,35 @@ class BaseIntegrator:
 
         .. note:: Callers must pre-normalize *managed_files* with
            forward-slash separators (see ``normalize_managed_files``).
+
+        Raises:
+            PathTraversalError: *target_path* itself is a symlink (dangling
+                or not). Integrators never write through a linked
+                destination, regardless of ``force`` or ownership.
         """
+        if target_path.is_symlink():
+            raise PathTraversalError(
+                f"Refusing deployment through a symlinked destination: {rel_path}. "
+                "Replace the symlink with a regular file or remove it, then retry."
+            )
         if managed_files is None:
             managed_files = set()
         if not target_path.exists():
             return False
         # managed_files is pre-normalized at the call site  -- O(1) lookup
-        if rel_path.replace("\\", "/") in managed_files:
+        rel_key = rel_path.replace("\\", "/")
+        if rel_key in managed_files:
             return False
         if force:
+            return False
+        rel_parts = PurePosixPath(rel_key).parts
+        if 0 < len(rel_parts) <= len(target_path.parts) and (
+            stored_alias(target_path.parents[len(rel_parts) - 1], rel_key, managed_files)
+            is not None
+        ):
+            # A managed file renamed upstream only by case/normalization is
+            # still APM-owned on case-insensitive filesystems: its stored
+            # spelling is the managed key (set lookups, no inventory scan).
             return False
 
         if diagnostics is not None:
@@ -325,8 +346,7 @@ class BaseIntegrator:
                     continue
                 if target_file.exists() and not target_file.is_file():
                     raise IsADirectoryError(
-                        f"Cannot deploy {entry}: destination is not a regular file. "
-                        "Move the blocking directory before reinstalling."
+                        errno.EISDIR, os.strerror(errno.EISDIR), str(target_file)
                     )
                 if (
                     unchanged
@@ -449,10 +469,10 @@ class BaseIntegrator:
         Conservative by design
         ----------------------
         Only fires when the deployed bytes match the source content (modulo
-        CRLF->LF normalization). Format-transforming targets
-        (``codex_agent``, ``cursor_rules``, ``claude_rules``,
-        ``windsurf_rules``, ``gemini_command``, ...) won't match -- they
-        keep the existing skip behavior. This means we never silently
+        CRLF->LF normalization). Format-transforming writers (Codex/Kiro
+        agents, link-rewritten agents, rules, prompts) must not use this
+        raw-source comparison; they render first and pass the rendered text
+        to :meth:`_check_adopt_or_skip` as ``expected_content``. This means we never silently
         adopt content that *might* have come from somewhere else; we only
         adopt files that are demonstrably the package's own content already
         on disk.
@@ -524,13 +544,14 @@ class BaseIntegrator:
         """Adopt *target_path* when it is identical to what would be deployed.
 
         Encapsulates the ``is_content_identical_to_source`` + append pattern
-        so secondary call sites in agent/prompt/hook integrators share a
-        single predicate call instead of repeating the three-line block.
+        for byte-preserving call sites (hook bundles) that deploy the source
+        verbatim. Writers that transform content (agents, prompts) render
+        first and adopt via :meth:`_check_adopt_or_skip` with
+        ``expected_content`` instead.
 
         ``lf_normalized_deploy`` is forwarded to
-        :meth:`is_content_identical_to_source`: LF-normalizing deployers
-        (agent, prompt) pass ``True``; byte-preserving deployers (hook,
-        kiro-hook) keep the ``False`` default.
+        :meth:`is_content_identical_to_source`; byte-preserving deployers
+        (hook, kiro-hook) keep the ``False`` default.
 
         Returns ``True`` and appends *target_path* to *target_paths* when the
         files are identical; returns ``False`` and leaves *target_paths*

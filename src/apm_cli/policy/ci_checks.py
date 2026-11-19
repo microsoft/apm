@@ -13,7 +13,7 @@ Exit-code contract (consumed by the ``apm audit --ci`` command):
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast  # noqa: UP035
 
@@ -101,8 +101,7 @@ def _check_ref_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify manifest refs match the lockfile's resolved ref and commit."""
-    from ..deps.revision_pins import is_full_revision_pin
-    from ..drift import detect_ref_change, marketplace_ref_mismatch
+    from ..drift import detect_ref_change, marketplace_ref_mismatch, revision_pin_mismatch
     from ..install.plan import lockfile_satisfies_replacements
     from ..models.dependency.replacement import project_manifest_dependencies
 
@@ -130,13 +129,8 @@ def _check_ref_consistency(
                 mismatches.append(f"{display}: {reason}")
                 requires_update = True
             continue
-        if is_full_revision_pin(dep_ref.reference) and (
-            locked_dep.resolved_commit != dep_ref.reference
-        ):
-            mismatches.append(
-                f"{key}: manifest commit '{dep_ref.reference}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
-            )
+        if pin_reason := revision_pin_mismatch(dep_ref.reference, locked_dep):
+            mismatches.append(f"{key}: {pin_reason}")
             requires_update = True
             continue
         if detect_ref_change(dep_ref, locked_dep):
@@ -152,7 +146,7 @@ def _check_ref_consistency(
             passed=True,
             message="All dependency refs match lockfile",
         )
-    repair_command = "apm install --update" if requires_update else "apm install"
+    repair_command = "apm update" if requires_update else "apm install"
     n = len(mismatches)
     noun = "mismatch" if n == 1 else "mismatches"
     return CheckResult(
@@ -381,8 +375,16 @@ def _check_skill_subset_consistency(
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
 ) -> CheckResult:
-    """Verify skill subsets match the lockfile and real package tree."""
+    """Verify locked selections match what the declared graph merges to.
+
+    Every locked dependency's ``skill_subset``/``target_subset`` must equal
+    the merge (canonical owner: ``merge_edge_selections``) of every edge the
+    project's ``apm.yml`` and the materialized packages' manifests declare
+    for it (#3735). A selection that cannot be recomputed is reported as
+    unverified, never passed.
+    """
     from ..constants import APM_MODULES_DIR
+    from ..deps.reachability import declared_node_selections
 
     if prepared_replay_error is not None:
         return CheckResult(
@@ -396,32 +398,67 @@ def _check_skill_subset_consistency(
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR
     )
+    declared = declared_node_selections(
+        lock,
+        project_root,
+        modules_root,
+        manifest.get_apm_dependencies(),
+        dev_refs=manifest.get_dev_apm_dependencies(),
+    )
     mismatches: list[str] = []
-    marketplace_index = lock.marketplace_index()
-    for dep_ref in manifest.get_all_apm_dependencies():
-        key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
-        if locked_dep is None:
-            continue
-        if not dep_ref.skill_subset and not locked_dep.skill_subset:
-            continue
-        manifest_subset = sorted(dep_ref.skill_subset) if dep_ref.skill_subset else []
-        lock_subset = sorted(locked_dep.skill_subset) if locked_dep.skill_subset else []
-        if manifest_subset != lock_subset:
-            mismatches.append(
-                f"{key}: manifest skills {manifest_subset} != lockfile skill_subset {lock_subset}"
-            )
-            continue
+    for locked_dep in lock.get_package_dependencies():
+        key = locked_dep.get_unique_key()
+        lock_skills = sorted(locked_dep.skill_subset or ())
+        lock_targets = sorted(locked_dep.target_subset or ())
         missing = _missing_recorded_skill_subset_paths(
             modules_root,
-            dep_ref,
+            locked_dep.to_dependency_ref(),
             locked_dep.package_type,
-            lock_subset,
+            lock_skills,
         )
         if missing:
             mismatches.append(
                 f"{key}: recorded skill subset path(s) not found in package tree: "
                 f"{', '.join(missing)}"
+            )
+            continue
+        selection = declared.selections.get(key)
+        expected_skills = list(selection.skill_subset or ()) if selection else []
+        expected_targets = list(selection.target_subset or ()) if selection else []
+        # An unrestricted declaration absorbs any declaration the walk could
+        # not read, so only then is an incomplete walk still conclusive.
+        absorbed = (
+            selection is not None
+            and selection.skill_subset is None
+            and selection.target_subset is None
+        )
+        if selection is None or (not declared.complete and not absorbed):
+            mismatches.append(
+                f"{key}: selection unverified -- the manifests that declare it could "
+                "not all be read"
+            )
+            continue
+        if lock_skills != expected_skills:
+            mismatches.append(
+                f"{key}: declared skills {expected_skills} != lockfile skill_subset {lock_skills}"
+            )
+            continue
+        if lock_targets != expected_targets:
+            mismatches.append(
+                f"{key}: declared targets {expected_targets} != lockfile target_subset "
+                f"{lock_targets}"
+            )
+            continue
+        try:
+            locked_pairing = locked_dep.selection()
+        except ValueError as exc:
+            mismatches.append(f"{key}: invalid lockfile subset_pairings -- {exc}")
+            continue
+        if locked_pairing != selection.lock_selection():
+            mismatches.append(
+                f"{key}: declared skill-target pairing "
+                f"{_pairing_summary(selection.lock_selection())} != lockfile "
+                f"{_pairing_summary(locked_pairing)}"
             )
 
     if not mismatches:
@@ -437,6 +474,15 @@ def _check_skill_subset_consistency(
             f"{len(mismatches)} skill subset mismatch(es) -- regenerate lockfile (apm install)"
         ),
         details=mismatches,
+    )
+
+
+def _pairing_summary(pairing) -> str:
+    """Render a selection as ``targets: skills`` groups ('all' for an omitted axis)."""
+    return "; ".join(
+        f"{', '.join(p.targets) if p.targets else 'all targets'}: "
+        f"{', '.join(p.skills) if p.skills else 'all skills'}"
+        for p in pairing.pairings
     )
 
 
@@ -542,6 +588,119 @@ def _check_config_consistency(
     )
 
 
+@dataclass(frozen=True)
+class DeployedHashDrift:
+    """One deployed file whose on-disk bytes differ from its locked hash envelope."""
+
+    owner: str
+    path: str
+    expected: str
+    actual: str
+
+
+def resolve_audit_scope(
+    project_root: Path, lock: LockFile | None
+) -> tuple[Path, bool, Sequence[TargetProfile]]:
+    """Return the deployment root, user-scope flag and targets audit verifies against."""
+    from ..core.scope import get_workspace_deploy_root
+    from ..deps.lockfile import LockFile
+    from ..integration.targets import resolve_audit_targets
+
+    deployment_root = get_workspace_deploy_root(project_root)
+    user_scope = deployment_root != project_root.resolve()
+    targets = resolve_audit_targets(
+        project_root,
+        user_scope=user_scope,
+        lockfile=lock if lock is not None else LockFile(),
+    )
+    return deployment_root, user_scope, targets
+
+
+def verify_deployed_file_hashes(
+    deploy_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile] = (),
+) -> tuple[list[DeployedHashDrift], list[str]]:
+    """Re-verify every locked deployed-file hash against on-disk bytes (req-lk-017).
+
+    Single owner shared by ``apm audit`` content-integrity and the
+    ``apm install --frozen`` post-deploy check. Returns the hash
+    mismatches and the claimed paths that resolve unsafely. Relative claims
+    resolve against *deploy_root*, the live deployment root. Missing files
+    are skipped: ``deployed-files-present`` owns that signal.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.deployment_state import LocatorKind
+    from ..integration.targets import KNOWN_TARGETS
+    from ..utils.content_hash import compute_file_hash
+
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+
+    def _has_symlink_component(path: Path) -> bool:
+        try:
+            relative = path.relative_to(deploy_root)
+        except ValueError:
+            return path.is_symlink()
+        current = deploy_root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return True
+        return False
+
+    # Per-file hash verification across canonical deployment records.
+    hash_mismatches: list[DeployedHashDrift] = []
+    unresolved_hash_paths: list[str] = []
+    for record in ledger.records.values():
+        expected_hash = record.content_hash
+        if expected_hash is None:
+            continue
+        locator = record.locator
+        if locator.kind == LocatorKind.URI:
+            continue
+        if locator.kind == LocatorKind.PROJECT_RELATIVE:
+            file_path = _resolve_deployed_file_path(locator.value, deploy_root, targets)
+            if file_path is None:
+                unresolved_hash_paths.append(locator.value)
+                continue
+        else:
+            target = next(
+                (candidate for candidate in targets if candidate.name == locator.target),
+                KNOWN_TARGETS.get(locator.target),
+            )
+            if target is None:
+                continue
+            try:
+                resolved = DeploymentLedgerCodec.resolve_locator(
+                    locator,
+                    project_root=deploy_root,
+                    target=target,
+                )
+            except (OSError, RuntimeError, ValueError):
+                unresolved_hash_paths.append(locator.value)
+                continue
+            if isinstance(resolved, str):
+                unresolved_hash_paths.append(locator.value)
+                continue
+            file_path = resolved
+        if not file_path.exists():
+            continue  # _check_deployed_files_present owns this signal
+        if locator.kind == LocatorKind.PROJECT_RELATIVE and _has_symlink_component(file_path):
+            continue
+        if file_path.is_symlink() or not file_path.is_file():
+            unresolved_hash_paths.append(locator.value)
+            continue
+        actual_hash = compute_file_hash(file_path)
+        if actual_hash != expected_hash:
+            hash_mismatches.append(
+                DeployedHashDrift(
+                    record.active_owner or "", locator.value, expected_hash, actual_hash
+                )
+            )
+
+    return hash_mismatches, unresolved_hash_paths
+
+
 def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
@@ -568,7 +727,6 @@ def _check_content_integrity(
     recorded hash (e.g. directories) are skipped silently.
     """
     from ..security.file_scanner import scan_project_result
-    from ..utils.content_hash import compute_file_hash
 
     # Reuse the already-parsed lock and union its recorded paths with the
     # independently governed deploy-tree scope. The scanner owns exact path
@@ -595,8 +753,6 @@ def _check_content_integrity(
     )
 
     from ..core.deployment_ledger import DeploymentLedgerCodec
-    from ..core.deployment_state import LocatorKind
-    from ..integration.targets import KNOWN_TARGETS
 
     ledger = DeploymentLedgerCodec.from_lockfile(lock)
     ledger_values = {
@@ -609,63 +765,9 @@ def _check_content_integrity(
         legacy_hash_paths.update(dependency.deployed_file_hashes)
     missing_ownership = sorted(legacy_hash_paths.difference(ledger_values))
 
-    def _has_symlink_component(path: Path) -> bool:
-        try:
-            relative = path.relative_to(project_root)
-        except ValueError:
-            return path.is_symlink()
-        current = project_root
-        for part in relative.parts:
-            current = current / part
-            if current.is_symlink():
-                return True
-        return False
-
-    # Per-file hash verification across canonical deployment records.
-    hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
-    unresolved_hash_paths: list[str] = []
-    for record in ledger.records.values():
-        expected_hash = record.content_hash
-        if expected_hash is None:
-            continue
-        locator = record.locator
-        if locator.kind == LocatorKind.URI:
-            continue
-        if locator.kind == LocatorKind.PROJECT_RELATIVE:
-            file_path = _resolve_deployed_file_path(locator.value, project_root, targets)
-            if file_path is None:
-                unresolved_hash_paths.append(locator.value)
-                continue
-        else:
-            target = next(
-                (candidate for candidate in targets if candidate.name == locator.target),
-                KNOWN_TARGETS.get(locator.target),
-            )
-            if target is None:
-                continue
-            try:
-                resolved = DeploymentLedgerCodec.resolve_locator(
-                    locator,
-                    project_root=project_root,
-                    target=target,
-                )
-            except (OSError, RuntimeError, ValueError):
-                unresolved_hash_paths.append(locator.value)
-                continue
-            if isinstance(resolved, str):
-                unresolved_hash_paths.append(locator.value)
-                continue
-            file_path = resolved
-        if not file_path.exists():
-            continue  # _check_deployed_files_present owns this signal
-        if locator.kind == LocatorKind.PROJECT_RELATIVE and _has_symlink_component(file_path):
-            continue
-        if file_path.is_symlink() or not file_path.is_file():
-            unresolved_hash_paths.append(locator.value)
-            continue
-        actual_hash = compute_file_hash(file_path)
-        if actual_hash != expected_hash:
-            hash_mismatches.append((record.active_owner, locator.value, expected_hash, actual_hash))
+    hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(
+        project_root, lock, targets
+    )
 
     if (
         not critical_files
@@ -693,7 +795,9 @@ def _check_content_integrity(
         details.append(f"missing-ownership: {rel_path}")
     for rel_path in unresolved_hash_paths:
         details.append(f"unresolved: {rel_path}")
-    for dep_key, rel_path, expected, actual in hash_mismatches:
+    for dep_key, rel_path, expected, actual in (
+        (drift.owner, drift.path, drift.expected, drift.actual) for drift in hash_mismatches
+    ):
         # Truncate hashes for terminal width; full hashes available via JSON output.
         exp_short = expected.split(":", 1)[-1][:12] if ":" in expected else expected[:12]
         act_short = actual.split(":", 1)[-1][:12] if ":" in actual else actual[:12]
@@ -958,26 +1062,18 @@ def run_baseline_checks(
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
-    When *ci_mode* is ``True``, the ``manifest-missing`` check is a hard
-    failure (``passed=False``); otherwise it is an advisory warning only.
+    When *ci_mode* is ``True``, a missing ``apm.yml`` is always a hard
+    ``manifest-missing`` failure, so a CI gate never passes without auditing
+    anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
-    from ..core.scope import get_workspace_deploy_root
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
-    deployment_root = get_workspace_deploy_root(project_root)
-    user_scope = deployment_root != project_root.resolve()
-    from ..integration.targets import resolve_audit_targets
-
     lockfile_path = get_lockfile_path(project_root)
     lock = LockFile.read(lockfile_path)
-    resolved_targets = resolve_audit_targets(
-        project_root,
-        user_scope=user_scope,
-        lockfile=lock if lock is not None else LockFile(),
-    )
+    deployment_root, user_scope, resolved_targets = resolve_audit_scope(project_root, lock)
     apm_yml_path = project_root / "apm.yml"
 
     # Parse manifest ONCE -- this function owns parse-error handling.
@@ -1011,6 +1107,20 @@ def run_baseline_checks(
                             "apm.yml is missing but APM artifacts"
                             " (.apm/ or apm.lock.yaml or apm.lock) were found"
                             " -- this may indicate a deleted manifest"
+                        ),
+                    )
+                )
+            elif ci_mode:
+                # A CI gate that checks nothing must not pass: the usual cause
+                # is running from a subdirectory or the wrong checkout path.
+                result.checks.append(
+                    CheckResult(
+                        name="manifest-missing",
+                        passed=False,
+                        message=(
+                            "No apm.yml in the current directory -- nothing was audited."
+                            " Run 'apm audit --ci' from the project root that"
+                            " contains apm.yml (APM does not search parent directories)."
                         ),
                     )
                 )

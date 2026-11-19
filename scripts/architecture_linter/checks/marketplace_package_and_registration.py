@@ -193,10 +193,10 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_PROJECTION,
             "src/apm_cli/install/native_plugin_admission.py",
             (
-                "_copy_tree_dereferencing_validated(source, replay_path, source)",
+                "expected_hash = compute_package_hash(replay_path)",
                 "verify_locked_package(candidate, expected_hash, carried)",
             ),
-            "Native cache verification must reuse canonical copying and package hashing",
+            "Native cache verification must hash the canonical replay image",
         )
     )
     return tuple(findings)
@@ -335,6 +335,7 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "PLUGIN_LAYOUT.get(head)",
                 "for primitive_kind in spec.primitive_kinds:",
                 "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+                '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})',
             ),
             "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
         )
@@ -525,7 +526,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
                 'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
                 'if result.get("native_claude_plugin"):',
                 "verify_claude_native_cache(",
-                'scratch_root / "normalized-local-sources"',
+                'local_modules_dir=scratch_root / "apm_modules",',
             ),
             "Claude replay must verify owned fingerprints without normalizing into the live cache",
         )

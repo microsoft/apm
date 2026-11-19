@@ -163,13 +163,20 @@ def hand_authored_root_context_blocks_write(
     protected_paths: MutableSet[Path],
     warnings: MutableSequence[str],
 ) -> bool:
-    """Return whether an existing project-root context file must be retained."""
+    """Return whether an existing project context file must be retained.
+
+    Root files and distributed outputs below the root share one rule: a
+    catalog context file (``AGENTS.md``, ``CLAUDE.md``, ``GEMINI.md``)
+    without the APM-generated marker is hand-authored and never overwritten.
+    """
     canonical_name = None
     normalized_path = Path(os.path.abspath(path))
     lexical_root = Path(os.path.abspath(path.parent)) == resolved_base_dir
     accepted_markers_by_name = catalog_root_context_markers()
     canonical_paths = tuple(resolved_base_dir / filename for filename in accepted_markers_by_name)
-    if lexical_root:
+    if not lexical_root and path.name in accepted_markers_by_name:
+        canonical_name = path.name
+    elif lexical_root:
         for candidate in canonical_paths:
             if normalized_path == candidate:
                 canonical_name = candidate.name

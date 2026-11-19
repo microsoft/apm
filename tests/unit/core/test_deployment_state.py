@@ -429,11 +429,13 @@ def test_same_target_stale_and_undeclared_target_are_removed(tmp_path: Path) -> 
     ],
     ids=["home-relative", "absolute", "windows-absolute"],
 )
-@pytest.mark.parametrize(("target", "default_root"), [("claude", ".claude"), ("hermes", ".hermes")])
+@pytest.mark.parametrize(
+    ("target", "default_root"), [("claude", ".claude"), ("hermes", ".hermes"), ("codex", ".codex")]
+)
 def test_other_profile_rows_are_not_stale(
     tmp_path: Path, selected_root: str, selected_value: str, target: str, default_root: str
 ) -> None:
-    """Rows under another CLAUDE_CONFIG_DIR/HERMES_HOME root survive an install into the selected one."""
+    """Rows under another CLAUDE_CONFIG_DIR/HERMES_HOME/CODEX_HOME root survive a selected install."""
     selected = _locator(f"{selected_value}/skills/demo/SKILL.md", target=target)
     default = _locator(f"{default_root}/skills/demo/SKILL.md", target=target)
     sibling = _locator("profiles/c/skills/demo/SKILL.md", target=target)

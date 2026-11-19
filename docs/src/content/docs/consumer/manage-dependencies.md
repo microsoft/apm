@@ -59,7 +59,7 @@ parser. The supported forms:
 | GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
-| Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. |
+| Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. Do not also declare `owner/repo` itself: install rejects a repository declared together with its own subdirectory package. |
 | Virtual file | `owner/repo/prompts/review.prompt.md` | Install a single primitive file. |
 | HTTPS git URL | `https://gitlab.com/acme/repo.git` | Explicit URL, any host. |
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
@@ -406,8 +406,8 @@ For registry-sourced deps or when `policy.dependencies.require_pinned_constraint
 
 Pip-style `==1.2.3` is not part of the node-semver grammar APM follows and is rejected as an unbounded ref under `require_pinned_constraint`. Use `=1.2.3` or the bare form instead.
 
-Branches move; tags and SHAs do not. For reproducibility, prefer tags or
-SHAs. The lockfile pins the resolved commit either way, so two clones
+Branches move; release tags rarely do and SHAs never do. For
+reproducibility, prefer tags or SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
 
@@ -472,7 +472,10 @@ lockfile alongside the resolved tag, so `apm install` on a fresh clone
 replays the same tag deterministically. A malformed range-like ref is
 rejected; use a plain range such as `^1.2.0` or pin a literal tag such as
 `pkg-a-v1.2.0`. Only `apm update` (or legacy `apm install --update`) or a
-manifest change re-resolves to a newer tag.
+manifest change re-resolves to a newer tag. Under an org policy with
+`require_pinned_constraint: true`, both forms count as bounded: the range
+is judged as the range you wrote, and `pkg-a-v1.2.0` is recognised as
+this package's own release tag.
 
 Marketplace object-form ranges use the marketplace package name in the tag
 pattern:
@@ -577,10 +580,10 @@ one root-to-target chain (not a fan-out of every theoretical route):
     +-- acme-org/shared-utils
 ```
 
-`<pkg>` accepts four identifier styles, tried in order: unique key
-(`acme-org_shared-utils`), full repo URL
-(`https://github.com/acme-org/shared-utils`), `owner/repo`, or bare
-basename (`shared-utils`) when unambiguous. An ambiguous bare name
+`<pkg>` accepts four identifier styles, tried in order: lockfile unique key
+(`acme-org/shared-utils`, or `gitlab.com/acme-org/shared-utils` for a
+non-GitHub host), lockfile `repo_url`, `owner/repo`, or bare
+basename (`shared-utils`) when unambiguous. An ambiguous name
 exits `1` and lists the candidates.
 
 Pass `--json` for scripting; the JSON document goes to stdout and all

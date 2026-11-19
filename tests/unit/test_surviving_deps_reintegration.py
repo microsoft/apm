@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import yaml
 
+from apm_cli.commands.uninstall.cli import _sync_integrations_for_manifest
 from apm_cli.commands.uninstall.engine import _sync_integrations_after_uninstall
 from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.models.apm_package import (
     APMPackage,
@@ -502,6 +504,68 @@ def test_uninstall_survivor_rebuild_honors_package_target_restriction(
     assert not (tmp_path / ".cursor/hooks.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("survivor_root", "removed_root"),
+    [
+        (".github/skills", ".github/skills"),
+        (".agents/skills", ".github/skills"),
+        (".github/skills", ".agents/skills"),
+    ],
+    ids=["legacy", "removed-legacy-survivor-converged", "removed-converged-survivor-legacy"],
+)
+def test_uninstall_keeps_each_survivor_in_its_recorded_skill_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    survivor_root: str,
+    removed_root: str,
+) -> None:
+    """#3773: survivors rebuild where they were recorded; removed skills go from either layout."""
+    monkeypatch.chdir(tmp_path)
+    survivor = tmp_path / "apm_modules" / "acme" / "survivor"
+    survivor.mkdir(parents=True)
+    (survivor / "apm.yml").write_text("name: survivor\nversion: 1.0.0\n", encoding="utf-8")
+    (survivor / "SKILL.md").write_text(
+        "---\nname: survivor\ndescription: test survivor\n---\n", encoding="utf-8"
+    )
+    (tmp_path / "apm.yml").write_text(
+        "name: root\nversion: 0.0.0\ntargets:\n  - copilot\n"
+        "dependencies:\n  apm:\n    - acme/survivor\n",
+        encoding="utf-8",
+    )
+    for root, name in ((survivor_root, "survivor"), (removed_root, "gone")):
+        (tmp_path / root / name).mkdir(parents=True)
+        (tmp_path / root / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    survivors = LockFile()
+    survivors.add_dependency(
+        LockedDependency(
+            repo_url="acme/survivor",
+            depth=1,
+            deployed_files=[f"{survivor_root}/survivor"],
+        )
+    )
+    observed: list[list[str]] = []
+
+    def _record_integration(*_args, **kwargs):
+        observed.append([t.skills_rel_root for t in kwargs["targets"] if t.supports("skills")])
+        return {"deployed_files": []}
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives", _record_integration
+    )
+
+    _sync_integrations_after_uninstall(
+        APMPackage.from_apm_yml(tmp_path / "apm.yml"),
+        tmp_path,
+        {f"{removed_root}/gone"},
+        MagicMock(),
+        lockfile=survivors,
+    )
+
+    assert not (tmp_path / removed_root / "gone").exists()
+    assert (tmp_path / survivor_root / "survivor" / "SKILL.md").is_file()
+    assert observed == [[survivor_root]]
+
+
 def test_uninstall_rejects_invalid_survivor_before_wiping_hooks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -547,3 +611,132 @@ def test_uninstall_rejects_invalid_survivor_before_wiping_hooks(
 
     assert config.read_bytes() == config_bytes
     assert sidecar.read_bytes() == sidecar_bytes
+
+
+_PRE_TOOL_USE = {
+    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo keep"}]}]
+}
+
+
+_UNDEPLOYABLE_SURVIVOR_CASES = pytest.mark.parametrize(
+    ("hook_documents", "message"),
+    [
+        pytest.param(
+            {
+                ".apm/hooks/hooks.json": _PRE_TOOL_USE,
+                ".apm/hooks/x-claude-hooks.json": _PRE_TOOL_USE,
+            },
+            "hook filename target routing was removed",
+            id="legacy-filename-routing",
+        ),
+        pytest.param(
+            {
+                ".apm/hooks/hooks.json": {
+                    "errorOccurred": [{"hooks": [{"type": "command", "command": "echo e"}]}]
+                }
+            },
+            "acme/survivor: hook events have no documented Claude Code name",
+            id="event-without-claude-pair",
+        ),
+    ],
+)
+
+
+def _seed_undeployable_survivor(
+    tmp_path: Path, hook_documents: dict[str, dict]
+) -> tuple[APMPackage, LockFile, dict[Path, bytes]]:
+    """Seed a hook survivor plus known-good Claude settings it owns."""
+    survivor = tmp_path / "apm_modules" / "acme" / "survivor"
+    survivor.mkdir(parents=True)
+    (survivor / "apm.yml").write_text("name: survivor\nversion: 1.0.0\n", encoding="utf-8")
+    for relative, hooks in hook_documents.items():
+        document = survivor / relative
+        document.parent.mkdir(parents=True, exist_ok=True)
+        document.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+    (tmp_path / "apm.yml").write_text(
+        "name: root\nversion: 0.0.0\ntargets:\n  - claude\n"
+        "dependencies:\n  apm:\n    - acme/survivor\n",
+        encoding="utf-8",
+    )
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    config = claude / "settings.json"
+    sidecar = claude / "apm-hooks.json"
+    config_bytes = b'{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}\n'
+    sidecar_bytes = b'{"PreToolUse": [{"hooks": [], "_apm_source": "acme/survivor"}]}\n'
+    config.write_bytes(config_bytes)
+    sidecar.write_bytes(sidecar_bytes)
+    survivors = LockFile()
+    survivors.add_dependency(LockedDependency(repo_url="acme/survivor"))
+    apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+    return apm_package, survivors, {config: config_bytes, sidecar: sidecar_bytes}
+
+
+@_UNDEPLOYABLE_SURVIVOR_CASES
+def test_uninstall_rejects_undeployable_survivor_hooks_before_wiping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_documents: dict[str, dict],
+    message: str,
+) -> None:
+    """A survivor whose hooks the rebuild would refuse keeps its live settings (#3226)."""
+    monkeypatch.chdir(tmp_path)
+    apm_package, survivors, known_good = _seed_undeployable_survivor(tmp_path, hook_documents)
+
+    with pytest.raises(HookContractError, match=message):
+        _sync_integrations_after_uninstall(
+            apm_package,
+            tmp_path,
+            set(),
+            MagicMock(),
+            lockfile=survivors,
+        )
+
+    assert {path: path.read_bytes() for path in known_good} == known_good
+
+
+@_UNDEPLOYABLE_SURVIVOR_CASES
+def test_reconcile_after_removal_refuses_undeployable_survivor_before_wiping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_documents: dict[str, dict],
+    message: str,
+) -> None:
+    """Prune-style reconciliation keeps live settings for a refused survivor (#3226)."""
+    monkeypatch.chdir(tmp_path)
+    apm_package, survivors, known_good = _seed_undeployable_survivor(tmp_path, hook_documents)
+
+    with pytest.raises(HookContractError, match=message):
+        HookIntegrator().reconcile_after_removal(apm_package, tmp_path, lockfile=survivors)
+
+    assert {path: path.read_bytes() for path in known_good} == known_good
+
+
+def test_uninstall_reports_survivor_hook_refusal_as_incomplete(tmp_path: Path) -> None:
+    """The migration message reaches the user and the cleanup reports an error."""
+    (tmp_path / "apm.yml").write_text("name: root\nversion: 0.0.0\n", encoding="utf-8")
+    refusal = HookContractError("acme/survivor: hook filename target routing was removed")
+    logger = MagicMock()
+
+    with patch(
+        "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+        side_effect=refusal,
+    ):
+        outcome, error = _sync_integrations_for_manifest(
+            manifest_path=tmp_path / "apm.yml",
+            deploy_root=tmp_path,
+            all_deployed_files=set(),
+            logger=logger,
+            user_scope=False,
+            lockfile=None,
+            modules_dir=tmp_path / "apm_modules",
+            deployed_file_hashes={},
+            default_counts={"hooks": 0},
+        )
+
+    assert error is refusal
+    assert outcome.counts == {"hooks": 0}
+    assert call(str(refusal)) in logger.warning.call_args_list
+    assert call("Migrate the package above, then run 'apm install' to resync.") in (
+        logger.warning.call_args_list
+    )

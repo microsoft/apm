@@ -163,17 +163,48 @@ def test_actual_resolver_inherits_fork_parent_coordinates_without_chaining(tmp_p
     assert len(resolver.replacement_index.unused_rules) == 1
 
 
-@pytest.mark.parametrize(
-    "other",
-    ["https://gitlab.com/example/base", "https://github.com:8443/example/base"],
-)
 def test_actual_resolver_rejects_ambiguous_original_materialization_slots(
-    tmp_path: Path, other: str
+    tmp_path: Path,
 ) -> None:
     factory = LocalPackageFactory(tmp_path)
+    other = "https://gitlab.com/example/base"
     consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
     _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
-    with pytest.raises(ReplacementCollisionError, match="share the existing materialization slot"):
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    # #3696: the materialization owner rejects the shared directory, naming the
+    # original (not the replacement) identity, whether or not rules exist.
+    assert graph.resolution_errors == [
+        "github.com/example/base and gitlab.com/example/base are different packages "
+        "that would both install to apm_modules/example/base. Remove one of them, "
+        "or set 'alias:' on one so it installs to its own directory."
+    ]
+
+
+def test_actual_resolver_claims_only_the_selected_alias_destination(tmp_path: Path) -> None:
+    """#3696: a discarded duplicate declaration's alias never claims a directory."""
+    factory = LocalPackageFactory(tmp_path)
+    tool = {"git": "https://github.com/acme/tool"}
+    other = {"git": "https://github.com/acme/other", "alias": "shared"}
+    consumer = factory.create(
+        "consumer",
+        dependencies=({**tool, "alias": "primary"}, {**tool, "alias": "shared"}, other),
+    )
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert not any("would both install" in error for error in graph.resolution_errors)
+
+    consumer = factory.create("clash", dependencies=({**tool, "alias": "shared"}, other))
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert any(
+        "would both install to apm_modules/shared" in error for error in graph.resolution_errors
+    )
+
+
+def test_actual_resolver_rejects_ambiguous_original_identities(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path)
+    other = "https://github.com:8443/example/base"
+    consumer = factory.create("consumer", dependencies=({"git": _UPSTREAM}, {"git": other}))
+    _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local"}}])
+    with pytest.raises(ReplacementCollisionError, match="share one original package identity"):
         APMDependencyResolver().resolve_dependencies(consumer.root)
 
 
@@ -246,3 +277,26 @@ def test_actual_resolver_frozen_fork_does_not_reuse_same_ref_upstream_pin(tmp_pa
     )
     assert not graph.is_valid()
     assert "selected replacement source" in "\n".join(graph.resolution_errors)
+
+
+def test_replaced_diamond_locks_the_merged_selection(tmp_path: Path) -> None:
+    """A replaced node records the union of every edge's skills (#3735)."""
+    factory = LocalPackageFactory(tmp_path)
+    factory.create("local-base")
+    nested = LocalPackageFactory(tmp_path / "nested")
+    nested.create("parent", dependencies=({"git": _UPSTREAM, "skills": ["beta"]},))
+    consumer = factory.create(
+        "consumer",
+        dependencies=({"git": _UPSTREAM, "skills": ["alpha"]}, "../nested/parent"),
+    )
+    _root_rules(consumer.root, [{"for": {"git": _UPSTREAM}, "with": {"path": "../local-base"}}])
+
+    graph = APMDependencyResolver(read_only=True).resolve_dependencies(consumer.root)
+    assert graph.is_valid(), graph.resolution_errors
+    node = graph.dependency_tree.get_node("example/base")
+    locked = LockedDependency.from_dependency_ref(node.dependency_ref, None, 1, None)
+    assert locked.skill_subset == ["alpha", "beta"]
+    assert locked.to_dependency_ref().skill_subset == ["alpha", "beta"]
+    reloaded = LockedDependency.from_dict(locked.to_dict())
+    assert reloaded.replacement.original.skill_subset == reloaded.skill_subset
+    assert reloaded.to_dependency_ref().skill_subset == ["alpha", "beta"]

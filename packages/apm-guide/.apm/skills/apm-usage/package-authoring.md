@@ -58,6 +58,9 @@ backfills one from the other:
   exclusively in `apm.yml`.
 - `name` and `version` must be non-empty strings. Quote numeric versions so
   YAML does not parse them as numbers.
+- `apm.yml` must not use YAML anchors or aliases (`&name`, `*name`, or
+  `<<: *name`). Every command that reads the manifest refuses one with the
+  file and line (OpenAPM req-mf-020(b)); write each value out in full.
 
 The corrected OpenAPM v0.1 candidate uses
 `https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.48.schema.json`
@@ -124,7 +127,12 @@ files and directories, including `.apm/agents -> ../agents`.
 directories under `.apm/agents/` or real `*.agent.md` files at root, then
 rerun `apm install`. Local-path dependencies (`./...` or `../...`) still work:
 contained symlinks are validated and copied as real files into
-`apm_modules/` before agent discovery.
+`apm_modules/` before agent discovery. `apm pack` likewise does not follow
+symlinked source files and names each skipped link in a warning.
+
+`apm install <bundle>` (a packed Claude plugin bundle) does not register
+plugin hooks yet: `hooks.json` and `hooks/` files are skipped with one
+warning per file. Install the package from source to deploy its hooks.
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
@@ -149,7 +157,12 @@ For legacy Claude plugin output (`apm pack --format plugin` or
 Plugin-root command paths are rewritten to their packed locations, including
 `.apm/skills/...` to `skills/...` and `.apm/hooks/...` to `hooks/...`.
 References may resolve relative to the source hook descriptor when absent
-at the package root. Sibling assets and Node module type are preserved.
+at the package root. A `./` script reference is packed the way `apm install`
+resolves it and anchored on the installed plugin root (for example
+`"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`); a symlinked script fails pack. Sibling assets and Node module type are preserved.
+`apm install <bundle>` registers these hooks through the same hook merge as a
+source install once the bundle's exact `name#version@sha256:<digest>` key is
+approved in `executables.allow`; otherwise they are skipped with one warning.
 Packing never executes scripts or translates hook semantics between hosts.
 Quoted filenames and selected directory references retain their meaning after
 relocation. Selected files must materialize each referenced directory; empty
@@ -164,8 +177,8 @@ excluded or collision-displaced resources fail before replacing a bundle.
 Use `apm pack --dry-run --verbose` to inspect the complete file list.
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
-files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
-(`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
+files under `hooks/` or `.apm/hooks/`. Hook filenames never select targets:
+every hook file reaches every effective target.
 
 Hook-only Git dependencies need neither `apm.yml` nor `SKILL.md`. Set
 `path` to the directory containing `hooks/` or `.apm/hooks/`, not the
@@ -201,11 +214,23 @@ This package cannot write to `.cursor/hooks.json`, even when Cursor is active.
 A consumer can narrow it further with per-dependency `targets:`; see
 `dependencies.md`.
 
-### Migrating filename-routed hooks
+To ship different hooks per harness, publish one package per target set,
+each declaring its own `target:`, and keep shared content in a common
+package. Declaring several targets on one package does not assign different
+files to each target.
 
-When renaming a target-specific hook file to generic `hooks.json`, preserve
-producer intent with an explicit package `target:` declaration -- consumers
-may narrow it further but cannot expand it:
+### Migrating from filename routing
+
+APM used to route `*-<harness>-hooks.json` and `hooks-<harness>.json` only to
+the named target and skipped generic files for a target that had its own
+file. That routing is removed. If removing it would give a target a hook file
+the old names kept from it, `apm install` fails for that package, names the
+target and files, and writes nothing from it. Until it is migrated,
+`apm uninstall` of another package stops with the same message before it
+changes hook settings.
+
+Package authors migrate by splitting each target's hooks into a package that
+declares it:
 
 ```yaml
 name: codex-hooks
@@ -213,21 +238,14 @@ version: "1.0.0"
 target: codex
 ```
 
-Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
-After: rename to `hooks.json` and add `target: codex` to the package's own
-`apm.yml`. The consumer can still narrow further with per-dependency `targets:`.
-Combined deprecated stems such as `claude-codex-hooks.json` route to every
-named target token during the migration window.
-Stems with target tokens outside the trailing target suffix (for example
-`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
-warning naming the ignored token.
-
-During the deprecation window, suffix routing remains an additional
-restriction inside the effective target set and emits an install-time warning.
-Consumer per-dependency `targets:` can narrow that set further.
+A consumer can instead narrow the dependency with object-form
+`targets: [codex]` only when the package ships hook files for that one
+target; a generic `hooks.json` beside them still needs the split. A file
+whose old name already matched every effective target keeps installing
+unchanged.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
-becomes `PostToolUse` in Claude) and rewrites path variables
+becomes `PostToolUse` in Claude; see the alias table below) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
@@ -263,12 +281,24 @@ configuration compatibility does not guarantee equivalent behavior.
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
-| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
+| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` |
+| `PreToolUse`, `preToolUse` | `preToolUse` | `PreToolUse` |
+| `PostToolUse`, `postToolUse` | `postToolUse` | `PostToolUse` |
+| `subagentStop` | unchanged | `SubagentStop` |
+| `sessionEnd` | unchanged | `SessionEnd` |
+| `postToolUseFailure` | unchanged | `PostToolUseFailure` |
+| `preCompact` | unchanged | `PreCompact` |
 
-For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
-camelCase or PascalCase name that conflicts with the target convention emits
-an install warning. All-lowercase names such as `stop` pass through silently;
-`stop` is not a native Copilot or Claude event and will not fire.
+Claude Code rejects unknown events, so a lower-case event without a
+documented Claude alias (for example `errorOccurred`, `subagentStart`, or
+`stop`) fails
+the install for that package before `.claude/settings.json` changes; limit
+the package to targets that support it. PascalCase names absent from the
+table pass to Claude unchanged. For Copilot, names absent from the table are
+preserved; an unmapped name whose casing conflicts with the target convention
+emits an install warning. Equivalent spellings of one binding are written
+once; bindings with different matchers (for example `Bash` and `*`) stay
+separate.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at
@@ -328,7 +358,7 @@ Two keys control which output runtimes a package compiles and installs to:
 
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
   A scalar remains accepted as a one-item compatibility input.
-- **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
+- **`target:` (deprecated singular form)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form). Still works; warns once per run with the exact `targets:` replacement.
 
 Setting both keys in the same `apm.yml` is a parse error
 (`ConflictingTargetsError`), even when either value is null. A null or empty
@@ -337,18 +367,18 @@ treated as omission for legacy compatibility; an empty string or list is a
 parse error.
 
 Both manifest keys validate target names. The canonical `targets:` form accepts
-canonical names only. The legacy `target:` form also accepts CLI aliases such
-as `vscode` and normalizes them. Invalid values fail at parse time -- they do
+canonical names plus the deprecated `vscode` alias of `copilot`. The legacy
+`target:` form also accepts CLI aliases such as `agents` and normalizes them. Invalid values fail at parse time -- they do
 **not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
-| `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
-| `target: vscode` | Legacy alias; normalizes to `copilot` |
-| `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
-| `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
+| `target: copilot` | Deprecated singular form (warns: use `targets: [copilot]`); stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
+| `target: claude,copilot` | Deprecated CSV-string form; aliases are normalized and order is preserved |
+| `target: vscode` / `targets: [vscode]` | Deprecated alias; selects exactly what `copilot` selects and warns |
+| `target: all` | Deprecated; selects every supported target (the warning prints the explicit `targets:` list) |
+| `targets: [all]` | Legacy; treated as omitted (auto-detect) |
 | `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
@@ -636,7 +666,11 @@ Review the requested change.
 
 Absent settings stay absent. APM does not translate model names, choose
 defaults, or validate model availability or supported effort values.
-Non-string values are dropped with a warning. Other frontmatter,
+Non-string values are dropped with a warning. The one model check is by
+name only: a Claude model alias (`opus`, `sonnet`, `haiku`, `inherit`)
+or `claude-*` id is still kept as written, with a warning naming the
+agent, because Codex does not recognize it; use a Codex-specific agent
+source or remove `model`. Other frontmatter,
 including other native Codex settings and a `codex:` block, is dropped
 with a warning; APM provides no arbitrary or namespaced passthrough.
 Remove unnecessary fields or do not rely on their settings in the
@@ -649,8 +683,8 @@ agent with Codex.
 
 Agent files and model ids belong to each harness vendor. APM writes a
 string `model` verbatim to every agent target (a Claude `sonnet` also
-lands in the Codex TOML); a warning for Claude-specific values in Codex output is
-tracked in #3477. APM does not add a per-target model map or `codex:`
+lands in the Codex TOML, with a warning naming the agent). APM does
+not add a per-target model map or `codex:`
 override block (#3324). Workarounds:
 
 1. Omit `model` from the shared agent so each harness uses its default.
@@ -871,7 +905,7 @@ registered from another host or a local path.
 
 ```bash
 # 1. Initialize a package project
-apm init my-package --plugin
+apm plugin init my-package
 
 # 2. Add primitives to .apm/ subdirectories
 #    (instructions, agents, prompts, skills, etc.)
@@ -966,9 +1000,9 @@ Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 - The user wants to convert an ad-hoc list of plugins into a proper index.
 
 `apm marketplace init` appends a `marketplace:` block to the project's
-`apm.yml` and creates `.claude-plugin/`. It does NOT scaffold a standalone
-`marketplace.yml`. Use `apm init --marketplace` when starting a brand-new
-project that will publish its own marketplace.
+`apm.yml`, scaffolding `apm.yml` if it is missing. It does NOT scaffold a
+standalone `marketplace.yml`. `apm init --marketplace` is deprecated; use
+`apm marketplace init` for a brand-new marketplace project too.
 
 ### apm.yml `marketplace:` block
 

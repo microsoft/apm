@@ -23,7 +23,7 @@ This changes the security model fundamentally. APM treats package deployment as 
 
 APM is a build-time dependency manager for AI agent configuration. It performs four operations:
 
-1. **Resolves git repositories** — clones or sparse-checks-out packages from GitHub or Azure DevOps.
+1. **Resolves git repositories** — clones or sparse-checks-out packages from GitHub, GitLab, Azure DevOps, or other git hosts.
 2. **Deploys static files** — copies markdown, JSON, and YAML files into project directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`).
 3. **Generates compiled output** — produces `AGENTS.md`, `CLAUDE.md`, and similar files from templates and prompts.
 4. **Records a lock file** — writes `apm.lock.yaml` with exact commit SHAs for every resolved dependency.
@@ -65,7 +65,7 @@ Git, Node-based Copilot, and Rust-based Codex retain their own trust configurati
 
 ## Dependency provenance
 
-APM resolves dependencies directly from git repositories. There is no intermediary registry, proxy, or mirror.
+By default, APM resolves dependencies directly from git repositories, with no intermediary registry, proxy, or mirror unless you configure one (see [Registry security model](#registry-security-model) and [Registry Proxy & Air-gapped](../registry-proxy/)).
 
 ### Exact commit pinning
 
@@ -83,7 +83,7 @@ dependencies:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. When `apm.yml` itself pins a full commit SHA, only a lock row with that same `resolved_commit` satisfies it: `apm install` re-resolves the pinned commit, `apm install --frozen` refuses, and `apm audit --ci` reports a `ref-consistency` failure. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
 
 ### GitHub API throttle containment
 
@@ -107,7 +107,7 @@ By default, APM resolves dependencies as git repository URLs, eliminating the ce
 The experimental `registries` feature adds REST-based package sources. When enabled:
 
 - **Byte-level reproducibility.** `resolved_hash` in `apm.lock.yaml` is a SHA-256 digest of the downloaded archive. Re-installs verify bytes against the lockfile hash before writing to disk. A mismatch **fails closed** — the install aborts before any archive contents are extracted.
-- **Token containment.** Tokens for registry auth MUST NOT appear in repo-tracked YAML files. APM hard-fails if a `token:` key is found in `apm.yml` or `apm-policy.yml`. Tokens belong in `APM_REGISTRY_TOKEN_<NAME>` env vars or `~/.apm/config.json`.
+- **Token containment.** Tokens for registry auth MUST NOT appear in repo-tracked YAML files. APM hard-fails if a `token:` key is found in an `apm.yml` registry entry. Tokens belong in `APM_REGISTRY_TOKEN_<NAME>` env vars or `~/.apm/config.json`.
 - **Policy enforcement.** The `registry_source` block in `apm-policy.yml` lets platform teams mandate specific registries and block non-registry sources. Checks apply transitively.
 
 **Known limitations:**
@@ -295,7 +295,7 @@ an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
 
 ## Content integrity hashing
 
-APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
+APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). The error names `apm update <pkg>` to accept that package's new upstream content and re-pin it in the lockfile (the full `apm update` for a transitive dependency).
 
 Replacement packages download and pass package-shape validation in an isolated
 staging directory while the current package remains in place. APM publishes the
@@ -318,7 +318,9 @@ Lock files generated before this feature omit `content_hash`. APM handles this g
 
 On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not via `git rev-parse`, so a poisoned `.git/config` cannot subvert the check) and compares it to the lockfile's `resolved_commit`; on mismatch the cache entry is evicted and a fresh fetch runs. Local bundles get a fourth check: every file listed in `pack.bundle_files` is SHA-256 verified, symlinks under the bundle root are rejected, and unlisted files are flagged as a tampering signal.
 
-See the [Lock File Specification](../../reference/lockfile-spec/#44-content-integrity) for field details.
+**Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
+
+See the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity) for field details.
 
 ## Inventory export (SBOM)
 
@@ -355,8 +357,9 @@ Trust boundaries:
 
 1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are rejected and the install aborts.
 2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.
-3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved targets get the server in their native MCP configs (Claude `.mcp.json`, Copilot CLI `.github/mcp.json` (project) or `$COPILOT_HOME/mcp-config.json` (global), VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
-4. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
+3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved targets get the server in their native MCP configs (Claude and Copilot `.mcp.json` (project), Copilot `$COPILOT_HOME/mcp-config.json` (global), Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
+4. **Only primitive files deploy.** A packed file is written only when it lands in a primitive directory the target owns (for example `skills/`, `agents/`, `instructions/`, `prompts/`). Files directly under a target root, such as runtime settings or MCP configuration, and directories no primitive owns are skipped with a warning. Target hook files and plugin `hooks.json` hooks follow the [executable trust gate](#executable-trust-gate) through the bundle's content-bound approval key; approved plugin hooks register through the same hook integrator as a source install. Their hook scripts are hash-checked, but the registered hook entries are outside `apm audit` drift checks and `apm uninstall`.
+5. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
 
 ### Symlink handling
 
@@ -367,8 +370,12 @@ during contained package materialization:
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
 - **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
-- **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
-- **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; replace the link with a regular file to continue.
+- **Deploy destinations** -- install refuses when a project target root, a primitive directory (for example `.github/prompts` or `.claude/commands`), or a deploy file location is a symlink. Nothing is written through the link.
+- **MCP configuration files** that are symlinks are rejected with a warning and not parsed or written. This covers project configs such as `.mcp.json` and `.cursor/mcp.json`. The upgrade step that moves APM-written entries out of `.github/mcp.json` and `.vscode/mcp.json` skips either file when it is a symlink.
+- **Hook settings merges** -- install refuses to merge hook entries into a project settings file (for example `.claude/settings.json`) whose path runs through a symlink; neither the link nor its target is read or written.
+- **Skill cleanup** removes only skill directories the lockfile records, and never through a symlinked skills root or a symlinked skill entry. Without a lockfile, no skill directories are removed.
+- **`apm unpack`** writes bundle files only under known integration directories (`.github/`, `.claude/`, ...) of the output directory, validates every destination before the first write, and does not read bundle paths that run through a symlink.
+- **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; `apm update`, `apm install --update` and `apm uninstall` refuse before deploying, deleting or editing anything else. Replace the link with a regular file to continue.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
@@ -425,7 +432,7 @@ APM separates production and development dependencies:
 - **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output in every bundle format (the default Claude plugin format, the explicit Agent Plugin format, and the legacy `--format apm`).
 - **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
 
-This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
+This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#per-entry-fields) for field details.
 
 ## Slash command deployment
 
@@ -477,7 +484,9 @@ first-match-wins ladder:
 - **Org** (`apm-policy.yml` `executables:`) is the ceiling on deny. It can
   `deny_all`, `deny` packages, `require` packages be present and trusted, and
   `recommend` a vetted set. See [executables](../../reference/policy-schema/#executables) in the policy
-  schema.
+  schema. Deny entries match the package identity, whatever its spelling
+  (shorthand, host-qualified, URL, or letter case on GitHub and Azure DevOps hosts), and cover
+  sub-packages below the denied path.
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
@@ -488,7 +497,7 @@ Personal consent can never widen past an org deny, and the default (rung 7) is
 **gated pending approval** -- a package with executables and no opinion anywhere
 is parked until approved, not hard-denied. This release ships no `enforce`
 mandate runtime or package signing; an org `executables.enforce` rung degrades
-to `recommend`. Local bundle MCP, LSP, and canvas approvals are narrower: APM
+to `recommend`. Local bundle hook, MCP, LSP, and canvas approvals are narrower: APM
 prints an exact `executables.allow` key containing the bundle's SHA-256 content
 digest, so another bundle that claims the same package name cannot inherit that
 consent.
@@ -538,12 +547,12 @@ MCP servers declared by your direct dependencies (packages listed in your `apm.y
 
 ### Transitive dependencies
 
-MCP servers declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. Transitive MCP servers can request tool access, file system permissions, or network capabilities — blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency.
+Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Registry-resolved servers declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
 
-To allow transitive MCP servers, you must either:
+To allow transitive self-defined MCP servers, you must either:
 
 - **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
-- **Pass `--trust-transitive-mcp`** to explicitly opt in to transitive MCP servers for that install.
+- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to opt in for that run. The lockfile records which servers were written; it does not carry this consent to later runs.
 
 ## Token handling
 
@@ -560,6 +569,15 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 - **Injected via transient git config.** APM passes credentials with `http.extraheader` for the duration of a single git invocation; tokens are never embedded in URLs and are not visible in `ps` or process listings.
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
+
+### Credential helper reports (Azure DevOps)
+
+When the Azure DevOps chain uses a credential from `git credential fill`, APM reports the result back to your credential helper, as Git does: `git credential approve` after the request succeeded, `git credential reject` after Azure DevOps refused that credential with HTTP 401. Limits:
+
+- Only the credential the helper returned for that repository's host and path is reported, using the exact description the helper returned. `ADO_APM_PAT`, Azure CLI bearer tokens, `gh` tokens, and GitHub, GitLab, or generic hosts are never reported.
+- A 403, a sign-in redirect or page, a proxy challenge, a not-found, throttle, network, or TLS failure, or an error naming another host is never reported, so an ambiguous answer never erases a credential.
+- Each report happens at most once per host, port, and path per run. A secret that already worked on a host in this run is never rejected for another path on that host.
+- Reports are non-interactive, time out after at most 10 seconds, and never fail the command.
 
 ### Azure DevOps Services AAD bearer tokens
 
@@ -583,7 +601,7 @@ See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-
 |---|---|---|
 | Registry compromise | Attacker poisons central registry | No registry by default (git-direct). With experimental `registries`: `resolved_hash` detects tampered archives; token containment enforced; package signing not yet supported. |
 | Version substitution | Malicious version replaces legitimate one | Lock file pins exact commit SHA; content hash detects post-download tampering |
-| Post-install scripts | Arbitrary code runs after install | No code execution |
+| Post-install scripts | Arbitrary code runs after install | Dependency packages cannot run install scripts; only [lifecycle scripts](../lifecycle-scripts/) from policy, user, or explicitly trusted project sources run |
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
@@ -608,7 +626,7 @@ For an org standardizing on APM:
   `--allow-insecure-host` in standard CI; review both explicit gates for any
   air-gapped exception. `registry_source.allow_non_registry` is a separate
   source-routing control, not an insecure-transport setting.
-- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor preserves explicitly authored static values, while env-var references use Cursor's native runtime interpolation. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
+- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor, and Claude Code and Copilot in the shared project `.mcp.json`, preserve explicitly authored static values, while env-var references stay native runtime references. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
 
 A restrictive dependency policy is still valuable, but it is identity-based,
 not transport-aware:

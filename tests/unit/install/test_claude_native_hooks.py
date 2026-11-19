@@ -84,6 +84,7 @@ def _integrate(home: Path, info: PackageInfo, **kwargs):
         diagnostics=DiagnosticCollector(),
         package_name="owner/hooks",
         scope=kwargs.pop("scope", InstallScope.USER),
+        skill_subset=kwargs.pop("skill_subset", None),
         ctx=ctx,
         **kwargs,
     )
@@ -119,6 +120,7 @@ def test_prepared_native_plan_preserves_unmanaged_loose_skill(tmp_path: Path) ->
         diagnostics=DiagnosticCollector(),
         package_name="owner/hooks",
         scope=InstallScope.USER,
+        skill_subset=None,
     )
     assert plan.claude_native is not None
     assert plan.codex_native is None

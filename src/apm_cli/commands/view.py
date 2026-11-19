@@ -361,7 +361,7 @@ def _display_registry_versions(
     owner = "/".join(parts[:-1]) if len(parts) > 2 else parts[0]
     repo = parts[-1]
 
-    # Build the merged registries map (config.json + ~/.apm/apm.yml + project).
+    # Build the merged registries map (config.json + $APM_HOME/apm.yml + project).
     project_registries = None
     project_default = None
     try:
@@ -602,7 +602,7 @@ def display_versions(
     if is_enforce_only():
         logger.error(
             f"Cannot list versions for '{package}' in registry-only mode: "
-            "the registry proxy exposes no version listing and "
+            "APM does not list versions through the registry proxy and "
             "PROXY_REGISTRY_ONLY blocks version enumeration against the source "
             "host. To list versions, unset PROXY_REGISTRY_ONLY; to install, pin "
             "an exact version tag in apm.yml."
@@ -684,7 +684,7 @@ _VIEW_HELP = (
 @click.command(
     name="view",
     help=_VIEW_HELP,
-    short_help="View package metadata, list remote versions, or trace a file's owner",
+    short_help="View package metadata, versions, or file owner",
 )
 @click.argument("package", required=False, default=None)
 @click.argument("field", required=False, default=None)
@@ -701,7 +701,7 @@ _VIEW_HELP = (
     "global_",
     is_flag=True,
     default=False,
-    help="Inspect package from user scope (~/.apm/)",
+    help="Inspect a package from the APM user home",
 )
 @click.option(
     "--registry",

@@ -110,22 +110,33 @@ jobs:
   # marker; the contributor dashboard's dependency-free Node suite
   # separately exercises its static-asset junction boundary. This is
   # intentionally narrower than either full suite.
-  windows-compat-gate:
-    name: Windows Compatibility Gate
+  #
+  # The serial selection runs as three shards on parallel runners.
+  # scripts/ci_sharding.py balances them by the measured seed in
+  # .github/ci-durations/windows-compat.json (weights, not an allowlist),
+  # keeps every module and xdist group on one shard, and fails unless the
+  # shards partition the selection exactly. The required
+  # `Windows Compatibility Gate` aggregate needs all three results.
+  windows-compat-gate-1:
+    name: Windows Compatibility Gate (1/3)
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      SHARD: "1"
 
-    steps:
+    steps: &windows-compat-steps
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Node.js
+      if: env.SHARD == '1'
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
 
     - name: Run contributor dashboard Node tests
+      if: env.SHARD == '1'
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
@@ -156,7 +167,9 @@ jobs:
       env:
         APM_E2E_TESTS: '1'
       run: >-
-        uv run --extra dev pytest -p no:cacheprovider -v
+        uv run --extra dev python -m pytest -p no:cacheprovider -v
+        -p scripts.ci_sharding --shard-count 3 --shard-index $env:SHARD
+        --shard-durations .github/ci-durations/windows-compat.json
         -m windows_compat
         tests/unit
         tests/integration
@@ -170,6 +183,45 @@ jobs:
         echo "::group::git config"
         git config --list --show-origin
         echo "::endgroup::"
+
+  windows-compat-gate-2:
+    name: Windows Compatibility Gate (2/3)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SHARD: "2"
+    steps: *windows-compat-steps
+
+  windows-compat-gate-3:
+    name: Windows Compatibility Gate (3/3)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SHARD: "3"
+    steps: *windows-compat-steps
+
+  windows-compat-gate:
+    name: Windows Compatibility Gate
+    needs: [windows-compat-gate-1, windows-compat-gate-2, windows-compat-gate-3]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+    - name: Require every Windows shard
+      env:
+        SHARD_1_RESULT: ${{ needs.windows-compat-gate-1.result }}
+        SHARD_2_RESULT: ${{ needs.windows-compat-gate-2.result }}
+        SHARD_3_RESULT: ${{ needs.windows-compat-gate-3.result }}
+      run: |
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ]; then
+          echo "::error::Every Windows shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT' and '$SHARD_3_RESULT'."
+          exit 1
+        fi
 
   windows-native-standard-user-symlink-gate:
     name: Windows Native Symlink Acceptance
@@ -402,9 +454,10 @@ jobs:
   # enforces the global 80% floor, just off the PR-time critical path,
   # and is escalated to required on `merge_group`.
   #
-  # First runs use pytest-split's naive file-based split (no .test_durations
-  # committed yet); commit a durations file in a follow-up PR after one
-  # green run to balance shards better.
+  # scripts/ci_sharding.py balances the two shards by the measured seed in
+  # .github/ci-durations/linux-unit.json (weights, not an allowlist), keeps
+  # modules and xdist groups whole, and fails unless the shards partition
+  # the selection exactly.
   build-and-test-shard:
     name: Build & Test Shard ${{ matrix.shard }} (Linux)
     runs-on: ubuntu-24.04
@@ -450,7 +503,6 @@ jobs:
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
-    # --splits 2 --group N matches the layout used by ci-integration.yml.
     # -n 2 --dist worksteal parallelises within the shard.
     #
     # Per-shard floor of 60% catches regressions at PR time on roughly
@@ -461,8 +513,9 @@ jobs:
     # gate is preserved on the path that actually merges to main.
     - name: Run tests with coverage
       run: |
-        uv run pytest tests/unit tests/test_console.py tests/red_team \
-          --splits 2 --group ${{ matrix.shard }} \
+        uv run python -m pytest tests/unit tests/test_console.py tests/red_team tests/fixtures/policy \
+          -p scripts.ci_sharding --shard-count 2 --shard-index ${{ matrix.shard }} \
+          --shard-durations .github/ci-durations/linux-unit.json \
           -n 2 --dist worksteal \
           --cov --cov-report= --cov-fail-under=60
 
@@ -699,11 +752,12 @@ jobs:
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
-  # The growing corpus exhausted this cap on run 39737354179. Two shards
+  # The growing corpus exhausted this cap on run 39737354179. Three shards
   # retain the full selection and xdist affinity without increasing the cap.
-  # pytest-split balances whole affinity units by their member counts;
-  # these weights are not claimed as measured test durations.
-  # The required aggregate checks both explicit job results independently.
+  # scripts/ci_sharding.py balances them by the measured Linux x86_64
+  # integration seed (weights, not an allowlist), keeps every module and
+  # xdist group whole, and fails unless the shards partition the selection.
+  # The required aggregate checks every explicit job result independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
   # merge-group-only, and required selections and guards their set partition,
@@ -750,7 +804,8 @@ jobs:
         printf 'Runner logical CPUs: '
         nproc
         uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-          -p scripts.lifecycle_smoke_sharding --lifecycle-shard "$LIFECYCLE_SHARD" \
+          -p scripts.ci_sharding --shard-count 3 --shard-index "$LIFECYCLE_SHARD" \
+          --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
 
@@ -764,20 +819,31 @@ jobs:
       LIFECYCLE_SHARD: "2"
     steps: *lifecycle-smoke-steps
 
+  lifecycle-smoke-shard-3:
+    name: Lifecycle Smoke Shard 3 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      LIFECYCLE_SHARD: "3"
+    steps: *lifecycle-smoke-steps
+
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
-    - name: Require both lifecycle shards
+    - name: Require every lifecycle shard
       env:
         SHARD_1_RESULT: ${{ needs.lifecycle-smoke-shard-1.result }}
         SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
+        SHARD_3_RESULT: ${{ needs.lifecycle-smoke-shard-3.result }}
       run: |
-        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ]; then
-          echo "::error::Both lifecycle shards must succeed; got '$SHARD_1_RESULT' and '$SHARD_2_RESULT'."
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ]; then
+          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT' and '$SHARD_3_RESULT'."
           exit 1
         fi

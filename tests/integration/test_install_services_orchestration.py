@@ -359,6 +359,7 @@ class TestIntegratePackagePrimitives:
             services.integrate_package_primitives(
                 make_package_info(package_dir),
                 tmp_path,
+                skill_subset=None,
                 targets=[target],
                 integrators=IntegratorBundle(
                     prompt=MagicMock(),
@@ -888,6 +889,7 @@ class TestIntegratePackagePrimitives:
             services.integrate_package_primitives(
                 make_package_info(package_dir),
                 tmp_path,
+                skill_subset=None,
                 targets=[make_target(name="copilot-cowork", primitives={})],
                 integrators=IntegratorBundle(
                     prompt=MagicMock(),
@@ -923,6 +925,7 @@ class TestIntegratePackagePrimitives:
             services.integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[make_target(name="copilot-cowork", primitives={})],
                 integrators=IntegratorBundle(
                     prompt=MagicMock(),

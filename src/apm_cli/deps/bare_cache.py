@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 from git import Repo
 
 from ..models.dependency.host_virtual import dependency_repository_owner
+from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 
 if TYPE_CHECKING:
@@ -257,7 +258,7 @@ def bare_clone_with_fallback(
             # would set resolved_commit to the abbreviation and lockfile
             # comparisons against `head.commit.hexsha` (always 40-char)
             # would never match. Copilot review finding (#1135).
-            full_sha_result = subprocess.run(
+            full_sha_result = run_git_text(
                 [
                     git_exe,
                     "--git-dir",
@@ -269,7 +270,6 @@ def bare_clone_with_fallback(
                 env=env,
                 check=True,
                 capture_output=True,
-                text=True,
             )
             full_sha = full_sha_result.stdout.strip()
             subprocess.run(
@@ -594,8 +594,10 @@ def materialize_from_bare(
         blocks downstream rmtree.
 
     CRLF + LFS pinning before checkout:
-      - ``core.autocrlf=false`` guarantees byte-identical content
-        across consumers regardless of the user's global git config.
+      - ``git_line_ending_pin_args`` (``core.autocrlf=false`` and
+        ``core.eol`` set to ``lf``) guarantees byte-identical ``text`` /
+        ``text=auto`` content across consumers regardless of host Git
+        config or platform default (apm#3270).
       - ``git_symlink_pin_args`` writes in-repo links as link text, so
         checkout never needs OS symlink capability; they are then
         replaced with their Git-object content (#3457).
@@ -621,6 +623,8 @@ def materialize_from_bare(
     """
     from ..utils.git_env import (
         get_git_executable,
+        git_line_ending_pin_args,
+        git_line_ending_pin_entries,
         git_no_hooks_args,
         git_no_templates_args,
         git_subprocess_env,
@@ -629,15 +633,14 @@ def materialize_from_bare(
 
     git_exe = get_git_executable()
     env = git_subprocess_env(env)
-    pin_args = list(git_symlink_pin_args())
+    pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]
 
     if known_sha:
         resolved_sha = known_sha
     else:
-        sha_result = subprocess.run(
+        sha_result = run_git_text(
             [git_exe, "--git-dir", str(bare_path), "rev-parse", "HEAD"],
             capture_output=True,
-            text=True,
             timeout=10,
             env=env,
             check=True,
@@ -645,14 +648,22 @@ def materialize_from_bare(
         resolved_sha = sha_result.stdout.strip()
 
     consumer_dir.parent.mkdir(parents=True, exist_ok=True)
-    # --no-checkout because we want to set core.autocrlf and disable
-    # LFS smudge BEFORE checkout writes any file content.
-    subprocess.run(
+    # --no-checkout because we want to pin line endings and disable
+    # LFS smudge BEFORE checkout writes any file content. ``--config``
+    # persists the line-ending pins in the clone itself (no extra spawn);
+    # the checkout also carries the ``-c`` pins, which outrank env
+    # snapshots. The symlink pin travels only as ``-c``: this consumer is
+    # not a reusable shard validated by ``_checkout_has_materialization_pins``.
+    line_ending_config = [
+        arg for key, val in git_line_ending_pin_entries() for arg in ("--config", f"{key}={val}")
+    ]
+    run_git_text(
         [
             git_exe,
             *git_no_hooks_args(),
             "clone",
             *git_no_templates_args(),
+            *line_ending_config,
             "--local",
             "--shared",
             "--no-checkout",
@@ -660,17 +671,7 @@ def materialize_from_bare(
             str(consumer_dir),
         ],
         capture_output=True,
-        text=True,
         timeout=60,
-        env=env,
-        check=True,
-    )
-    # CRLF determinism (panel: byte-identical across users).
-    subprocess.run(
-        [git_exe, "-C", str(consumer_dir), "config", "core.autocrlf", "false"],
-        capture_output=True,
-        text=True,
-        timeout=10,
         env=env,
         check=True,
     )
@@ -683,10 +684,9 @@ def materialize_from_bare(
         ("filter.lfs.process", ""),
         ("filter.lfs.required", "false"),
     ):
-        subprocess.run(
+        run_git_text(
             [git_exe, "-C", str(consumer_dir), "config", key, val],
             capture_output=True,
-            text=True,
             timeout=10,
             env=env,
             check=False,
@@ -696,7 +696,7 @@ def materialize_from_bare(
         apply_sparse_cone(
             git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
         )
-    subprocess.run(
+    run_git_text(
         [
             git_exe,
             *git_no_hooks_args(),
@@ -707,7 +707,6 @@ def materialize_from_bare(
             checkout_target,
         ],
         capture_output=True,
-        text=True,
         timeout=60,
         env=env,
         check=True,
@@ -895,6 +894,18 @@ def build_clone_failure_message(
             "and is readable, then inspect the matching rule with "
             "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
         )
+    elif is_ado and getattr(last_error, "attempts", None) is not None:
+        # The exhausted ADO chain names every credential step in order; it
+        # leads the message and replaces the generic "Last error" suffix.
+        error_msg += f"{last_error} " + auth_resolver.build_error_context(
+            dep_host or "dev.azure.com",
+            "clone",
+            org=dep_ref.ado_organization if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            dep_url=dep_ref.repo_url if dep_ref else None,
+            attempts=last_error.attempts,
+        )
+        return error_msg
     elif is_ado and not has_ado_token:
         host = dep_host or "dev.azure.com"
         error_msg += auth_resolver.build_error_context(

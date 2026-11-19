@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import apm_cli.security.executables as ex
-from apm_cli.install.template import _effective_allow
+from apm_cli.install.template import effective_allow_map
 
 
 def test_effective_allow_reads_source_manifest_under_root_redirect(tmp_path, monkeypatch):
@@ -27,4 +27,4 @@ def test_effective_allow_reads_source_manifest_under_root_redirect(tmp_path, mon
         logger=None,
     )
 
-    assert _effective_allow(ctx) == {}
+    assert effective_allow_map(ctx) == {}

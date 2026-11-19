@@ -48,7 +48,7 @@ from apm_cli.integration.hook_command_paths import (
 )
 from apm_cli.integration.hook_command_warnings import warn_unresolved_plugin_root
 from apm_cli.integration.hook_cursor_preflight import preflight_cursor_hooks
-from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
+from apm_cli.integration.hook_file_routing import hook_package_label
 from apm_cli.integration.hook_native_formats import (
     _legacy_hook_entries,
     _to_antigravity_hook_entries,
@@ -56,12 +56,17 @@ from apm_cli.integration.hook_native_formats import (
     _to_codex_hook_entries,
     _to_cursor_hook_entries,
     _to_gemini_hook_entries,
+    require_claude_native_events,
 )
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
     dependency_hook_sources,
+    drop_dependency_owned_entries,
+    drop_source_entries,
     legacy_source_marker_is_unambiguous,
+    local_bundle_hook_source_marker,
     read_hook_object,
+    read_merged_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -73,8 +78,8 @@ from apm_cli.integration.hook_source_selection import (
     HookSourceSelection,
     _parse_hook_json,
     _referenced_hook_source_files,
-    _resolve_relative_hook_script,
     resolve_plugin_root_hook_script,
+    resolve_relative_hook_script,
     select_hook_sources,
 )
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -92,10 +97,6 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _DOT_NAMED_HOOK_ROOTS = frozenset({"cursor", "codex", "windsurf", "kiro"})
-
-# Testability seam: tests can patch deprecated filename routing without
-# replacing the imported helper for every call site.
-_filter_hook_files_for_target = filter_hook_files_for_target
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -164,11 +165,16 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postTaskExecution": "postTaskExecution",
     },
     "claude": {
-        # Copilot camelCase and portable lifecycle aliases -> Claude PascalCase
+        # Copilot hooks-reference alias pairs -> documented Claude events.
         "preToolUse": "PreToolUse",
         "postToolUse": "PostToolUse",
+        "postToolUseFailure": "PostToolUseFailure",
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
+        "sessionEnd": "SessionEnd",
+        **dict.fromkeys(("userPromptSubmitted", "userPromptSubmit"), "UserPromptSubmit"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
+        "subagentStop": "SubagentStop",
+        "preCompact": "PreCompact",
     },
     "cursor": {  # Values must stay within CURSOR_NATIVE_EVENTS.
         "PreToolUse": "preToolUse",
@@ -394,11 +400,6 @@ class HookIntegrator(BaseIntegrator):
     #   Claude Code:      https://code.claude.com/docs/en/hooks
     HOOK_COMMAND_KEYS: tuple[str, ...] = _HOOK_COMMAND_KEYS
 
-    def __init__(self) -> None:
-        """Initialize per-install hook integration state."""
-        super().__init__()
-        self._deprecated_hook_routing_warnings: set[str] = set()
-
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
         """Flatten hook payloads into (event_name, entry_dict) pairs."""
@@ -519,17 +520,14 @@ class HookIntegrator(BaseIntegrator):
         package_path: Path,
         target_names: Iterable[str],
         *,
-        package_name: str = "",
-        package_identity: str = "",
-        warned_packages: set[str] | None = None,
         hook_files: list[Path] | None = None,
     ) -> HookSourceSelection:
         """Select hook inputs that each resolved target will materialize.
 
-        This is the sole hook source-selection algorithm.  It applies
-        filename routing before discovering referenced script bundles, excludes
-        Copilot's recursively-scanned JSON assets, and enumerates each source
-        root once per target.
+        This is the sole hook source-selection algorithm.  Filenames never
+        route (#3226); it records retired-routing widening, excludes Copilot's
+        recursively-scanned JSON assets, and enumerates each source root once
+        per target.
         """
         integrator = cls()
         discovered_files = (
@@ -538,12 +536,8 @@ class HookIntegrator(BaseIntegrator):
         return select_hook_sources(
             package_path,
             target_names,
-            package_name=package_name,
-            package_identity=package_identity,
-            warned_packages=warned_packages,
             hook_files=discovered_files,
             parse_hook_json=integrator._parse_hook_json,
-            filter_hook_files=_filter_hook_files_for_target,
             iter_bundle_files=iter_deployable_hook_bundle_files,
             merge_target_names=_MERGE_HOOK_TARGETS,
         )
@@ -555,18 +549,18 @@ class HookIntegrator(BaseIntegrator):
         *,
         source_plan=None,
     ) -> HookSourceSelection:
-        """Read the plan's selection or build the same selection for direct use."""
-        selection = getattr(source_plan, "hook_source_selection", None)
-        if selection is not None:
-            return selection
-        package_name = self._get_package_name(package_info, None)
-        return self.select_deployable_hook_sources(
-            package_info.install_path,
-            (target_name,),
-            package_name=package_name,
-            package_identity=package_info.get_canonical_dependency_string(),
-            warned_packages=self._deprecated_hook_routing_warnings,
-        )
+        """Read the plan's selection (empty when unauthorized) or build one; refuse widening."""
+        if source_plan is not None:
+            selection = getattr(source_plan, "hook_source_selection", None)
+            if selection is None:
+                selection = HookSourceSelection({}, {})
+        else:
+            selection = self.select_deployable_hook_sources(
+                package_info.install_path, (target_name,)
+            )
+        # Routing only; Claude events are checked at preflight and the Claude write.
+        selection.require_configured_routing(hook_package_label(package_info))
+        return selection
 
     @staticmethod
     def _referenced_hook_source_files(
@@ -691,7 +685,7 @@ class HookIntegrator(BaseIntegrator):
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            source_file = _resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
+            source_file = resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
             if source_file is None:
                 continue
             if source_file.exists() and source_file.is_file():
@@ -906,6 +900,8 @@ class HookIntegrator(BaseIntegrator):
             if package_name == "_local":
                 return "_local"
             return f"_local/{package_name}"
+        if isinstance(bundle_id := getattr(package_info, "local_bundle_id", None), str):
+            return local_bundle_hook_source_marker(bundle_id)
         try:
             dependency_ref = vars(package_info).get("dependency_ref")
         except TypeError:
@@ -1109,7 +1105,7 @@ class HookIntegrator(BaseIntegrator):
                         locator=DeploymentLedgerCodec.locator_for_path(
                             target_path,
                             project_root=project_root,
-                            target=KNOWN_TARGETS["copilot"],
+                            target=target or KNOWN_TARGETS["copilot"],
                             scope=InstallScope.PROJECT,
                         ),
                         owners=frozenset({package_info.get_canonical_dependency_string()}),
@@ -1135,7 +1131,7 @@ class HookIntegrator(BaseIntegrator):
                     locator=DeploymentLedgerCodec.locator_for_path(
                         target_path,
                         project_root=project_root,
-                        target=KNOWN_TARGETS["copilot"],
+                        target=target or KNOWN_TARGETS["copilot"],
                         scope=InstallScope.PROJECT,
                     ),
                     owners=frozenset({package_info.get_canonical_dependency_string()}),
@@ -1229,6 +1225,10 @@ class HookIntegrator(BaseIntegrator):
         hook_files = hook_sources.descriptors_for(config.target_key)
         if not hook_files:
             return _empty
+        if config.target_key == "claude":  # write-boundary re-check, as for Cursor
+            require_claude_native_events(
+                hook_files, self._parse_hook_json, _HOOK_EVENT_MAP, hook_package_label(package_info)
+            )
 
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
@@ -1268,13 +1268,7 @@ class HookIntegrator(BaseIntegrator):
 
         # Read existing JSON config
         json_path = target_dir / config.config_filename
-        json_config: dict = {}
-        if json_path.exists():
-            try:
-                with open(json_path, encoding="utf-8") as f:
-                    json_config = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                json_config = {}
+        json_config = read_merged_hook_config(json_path, project_root, user_scope=user_scope)
 
         # Load external ownership metadata before reconciling native entries.
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
@@ -1304,16 +1298,10 @@ class HookIntegrator(BaseIntegrator):
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
+        # Safe legacy leaf aliases retire with the canonical marker (#3665).
+        owned_markers = frozenset({source_marker, *legacy_source_markers})
         if config.target_key == "cursor":
-            for event in list(json_config[container]):
-                json_config[container][event] = [
-                    entry
-                    for entry in json_config[container][event]
-                    if not isinstance(entry, dict)
-                    or entry.get("_apm_source") not in {source_marker, *legacy_source_markers}
-                ]
-                if not json_config[container][event]:
-                    del json_config[container][event]
+            drop_source_entries(json_config[container], owned_markers)
 
         # Defaults never overwrite existing user fields.
         injected_keys: list[str] = []
@@ -1519,6 +1507,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
 
+        drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
         # Shared configs are cleaned by ownership, never file-level deletion.
         json_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1640,9 +1629,10 @@ class HookIntegrator(BaseIntegrator):
         user_scope: bool = False,
         retiring_targets: frozenset[str] = frozenset(),
     ) -> None:
-        """Check authorized Cursor/import sources before any primitive is written."""
+        """Check routing, Claude events and Cursor imports before any primitive write."""
         selection = source_plan.hook_source_selection
         if selection is not None:
+            selection.require_deployable(package_info, _HOOK_EVENT_MAP)
             preflight_cursor_hooks(
                 self,
                 package_info,
@@ -1738,19 +1728,29 @@ class HookIntegrator(BaseIntegrator):
         dry_run: bool = False,
     ) -> HookTargetReconcileStats:
         """Remove excluded hooks, or count planned removals without writes."""
-        stats: HookTargetReconcileStats = {
-            "files_removed": 0,
-            "errors": 0,
-            "failed_targets": [],
-            "failed_paths": [],
-        }
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
             project_root,
             package_name,
         )
-        source_markers = frozenset({source_marker, *legacy_source_markers})
+        markers = frozenset({source_marker, *legacy_source_markers})
+        return self._retire_source_markers(project_root, excluded_targets, markers, dry_run)
+
+    def retire_local_bundle_hooks(self, bundle_id: str, project_root: Path, targets):
+        """Remove one local bundle's merged hooks; its next install ships none (#3700)."""
+        marker = frozenset({local_bundle_hook_source_marker(bundle_id)})
+        return self._retire_source_markers(project_root, targets, marker)
+
+    def _retire_source_markers(
+        self, project_root: Path, excluded_targets, source_markers: frozenset[str], dry_run=False
+    ) -> HookTargetReconcileStats:
+        stats: HookTargetReconcileStats = {
+            "files_removed": 0,
+            "errors": 0,
+            "failed_targets": [],
+            "failed_paths": [],
+        }
         for target in excluded_targets:
             config = _MERGE_HOOK_TARGETS.get(target.name)
             if config is None:
@@ -1957,6 +1957,7 @@ class HookIntegrator(BaseIntegrator):
         """Securely wipe and rebuild merged hooks from installed survivors."""
         from apm_cli.agent_plugins.errors import preflight_reintegration_survivors
         from apm_cli.constants import APM_MODULES_DIR
+        from apm_cli.install.package_resolution import effective_dependency_selection
         from apm_cli.install.target_filter import resolve_effective_package_targets
         from apm_cli.integration.hook_reintegration import (
             build_hook_reintegration_source_plan,
@@ -1964,6 +1965,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
         )
+        from apm_cli.security.executables import resolve_project_exec_allow_map
 
         from .targets import resolve_targets
 
@@ -1985,11 +1987,14 @@ class HookIntegrator(BaseIntegrator):
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
         )
+        allow_map = None
+        if survivor_plan:
+            allow_map = resolve_project_exec_allow_map(project_root, apm_package)
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(
                 targets,
-                dep_ref.target_subset,
+                effective_dependency_selection(dep_ref).target_subset,
                 pkg_info,
                 None,
                 dep_ref.get_identity(),
@@ -1998,8 +2003,10 @@ class HookIntegrator(BaseIntegrator):
                 dep_ref,
                 pkg_info,
                 list(target_selection.targets),
-                getattr(apm_package, "allow_executables", None),
+                allow_map,
             )
+            if source_plan.hook_source_selection is not None:
+                source_plan.hook_source_selection.require_deployable(pkg_info, _HOOK_EVENT_MAP)
             rebuild_plan.append((dep_ref, pkg_info, target_selection, source_plan))
 
         # Empty managed_files (not None) skips file-level deletion while
@@ -2065,25 +2072,16 @@ class HookIntegrator(BaseIntegrator):
                     sidecar_path.unlink()
                 return
 
-            if sidecar_path is not None and sidecar_path.exists():
+            had_sidecar = sidecar_path is not None and sidecar_path.exists()
+            if had_sidecar:
                 with open(sidecar_path, encoding="utf-8") as f:
                     sidecar_data = json.load(f)
                 if isinstance(sidecar_data, dict):
                     _reinject_apm_source_from_sidecar(data[container], sidecar_data)
 
-            modified = False
-            for event_name in list(data[container].keys()):
-                entries = data[container][event_name]
-                if isinstance(entries, list):
-                    filtered = [
-                        e for e in entries if not (isinstance(e, dict) and "_apm_source" in e)
-                    ]
-                    if len(filtered) != len(entries):
-                        modified = True
-                    data[container][event_name] = filtered
-                    if not filtered:
-                        del data[container][event_name]
-
+            # Local-bundle hooks are not dependency-owned; keep them (#3700).
+            modified = drop_dependency_owned_entries(data[container])
+            kept = _extract_apm_source_sidecar(data[container]) if had_sidecar else {}
             if not data[container]:
                 del data[container]
 
@@ -2092,7 +2090,9 @@ class HookIntegrator(BaseIntegrator):
                     json.dump(data, f, indent=2)
                     f.write("\n")
                 stats["files_removed"] += 1
-            if sidecar_path is not None and sidecar_path.exists():
+            if kept:
+                atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
+            elif had_sidecar:
                 sidecar_path.unlink()
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1

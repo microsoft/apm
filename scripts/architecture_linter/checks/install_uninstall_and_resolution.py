@@ -20,6 +20,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
     _line_findings,
     _present,
+    _present_re,
     _python_paths,
     _summary,
 )
@@ -112,7 +113,15 @@ def _call_terminal_name(node: ast.Call) -> str | None:
 _SELECTION_OWNER = "src/apm_cli/models/dependency/selection.py"
 
 
-_OWNED_SELECTION_DEFS = frozenset({"parse_dependency_entry", "select_manifest_dependency"})
+_OWNED_SELECTION_DEFS = frozenset(
+    {"manifest_declarations_of", "parse_dependency_entry", "select_manifest_dependency"}
+)
+
+
+_UNINSTALL_CLI = "src/apm_cli/commands/uninstall/cli.py"
+
+
+_PACKAGE_RESOLUTION = "src/apm_cli/install/package_resolution.py"
 
 
 _FORBIDDEN_SELECTION_CALLS = frozenset(
@@ -271,6 +280,35 @@ def check_uninstall_selection(provider: FactsProvider) -> tuple[Violation, ...]:
                         line=definition.line,
                     )
                 )
+    # #3693: survivors and the apm.yml edit drop every declaration of a removed
+    # package through the owner, never by matching one entry per section.
+    cli, cli_fail = _facts_for(provider, _UNINSTALL_CLI, rule_id)
+    findings.extend(cli_fail)
+    if not cli_fail and (
+        _count_re(cli, re.compile(r"manifest_declarations_of\(\w+, packages_to_remove\)")) != 3
+        or _present_re(cli, re.compile(r"\bpackage in (?:dev|prod)_deps\b"))
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _UNINSTALL_CLI,
+                "Uninstall must drop every declaration through manifest_declarations_of()",
+            )
+        )
+    # Install's cross-section reconciliation (--dev moves, plain install keeps)
+    # matches declarations through the same owner.
+    resolution, resolution_fail = _facts_for(provider, _PACKAGE_RESOLUTION, rule_id)
+    findings.extend(resolution_fail)
+    if not resolution_fail and not _present(
+        resolution, "declared = manifest_declarations_of(other_deps, [package])"
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _PACKAGE_RESOLUTION,
+                "Cross-section install reconciliation must use manifest_declarations_of()",
+            )
+        )
     engine_index = provider.tree_index(_UNINSTALL_ENGINE)
     if engine_index is not None:
         findings.extend(_validator_selection_findings(provider, engine_index, rule_id))

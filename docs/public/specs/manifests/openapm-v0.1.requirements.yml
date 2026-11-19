@@ -133,6 +133,10 @@ requirements:
     keyword: MUST
     section: "4.5"
     conformance_class: consumer
+  - id: req-mf-027
+    keyword: MUST
+    section: "4.5"
+    conformance_class: consumer
   - id: req-ext-001
     keyword: MUST
     section: "4.1"
@@ -320,7 +324,7 @@ requirements:
     keyword: MUST
     section: "6.3.1"
     conformance_class: governance
-    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged"
+    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged; clause (g): a first pattern segment containing a dot and not beginning with one names a host matched exactly (ASCII case-folded, numeric port and one trailing dot ignored on both sides) against the written or implementation-default effective host, while hostless patterns (including ./ and ../ local-path patterns) match every host; dependencies.require is not host-qualified"
   - id: req-pl-019
     keyword: MUST
     section: "6.8.1"
@@ -403,6 +407,11 @@ requirements:
     section: "7.7"
     conformance_class: consumer
     notes: "full-SHA update extensions deterministically select the highest eligible non-prerelease annotated tag, retain pins with no eligible tag, persist git-literal provenance, and stop before writes on malformed or failed remote resolution"
+  - id: req-rs-018
+    keyword: MUST
+    section: "7.4.1"
+    conformance_class: consumer
+    notes: "multi-edge skills x targets selections merge by exact per-edge pairing with all absorbing per axis, independent of order and depth; lock records unions plus canonical subset_pairings only when the flat product over-selects; inconsistent records and frozen selection changes fail"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"

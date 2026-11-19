@@ -25,11 +25,16 @@ def _lock(*entries: LockedDependency) -> LockFile:
 
 
 def _chain_lock() -> LockFile:
-    """Parent ``Acme/Parent`` -> ``acme/b`` -> ``acme/c``, recorded with declared casing."""
-    return _lock(
-        LockedDependency(repo_url="Acme/Parent"),
-        LockedDependency(repo_url="acme/b", depth=2, resolved_by="Acme/Parent"),
-        LockedDependency(repo_url="acme/c", depth=3, resolved_by="acme/b"),
+    """Parent ``Acme/Parent`` -> ``acme/b`` -> ``acme/c``, recorded with declared casing.
+
+    Read back from YAML like an on-disk lock written before #3698.
+    """
+    return LockFile.from_yaml(
+        _lock(
+            LockedDependency(repo_url="Acme/Parent"),
+            LockedDependency(repo_url="acme/b", depth=2, resolved_by="Acme/Parent"),
+            LockedDependency(repo_url="acme/c", depth=3, resolved_by="acme/b"),
+        ).to_yaml()
     )
 
 
@@ -44,6 +49,20 @@ def test_canonical_selector_reaches_children_recorded_under_declared_casing(decl
     )
     assert dropped == {"acme/b", "acme/c"}
     assert rescued == frozenset()
+
+
+def test_retained_entry_missing_from_graph_drops_nothing():
+    """An unselected entry the graph no longer reaches may still need a candidate."""
+    lock = _chain_lock()
+    lock.dependencies["acme/other"] = LockedDependency(repo_url="acme/other")
+    dropped, rescued = previous_selected_subtree_keys(["acme/parent"], [], lock, {"acme/parent"})
+    assert dropped == frozenset()
+    assert rescued == frozenset()
+
+    dropped, _ = previous_selected_subtree_keys(
+        ["acme/parent"], [], lock, {"acme/parent", "acme/other"}
+    )
+    assert dropped == {"acme/b", "acme/c"}
 
 
 def test_replacement_bound_candidate_fails_closed():

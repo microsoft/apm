@@ -15,7 +15,6 @@ import builtins
 import copy
 import json
 import logging
-import os
 import re
 import shutil
 import warnings
@@ -40,6 +39,7 @@ from apm_cli.integration.mcp_config_view import (
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.mcp_transport import canonical_remote_transport
 from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -482,7 +482,7 @@ class MCPIntegrator:
         if dep.transport in ("http", "sse", "streamable-http"):
             # Build as a remote endpoint
             remote = {
-                "transport_type": dep.transport,
+                "transport": canonical_remote_transport({"transport": dep.transport}),
                 "url": dep.url or "",
             }
             if dep.headers:
@@ -531,6 +531,21 @@ class MCPIntegrator:
         return info
 
     @staticmethod
+    def _canonicalize_remote_transports(info: dict) -> None:
+        """Record each remote's canonical transport under ``transport`` (in place).
+
+        Registry payloads are normalized at ingestion; this keeps server info
+        that reached the overlay another way on the same canonical key.
+        """
+        for remote in info.get("remotes") or []:
+            if not isinstance(remote, dict):
+                continue
+            try:
+                remote["transport"] = canonical_remote_transport(remote)
+            except ValueError:
+                continue  # the rendering adapter reports it with its own label
+
+    @staticmethod
     def _apply_overlay(server_info_cache: dict, dep) -> None:
         """Apply MCPDependency overlay fields onto cached server_info (in-place).
 
@@ -543,12 +558,22 @@ class MCPIntegrator:
 
         dep.apply_opencode_enabled(info)
 
+        MCPIntegrator._canonicalize_remote_transports(info)
+
         # Transport overlay: select matching transport from available options
         if dep.transport:
             if dep.transport in ("http", "sse", "streamable-http"):
                 # User prefers remote transport  -- remove packages to force remote path
                 if info.get("remotes"):
                     info.pop("packages", None)
+                    declared = canonical_remote_transport({"transport": dep.transport})
+                    matching = [
+                        remote
+                        for remote in info["remotes"]
+                        if isinstance(remote, dict) and remote.get("transport") == declared
+                    ]
+                    if matching:
+                        info["remotes"] = matching
             elif dep.transport == "stdio":
                 # User prefers stdio  -- remove remotes to force package path
                 if info.get("packages"):
@@ -787,7 +812,10 @@ class MCPIntegrator:
             target_runtimes.discard(exclude)
 
         from apm_cli.core.scope import InstallScope
-        from apm_cli.install.mcp.ownership import require_removable_mcp_connections
+        from apm_cli.install.mcp.ownership import (
+            project_mcp_cleanup_reachable,
+            require_removable_mcp_connections,
+        )
 
         # Scope filtering: at USER scope, only clean global-capable runtimes.
         if scope is InstallScope.USER:
@@ -817,12 +845,19 @@ class MCPIntegrator:
             )
 
         # Build an expanded set that includes both the full reference and the
-        # last-segment short name so we match config keys in every runtime.
+        # native key the adapters write (registry ``owner/name`` -> ``name``).
+        # Self-defined servers keep their declared key (#3493); their older
+        # truncated keys are reconciled only under ownership proof at install
+        # time, so a short-name entry here may belong to the user.
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
         expanded_stale: builtins.set = builtins.set()
         for n in stale_names:
             expanded_stale.add(n)
-            if "/" in n:
-                expanded_stale.add(n.rsplit("/", 1)[-1])
+            stored = (stored_configs or {}).get(n)
+            self_defined = isinstance(stored, dict) and stored.get("registry") is False
+            info = {"name": n, "is_self_defined": True} if self_defined else None
+            expanded_stale.add(MCPClientAdapter.determine_config_key(n, None, info))
 
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
@@ -840,19 +875,44 @@ class MCPIntegrator:
         if "copilot" in target_runtimes:
             from apm_cli.factory import ClientFactory
 
+            copilot_user = scope is not InstallScope.PROJECT
             copilot_client = ClientFactory.create_client(
                 "copilot",
                 project_root=project_root_path,
-                user_scope=scope is not InstallScope.PROJECT,
+                user_scope=copilot_user,
             )
-            _clean_json_mcp_config(
-                Path(copilot_client.get_config_path()),
-                expanded_stale,
-                logger,
-                "Copilot CLI config",
-                use_rich=True,
-                fail_on_write_error=fail_on_write_error,
-            )
+            copilot_cfg = Path(copilot_client.get_config_path())
+            if copilot_user:
+                _clean_json_mcp_config(
+                    copilot_cfg,
+                    expanded_stale,
+                    logger,
+                    "Copilot CLI config",
+                    use_rich=True,
+                    fail_on_write_error=fail_on_write_error,
+                )
+            elif runtime is not None or stored_configs:
+                # The project .mcp.json is shared with Claude Code and the user:
+                # remove only entries proven to be APM's, as the Claude cleanup does.
+                if _reject_symlink_config(
+                    copilot_cfg, ".mcp.json", logger, fail_on_write_error=fail_on_write_error
+                ):
+                    return
+                verified_keys = require_removable_mcp_connections(
+                    copilot_client,
+                    stale_names,
+                    stored_configs or {},
+                    (native_hashes or {}).get("copilot"),
+                )
+                _clean_json_mcp_config(
+                    copilot_cfg,
+                    verified_keys,
+                    logger,
+                    ".mcp.json",
+                    trailing_newline=True,
+                    use_rich=True,
+                    fail_on_write_error=fail_on_write_error,
+                )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:
@@ -893,7 +953,9 @@ class MCPIntegrator:
 
         # Project scope is opt-in; user scope uses ~/.config/opencode/.
         if "opencode" in target_runtimes:
-            if clean_user_scope or (project_root_path / ".opencode").is_dir():
+            if clean_user_scope or project_mcp_cleanup_reachable(
+                project_root_path, ".opencode", runtime_scoped=runtime is not None
+            ):
                 from apm_cli.adapters.client.opencode import (
                     V2_MCP_SETTINGS,
                     OpenCodeClientAdapter,
@@ -987,11 +1049,9 @@ class MCPIntegrator:
 
         if "hermes" in target_runtimes:
             from apm_cli.factory import ClientFactory
+            from apm_cli.integration.targets import resolve_user_root
 
-            hermes_home = os.environ.get("HERMES_HOME", "").strip()
-            unresolved_cfg = (
-                Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
-            ) / "config.yaml"
+            unresolved_cfg = resolve_user_root("hermes") / "config.yaml"
             if _reject_symlink_config(
                 unresolved_cfg,
                 "Hermes config.yaml",
@@ -1013,9 +1073,11 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
+        # Clean Claude Code project .mcp.json when it is reachable for cleanup.
         if clean_claude_project:
-            claude_project_enabled = (project_root_path / ".claude").is_dir()
+            claude_project_enabled = project_mcp_cleanup_reachable(
+                project_root_path, ".claude", runtime_scoped=runtime is not None
+            )
             if claude_project_enabled or stored_configs:
                 if _reject_symlink_config(
                     project_root_path / ".mcp.json",
@@ -1097,6 +1159,7 @@ class MCPIntegrator:
         native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
         logger: CommandLogger | None = None,
         fail_on_write_error: bool = False,
+        stamp_version: bool = False,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -1115,6 +1178,9 @@ class MCPIntegrator:
                          with ``mcp_configs`` so the two never diverge (#2081).
                          ``None`` leaves the existing value untouched.
             logger: Optional command logger for actionable creation failures.
+            stamp_version: Record the running APM version, once this install
+                         translated the lock's pre-0.37 MCP claims (see
+                         ``lock_holds_untranslated_mcp_claims``).
             fail_on_write_error: Raise a required-integration error on any
                          persistence failure.
 
@@ -1173,8 +1239,12 @@ class MCPIntegrator:
                     for name, pkg in lockfile.mcp_config_provenance.items()
                     if name in lockfile.mcp_configs
                 }
-            if existing_lockfile is not None and lockfile.is_semantically_equivalent(
-                existing_lockfile
+            if stamp_version:
+                lockfile.apm_version = installed_apm_version()
+            if (
+                existing_lockfile is not None
+                and lockfile.apm_version == existing_lockfile.apm_version
+                and lockfile.is_semantically_equivalent(existing_lockfile)
             ):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return
@@ -1352,8 +1422,12 @@ class MCPIntegrator:
             try:
                 if runtime == "copilot":
                     from apm_cli.adapters.client.copilot import CopilotClientAdapter
+                    from apm_cli.adapters.client.copilot_project import (
+                        CopilotProjectClientAdapter,
+                    )
 
                     CopilotClientAdapter.emit_install_run_summary()
+                    CopilotProjectClientAdapter.emit_install_run_summary()
             except Exception:
                 _log.debug("Failed to emit install-run summary", exc_info=True)
 
@@ -1437,9 +1511,9 @@ class MCPIntegrator:
             ConflictingTargetsError,
             EmptyTargetsListError,
             UnknownTargetError,
-            parse_targets_field,
         )
         from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+        from apm_cli.models.manifest_targets import manifest_target_restriction
 
         if target_decision is not None and target_decision.canonical_targets is not None:
             active = set(target_decision.canonical_targets)
@@ -1463,7 +1537,7 @@ class MCPIntegrator:
         yaml_targets: list[str] | None = None
         if apm_config:
             try:
-                parsed = parse_targets_field(apm_config)
+                parsed = manifest_target_restriction(apm_config)
                 yaml_targets = parsed if parsed else None
             except (
                 ConflictingTargetsError,
@@ -1474,9 +1548,9 @@ class MCPIntegrator:
                     "Skipping all MCP config writes -- apm.yml 'targets' field is invalid.",
                     symbol="error",
                 )
-                _rich_error(str(exc), symbol="")
+                _rich_error(str(exc), symbol="error")
                 _log.debug(
-                    "parse_targets_field failed; failing closed (no MCP writes)",
+                    "manifest target declaration invalid; failing closed (no MCP writes)",
                     exc_info=True,
                 )
                 return []
@@ -1553,7 +1627,7 @@ class MCPIntegrator:
                 "Skipping all MCP config writes -- could not resolve active targets.",
                 symbol="error",
             )
-            _rich_error(str(exc), symbol="")
+            _rich_error(str(exc), symbol="error")
             _log.debug(
                 "resolve_targets failed; failing closed (no MCP writes)",
                 exc_info=True,

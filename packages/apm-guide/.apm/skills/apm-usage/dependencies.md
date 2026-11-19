@@ -43,6 +43,11 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+Bare `owner/repo` shorthand resolves against the manifest's top-level
+`default_host:` (bare hostname, e.g. `default_host: gitlab.com`), else
+`GITHUB_HOST`, else `github.com`. Each manifest uses its own value, and
+`apm install PKG` writes entries on that host as shorthand.
+
 GitHub and package-registry owner/repository identifiers are normalized to
 lowercase only for comparison, lock keys, and cache identity. The first
 declaration selects the repository display spelling retained in `apm.yml`,
@@ -86,6 +91,17 @@ privileges and the `content_hash` is the same on every platform. Links that
 escape the repository, are broken or loop fail the install with an error
 naming the link. See [Install packages: when things go
 wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
+
+### Line endings in dependency checkouts
+
+APM checks out dependencies with `core.autocrlf=false` and `core.eol=lf` on
+its own Git commands only, so `text` / `text=auto` files keep their committed
+LF bytes on every platform and the `content_hash` matches. Explicit
+`.gitattributes` `eol=` attributes, binary files and blobs committed with CRLF
+keep their repository bytes. A lockfile written by an older APM on Windows may
+hold a CRLF hash that `--frozen` refuses; see [Content hash
+mismatch](https://microsoft.github.io/apm/troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b)
+to recover.
 
 ### Custom git ports
 
@@ -197,6 +213,18 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | OPTIONAL | Select deployed skills, not a repo slice; use `path` for a subdirectory. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
+
+When several manifests declare the same dependency, each `skills:` list reaches
+only the `targets:` of its own declaration (omitted = all). Example: one parent
+asks for `alpha` on `claude`, another for `gamma` on `copilot`; `alpha` deploys
+only for Claude and `gamma` only for Copilot, in any declaration order.
+`apm.lock.yaml` records this as `subset_pairings`, and `--frozen` fails if the
+pairing changed.
+
+`apm_modules/` paths do not include the host, so `acme/tool` and
+`gitlab.example.com/acme/tool` (or two dependencies with the same `alias:`)
+would share `apm_modules/acme/tool`. Install fails before fetching and names
+both declarations; remove one, or set `alias:` on one of them.
 
 Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
 source identity or local `../sibling` source anchors. After upgrading an older
@@ -348,6 +376,12 @@ placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
 
+The `marketplace` value names a marketplace registered with
+`apm marketplace add` or declared in the user manifest's `marketplaces:`
+list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
+`apm install -g`). Dependencies and
+project manifests cannot declare `marketplaces:`.
+
 For object-form declarations, `apm audit --ci` uses recorded
 `discovered_via` + `marketplace_plugin_name` to find one locked coordinate.
 Semver selections also record `constraint`, `resolved_tag`, and the selected
@@ -473,6 +507,10 @@ Virtual packages reference a subset of a repository.
 | File | Ends in `.prompt.md`, `.instructions.md`, or `.agent.md` | `owner/repo/prompts/review.prompt.md` |
 | Subdirectory | Shorthand path has no file extension, or an explicit `git`/`path` reference identifies a directory | `owner/repo/skills/security` |
 
+Install rejects declaring a repository (`owner/repo`) together with one of its
+own subdirectory packages (`owner/repo/skills/security`): the subdirectory
+package would be installed inside the repository package. Keep only one.
+
 Shorthand rejects unsupported file-like suffixes. Git-hosted marketplaces can
 preserve dotted directories such as `plugins/my-plugin-1.2.3` through explicit
 `git`/`path` coordinates; do not rewrite them as shorthand. Directory and
@@ -525,7 +563,10 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
-compile/install targets; per-dependency `targets:` (inside a
+compile/install targets. The older top-level `target:` key is deprecated
+(warning on the consumer manifest only, naming the exact `targets:`
+replacement; removal in a future release).
+Per-dependency `targets:` (inside a
 `dependencies.apm` entry) selects which active targets receive that
 dependency's target-scoped primitives. They compose via intersection. See
 `package-authoring.md` for author guidance.
@@ -533,8 +574,9 @@ dependency's target-scoped primitives. They compose via intersection. See
 - Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
   `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
   `opencode`, `agent-skills`, `hermes`, and `grok-bot`. Experimental targets are `openclaw`,
-  `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
-  target alias `vscode`, for Copilot-family dependency routing.
+  `copilot-cowork`, `copilot-app`, and `grok-cloud`. `vscode` is a
+  deprecated alias of `copilot` (recorded as `copilot` in the lockfile; the
+  consumer manifest warns); use `copilot`.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.
   A non-empty list narrows reach; it never widens beyond what the install
@@ -561,6 +603,17 @@ lockfile cannot widen a dependency's reach. The formal schema contract
 lives in `docs/src/content/docs/reference/manifest-schema.md` section
 4.1.2.
 
+
+## Shared dependencies (diamonds)
+
+When your `apm.yml` and one or more parent packages declare the same
+dependency, APM installs it once with the sorted union of every declaration's
+`skills:` and of every declaration's `targets:`. A declaration that omits the
+field selects everything. Declaration order does not matter. `apm uninstall`
+of one parent narrows the union to the remaining declarations, and
+`apm audit --ci` checks the lockfile against that union. If the declarations
+use different `alias:` values, the shallowest declaration wins with a warning.
+
 ## MCP dependency formats
 
 See also: [MCP Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
@@ -582,9 +635,9 @@ dependencies:
       headers:
         X-Custom: "value"
         # Env-var placeholders in headers/env values:
-        #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
+        #   ${VAR} or ${env:VAR}  -> Copilot: preserved as ${VAR} and resolved
         #                            from host env at server-start (no plaintext on disk).
-        #                            VS Code and JetBrains: rewritten to ${env:VAR}
+        #                            JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
@@ -616,7 +669,7 @@ dependencies:
         #                            entry, switch between ${VAR} and ${env:VAR}
         #                            and reinstall with the same scope/targets.
         #                            Review/back up manual edits to that entry first.
-        #   ${input:<id>}         -> VS Code prompts user at runtime
+        #   ${input:<id>}         -> not supported by any target; use ${VAR}
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
         # see manifest-schema section 4.2.4 for reinstall preservation semantics.
@@ -643,7 +696,8 @@ dependencies:
     # Unknown keys (e.g. oauth) are passthrough: preserved and written into
     # the generated config for EVERY installed harness. Keys that collide with
     # a modeled or adapter-owned field
-    # (command/url/headers/env/environment/http_headers/id/...) are rejected.
+    # (command/url/httpUrl/serverUrl/headers/env/environment/http_headers/id/...)
+    # are rejected.
     # Top-level enabled is modeled for OpenCode; extra.enabled remains reserved.
     - name: slack
       registry: false
@@ -653,6 +707,17 @@ dependencies:
         clientId: "<pre-registered-client-id>"
         callbackPort: 3118
 ```
+
+Remote transport: `http`/`streamable-http` are Streamable HTTP; registry servers
+take it from `remotes[].type` (missing = Streamable HTTP). Native keys per
+harness: Copilot, Claude `type: http|sse` + `url`; Gemini `httpUrl`
+(Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`; Hermes
+`url`, plus `transport: sse` for SSE (Hermes also keeps stdio `cwd` and extra
+keys such as `timeout` or `auth`). SSE on
+Antigravity or Codex is skipped with one warning, not recorded, exit 0 (also
+under `--frozen`). The next
+install, update or `install --frozen` rewrites APM-written entries left in an
+older APM shape (for example Antigravity `httpUrl`); user entries are preserved.
 
 For a recognized GitHub MCP server, automatic auth follows the target's
 runtime support and uses the selected token environment variable name on
@@ -678,7 +743,7 @@ OpenCode 2 layout), APM writes there instead: `false` becomes
 `disabled: true`, `true` or omission writes no field, and other values warn
 and leave the file unchanged. Set `codemode: false` as an extra field to
 bypass Code Mode. See the
-[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp----listmcpdependency)
 for the dependency contract and
 [OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
 for format selection.
@@ -688,11 +753,11 @@ maps that type to the Docker launcher automatically, preserves Docker
 run options before the image, and appends package arguments after the
 image. Options-only `runtimeArguments` (no leading `run`) gain
 `run -i --rm` ahead of them. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
-then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
+then PyPI. Docker must be
 available when the harness starts an OCI server. Do not add per-target
 launcher overrides.
 
-For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
+For Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
 identity. Legacy `value_hint` arguments remain compatible. Registry
@@ -718,7 +783,11 @@ devDependencies:
 The root project activates both sections during `apm install`. Direct
 and transitive dependency packages contribute only `dependencies.mcp`;
 their development MCP entries do not enter the consumer's target config
-or `mcp_config_provenance`.
+or `mcp_config_provenance`. A transitive package's MCP entry is admitted
+without `--trust-transitive-mcp` only as a plain reference to the
+consumer's registry; self-defined entries and entries that set their own
+`registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or
+extra keys are skipped until re-declared or trusted.
 
 At user scope, Claude MCP entries are written to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
@@ -728,8 +797,8 @@ relative values are rejected.
 ## LSP dependency formats
 
 LSP (Language Server Protocol) servers give supported runtimes real-time
-code intelligence. APM currently writes LSP config for Claude Code and
-GitHub Copilot CLI while keeping the dependency schema runtime-neutral.
+code intelligence. APM currently writes LSP config for Claude Code, GitHub
+Copilot CLI and OpenCode while keeping the dependency schema runtime-neutral.
 
 ```yaml
 dependencies:
@@ -767,8 +836,11 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 project installs use the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs use
 `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. GitHub Copilot CLI uses
-`.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI uses
-`fileExtensions` on disk;
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. OpenCode uses the `lsp`
+key of `opencode.json` or `~/.config/opencode/opencode.json`
+(`command` array, `extensions`, `env`, `initialization`; socket and name-only
+servers are skipped), and creating that key also enables OpenCode's built-in
+language servers. Copilot CLI uses `fileExtensions` on disk;
 manifests continue to use `extensionToLanguage`. A dependency package's source
 `.lsp.json` may use either a flat server map or a
 `{ "lspServers": { ... } }` envelope; it is distinct from the Claude project
@@ -798,10 +870,10 @@ New named refs may need a Git lookup to establish equivalence.
 
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
-| Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
+| Tag | `owner/repo#v1.0.0` | Production -- release tag; the lockfile pins the commit |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
-| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |
+| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; for a full 40-character SHA pin, `apm update` moves it to the commit of the latest stable annotated semver tag and appends `# <tag>` (no eligible tag keeps the SHA; short SHAs are never moved) |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
 
@@ -876,7 +948,7 @@ upstream instead of using a persistent bare-cache ref as current-state evidence.
 `--frozen` checks declared refs, full commit pins, host providers and HTTP/HTTPS
 transport against the lock, including transport changes under an unchanged
 semver range. It does not check whether an upstream branch moved. Review an
-intentional declaration change and run `apm install --update` to refresh the lock.
+intentional declaration change and run `apm update` to refresh the lock.
 
 For local `.agent.md`, `.instructions.md`, and `.prompt.md` dependencies, the
 locked content hash covers the ordinary materialized package, including its

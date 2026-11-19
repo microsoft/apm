@@ -36,12 +36,12 @@ Verified in `src/apm_cli/policy/schema.py` and `policy/parser.py`:
 | Mode | What `apm install` does | What `apm audit --ci` does |
 |---|---|---|
 | `off` | Skip policy enforcement entirely. | Skip policy checks (baseline lockfile checks still run). |
-| `warn` | Run every check; emit `Policy warning: <dep> -- <reason>`; install proceeds. | Report violations; exit 0. |
+| `warn` | Run every check; list each violation under `policy warnings` in the install summary; install proceeds. | Report policy violations without failing on them. Baseline lockfile and drift failures, and a failing `security.integrity.require_hashes` check, still exit non-zero. |
 | `block` | Run every check; emit `Policy violation: <dep> -- <reason>`; abort with `PolicyViolationError`. | Report violations; exit non-zero. |
 
 There is no `dry-run` enforcement mode. `--dry-run` is a CLI flag on `apm install` that previews `Would be blocked by policy: <dep> -- <reason>` lines without writing to disk -- usable against any policy mode.
 
-Per-rule modes exist only for two sub-fields: `mcp.self_defined` (`deny | warn | allow`) and `unmanaged_files.action` (`ignore | warn | deny`). Every other rule inherits the top-level `enforcement`.
+Per-rule modes exist only for three sub-fields: `mcp.self_defined` (`deny | warn | allow`), `unmanaged_files.action` (`ignore | warn | deny`), and `security.audit.on_install` (`off | warn | block`). Every other rule inherits the top-level `enforcement`.
 
 ---
 
@@ -111,6 +111,6 @@ Roll back when:
 
 - A violation surge reveals a category of legitimate use you missed.
 - A transitive MCP dependency that you cannot patch on your timeline starts blocking installs.
-- The policy file itself fails to fetch in a way that interacts badly with `policy.fetch_failure: block` -- see [Enforce in CI](../enforce-in-ci/) for the failure-mode matrix.
+- The policy file itself fails to fetch in a way that interacts badly with `fetch_failure: block` -- see [Enforce in CI](../enforce-in-ci/) for the failure-mode matrix.
 
 A rollback is cheap. A blocked org is not. If you are debating, roll back, fix forward, escalate again.

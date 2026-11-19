@@ -1502,6 +1502,30 @@ class TestUpdateForceAndParallel:
             assert captured["parallel_downloads"] == 0
 
 
+class TestUpdateLegacySkillPaths:
+    """``apm update`` keeps a per-client skill layout like ``apm deps update`` (#3841)."""
+
+    @pytest.mark.parametrize(
+        ("args", "env", "expected"),
+        [
+            (["update", "--legacy-skill-paths"], {}, True),
+            (["update"], {"APM_LEGACY_SKILL_PATHS": "1"}, True),
+            (["update"], {"APM_LEGACY_SKILL_PATHS": ""}, False),
+        ],
+    )
+    def test_legacy_skill_paths_forwarded(self, runner, tmp_path, args, env, expected):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured: dict = {}
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=_capturing_install(captured),
+            ):
+                result = runner.invoke(cli, args, env=env)
+            assert result.exit_code == 0, result.output
+            assert captured["legacy_skill_paths"] is expected
+
+
 class TestUpdateGlobalScope:
     def test_global_flag_uses_user_scope(self, runner, tmp_path):
         from apm_cli.core.scope import InstallScope

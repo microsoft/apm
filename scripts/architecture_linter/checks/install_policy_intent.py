@@ -28,13 +28,19 @@ from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import 
     RULE_GITLAB_ADAPTER,
     RULE_GITLAB_FACADE,
     RULE_LOCAL_BUNDLE_PREFLIGHT,
+    RULE_REMOTE_ORIGIN_OWNER,
     RULE_REQUIRE_HASHES,
     RULE_WINNER_SELECTION,
     check_dependency_winner_selection,
     check_gitlab_facade_orchestration,
     check_gitlab_policy_adapter,
     check_local_bundle_preflight,
+    check_policy_remote_origin_owner,
     check_require_hashes_enforcement,
+)
+from scripts.architecture_linter.checks.install_policy_mcp_transport import (
+    RULE_POLICY_MCP_TRANSPORT,
+    check_policy_mcp_transport_projection,
 )
 from scripts.architecture_linter.checks.install_policy_plugin_and_approval import (
     RULE_APPROVAL_OUTCOME,
@@ -42,11 +48,13 @@ from scripts.architecture_linter.checks.install_policy_plugin_and_approval impor
     RULE_INCOMPLETE_CHAIN,
     RULE_MANIFEST_INHERITANCE,
     RULE_PLUGIN_BIN,
+    RULE_POLICY_DISABLE_SWITCH,
     check_approval_outcome_routing,
     check_audit_policy_discovery,
     check_incomplete_chain_routing,
     check_manifest_inheritance,
     check_plugin_bin_eligibility,
+    check_policy_disable_switch_owner,
 )
 from scripts.architecture_linter.checks.install_policy_shared import GROUP, _semantic_rule
 from scripts.architecture_linter.checks.install_policy_skill_and_lock import (
@@ -62,6 +70,10 @@ from scripts.architecture_linter.checks.install_policy_skill_and_lock import (
     check_marketplace_mutation_lock,
     check_skill_subset_tokens,
     check_update_plan_ref_annotation,
+)
+from scripts.architecture_linter.checks.install_policy_violation_subjects import (
+    RULE_POLICY_VIOLATION_SUBJECTS,
+    check_policy_violation_subjects,
 )
 from scripts.architecture_linter.models import Rule
 
@@ -100,6 +112,43 @@ EXTRA_RULES: tuple[Rule, ...] = (
         RULE_GITLAB_FACADE,
         "GitLab policy cache and transport remain in policy/_gitlab.py.",
         check_gitlab_facade_orchestration,
+    ),
+    Rule(
+        id=RULE_REMOTE_ORIGIN_OWNER,
+        group=GROUP,
+        guard_ids=(RULE_REMOTE_ORIGIN_OWNER,),
+        description=(
+            "Policy discovery reads and parses the git remote through one owner (policy/_remote.py)."
+        ),
+        check=check_policy_remote_origin_owner,
+    ),
+    Rule(
+        id=RULE_POLICY_MCP_TRANSPORT,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_MCP_TRANSPORT,),
+        description=(
+            "Policy mcp.transport.allow judges canonical effective transports from the owner."
+        ),
+        check=check_policy_mcp_transport_projection,
+    ),
+    Rule(
+        id=RULE_POLICY_VIOLATION_SUBJECTS,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_VIOLATION_SUBJECTS,),
+        description=(
+            "Install policy violations name their subject via policy/install_preflight.py"
+            "::emit_check_violations."
+        ),
+        check=check_policy_violation_subjects,
+    ),
+    Rule(
+        id=RULE_POLICY_DISABLE_SWITCH,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_DISABLE_SWITCH,),
+        description=(
+            "APM_POLICY_DISABLE is read only by policy/discovery.py::policy_disabled_by_env."
+        ),
+        check=check_policy_disable_switch_owner,
     ),
     _semantic_rule(
         RULE_LOCAL_BUNDLE_PREFLIGHT,

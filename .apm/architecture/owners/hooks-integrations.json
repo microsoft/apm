@@ -39,15 +39,16 @@
     },
     {
       "id": "neutral-hook-contract",
-      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, and ownership-sidecar comparison",
-      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar)",
+      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, ownership-sidecar comparison, and local-bundle hook ownership markers",
+      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar, local_bundle_hook_source_marker); local bundle hooks register through HookIntegrator via install/local_bundle_hooks.py",
       "selectors": [
         "src/apm_cli/hook_contract.py",
         "src/apm_cli/integration/hook_ir.py",
         "src/apm_cli/integration/hook_native_formats.py",
         "src/apm_cli/integration/hook_cursor_preflight.py",
         "src/apm_cli/integration/hook_integrator.py",
-        "src/apm_cli/integration/hook_ownership.py"
+        "src/apm_cli/integration/hook_ownership.py",
+        "src/apm_cli/install/local_bundle_hooks.py"
       ],
       "guards": ["hooks-integrations-neutral-hook-contract"]
     },
@@ -71,10 +72,10 @@
     },
     {
       "id": "mcp-package-launcher",
-      "decision": "MCP package launcher selection and argv shape (container and non-container)",
-      "owner": "adapters/client/base.py (MCPClientAdapter)",
+      "decision": "MCP package launcher selection, argv shape (container and non-container), and config-key derivation; MCP JSON config parse-for-update (never rewrite an unparsable file) and atomic write",
+      "owner": "adapters/client/base.py (MCPClientAdapter, including determine_config_key)",
       "selectors": ["src/apm_cli/adapters/client/base.py"],
-      "guards": ["hooks-integrations-mcp-package-launcher"]
+      "guards": ["hooks-integrations-mcp-config-key-derivation", "hooks-integrations-mcp-package-launcher", "hooks-integrations-mcp-json-config-write"]
     },
     {
       "id": "mcp-passthrough-denylist",
@@ -89,6 +90,20 @@
         "hooks-integrations-mcp-passthrough-denylist",
         "hooks-integrations-opencode-enabled-intent"
       ]
+    },
+    {
+      "id": "mcp-remote-transport-normalization",
+      "decision": "MCP remote transport vocabulary: registry v0.1 type, legacy transport_type and manifest transport normalized to streamable-http or sse, recorded at ingestion and read by every adapter and apm mcp show",
+      "owner": "mcp_transport.py (canonical_remote_transport, TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE, CANONICAL_REMOTE_TRANSPORTS; policy projection canonical_transport_name(s), POLICY_TRANSPORTS, TRANSPORT_STDIO, server_write_transports)",
+      "selectors": ["src/apm_cli/mcp_transport.py"],
+      "guards": ["hooks-integrations-mcp-remote-transport-normalization"]
+    },
+    {
+      "id": "mcp-remote-shape-table",
+      "decision": "Per-harness remote MCP output shape (URL key, transport discriminator, unsupported transports and retired APM renders), one evidence-backed row per registered runtime, plus the warn-skip-unclaimed disposition for unsupported transports; an adapter whose row retires earlier shapes keeps native comparison on so those APM writes heal",
+      "owner": "adapters/client/_remote_shapes.py (REMOTE_SHAPES, remote_shape_of, skip_unsupported_remote)",
+      "selectors": ["src/apm_cli/adapters/client/_remote_shapes.py"],
+      "guards": ["hooks-integrations-mcp-remote-shape-table"]
     },
     {
       "id": "jetbrains-copilot-mcp-config-path",
@@ -106,9 +121,13 @@
     },
     {
       "id": "copilot-cli-mcp-config-paths",
-      "decision": "Copilot CLI MCP config paths",
-      "owner": "adapters/client/copilot.py",
-      "selectors": ["src/apm_cli/adapters/client/copilot.py"],
+      "decision": "Copilot MCP config paths and destinations: user scope mcp-config.json under COPILOT_HOME; project scope workspace-root .mcp.json shared with Claude Code; .github/mcp.json and .vscode/mcp.json are retired destinations healed by lockfile ownership",
+      "owner": "adapters/client/copilot.py (user scope), adapters/client/copilot_project.py (CopilotProjectClientAdapter, routed by ClientFactory), install/mcp/retired_destinations.py (heal)",
+      "selectors": [
+        "src/apm_cli/adapters/client/copilot.py",
+        "src/apm_cli/adapters/client/copilot_project.py",
+        "src/apm_cli/install/mcp/retired_destinations.py"
+      ],
       "guards": ["hooks-integrations-copilot-cli-mcp-paths"]
     },
     {

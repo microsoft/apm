@@ -13,6 +13,8 @@ Ports three of the owner guards recorded in
   fields and harness aliases.
 * ``hooks-integrations-jetbrains-mcp-path`` -- AC28 JetBrains Copilot MCP
   path.
+* ``hooks-integrations-mcp-json-config-write`` -- MCP JSON config
+  parse-for-update and atomic write owned by MCPClientAdapter.
 """
 
 from __future__ import annotations
@@ -186,7 +188,7 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
         return ()
 
     findings: list[Violation] = []
-    if not _span_has_fixed(install_facts, adapter_span, "parse_targets_field(apm_config)"):
+    if not _span_has_fixed(install_facts, adapter_span, "manifest_target_restriction(apm_config)"):
         findings.append(
             violation(
                 rule_id, _MCP_INSTALL, "manifest adapter must parse targets from the manifest"
@@ -213,12 +215,16 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "resolver must consult the manifest adapter before runtime discovery",
             )
         )
-    if _span_has_fixed(install_facts, resolver_span, "parse_targets_field("):
+    if _span_has_fixed(install_facts, resolver_span, "parse_targets_field(") or _span_has_fixed(
+        install_facts, resolver_span, "manifest_target_restriction("
+    ):
         findings.append(
             violation(rule_id, _MCP_INSTALL, "resolver must not parse manifest targets itself")
         )
     validation_line = _first_span_line(
-        integration_facts, integration_span, "parse_targets_field(mcp_apm_config)"
+        integration_facts,
+        integration_span,
+        "package_target_declaration(apm_package).validate_for_install()",
     )
     install_line = _first_span_line(integration_facts, integration_span, "MCPIntegrator.install(")
     if validation_line is None or install_line is None or validation_line >= install_line:
@@ -331,6 +337,17 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
                 rule_id,
                 _MCP_SCOPE_OWNER,
                 "unlocked collector must read package.get_mcp_dependencies exactly once",
+            )
+        )
+    if not _span_has_fixed(
+        facts, locked_span, "mcp_dependency.requires_transitive_trust"
+    ) or not _span_has_fixed(facts, unlocked_span, "dependency.requires_transitive_trust"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "dependency collectors must gate transitive declarations through "
+                "MCPDependency.requires_transitive_trust",
             )
         )
     if not _span_has_fixed(
@@ -629,8 +646,10 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
                 '        "enabled",\n'
                 '        "env_http_headers",\n'
                 '        "environment",\n'
+                '        "httpUrl",\n'
                 '        "http_headers",\n'
                 '        "id",\n'
+                '        "serverUrl",\n'
                 "    }\n"
                 ")",
             ),
@@ -780,6 +799,60 @@ def _check_jetbrains_mcp_path(provider: FactsProvider) -> Iterable[Violation]:
     return tuple(findings)
 
 
+def _check_mcp_json_config_write(provider: FactsProvider) -> Iterable[Violation]:
+    """MCP JSON config merge-writes must route through the base adapter owner.
+
+    ``MCPClientAdapter`` owns parse-for-update (refuse to rewrite a file it
+    cannot parse, or a project-scope config that is a symbolic link) and the
+    atomic writer; no other adapter may serialize JSON straight into a config
+    file handle or rewrite an unparsable config from scratch.
+    """
+    rule_id = "mutation_writes.mcp_json_config_write"
+    facts, failures = checked_facts(provider, _MCP_ADAPTER_BASE, rule_id, require_python=True)
+    findings: list[Violation] = list(failures)
+    if not failures:
+        for owner in ("_parse_json_config_for_update", "_write_json_config"):
+            findings.extend(
+                _require(
+                    _count_regex_lines(facts, rf"^\s+def {owner}\(") == 1,
+                    rule_id,
+                    _MCP_ADAPTER_BASE,
+                    f"{owner} must be defined exactly once on MCPClientAdapter",
+                )
+            )
+            span = _function_span(facts, owner, top_level=False)
+            findings.extend(
+                _require(
+                    span is not None
+                    and _span_has_fixed(facts, span, "self._is_linked_project_config("),
+                    rule_id,
+                    _MCP_ADAPTER_BASE,
+                    f"{owner} must refuse project-scope MCP configs that are symlinks",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=r"json\.dump\(|write_text\(\s*json\.dumps|open\([^)]*[\"']w[\"']",
+            message="MCP JSON config writes must use MCPClientAdapter._write_json_config",
+            exempt=True,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=r"rewriting from scratch",
+            message="Unparsable MCP configs must fail closed via _parse_json_config_for_update",
+            exempt=True,
+        )
+    )
+    return tuple(findings)
+
+
 def _check_mcp_ownership_migration(provider: FactsProvider) -> Iterable[Violation]:
     """Legacy MCP target ownership migration must stay owned by one module.
 
@@ -825,7 +898,83 @@ def _check_mcp_ownership_migration(provider: FactsProvider) -> Iterable[Violatio
     return tuple(findings)
 
 
+# -- MCP config-key derivation owner guard ----------------------------------
+
+_MCP_CONFIG_KEY_CONSUMERS: tuple[str, ...] = (
+    "src/apm_cli/integration/mcp_integrator.py",
+    "src/apm_cli/integration/mcp_integrator_install.py",
+    "src/apm_cli/install/mcp/ownership.py",
+)
+
+# Pattern that re-derives a config key from a server name by splitting on "/"
+# outside the canonical owner.  The adapter's determine_config_key already
+# handles scoped-npm, self-defined, and owner/repo fallback cases; a bare
+# split in a consumer would diverge.
+_INLINE_KEY_DERIVATION_RE = re.compile(r"""(?:rsplit|split)\(\s*["']/["']\s*[,)].*\[-1\]""")
+
+
+def _check_mcp_config_key_derivation(provider: FactsProvider) -> Iterable[Violation]:
+    """MCP config-key derivation must route through MCPClientAdapter.determine_config_key.
+
+    The adapter owns the scoped-npm, self-defined and owner/repo -> short-name
+    fallback logic.  Consumers must call through the adapter, not re-derive a
+    config key from a server name by splitting on ``"/"``.
+    """
+    rule_id = "mutation_writes.mcp_config_key_derivation"
+    base_facts, failures = checked_facts(provider, _MCP_ADAPTER_BASE, rule_id, require_python=True)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+
+    # Owner must define the canonical static method.
+    if not _has_fixed(base_facts, "def determine_config_key("):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_ADAPTER_BASE,
+                "MCPClientAdapter must define determine_config_key as the config-key owner",
+            )
+        )
+
+    # Consumers must route through the owner, not inline slash-based key derivation.
+    findings.extend(
+        _missing_consumers(
+            provider,
+            rule_id,
+            _MCP_CONFIG_KEY_CONSUMERS,
+            "determine_config_key(",
+            "MCP config-key consumer must route through MCPClientAdapter.determine_config_key",
+        )
+    )
+
+    for path in _MCP_CONFIG_KEY_CONSUMERS:
+        facts, f = checked_facts(provider, path, rule_id, require_python=True)
+        findings.extend(f)
+        if f:
+            continue
+        for lineno, line in enumerate(facts.lines, 1):
+            if _INLINE_KEY_DERIVATION_RE.search(line) is not None:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "MCP config-key must not be re-derived by splitting on '/'; "
+                        "route through MCPClientAdapter.determine_config_key",
+                        line=lineno,
+                    )
+                )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="mutation_writes.mcp_config_key_derivation",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-config-key-derivation",),
+        description="MCP config-key derivation must route through MCPClientAdapter.determine_config_key.",
+        check=_check_mcp_config_key_derivation,
+    ),
     Rule(
         id="mutation_writes.mcp_target_selection",
         group=GROUP,
@@ -874,6 +1023,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-jetbrains-mcp-path",),
         description="JetBrains Copilot MCP config paths must come from the IntelliJ adapter.",
         check=_check_jetbrains_mcp_path,
+    ),
+    Rule(
+        id="mutation_writes.mcp_json_config_write",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-json-config-write",),
+        description="MCP JSON config merge-writes must route through the base adapter owner.",
+        check=_check_mcp_json_config_write,
     ),
 )
 

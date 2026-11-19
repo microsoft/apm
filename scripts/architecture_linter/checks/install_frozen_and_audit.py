@@ -67,6 +67,18 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 
 
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
+# req-lk-017: frozen install and audit content-integrity share one verifier.
+_DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
+_DEPLOYED_HASH_FRAGMENTS = (
+    (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
+    (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
+    (_DEPLOYED_HASH_VERIFIER, "def verify_deployed_file_hashes("),
+    (
+        _DEPLOYED_HASH_VERIFIER,
+        "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
+    ),
+    (_DEPLOYED_HASH_VERIFIER, "= resolve_audit_scope(project_root, lock)"),
+)
 
 
 def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -82,8 +94,15 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
+    audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
     failures = (
-        owner_fail + adapter_fail + services_fail + integration_fail + outcome_fail + mcp_fail
+        owner_fail
+        + adapter_fail
+        + services_fail
+        + integration_fail
+        + outcome_fail
+        + mcp_fail
+        + audit_fail
     )
     if failures:
         return tuple(failures)
@@ -198,6 +217,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         )
         or not _before(acquisition, hydrated_check)
         or not _before(hydrated_check, deployment)
+        or not all(
+            _present(owner if path == _FROZEN_OWNER else audit, needle)
+            for path, needle in _DEPLOYED_HASH_FRAGMENTS
+        )
         or bool(duplicates)
     )
     if not failed:
@@ -259,6 +282,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             pattern=re.compile(
                 r"^[ \t]*(?:def (?:compare_native_mcp_connection|"
                 r"require_removable_mcp_connections|mcp_native_hash|"
+                r"project_mcp_cleanup_reachable|"
                 r"retain_deferred_mcp_claims)\(|class NativeMcpConnectionState\b)"
             ),
             owner=_MCP_OWNERSHIP_OWNER,
@@ -271,6 +295,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         "require_removable_mcp_connections",
         "mcp_native_hash",
         "retain_deferred_mcp_claims",
+        "project_mcp_cleanup_reachable",
     ):
         if not _present_re(owner, re.compile(rf"^def {name}\(")):
             findings.append(
@@ -315,6 +340,11 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "remove_stale",
             "require_removable_mcp_connections",
         ),
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "remove_stale",
+            "project_mcp_cleanup_reachable",
+        ),
         (_MCP_OWNERSHIP_OWNER, "compare_native_mcp_connection", "mcp_native_hash"),
         (
             "src/apm_cli/install/mcp/integration.py",
@@ -352,6 +382,17 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                 )
             )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
+    opt_in_gate = re.compile(r'/ "\.(?:claude|opencode)"\)\.is_dir\(\)')
+    for number, line in enumerate(_lines(cleanup), start=1):
+        if opt_in_gate.search(line):
+            findings.append(
+                violation(
+                    rule_id,
+                    "src/apm_cli/integration/mcp_integrator.py",
+                    "Stale MCP cleanup must gate opt-in dirs through project_mcp_cleanup_reachable",
+                    line=number,
+                )
+            )
     index = cleanup.tree_index
     if index is not None:
         for node in index.nodes:
@@ -379,13 +420,14 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             and call.qualname.rsplit(".", 1)[-1] == "require_removable_mcp_connections"
             for call in getattr(cleanup, "calls", ())
         )
-        != 3
+        != 4
     ):
         findings.append(
             _summary(
                 rule_id,
                 "src/apm_cli/integration/mcp_integrator.py",
-                "Codex and both Claude cleanup scopes must verify their managed baseline",
+                "Codex, both Claude cleanup scopes and the shared Copilot project .mcp.json "
+                "must verify their managed baseline",
             )
         )
     if not _present_re(
@@ -489,6 +531,29 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     findings.append(
                         violation(rule_id, path, message, line=number, column=column + 1)
                     )
+    # Prune and the expected-path selector ask the same owner which lock
+    # entries are retained instead of re-deriving ``depth > 1`` (#3668).
+    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/install/orphans.py"):
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        if not _present_re(facts, re.compile(r"\bretained_lock_keys\(")):
+            findings.append(
+                _summary(rule_id, path, "Retained lock keys must come from deps/reachability.py")
+            )
+        for number, line in enumerate(_lines(facts), start=1):
+            column = line.find("depth > 1")
+            if column >= 0 and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Retained lock entries are decided by deps/reachability.py",
+                        line=number,
+                        column=column + 1,
+                    )
+                )
     return tuple(findings)
 
 
@@ -600,7 +665,9 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     if not (
         _body_has(run_replay_body, "integrate_package_primitives(")
         and _body_has(run_replay_body, "skill_subset=")
-        and _body_has(run_replay_body, "package_info.dependency_ref.skill_subset")
+        and _body_has(
+            run_replay_body, "effective_dependency_selection(package_info.dependency_ref)"
+        )
     ):
         findings.append(
             _summary(
@@ -638,17 +705,55 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
 
     audit_gate_calls = _name_calls_in(audit, "_audit_ci_gate")
     audit_gate_body = _awk_body(audit, re.compile(r"^def _audit_ci_gate\("), re.compile(r"^def "))
-    if not _body_has(
-        audit_gate_body,
-        "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
+    materialization_body = _awk_body(
+        owner,
+        re.compile(r"^def resolve_ci_audit_materialization\("),
+        re.compile(r"^(def |class |@)"),
+    )
+    lockfile, lockfile_fail = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    findings.extend(lockfile_fail)
+    modules_content_body = _awk_body(
+        lockfile,
+        re.compile(r"^    def records_modules_content\("),
+        re.compile(r"^    (def |@)"),
+    )
+    # #3781: one owner decides whether a workspace needs live package
+    # materialization; the user workspace needs it only when the lockfile
+    # records apm_modules content (packages or local bundle staging).
+    if not (
+        _body_has(
+            materialization_body,
+            "get_workspace_deploy_root(project_root) != project_root.resolve()",
+        )
+        and _body_has(materialization_body, "lockfile.records_modules_content()")
+        and _body_has(modules_content_body, "self.get_package_dependencies()")
+        and _body_has(modules_content_body, "self.local_staging_slugs()")
+        and _body_has(materialization_body, "prepare_ci_audit_replay(")
+        and "resolve_ci_audit_materialization" in audit_gate_calls
+        and not {"get_workspace_deploy_root", "prepare_ci_audit_replay"} & audit_gate_calls
+        and not _body_has(audit_gate_body, "apm_modules")
+        and not _body_has(audit_gate_body, "APM_MODULES_DIR")
     ):
         findings.append(
             _summary(
                 rule_id,
-                "src/apm_cli/commands/audit.py",
-                "CI audit must compare resolved workspace identities before refusing global replay",
+                _AUDIT_REPLAY_OWNER,
+                "CI audit must ask resolve_ci_audit_materialization whether a workspace "
+                "needs package materialization (resolved identity; user scope only when "
+                "the lockfile records apm_modules content)",
             )
         )
+    findings.extend(
+        _duplicate_definition_lines(
+            provider,
+            rule_id=rule_id,
+            prefix=_SRC_PREFIX,
+            pattern=re.compile(r"installed package materialization is missing"),
+            owner=_AUDIT_REPLAY_OWNER,
+            message="Missing-materialization refusals belong to resolve_ci_audit_materialization",
+            respect_exempt=False,
+        )
+    )
     config_body = _awk_body(
         ci_checks, re.compile(r"^def _check_config_consistency\("), re.compile(r"^def ")
     )
@@ -657,7 +762,6 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     if (
         not _present_re(owner, re.compile(r"^def prepare_ci_audit_replay\("))
-        or "prepare_ci_audit_replay" not in audit_gate_calls
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")

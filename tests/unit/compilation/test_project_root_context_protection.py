@@ -12,7 +12,7 @@ from apm_cli.commands.compile.cli import (
     _report_protected_no_write,
 )
 from apm_cli.commands.compile.watcher import APMFileHandler, _report_retained_watch_outputs
-from apm_cli.compilation.agents_compiler import AgentsCompiler
+from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
 from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
 from apm_cli.compilation.distributed_compiler import (
@@ -77,7 +77,7 @@ def test_compile_preserves_hand_authored_project_root_context(
         assert "would be retained" in " ".join(result.output.split())
         assert "Generated Content Preview" not in result.output
     if dry_run and not single_agents:
-        assert "Would retain 2 hand-authored root files" in " ".join(result.output.split())
+        assert "Would retain 2 hand-authored context files" in " ".join(result.output.split())
 
 
 def test_partial_compile_reports_generated_and_retained_outputs(
@@ -92,7 +92,7 @@ def test_partial_compile_reports_generated_and_retained_outputs(
     result = CliRunner().invoke(cli, ["compile"])
 
     assert result.exit_code == 0, result.output
-    assert "retained 1 hand-authored root file" in " ".join(result.output.split())
+    assert "retained 1 hand-authored context file" in " ".join(result.output.split())
 
 
 def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
@@ -110,7 +110,7 @@ def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
 
     assert retained
     logger.warning.assert_called_once()
-    assert "retained 1 hand-authored root file" in logger.progress.call_args.args[0]
+    assert "retained 1 hand-authored context file" in logger.progress.call_args.args[0]
     assert "generated 1 other output file" in logger.progress.call_args.args[0]
 
 
@@ -130,7 +130,7 @@ def test_watch_dry_run_reports_generated_and_retained_outputs() -> None:
     assert retained
     message = logger.progress.call_args.args[0]
     assert "Would generate 2 other output files" in message
-    assert "retain 1 hand-authored root file" in message
+    assert "retain 1 hand-authored context file" in message
 
 
 def test_watch_recompile_retains_hand_authored_root_context(
@@ -175,7 +175,7 @@ def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
     )
 
     message = logger.success.call_args.args[0]
-    assert "retained 1 hand-authored root file" in message
+    assert "retained 1 hand-authored context file" in message
     assert "skipped 1 nested Git repository placement" in message
 
 
@@ -193,7 +193,7 @@ def test_no_write_outcome_reports_retained_and_nested_skipped_outputs() -> None:
     )
 
     message = logger.progress.call_args.args[0]
-    assert "Retained 2 hand-authored root files" in message
+    assert "Retained 2 hand-authored context files" in message
     assert "skipped 1 nested Git repository placement" in message
 
 
@@ -740,3 +740,78 @@ def test_managed_section_rejects_external_agents_symlink(
     assert result.exit_code == 1
     assert "Compilation failed with 1 errors" in result.output
     assert external.read_text(encoding="utf-8").startswith("<!-- apm:start -->")
+
+
+def _seed_nested_project(project: Path) -> None:
+    """A distributed project whose ``docs/`` placement holds hand-authored context."""
+    (project / "apm.yml").write_text(
+        "name: nested-context\nversion: 1.0.0\ntargets: [claude, codex]\n",
+        encoding="utf-8",
+    )
+    instructions = project / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "docs.instructions.md").write_text(
+        '---\ndescription: docs\napplyTo: "docs/**"\n---\nDocs rule.\n', encoding="utf-8"
+    )
+    (project / "docs").mkdir()
+    (project / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_distributed_compile_retains_hand_authored_nested_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    """Nested placements obey the same marker rule as root files (#3655)."""
+    _seed_nested_project(tmp_path)
+    (tmp_path / "docs" / "AGENTS.md").write_text(_MANUAL_AGENTS, encoding="utf-8")
+    (tmp_path / "docs" / "CLAUDE.md").write_text(_MANUAL_CLAUDE, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    args = ["compile", *(["--dry-run"] if dry_run else [])]
+    for _ in range(2):
+        result = CliRunner().invoke(cli, args, catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        output = " ".join(result.output.split())
+        assert "Protected docs/AGENTS.md: hand-authored file will not be overwritten" in output
+        assert "Protected docs/CLAUDE.md: hand-authored file will not be overwritten" in output
+        assert "Orphaned" not in output
+        assert (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
+        assert (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8") == _MANUAL_CLAUDE
+
+
+def test_distributed_compile_replaces_generated_nested_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A marker-bearing nested output from an earlier compile stays replaceable."""
+    _seed_nested_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert CliRunner().invoke(cli, ["compile"], catch_exceptions=False).exit_code == 0
+    generated = (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8")
+    assert DISTRIBUTED_AGENTS_MARKER in generated
+    (tmp_path / ".apm" / "instructions" / "docs.instructions.md").write_text(
+        '---\ndescription: docs\napplyTo: "docs/**"\n---\nDocs rule v2.\n', encoding="utf-8"
+    )
+
+    result = CliRunner().invoke(cli, ["compile"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert "Protected" not in result.output
+    assert "Docs rule v2." in (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Docs rule v2." in (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+def test_nested_git_skip_precedes_hand_authored_protection(tmp_path: Path) -> None:
+    """A nested repository's own AGENTS.md is a boundary skip, not a protection count."""
+    nested = tmp_path / "docs"
+    nested.mkdir()
+    (nested / ".git").mkdir()
+    (nested / "AGENTS.md").write_text(_MANUAL_AGENTS, encoding="utf-8")
+    compiler = AgentsCompiler(str(tmp_path))
+
+    prepared = compiler._prepare_distributed_file(
+        nested / "AGENTS.md", "generated", CompilationConfig()
+    )
+
+    assert prepared is None
+    assert compiler._protected_root_context_paths == set()
+    assert any("nested Git repository" in warning for warning in compiler.warnings)

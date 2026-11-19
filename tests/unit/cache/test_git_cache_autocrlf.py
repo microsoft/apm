@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _checkout_pins_autocrlf_false, _safe_git_args
+from apm_cli.cache.git_cache import GitCache, _checkout_has_materialization_pins, _safe_git_args
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.content_hash import compute_package_hash
 from apm_cli.utils.git_env import get_git_executable
@@ -107,7 +107,7 @@ def test_full_checkout_keeps_lf_under_system_autocrlf_true(
     checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), sha, locked_sha=sha)
     skill = checkout / "skills" / "demo" / "SKILL.md"
     assert skill.read_bytes() == _LF_BODY
-    assert _checkout_pins_autocrlf_false(checkout)
+    assert _checkout_has_materialization_pins(checkout)
     assert compute_package_hash(checkout / "skills" / "demo") == compute_package_hash(
         origin / "skills" / "demo"
     )
@@ -157,7 +157,7 @@ def test_cache_hit_rematerializes_unpinned_crlf_shard(
     reused = cache.get_checkout(str(origin), sha, locked_sha=sha)
     assert reused.exists()
     assert (reused / "skills" / "demo" / "SKILL.md").read_bytes() == _LF_BODY
-    assert _checkout_pins_autocrlf_false(reused)
+    assert _checkout_has_materialization_pins(reused)
 
 
 def test_create_checkout_rematerializes_unpinned_final_dir(
@@ -169,11 +169,11 @@ def test_create_checkout_rematerializes_unpinned_final_dir(
     cache = GitCache(tmp_path / "cache")
     poisoned = cache.get_checkout(str(origin), sha, locked_sha=sha)
     _poison_autocrlf_pin(poisoned)
-    assert not _checkout_pins_autocrlf_false(poisoned)
+    assert not _checkout_has_materialization_pins(poisoned)
 
     rebuilt = cache._create_checkout(str(origin), cache_shard_key(str(origin)), sha)
     assert (rebuilt / "skills" / "demo" / "SKILL.md").read_bytes() == _LF_BODY
-    assert _checkout_pins_autocrlf_false(rebuilt)
+    assert _checkout_has_materialization_pins(rebuilt)
 
 
 def test_unremovable_unpinned_checkout_is_not_returned(
@@ -201,12 +201,14 @@ def test_pin_reads_core_section_not_url_substring(tmp_path: Path) -> None:
         '[remote "origin"]\n\turl = https://example.com/autocrlf=false.git\n',
         encoding="utf-8",
     )
-    assert not _checkout_pins_autocrlf_false(checkout)
+    assert not _checkout_has_materialization_pins(checkout)
 
 
 def test_pin_treats_non_utf8_config_as_missing(tmp_path: Path) -> None:
     checkout = tmp_path / "checkout"
     git_dir = checkout / ".git"
     git_dir.mkdir(parents=True)
-    (git_dir / "config").write_bytes(b"\xff\xfe[core]\n\tautocrlf = false\n")
-    assert not _checkout_pins_autocrlf_false(checkout)
+    (git_dir / "config").write_bytes(
+        b"\xff\xfe[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n"
+    )
+    assert not _checkout_has_materialization_pins(checkout)

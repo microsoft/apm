@@ -377,6 +377,7 @@ def resync_claude_plugins(
     from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.install.exec_gate import check_executable_approval
+    from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.target_filter import resolve_effective_package_targets
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
@@ -440,9 +441,10 @@ def resync_claude_plugins(
             dependency_ref=locked.to_dependency_ref(),
             package_type=PackageType(locked.package_type),
         )
+        dep_selection = effective_dependency_selection(info.dependency_ref)
         selection = resolve_effective_package_targets(
             active_targets if prepared and key in prepared else retention_targets,
-            candidate.target_subset,
+            dep_selection.target_subset,
             info,
             None,
             key,
@@ -453,7 +455,7 @@ def resync_claude_plugins(
             package_name=key,
             targets=list(selection.targets),
             scope=scope,
-            skill_subset=tuple(info.dependency_ref.skill_subset or ()) or None,
+            skill_subset=dep_selection.skill_subset,
             hooks_approved=hooks_approved,
             skip_bin=True,
         )
@@ -462,7 +464,7 @@ def resync_claude_plugins(
         DeployableSourcePlan.create(
             info,
             list(selection.targets),
-            skill_subset=None,
+            skill_subset=dep_selection.skill_subset,
             hooks_approved=hooks_approved,
             canvas_approved=False,
             skip_bin=True,

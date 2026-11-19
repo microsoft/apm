@@ -220,16 +220,13 @@ class TestExtendsHostPin:
 class TestFetchFromUrlRedirectRefusal:
     """_fetch_from_url must NOT follow HTTP redirects (SSRF / Referer leak)."""
 
-    @patch("apm_cli.policy.discovery.requests")
-    def test_fetch_from_url_disables_redirects(self, mock_requests):
+    @patch("apm_cli.utils.http_credentials.CredentialScopedSession.request")
+    def test_fetch_from_url_disables_redirects(self, mock_request):
         """A 301 response is returned as fetch failure, not silently followed."""
-        import requests as real_requests
-
         mock_resp = MagicMock()
         mock_resp.status_code = 301
         mock_resp.headers = {"Location": "https://attacker.example.com/leak"}
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = real_requests.exceptions
+        mock_request.return_value = mock_resp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_url(
@@ -238,9 +235,9 @@ class TestFetchFromUrlRedirectRefusal:
                 no_cache=True,
             )
 
-        # requests.get must have been invoked with allow_redirects=False.
-        call_kwargs = mock_requests.get.call_args.kwargs
-        assert call_kwargs.get("allow_redirects") is False
+        # One hop, sent without automatic redirect following; never followed.
+        assert mock_request.call_count == 1
+        assert mock_request.call_args.kwargs.get("allow_redirects") is False
 
         # Result is a fetch failure with a clear error message.
         assert result.policy is None
@@ -248,16 +245,13 @@ class TestFetchFromUrlRedirectRefusal:
         assert "redirect" in (result.error or "").lower()
         _assert_redirect_target_host(result.error or "", "attacker.example.com")
 
-    @patch("apm_cli.policy.discovery.requests")
-    def test_fetch_from_url_302_also_refused(self, mock_requests):
+    @patch("apm_cli.utils.http_credentials.CredentialScopedSession.request")
+    def test_fetch_from_url_302_also_refused(self, mock_request):
         """Any 3xx redirect class is refused, not just 301."""
-        import requests as real_requests
-
         mock_resp = MagicMock()
         mock_resp.status_code = 302
-        mock_resp.headers = {"Location": "https://other.example.com/x"}
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = real_requests.exceptions
+        mock_resp.headers = {"Location": "https://example.com/elsewhere/policy.yml"}
+        mock_request.return_value = mock_resp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_url(
@@ -266,5 +260,7 @@ class TestFetchFromUrlRedirectRefusal:
                 no_cache=True,
             )
 
+        # A same-origin hop to another path is refused too: never followed.
+        assert mock_request.call_count == 1
         assert result.policy is None
         assert "redirect" in (result.error or "").lower()

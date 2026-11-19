@@ -70,10 +70,11 @@
 
 ## 6. Diagrams
 
-- Acceptance: 1-3 mermaid blocks for any non-doc-only PR. Each
-  block preceded by a one-sentence legend. **Every block validated
-  by `mmdc` before save** (see SKILL.md "Mandatory mermaid
-  validation step").
+- Acceptance: 1-3 mermaid blocks when structure or control flow is
+  non-trivial. Simple, docs-only, and mechanical PRs may omit the
+  entire section. Every included block has a one-sentence legend and
+  is validated by the pinned `mmdc` package before save (see SKILL.md
+  "Mandatory mermaid validation step").
 - Refuse: any block that fails `mmdc`; a third diagram that does
   not earn its place; diagrams with no legend; decorative diagrams
   that do not reflect the change. Unicode IS allowed in node
@@ -148,7 +149,9 @@ validation block.
 
 ## Final pass -- run before saving
 
-- [ ] All 10 sections present.
+- [ ] All required sections present; Diagrams present (1-3 validated
+      blocks) when structure or control flow is non-trivial, optional
+      otherwise.
 - [ ] **Scenario Evidence table present in Validation** (or skip
       clause justified in trade-offs per
       `assets/scenario-evidence-rubric.md`).

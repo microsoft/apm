@@ -5,7 +5,8 @@ sidebar:
   order: 10
 ---
 
-Read and write APM CLI configuration stored in `~/.apm/config.json`.
+Read and write APM CLI configuration stored in `$APM_HOME/config.json`
+(default `~/.apm/config.json`).
 
 ## Synopsis
 
@@ -19,10 +20,10 @@ apm config unset KEY             # remove a key
 
 ## Description
 
-`apm config` manages the user-level CLI configuration file at `~/.apm/config.json`. It is independent of `apm.yml`, which describes a project. With no subcommand, `apm config` prints a table that combines:
+`apm config` manages the user-level CLI configuration file at `$APM_HOME/config.json` (default `~/.apm/config.json`). It is independent of `apm.yml`, which describes a project. With no subcommand, `apm config` prints a table that combines:
 
 - **Project** values from `apm.yml` in the current directory (when present): name, version, entrypoint, MCP dependency count, and compilation settings.
-- **Global** values from `~/.apm/config.json`: CLI version, `temp-dir`, and any other set keys.
+- **Global** values from `$APM_HOME/config.json`: CLI version, `temp-dir`, and any other set keys.
 
 Use `get`/`set`/`unset` to manipulate individual keys. Boolean values accept `true`, `false`, `yes`, `no`, `1`, or `0`.
 
@@ -46,25 +47,24 @@ Familiar with `npm config list` or `git config --list`? `apm config list` is the
 
 ### `apm config set KEY VALUE`
 
-Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
+Write `KEY` to `$APM_HOME/config.json`. Validates the value before writing:
 
 - `temp-dir` must be an existing, writable directory. The path is expanded (`~`) and stored absolute.
 - `target` must be a valid install target token (or comma-separated list), using the same validator as `apm install --target`.
 - `self-update.channel` must be `stable` or `prerelease`.
 - `self-update.install-dir` is optional on Unix. When set, it is expanded and stored absolute, then passed as `APM_INSTALL_DIR` when the environment variable is absent. It must match the existing launcher; leaving it unset preserves the detected installation. Windows behavior is unchanged.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
-- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. Configured `http://` endpoints require `MCP_REGISTRY_ALLOW_HTTP=1` when used.
+- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. A persisted `http://` endpoint needs no `MCP_REGISTRY_ALLOW_HTTP=1` opt-in.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `github-auth-first`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supported unset keys: `target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `github-auth-first`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
 | `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
 | `self-update.install-dir` | path | unset | Optional launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
@@ -78,22 +78,26 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
 | `mcp-registry-url` | URL | GitHub MCP Registry | Persist a private MCP registry endpoint. Accepts `http://` or `https://` URLs. Provides a persistent fallback below `MCP_REGISTRY_URL` and above the built-in default, and applies to every registry lookup: `apm mcp list/search/show`, `apm install --mcp NAME`, and the `dependencies.mcp` entries `apm install` reads from `apm.yml`. |
 | `registry.<name>.url` | URL | unset | Base URL for registry `<name>`. Requires `registries` experimental flag. |
-| `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
+| `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `$APM_HOME/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
+
+### Deprecated keys
+
+`auto-integrate` has no effect: no command reads it. `apm config get` and `apm config set` still accept it, so existing scripts keep working, but print a deprecation warning; `set` stores the value and reports `Stored auto-integrate=<value> (no effect)` instead of a success line. It is not listed in the config summary and will be removed in a future release.
 
 ### Resolution order
 
 `temp-dir` and `copilot-cowork-skills-dir` are resolved at runtime as:
 
 1. Environment variable (`APM_TEMP_DIR`, `APM_COPILOT_COWORK_SKILLS_DIR`)
-2. Value in `~/.apm/config.json`
+2. Value in `$APM_HOME/config.json`
 3. Built-in default (system temp / platform auto-detection)
 
 `mcp-registry-url` follows a four-layer precedence chain (CLI flag wins):
 
 1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (used immediately and persisted on the dependency in `apm.yml`)
 2. `MCP_REGISTRY_URL` environment variable
-3. `mcp-registry-url` value in `~/.apm/config.json`
+3. `mcp-registry-url` value in `$APM_HOME/config.json`
 4. Built-in default, the curated GitHub MCP Registry
 
 A per-dependency `registry:` URL in `apm.yml` overrides the chain for that entry
@@ -105,7 +109,7 @@ needs no opt-in, since setting it is already the explicit choice.
 
 1. CLI flag (`--allow-protocol-fallback`, `--ssh`) -- highest priority
 2. Environment variable (`APM_ALLOW_PROTOCOL_FALLBACK=1`, `APM_GIT_PROTOCOL=ssh`)
-3. Value in `~/.apm/config.json` (`apm config set ...`)
+3. Value in `$APM_HOME/config.json` (`apm config set ...`)
 4. Built-in default (`false` / no preference)
 
 `github-auth-first` follows the same layered shape, but it is a credential-order
@@ -113,26 +117,26 @@ setting, not a transport selector -- see [`apm install`'s `--auth-first`](../ins
 
 1. CLI flag (`--auth-first`) -- highest priority
 2. Environment variable (`APM_GITHUB_AUTH_FIRST=1`)
-3. Value in `~/.apm/config.json` (`apm config set github-auth-first true`)
+3. Value in `$APM_HOME/config.json` (`apm config set github-auth-first true`)
 4. Built-in default (`false`: anonymous-first for exact-host `github.com`)
 
 Registry tokens are resolved as:
 
 1. `APM_REGISTRY_TOKEN_<NAME>` environment variable (uppercase name, `-`/`.` -> `_`)
-2. `registry.<name>.token` in `~/.apm/config.json`
+2. `registry.<name>.token` in `$APM_HOME/config.json`
 3. Unauthenticated (APM surfaces a remediation hint on 401/403)
 
 Registry URLs are merged at install time (highest wins):
 
 1. `apm-policy.yml`
 2. Project `apm.yml` `registries:` block
-3. Workspace `~/.apm/apm.yml`
-4. `registry.<name>.url` in `~/.apm/config.json`
+3. User workspace `$APM_HOME/apm.yml`
+4. `registry.<name>.url` in `$APM_HOME/config.json`
 
 Default registry selection (highest wins):
 
 1. `registries.default` in project `apm.yml`
-2. The registry entry in `~/.apm/config.json` with `"default": true` (set via `registry.<name>.default true`)
+2. The registry entry in `$APM_HOME/config.json` with `"default": true` (set via `registry.<name>.default true`)
 
 `apm self-update` installer inputs resolve as:
 
@@ -150,13 +154,6 @@ Show everything:
 
 ```bash
 apm config
-```
-
-Read and write `auto-integrate`:
-
-```bash
-apm config get auto-integrate
-apm config set auto-integrate false
 ```
 
 Persist a default install target:
@@ -266,17 +263,16 @@ See [External scanners](../../../integrations/external-scanners/).
 
 ## Configuration file
 
-- **Location:** `~/.apm/config.json`
+- **Location:** `$APM_HOME/config.json` (default `~/.apm/config.json`)
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
+Internal JSON keys use snake_case (`install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 
 ## Related
 
 - [`apm install`](../install/) -- consumes `target`, `temp-dir`, and `allow-protocol-fallback` / `prefer-ssh` / `github-auth-first`.
 - [`apm self-update`](../self-update/) -- consumes `self-update.channel` and `self-update.install-dir`.
-- [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
 - [Environment variables](../../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK` and `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys; `APM_GITHUB_AUTH_FIRST` is the env-var equivalent of the credential-order `github-auth-first` key.
 - [Registries](../../../guides/registries/) -- full private registry setup guide.

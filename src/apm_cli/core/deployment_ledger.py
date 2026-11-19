@@ -52,6 +52,8 @@ _LEGACY_USER_TARGET_PREFIXES = {
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 UNATTRIBUTED_TARGET = "legacy"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
+LOCAL_STATE_DIR = ".apm-local"
+"""Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
 _LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
@@ -90,9 +92,15 @@ class DeploymentMaterializationSession:
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
         self.scope = scope
+        from apm_cli.core.scope import get_apm_home
+
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
-        self.state_path = Path.home() / ".apm" / "deployment-receipts" / f"{key}.json"
-        self.identity_path = self.root / ".apm-local" / "installation"
+        apm_home = get_apm_home()
+        # Containment is anchored one level above APM_HOME (``$HOME`` by
+        # default); for a shallow custom root the symlink check is the guard.
+        self._receipts_base = apm_home.parent
+        self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
+        self.identity_path = self.root / LOCAL_STATE_DIR / "installation"
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
@@ -116,7 +124,7 @@ class DeploymentMaterializationSession:
 
     def _validate_paths(self) -> None:
         for base, path in (
-            (Path.home(), self.state_path),
+            (self._receipts_base, self.state_path),
             (self.root, self.identity_path),
             (self.root, self.identity_path.parent / ".gitignore"),
         ):
@@ -257,7 +265,7 @@ class DeploymentMaterializationSession:
         record = self._records.get(key)
         if record is None:
             return None
-        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
         recorded_target = next(
             (target for target in targets if target.name == record.locator.target), None
@@ -265,7 +273,9 @@ class DeploymentMaterializationSession:
         if recorded_target is None:
             profile = KNOWN_TARGETS.get(record.locator.target)
             recorded_target = (
-                profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                scoped_profile_or_none(profile, user_scope=self.scope.value == "user")
+                if profile
+                else None
             )
         if recorded_target is None or self._locator(path, [recorded_target]) != record.locator:
             return None
@@ -866,13 +876,31 @@ class DeploymentLedgerCodec:
         lockfile: LockFile,
         files: list[str],
         hashes: dict[str, str],
+        *,
+        staged: Collection[str] = (),
     ) -> None:
-        """Persist imperative bundle files without making them replayable source."""
+        """Persist imperative bundle files without making them replayable source.
+
+        *staged* is compile input under ``apm_modules/<slug>/.apm/`` (#3705):
+        it is recorded in ``local_staged_files`` and never claimed. Every prior
+        bundle-owned staging claim (pre-#3705 lockfiles) moves there too, even
+        when this install skipped or no longer ships the file; bytes are kept.
+        """
+        from apm_cli.deps.lockfile import local_staging_slug
+
         prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        retired_paths = frozenset(
+            path for path in prior_bundle_paths if local_staging_slug(path) is not None
+        )
+        prior_bundle_paths -= retired_paths
         for path in files:
             _require_local_bundle_hash(path, hashes.get(path))
-        merged_files = sorted(set(lockfile.local_deployed_files).union(files))
-        merged_hashes = dict(lockfile.local_deployed_file_hashes)
+        merged_files = sorted((set(lockfile.local_deployed_files) - retired_paths).union(files))
+        merged_hashes = {
+            path: digest
+            for path, digest in lockfile.local_deployed_file_hashes.items()
+            if path not in retired_paths
+        }
         merged_hashes.update(hashes)
         DeploymentLedgerCodec.replace_legacy_owner(
             lockfile,
@@ -884,6 +912,9 @@ class DeploymentLedgerCodec:
         DeploymentLedgerCodec._mark_local_bundle_paths(
             lockfile,
             prior_bundle_paths.union(files),
+        )
+        lockfile.local_staged_files = sorted(
+            set(lockfile.local_staged_files).union(staged, retired_paths)
         )
         DeploymentLedgerCodec.apply_to_lockfile(lockfile.deployment_ledger, lockfile)
 
@@ -1296,7 +1327,7 @@ class DeploymentLedgerCodec:
             active_owner = str(row.get("active_owner") or "")
             locator = DeploymentLocator(
                 kind=LocatorKind(str(row["kind"])),
-                target=str(row["target"]),
+                target=str(row["target"]),  # architecture-authority-exempt: ledger-row
                 value=str(row["value"]),
                 runtime=str(row["runtime"]) if row.get("runtime") is not None else None,
                 scope=str(row["scope"]),
@@ -1321,7 +1352,7 @@ class DeploymentLedgerCodec:
                 raise ValueError(f"Lockfile deployment row {index} must be a mapping")
             try:
                 LocatorKind(str(row["kind"]))
-                target = row["target"]
+                target = row["target"]  # architecture-authority-exempt: ledger-row
                 value = row["value"]
                 scope = row["scope"]
             except (KeyError, TypeError, ValueError) as exc:
@@ -1406,6 +1437,18 @@ class DeploymentLedgerCodec:
         if any(value.startswith(prefix) for prefix in _LEGACY_USER_TARGET_PREFIXES):
             return "user"
         return "project"
+
+    @staticmethod
+    def locator_in_scope(locator: DeploymentLocator, scope: str) -> bool:
+        """Return whether a persisted deployment row belongs to *scope*.
+
+        Rows rebuilt from compatibility views carry the scope
+        :meth:`legacy_scope` infers from the path, which cannot tell a
+        user-scope ``.claude/`` path from a project one. That inferred value
+        is not scope evidence; only a recorded scope that differs from the
+        inference places a row in another scope.
+        """
+        return locator.scope in (scope, DeploymentLedgerCodec.legacy_scope(locator.value))
 
     @staticmethod
     def legacy_value(locator: DeploymentLocator) -> str:

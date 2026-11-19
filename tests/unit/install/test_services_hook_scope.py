@@ -104,6 +104,7 @@ def _call(scope: InstallScope, project_root: Path) -> MagicMock:
     integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=[_claude_hooks_only_target()],
         integrators=IntegratorBundle(
             prompt=MagicMock(),
@@ -205,6 +206,7 @@ def test_non_hook_integrators_never_receive_user_scope(tmp_path: Path) -> None:
     integrate_package_primitives(
         package_info,
         tmp_path,
+        skill_subset=None,
         targets=[target],
         integrators=IntegratorBundle(
             prompt=MagicMock(),

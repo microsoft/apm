@@ -12,7 +12,9 @@ from apm_cli.utils.subprocess_env import external_process_env
 
 from .admission import ClaudeNativePluginError
 
-QUALIFIED_VERSION = "2.1.291"
+# Exact Claude Code releases whose plugin metadata/consent contract was qualified.
+QUALIFIED_VERSIONS = ("2.1.291", "2.1.322")
+_QUALIFIED_TEXT = " or ".join(QUALIFIED_VERSIONS)
 
 
 class ClaudePluginCLI:
@@ -22,7 +24,7 @@ class ClaudePluginCLI:
         executable = shutil.which("claude")
         if executable is None:
             raise ClaudeNativePluginError(
-                f"Native Claude registration needs Claude Code {QUALIFIED_VERSION} on PATH. "
+                f"Native Claude registration needs Claude Code {_QUALIFIED_TEXT} on PATH. "
                 "Install that client, then retry with the original target selection. "
                 "No loose fallback was used."
             )
@@ -77,10 +79,11 @@ class ClaudePluginCLI:
 
     def check_version(self) -> None:
         """Refuse unqualified metadata/consent contracts rather than guessing."""
-        if self.run("--version").split()[0:1] != [QUALIFIED_VERSION]:
+        reported = self.run("--version").split()
+        if not reported or reported[0] not in QUALIFIED_VERSIONS:
             raise ClaudeNativePluginError(
-                f"Native Claude registration is qualified only with Claude Code {QUALIFIED_VERSION}. "
-                "Use that version or exclude Claude from this dependency's targets."
+                f"Native Claude registration is qualified only with Claude Code {_QUALIFIED_TEXT}. "
+                "Use a qualified version or exclude Claude from this dependency's targets."
             )
 
     def records(self, *args: str) -> list[dict[str, Any]]:

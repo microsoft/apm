@@ -523,7 +523,6 @@ class TestManagedSectionDistributed:
     def test_distributed_agents_md_rejects_external_file_symlink(self, tmp_path):
         """An AGENTS.md symlink cannot redirect output outside the project."""
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
-        from apm_cli.utils.path_security import PathTraversalError
 
         external_agents = tmp_path.parent / "external-agents.md"
         external_agents.write_text("External guidance.\n", encoding="utf-8")
@@ -535,14 +534,16 @@ class TestManagedSectionDistributed:
         except OSError as exc:
             pytest.skip(f"file symlinks are unavailable: {exc}")
 
-        with pytest.raises(PathTraversalError, match=r"outside.*allowed base directory"):
-            AgentsCompiler(str(tmp_path))._write_distributed_file(
-                target,
-                "Must not escape.",
-                CompilationConfig(agents_md_mode="full", dry_run=False),
-            )
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(
+            target,
+            "Must not escape.",
+            CompilationConfig(agents_md_mode="full", dry_run=False),
+        )
 
         assert external_agents.read_text(encoding="utf-8") == "External guidance.\n"
+        assert target.is_symlink()
+        assert any("PathTraversalError" in warning for warning in compiler.warnings)
 
     def test_distributed_root_agents_md_full_mode_preserves_hand_authored(self, tmp_path):
         """Full mode preserves an unmarked hand-authored root AGENTS.md."""

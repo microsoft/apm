@@ -644,6 +644,11 @@ def test_replacement_failure_preserves_previous_owned_bytes_without_fallback(
     result = fixture.run()
     assert result.returncode != 0, result.stdout + result.stderr
     assert "replacement" in (result.stdout + result.stderr).lower()
+    if failure == "invalid":
+        # #3871: the error names the replacement, not APM's staging directory.
+        output = " ".join((result.stdout + result.stderr).split())
+        assert "Downloaded dependency '../local-base' (replacement for '" in output, output
+        assert ".apm-resolution-staging" not in output, output
     assert _snapshot(fixture.consumer.root) == before
     fixture.assert_bytes("LOCAL")
 
@@ -909,8 +914,16 @@ def test_replacement_remote_diamond_preserves_original_requests_and_root_anchor(
     direct = []
     originals = {}
     requests = {}
-    for name, ref in (("left", fixture.upstream_sha), ("right", "f" * 40)):
-        parent = factory.create(name, dependencies=({"git": _UPSTREAM, "ref": ref},))
+    for skill in ("alpha", "beta"):
+        skill_file = fixture.local.root / ".apm" / "skills" / skill / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            f"---\nname: {skill}\ndescription: {skill} skill\n---\n# {skill}\n", encoding="utf-8"
+        )
+    for name, ref, skill in (("left", fixture.upstream_sha, "alpha"), ("right", "f" * 40, "beta")):
+        parent = factory.create(
+            name, dependencies=({"git": _UPSTREAM, "ref": ref, "skills": [skill]},)
+        )
         originals[parent.manifest_path] = parent.manifest_path.read_bytes()
         repository = fixture.repositories.create(name, source_tree=parent.root)
         sha = fixture.repositories.commit(repository, message=f"Diamond parent {name}").sha
@@ -929,6 +942,10 @@ def test_replacement_remote_diamond_preserves_original_requests_and_root_anchor(
     assert len(entries) == 3
     replacement = next(d for d in entries if d["repo_url"] == "apm-replacement-fixture/base")
     assert {r["parent"]: r["ref"] for r in replacement["replacement"]["requests"]} == requests
+    # Each parent selects one skill; the replaced node locks their union (#3735).
+    assert replacement["skill_subset"] == ["alpha", "beta"]
+    audit = fixture.run("audit", "--ci", "--no-policy", "--format", "json")
+    assert audit.returncode == 0, audit.stdout + audit.stderr
     assert {path: path.read_bytes() for path in originals} == originals
     modules = fixture.consumer.root / "apm_modules"
     assert sorted(path.relative_to(modules).as_posix() for path in modules.rglob("apm.yml")) == [

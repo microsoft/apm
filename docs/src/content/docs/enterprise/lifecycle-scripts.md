@@ -130,6 +130,10 @@ If both `bash` and `command` are present, `bash` takes priority.
 Timeouts must be positive. A zero or negative `timeoutSec` (or `timeout`) is
 ignored with a warning naming the script, and the default applies.
 
+Interrupting the APM command (Ctrl+C or SIGTERM) also stops a running command script and
+the background jobs in its process group, so the script does not keep running
+after the command exits.
+
 ### Generating sources before compile
 
 A `pre-compile` script can generate instructions from the project's own
@@ -259,7 +263,10 @@ Two environment-level kill-switches are also available:
 - Org policy `executables.deny_all: true` -- when set in `apm-policy.yml`,
   suppresses all lifecycle scripts as a one-directional safety ceiling. An
   org that has locked down all executable primitives will also have lifecycle
-  scripts suppressed automatically.
+  scripts suppressed automatically. When the org policy cannot be enforced in
+  a way that would block `apm install` (for example, it cannot be fetched and
+  `apm.yml` sets `policy.fetch_failure_default: block`), lifecycle scripts are
+  suppressed too.
 
 ## Analytics use case
 

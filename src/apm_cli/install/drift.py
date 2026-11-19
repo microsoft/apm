@@ -5,7 +5,7 @@ directory, then diffs the resulting tree against the working project to
 surface five kinds of divergence:
 
 * ``modified``     -- a tracked deployed file's content differs.
-* ``unmanaged-conflict`` -- a selected skill differs at an unowned destination.
+* ``unmanaged-conflict`` -- a replayed file differs at a destination no lockfile entry claims.
 * ``unintegrated`` -- a tracked deployed file is missing from the project.
 * ``orphaned``     -- a managed-directory file exists in the project but
   is not present in the scratch replay AND not tracked in the lockfile.
@@ -32,7 +32,7 @@ from __future__ import annotations
 import atexit
 import tempfile
 import tracemalloc
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from shutil import copytree, rmtree
 from typing import TYPE_CHECKING, Any
@@ -42,7 +42,11 @@ import click
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
 )
-from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import (
+    build_local_parent_index,
+    resolve_local_dep_base,
+    resolve_local_dep_dir,
+)
 from apm_cli.install.audit_target_roots import (
     canvas_deploy_prefixes as _canvas_deploy_prefixes,
 )
@@ -239,8 +243,12 @@ def _materialize_install_path(
     registry_resolver: Any | None = None,
     registries: dict[str, str] | None = None,
     declared_transports: DeclaredTransportIndex | None = None,
+    local_modules_dir: Path | None = None,
 ) -> Path:
     """Resolve the on-disk path for a locked dep's package contents.
+
+    Local package images are written under ``local_modules_dir`` (default
+    ``apm_modules_dir``); replay passes an ungoverned scratch dir instead.
 
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,
@@ -286,22 +294,15 @@ def _materialize_install_path(
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
             )
-        if candidate.is_file():
-            from apm_cli.install.phases.local_content import materialize_local_file_for_replay
+        from apm_cli.install.phases.local_content import materialize_local_package_for_replay
 
-            # Resolve the declaring directory through the same anchor owner.
-            # Keep the original spelling for admission so file symlinks cannot
-            # disappear behind the resolved candidate.
-            source_base = resolve_local_dep_dir(
-                replace(lock_dep, local_path="."),
-                lockfile,
-                project_root,
-                parent_index=parent_index,
-            )
-            return materialize_local_file_for_replay(
-                lock_dep.to_dependency_ref(), source_base, apm_modules_dir
-            )
-        return candidate
+        # Replay the image install copies, never the raw source tree.
+        source_base = resolve_local_dep_base(
+            lock_dep, lockfile, project_root, parent_index=parent_index
+        )
+        return materialize_local_package_for_replay(
+            lock_dep.to_dependency_ref(), source_base, local_modules_dir or apm_modules_dir
+        )
 
     dep_ref = lock_dep.to_dependency_ref()
     candidate = dep_ref.get_install_path(apm_modules_dir)
@@ -376,14 +377,12 @@ def _materialize_install_path(
 
 
 def _normalize_legacy_local_plugin_for_replay(
-    lock_dep: LockedDependency,
-    install_path: Path,
-    apm_modules_dir: Path,
+    lock_dep: LockedDependency, install_path: Path
 ) -> Path:
     """Normalize a local legacy plugin only in the scratch replay tree."""
     from apm_cli.agent_plugins.loader import detect_agent_plugin
     from apm_cli.deps.plugin_parser import normalize_plugin_directory
-    from apm_cli.models.validation import PackageType
+    from apm_cli.models.validation import PackageType, detect_package_type
     from apm_cli.utils.helpers import find_plugin_json
 
     if lock_dep.package_type == PackageType.AGENT_PLUGIN.value:
@@ -392,16 +391,19 @@ def _normalize_legacy_local_plugin_for_replay(
     if detect_agent_plugin(install_path) is not None:
         return install_path
 
+    # Install normalizes only what the canonical classifier calls a legacy
+    # plugin; an apm.yml package that also ships plugin.json is not one.
+    if detect_package_type(install_path)[0] != PackageType.MARKETPLACE_PLUGIN:
+        return install_path
+
     plugin_json = find_plugin_json(install_path)
     if plugin_json is None:
         return install_path
 
-    replay_path = lock_dep.to_dependency_ref().get_install_path(apm_modules_dir)
-    _copy_install_tree(install_path, replay_path)
-    # The canonical loader has already excluded native Agent Plugin inputs.
-    manifest_path = replay_path / plugin_json.relative_to(install_path)
-    normalize_plugin_directory(replay_path, manifest_path)
-    return replay_path
+    # install_path is the scratch image from materialize_local_package_for_replay;
+    # the canonical loader has already excluded native Agent Plugin inputs.
+    normalize_plugin_directory(install_path, plugin_json)
+    return install_path
 
 
 def _build_package_info(
@@ -533,6 +535,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
+    from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import _project_has_root_primitives
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
@@ -663,14 +666,13 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             registry_resolver=registry_resolver,
                             registries=registries,
                             declared_transports=declared_transports,
+                            local_modules_dir=scratch_root / "apm_modules",
                         )
                         if declared_transports is not None:
                             declared_transports.record_package(install_path, lock_dep)
                         if lock_dep.is_local_source:
                             install_path = _normalize_legacy_local_plugin_for_replay(
-                                lock_dep,
-                                install_path,
-                                scratch_root / "normalized-local-sources",
+                                lock_dep, install_path
                             )
 
                     if lock_dep.local_path == _SELF_KEY:
@@ -684,6 +686,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     dep_key = lock_dep.get_unique_key()
 
+                    # Replay deploys the locked selection, as uninstall does (#3760).
+                    selection = effective_dependency_selection(package_info.dependency_ref)
                     try:
                         result = integrate_package_primitives(
                             package_info,
@@ -704,16 +708,13 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             logger=None,
                             scope=None,
                             native_claude_user_scope=config.user_scope,
-                            skill_subset=(
-                                tuple(package_info.dependency_ref.skill_subset or ()) or None
-                                if package_info.dependency_ref
-                                else None
-                            ),
+                            skill_subset=selection.skill_subset,
+                            skill_pairing=selection.skill_pairing,
                             ctx=None,
                             scratch_root=scratch_root,
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the
                             # replay does not write to targets excluded by the consumer (#1923).
-                            dep_target_subset=lock_dep.target_subset or None,
+                            dep_target_subset=selection.target_subset,
                         )
                     except AgentPluginTargetExcludedError:
                         continue
@@ -792,33 +793,6 @@ def _collect_tracked_files(lockfile: LockFile) -> dict[str, str]:
     return DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)
 
 
-def _claimed_prefixes(
-    tracked: dict[str, str],
-    hashed_files: set[str],
-    project_files: dict[str, Path],
-) -> tuple[str, ...]:
-    """Return ``dir/`` prefixes for the tracked entries that name directories.
-
-    A manifest entry may name a directory rather than each file beneath it
-    (``scan_lockfile_packages`` and ``_check_deployed_files_present`` both
-    accept that shape), so a file is claimed when a tracked *directory*
-    covers it.
-
-    Entries with a recorded hash are files even if the current project path was
-    replaced by a directory. Entries present in *project_files* are also files,
-    which preserves the same rule for legacy hashless lockfiles. A file claim
-    must never act as a prefix: otherwise replacing tracked ``a.md`` with an
-    ``a.md/`` directory would let every descendant dodge the membership check.
-    """
-    return tuple(
-        normalized + "/"
-        for path in tracked
-        if (normalized := path.rstrip("/"))
-        and normalized not in hashed_files
-        and normalized not in project_files
-    )
-
-
 def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     """Return every deployed path whose lock claim is explicitly file-shaped."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -841,7 +815,9 @@ def diff_scratch_against_project(
     Five kinds of findings are emitted:
 
     * ``modified``     -- file exists in both, normalized content differs.
-    * ``unmanaged-conflict`` -- a replayed skill differs from an unowned file.
+    * ``unmanaged-conflict`` -- a replayed file differs from (or is shadowed
+      by a case-only variant of) a file no lockfile entry claims: install
+      skipped a user-authored file, so it is never a managed local edit.
     * ``unintegrated`` -- file exists in scratch but not in project, and the
       path is part of the committed working tree when git tracking is known.
     * ``orphaned``     -- file exists in project + tracked in lockfile
@@ -869,26 +845,6 @@ def diff_scratch_against_project(
     governed = governed_roots if governed_roots is not None else _governed_root_dirs(targets)
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
-    from apm_cli.install.audit_target_roots import claims_for_root
-
-    tracked = claims_for_root(
-        _collect_tracked_files(lockfile),
-        project_root,
-        absolute_only=absolute_claims_only,
-        targets=tuple(targets),
-    )
-    claimed_prefixes = _claimed_prefixes(
-        tracked,
-        set(
-            claims_for_root(
-                {path: "" for path in _collect_hashed_files(lockfile)},
-                project_root,
-                absolute_only=absolute_claims_only,
-                targets=tuple(targets),
-            )
-        ),
-        project_files,
-    )
     # Hook merge targets are shared with the user and never claimed in
     # deployed_files, so they can never be "unrecorded". Their APM-owned slice
     # is compared through hook_ownership; sidecars compare all owned content
@@ -897,7 +853,18 @@ def diff_scratch_against_project(
 
     merge_config_specs = merge_hook_config_projection_specs(targets)
     merge_sidecar_paths = {sidecar_path for sidecar_path, _ in merge_config_specs.values()}
-    merge_config_paths = set(merge_config_specs) | merge_sidecar_paths
+    from apm_cli.install.drift_claims import ReplayClaims
+
+    claims = ReplayClaims.build(
+        _collect_tracked_files(lockfile),
+        _collect_hashed_files(lockfile),
+        project_root,
+        project_files,
+        targets=tuple(targets),
+        absolute_only=absolute_claims_only,
+        shared=set(merge_config_specs) | merge_sidecar_paths,
+    )
+    tracked = claims.tracked
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
@@ -947,6 +914,11 @@ def diff_scratch_against_project(
     for rel, scratch_path in sorted(scratch_files.items()):
         project_path = project_files.get(rel)
         if project_path is None:
+            # A case-only variant occupies the destination on a
+            # case-insensitive filesystem: install skipped it as user-authored.
+            if claims.unclaimed(rel) and (project_root / rel).is_file():
+                findings.append(DriftFinding(path=rel, kind="unmanaged-conflict", package=""))
+                continue
             if tracked_files is not None and rel not in tracked_files:
                 continue
             findings.append(
@@ -962,6 +934,7 @@ def diff_scratch_against_project(
                 project_path, rel, managed, False, diagnostics=collision_diagnostics
             )
         )
+        unmanaged = unmanaged_skill or claims.unclaimed(rel)
         try:
             s_bytes = _normalize(scratch_path.read_bytes())
             p_bytes = _normalize(project_path.read_bytes())
@@ -988,7 +961,7 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
+                    kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=f"(read error: {exc})",
                 )
@@ -1001,12 +974,12 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
+                    kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
                 )
             )
-        elif not (rel in tracked or rel.startswith(claimed_prefixes) or rel in merge_config_paths):
+        elif claims.unclaimed(rel):
             # Content agrees, so nothing else in the audit will ever look at
             # this file again: no manifest entry means no hash baseline and no
             # Unicode scan. Reported only in the content-clean case -- when the

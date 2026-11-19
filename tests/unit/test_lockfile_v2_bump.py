@@ -127,6 +127,26 @@ def test_v3_lockfile_fails_closed_as_unsupported() -> None:
         )
 
 
+@pytest.mark.parametrize("declared", ["1", "2"])
+def test_unquoted_integer_lockfile_version_is_the_same_version(declared: str) -> None:
+    """``lockfile_version: 1`` (quotes dropped by a hand edit) reads as ``'1'``."""
+    # Unquoted in the YAML text, so the loader yields an int, not a str.
+    lock = LockFile.from_yaml(f"lockfile_version: {declared}\ndependencies: []\n")
+
+    assert lock.lockfile_version == declared
+    assert "lockfile_version: '1'" in lock.to_yaml()
+
+
+@pytest.mark.parametrize("declared", ["4", "true", "1.0"])
+def test_unsupported_unquoted_lockfile_version_names_itself(declared: str) -> None:
+    with pytest.raises(UnsupportedLockfileVersionError) as excinfo:
+        LockFile.from_yaml(f"lockfile_version: {declared}\ndependencies: []\n")
+
+    message = str(excinfo.value)
+    assert message.startswith("Unsupported lockfile version ")
+    assert "Unsupported lockfile version 1;" not in message
+
+
 class TestSchemaBumpOpportunistic:
     def test_v1_stays_v1_without_registry_deps(self):
         lock = LockFile()

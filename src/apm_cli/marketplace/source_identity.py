@@ -87,6 +87,49 @@ def parse_marketplace_source(
     return _parse_shorthand(raw, host_flag)
 
 
+def admit_marketplace_catalog_path(path: str) -> str:
+    """Validate a repository-relative catalog path and return its normal form.
+
+    The path selects one ``marketplace.json`` inside a git-backed marketplace
+    repository (Claude Code's ``path`` field on ``github``/``git`` marketplace
+    sources). It must stay inside the repository: no absolute or drive paths,
+    no ``.``/``..`` segments (including percent-encoded ones), no backslashes,
+    no URL query or fragment characters (``?``, ``#``), and it must name a
+    ``.json`` file. A single leading ``./`` is dropped.
+
+    Raises:
+        ValueError: The path is not a string, is empty, escapes the
+            repository, or does not name a JSON file.
+    """
+    if path is not None and not isinstance(path, str):
+        raise ValueError("catalog path must be a string")
+    raw = (path or "").strip()
+    if not raw:
+        raise ValueError("catalog path is empty")
+    if any(ord(char) < 32 or ord(char) == 127 for char in raw):
+        raise ValueError("catalog path contains control characters")
+    if "\\" in raw:
+        raise ValueError("catalog path must use forward slashes")
+    if "?" in raw or "#" in raw:
+        raise ValueError("catalog path must not contain '?' or '#'")
+    if raw.startswith("/") or (len(raw) >= 2 and raw[0].isalpha() and raw[1] == ":"):
+        raise ValueError("catalog path must be relative to the repository root")
+    if raw.startswith("./"):
+        raw = raw[2:]
+    if not raw.lower().endswith(".json"):
+        raise ValueError("catalog path must name a marketplace JSON file")
+    try:
+        validate_path_segments(raw, context="catalog path", reject_empty=True)
+    except ValueError as exc:
+        if "traversal" in str(exc):
+            raise ValueError(
+                f"catalog path '{raw}' contains a traversal segment; "
+                "it must stay inside the repository"
+            ) from exc
+        raise ValueError(f"catalog path '{raw}' contains an empty segment") from exc
+    return raw
+
+
 def _parse_ssh_url(raw: str, host_flag: str | None) -> MarketplaceSourceIdentity:
     """Validate a fully qualified SSH URL without rewriting its transport."""
     normalized_url = f"ssh://{raw[len('ssh://') :]}"

@@ -1,0 +1,260 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: _local/pkg
+  name: pkg
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/pkg-skill
+  - .agents/skills/pkg-skill/SKILL.md
+  - .claude/rules/style.md
+  - .claude/skills/pkg-skill
+  - .claude/skills/pkg-skill/SKILL.md
+  - .cursor/rules/style.mdc
+  - .github/instructions/style.instructions.md
+  - .grok/rules/style.instructions.md
+  - .grok/skills/pkg-skill
+  - .grok/skills/pkg-skill/SKILL.md
+  - .kiro/skills/pkg-skill
+  - .kiro/skills/pkg-skill/SKILL.md
+  - .kiro/steering/style.md
+  - .windsurf/rules/style.md
+  deployed_file_hashes:
+    .agents/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .claude/rules/style.md: sha256:0fa8090de3dbfd7b59584c07e4547d31011d16fa5c45faa87d711d151db6a8e3
+    .claude/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .cursor/rules/style.mdc: sha256:ad4f3ffefe50d676a609ed70c21a3d77d4743a91da31e9b8983263abc37cc3ab
+    .github/instructions/style.instructions.md: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+    .grok/rules/style.instructions.md: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+    .grok/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .kiro/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .kiro/steering/style.md: sha256:eed68ad4edaab056fe57ade294308b34e02bf7f65e3d91187368a8d2f3e62103
+    .windsurf/rules/style.md: sha256:8354e6c9f51a1681f6afa18285cfa2235e8296a291fa578be5f5f51640ef1465
+  source: local
+  local_path: ../pkg
+  content_hash: sha256:4bd06327422aecf0af60576e08fd0a2b47c74ca3db45dcb21fec87af8f9f3057
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/rules/style.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:0fa8090de3dbfd7b59584c07e4547d31011d16fa5c45faa87d711d151db6a8e3
+- kind: project-relative
+  target: claude
+  value: .claude/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: codex
+  value: .agents/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/style.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+- kind: project-relative
+  target: cursor
+  value: .cursor/rules/style.mdc
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:ad4f3ffefe50d676a609ed70c21a3d77d4743a91da31e9b8983263abc37cc3ab
+- kind: project-relative
+  target: grok-build
+  value: .grok/rules/style.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+- kind: project-relative
+  target: grok-build
+  value: .grok/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: grok-build
+  value: .grok/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: kiro
+  value: .kiro/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: kiro
+  value: .kiro/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: kiro
+  value: .kiro/steering/style.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:eed68ad4edaab056fe57ade294308b34e02bf7f65e3d91187368a8d2f3e62103
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b15877ca760ef4e16189f361d050a593a0ebe784862d018bd6985f422d00cedf
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: codex
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:6a4aa8d0ba1855e44cdd36ae30e111f8955f683ca9d4094e6a31ee99d36d53c7
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: cursor
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b15877ca760ef4e16189f361d050a593a0ebe784862d018bd6985f422d00cedf
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: gemini
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:41f30432fa0b0fb3633189a7f7a4f5b88d1f50fb9f660428a934aee179325cd1
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: kiro
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:6a4aa8d0ba1855e44cdd36ae30e111f8955f683ca9d4094e6a31ee99d36d53c7
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: opencode
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:543a603ec574969067f12ac59d652929b6c4f9454986274016557eec1dfe79bc
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: vscode
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a61b5eaf39b93a51e231f31f99b9eb72a86411645bc53171a44b2888e11ae385
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: windsurf
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:4ad5a2774e6499cf3d891b3237ea94314ed45ea323aca09a25628186e0d607de
+- kind: project-relative
+  target: windsurf
+  value: .windsurf/rules/style.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:8354e6c9f51a1681f6afa18285cfa2235e8296a291fa578be5f5f51640ef1465
+mcp_servers:
+- srv
+mcp_configs:
+  srv:
+    name: srv
+    transport: http
+    registry: false
+    url: https://mcp.example.com/mcp
+mcp_target_servers:
+  claude:
+  - srv
+  codex:
+  - srv
+  cursor:
+  - srv
+  gemini:
+  - srv
+  kiro:
+  - srv
+  opencode:
+  - srv
+  vscode:
+  - srv
+  windsurf:
+  - srv

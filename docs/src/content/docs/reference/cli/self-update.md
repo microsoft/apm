@@ -116,7 +116,7 @@ When an update is available, APM downloads and runs the platform installer, stre
 
 Recognized Unix bundles retain their launcher/bundle directories whether `self-update.install-dir` is set to the matching launcher directory or left unset. Conflicting overrides fail; this setting does not migrate an installation. See [ownership and migration](../../../getting-started/installation/#unix-install-ownership-and-migration) for bundle recognition, permission checks, administrator updates, and pip fallback restrictions.
 
-On Windows, self-update advances the [stable executable path](../../../getting-started/installation/). Configuration under `~/.apm/` and project files are untouched.
+On Windows, self-update advances the [stable executable path](../../../getting-started/installation/). Configuration under `$APM_HOME` (default `~/.apm`) and project files are untouched.
 
 ## After update
 

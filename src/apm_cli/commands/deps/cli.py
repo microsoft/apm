@@ -17,8 +17,9 @@ from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
-from ...deps.lockfile import LockedDependency
+from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
+from ...models.manifest_io import InvalidManifestError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
@@ -50,24 +51,32 @@ def _format_primitive_counts(primitives):
     return ", ".join(parts)
 
 
+_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab"}
+
+
 def _deps_list_source_label(
     host: str | None,
     *,
     is_local: bool = False,
     lockfile_source: str | None = None,
+    host_type: str | None = None,
 ) -> str:
-    """Map host / local flags to the ``apm deps list`` Source column."""
-    from ...utils.github_host import is_azure_devops_hostname, is_gitlab_hostname
+    """Map a dependency's provider to the ``apm deps list`` Source column.
+
+    Remote hosts classify through the canonical provider registry, so a
+    declared or locked ``host_type`` labels a self-hosted GitLab correctly.
+    """
+    from ...core.host_providers import classify_host_provider
 
     if is_local or lockfile_source == "local":
         return "local"
     if lockfile_source == "registry":
         return "registry"
-    if host and is_azure_devops_hostname(host):
-        return "azure-devops"
-    if host and is_gitlab_hostname(host):
-        return "gitlab"
-    return "github"
+    try:
+        kind = classify_host_provider(host, host_type=host_type).kind if host else "github"
+    except (ValueError, RuntimeError):
+        kind = "github"
+    return _PROVIDER_SOURCE_LABELS.get(kind, "github")
 
 
 _LOCAL_HASH_SLOT_RE = re.compile(r"^(_local)/[0-9a-f]{12}/(.+)$")
@@ -113,8 +122,8 @@ def _logical_local_display(physical_name: str) -> str:
     return physical_name
 
 
-def _dep_display_name(dep: LockedDependency) -> str:
-    """Get display name for a locked dependency (key@version).
+def _dep_display_key(dep: LockedDependency) -> str:
+    """Return the user-facing key that ``apm uninstall`` accepts for a locked dependency.
 
     Local deps render a logical, portable identity instead of the lockfile
     unique key. For anchored transitive local deps the unique key is an
@@ -123,17 +132,20 @@ def _dep_display_name(dep: LockedDependency) -> str:
     declared relative ``local_path`` (``../pkg``); fall back to the logical
     ``repo_url`` (``_local/pkg``) when the path is absent or itself absolute
     (``/Users/...``, ``~/...``, ``C:\\...``). Remote deps keep their canonical
-    unique key.
+    unique key (host-qualified for non-default hosts).
     """
-    if dep.source == "local":
-        if dep.local_path and not _is_absolute_local_path(dep.local_path):
-            key = dep.local_path
-        elif dep.local_path:
-            key = _absolute_local_display(dep.local_path, dep.repo_url)
-        else:
-            key = dep.repo_url
-    else:
-        key = dep.get_unique_key()
+    if dep.source != "local":
+        return dep.get_unique_key()
+    if dep.local_path and not _is_absolute_local_path(dep.local_path):
+        return dep.local_path
+    if dep.local_path:
+        return _absolute_local_display(dep.local_path, dep.repo_url)
+    return dep.repo_url
+
+
+def _dep_display_name(dep: LockedDependency) -> str:
+    """Get display name for a locked dependency (``key@version``)."""
+    key = _dep_display_key(dep)
     version = (
         dep.version
         or (dep.resolved_commit[:7] if dep.resolved_commit else None)
@@ -241,6 +253,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
     declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
     physical_to_logical: dict[str, str] = {}
+    # Host-blind logical key -> the identity ``apm deps tree`` and uninstall use.
+    display_keys: dict[str, str] = {}
     declared_deps = []
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
@@ -251,7 +265,10 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 # Build the expected installed package name
                 repo_parts = dep.repo_url.split("/")
                 source = _deps_list_source_label(
-                    dep.host, is_local=dep.is_local, lockfile_source=dep.source
+                    dep.host,
+                    is_local=dep.is_local,
+                    lockfile_source=dep.source,
+                    host_type=dep.host_type,
                 )
                 if dep.alias is not None:
                     install_path = dep.get_install_path(apm_modules_path)
@@ -291,7 +308,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
-    except PathTraversalError:
+    except (PathTraversalError, InvalidManifestError):
         raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
@@ -322,17 +339,21 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     dep_key = dep.get_canonical_dependency_string()
                 if dep_key and dep_key not in declared_sources:
                     declared_sources[dep_key] = _deps_list_source_label(
-                        dep.host,
-                        lockfile_source=dep.source,
+                        dep.host, lockfile_source=dep.source, host_type=dep.host_type
                     )
+                if dep.source != "local":
+                    display_keys[dep_key] = _dep_display_key(dep)
                 if dep.replacement is not None:
                     selected = dep.to_dependency_ref()
                     declared_sources[dep_key] = _deps_list_source_label(
-                        selected.host, is_local=selected.is_local, lockfile_source=selected.source
+                        selected.host,
+                        is_local=selected.is_local,
+                        lockfile_source=selected.source,
+                        host_type=selected.host_type,
                     )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
-    except PathTraversalError:
+    except (PathTraversalError, LockfileConflictError):
         raise
     except Exception:
         pass  # Continue without lockfile if it can't be read
@@ -427,7 +448,11 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             or org_repo_name in selected_orphans
             or org_repo_name in expected_ancestors
         )
-        display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
+        display_name = (
+            _logical_local_display(logical_name)
+            if is_orphaned
+            else display_keys.get(logical_name, logical_name)
+        )
         try:
             version = "unknown"
             if has_apm_yml:
@@ -650,7 +675,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
     "global_",
     is_flag=True,
     default=False,
-    help="List user-scope dependencies (~/.apm/) instead of project",
+    help="List dependencies in the APM user home instead of the project",
 )
 @click.option(
     "--all",
@@ -811,6 +836,8 @@ def _build_dep_tree(apm_dir):
                     result["children_map"] = children_map
                     result["unresolved"] = list(placement.unresolved)
                     return result
+    except LockfileConflictError:
+        raise
     except Exception:
         pass
 
@@ -852,7 +879,7 @@ def _build_dep_tree(apm_dir):
     "global_",
     is_flag=True,
     default=False,
-    help="Show user-scope dependency tree (~/.apm/)",
+    help="Show the dependency tree in the APM user home",
 )
 def tree(global_):
     """Display dependencies in hierarchical tree format using lockfile."""
@@ -1043,7 +1070,7 @@ def clean(dry_run: bool, yes: bool):
     "global_",
     is_flag=True,
     default=False,
-    help="Update user-scope dependencies (~/.apm/)",
+    help="Update dependencies in the APM user home",
 )
 @click.option(
     "--legacy-skill-paths",
@@ -1085,8 +1112,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # breaking release.
     _rich_warning(
         "'apm deps update' is deprecated; use 'apm update' instead. "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
-        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
+        "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
+        "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
+        "interactive plan, --dry-run, and --yes.",
         symbol="warning",
     )
 
@@ -1105,7 +1133,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     apm_yml_path = project_root / APM_YML_FILENAME
 
     if not apm_yml_path.exists():
-        scope_hint = "~/.apm/" if global_ else "current directory"
+        scope_hint = str(project_root) if global_ else "current directory"
         logger.error(f"No {APM_YML_FILENAME} found in {scope_hint}")
         sys.exit(1)
 

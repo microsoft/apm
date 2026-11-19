@@ -25,6 +25,17 @@ class MarketplaceNotFoundError(MarketplaceError):
         )
 
 
+class ManualMarketplaceConflictError(MarketplaceError):
+    """Raised when a manifest entry targets a manually registered marketplace name."""
+
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(
+            f"Marketplace '{name}' was registered manually with 'apm marketplace add'; "
+            "the user manifest does not overwrite it."
+        )
+
+
 class PluginNotFoundError(MarketplaceError):
     """Raised when a plugin is not found in a marketplace."""
 
@@ -105,7 +116,8 @@ class HeadNotAllowedError(BuildError):
         super().__init__(
             f"Package '{package}' resolves to branch/HEAD ref '{ref}'. "
             f"Branch refs are mutable and not recommended for reproducible builds. "
-            f"Pin to a tag or SHA, or pass --allow-head to override.",
+            f"Pin 'ref' to a tag or a full 40-character commit SHA "
+            f"(for example: apm marketplace package set {package} --ref <tag-or-sha>).",
             package=package,
         )
 

@@ -8,6 +8,7 @@ import os
 import subprocess
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
@@ -20,6 +21,7 @@ from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy._gitlab import (
     _fetch_from_gitlab_repo,
     _fetch_gitlab_contents,
+    _gitlab_namespace_descending,
     _gitlab_project_state_via_git,
 )
 from apm_cli.policy.discovery import (
@@ -29,6 +31,7 @@ from apm_cli.policy.discovery import (
     PolicyFetchResult,
     _auto_discover,
     _cache_key,
+    _extract_extends_host,
     _extract_org_from_git_remote,
     _extract_org_host_port_from_git_remote,
     _fetch_ado_contents,
@@ -44,12 +47,15 @@ from apm_cli.policy.discovery import (
     _policy_repo_candidates,
     _read_cache,
     _read_cache_entry,
+    _remote_url_parts,
+    _validate_extends_host,
     _write_cache,
     discover_policy,
 )
 from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy
 from apm_cli.utils.git_env import get_git_executable
+from tests.utils.simulated_ado_chain import StaticPolicyResolver
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
@@ -157,11 +163,78 @@ class TestParseRemoteUrl(unittest.TestCase):
         result = _parse_remote_url("git@ssh.dev.azure.com:v3/myorg/myproject/myrepo.git")
         self.assertEqual(result, ("myorg", "ssh.dev.azure.com"))
 
+    # --- Nested GitLab subgroups: org stays the top-level group (#2753) ---
+
+    def test_https_gitlab_nested_subgroups_org_is_top_level(self):
+        result = _parse_remote_url("https://gitlab.com/acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("acme", "gitlab.com"))
+
+    def test_ssh_gitlab_nested_subgroups_org_is_top_level(self):
+        result = _parse_remote_url("git@gitlab.com:acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("acme", "gitlab.com"))
+
+
+class TestRemoteUrlParts(unittest.TestCase):
+    """Test _remote_url_parts -- the shared host + path-segments splitter."""
+
+    def test_https_nested_segments(self):
+        result = _remote_url_parts("https://gitlab.com/acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("gitlab.com", ["acme", "dept-a", "team-x", "my-project"]))
+
+    def test_ssh_nested_segments(self):
+        result = _remote_url_parts("git@gitlab.com:acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("gitlab.com", ["acme", "dept-a", "team-x", "my-project"]))
+
+    def test_https_flat_segments(self):
+        result = _remote_url_parts("https://gitlab.com/acme/my-project")
+        self.assertEqual(result, ("gitlab.com", ["acme", "my-project"]))
+
+    def test_https_trailing_slash_is_cleaned(self):
+        result = _remote_url_parts("https://gitlab.com/acme/my-project/")
+        self.assertEqual(result, ("gitlab.com", ["acme", "my-project"]))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_remote_url_parts(""))
+
+    def test_non_url_returns_none(self):
+        self.assertIsNone(_remote_url_parts("not-a-url"))
+
+    def test_ssh_empty_path_returns_none(self):
+        self.assertIsNone(_remote_url_parts("git@gitlab.com:"))
+
+    def test_https_no_path_returns_none(self):
+        self.assertIsNone(_remote_url_parts("https://gitlab.com/"))
+
+
+class TestGitlabNamespaceDescending(unittest.TestCase):
+    """Test _gitlab_namespace_descending -- subgroup probe order (#2753).
+
+    The helper is pure: it takes the already-read ``origin`` URL so discovery
+    reads the remote exactly once.
+    """
+
+    def test_nested_subgroups_deepest_first(self):
+        result = _gitlab_namespace_descending(
+            "https://gitlab.com/acme/dept-a/team-x/my-project.git"
+        )
+        self.assertEqual(result, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
+
+    def test_flat_project_yields_single_top_level(self):
+        result = _gitlab_namespace_descending("git@gitlab.com:acme/my-project.git")
+        self.assertEqual(result, ["acme"])
+
+    def test_no_remote_returns_none(self):
+        self.assertIsNone(_gitlab_namespace_descending(None))
+
+    def test_no_namespace_segment_returns_none(self):
+        # A remote with only one path segment has no owning namespace.
+        self.assertIsNone(_gitlab_namespace_descending("https://gitlab.com/solo"))
+
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):
     """Test _extract_org_from_git_remote with mocked subprocess."""
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_successful_remote(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -178,26 +251,26 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
             timeout=5,
         )
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_git_command_fails(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_git_not_found(self, mock_run):
         mock_run.side_effect = FileNotFoundError("git not found")
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5)
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery._parse_remote_url")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote._parse_remote_url")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_remote_parser_value_error_returns_none(self, mock_run, mock_parse):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -209,9 +282,9 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery.urlparse")
-    @patch("apm_cli.policy.discovery._parse_remote_url")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.urlparse")
+    @patch("apm_cli.policy._remote._parse_remote_url")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_remote_port_value_error_returns_none(self, mock_run, mock_parse, mock_urlparse):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -451,119 +524,138 @@ class TestFetchGithubContents(unittest.TestCase):
             "content": base64.b64encode(content.encode()).decode(),
         }
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_200_base64_content(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = self._b64_response(VALID_POLICY_YAML)
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_200_plain_content(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"content": VALID_POLICY_YAML}
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_404(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("404", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_403(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 403
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("403", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_timeout(self, mock_requests, _mock_token):
         import requests as real_requests
 
-        mock_requests.exceptions = real_requests.exceptions
-        mock_requests.get.side_effect = real_requests.exceptions.Timeout()
+        mock_requests.side_effect = real_requests.exceptions.Timeout()
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("Timeout", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_connection_error(self, mock_requests, _mock_token):
         import requests as real_requests
 
-        mock_requests.exceptions = real_requests.exceptions
-        mock_requests.get.side_effect = real_requests.exceptions.ConnectionError()
+        mock_requests.side_effect = real_requests.exceptions.ConnectionError()
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("Connection error", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_unexpected_response_format(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"type": "dir"}
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         content, error = _fetch_github_contents("contoso/.github", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("Unexpected response", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_invalid_repo_ref(self, mock_requests, _mock_token):
         content, error = _fetch_github_contents("invalid", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("Invalid repo reference", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ghp_test123")
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver",
+        return_value=StaticPolicyResolver("ghp_test123"),
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_auth_header_sent(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = self._b64_response(VALID_POLICY_YAML)
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         _fetch_github_contents("contoso/.github", "apm-policy.yml")
 
-        call_kwargs = mock_requests.get.call_args[1]
+        call_kwargs = mock_requests.call_args[1]
         self.assertIn("Authorization", call_kwargs["headers"])
         self.assertEqual(call_kwargs["headers"]["Authorization"], "token ghp_test123")
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
-    @patch("apm_cli.policy.discovery.requests")
+    @patch(
+        "apm_cli.policy.discovery._policy_auth_resolver", return_value=StaticPolicyResolver(None)
+    )
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_ghe_api_url(self, mock_requests, _mock_token):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        mock_requests.get.return_value = mock_resp
+        mock_requests.return_value = mock_resp
 
         _fetch_github_contents("ghe.example.com/contoso/.github", "apm-policy.yml")
 
-        call_url = mock_requests.get.call_args[0][0]
+        call_url = mock_requests.call_args[0][0]
         self.assertTrue(call_url.startswith("https://ghe.example.com/api/v3/repos/"))
 
 
@@ -637,50 +729,46 @@ class TestFetchFromRepo(unittest.TestCase):
 class TestFetchFromUrl(unittest.TestCase):
     """Test _fetch_from_url with mocked requests."""
 
-    @patch("apm_cli.policy.discovery.requests")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_200_success(self, mock_requests):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = __import__("requests").exceptions
+        mock_requests.return_value = mock_resp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertTrue(result.found)
             self.assertEqual(result.source, "url:https://example.com/policy.yml")
 
-    @patch("apm_cli.policy.discovery.requests")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_404(self, mock_requests):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = __import__("requests").exceptions
+        mock_requests.return_value = mock_resp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("404", result.error)
 
-    @patch("apm_cli.policy.discovery.requests")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_timeout(self, mock_requests):
         import requests as real_requests
 
-        mock_requests.exceptions = real_requests.exceptions
-        mock_requests.get.side_effect = real_requests.exceptions.Timeout()
+        mock_requests.side_effect = real_requests.exceptions.Timeout()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("Timeout", result.error)
 
-    @patch("apm_cli.policy.discovery.requests")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_invalid_policy_content(self, mock_requests):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = "enforcement: bogus\n"
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = __import__("requests").exceptions
+        mock_requests.return_value = mock_resp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
@@ -699,13 +787,12 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertTrue(result.found)
             self.assertIn("file:", result.source)
 
-    @patch("apm_cli.policy.discovery.requests")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_override_url(self, mock_requests):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = __import__("requests").exceptions
+        mock_requests.return_value = mock_resp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = discover_policy(
@@ -792,7 +879,7 @@ class TestDiscoverPolicy(unittest.TestCase):
         mock_fetch.assert_called_once()
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_override_org_auto_discovers(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -806,7 +893,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             mock_fetch.assert_called_once()
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_none_auto_discovers(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -819,7 +906,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertTrue(result.found)
             self.assertEqual(result.source, "org:contoso/.github-private")
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_no_git_remote(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
 
@@ -829,7 +916,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertIn("Could not determine org", result.error)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_cache_hit_returns_cached(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -850,7 +937,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertEqual(mock_fetch.call_count, 1)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_ghe_repo_ref_includes_host(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -935,6 +1022,53 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertEqual(mock_fetch.call_count, 4)
             self.assertEqual(result.outcome, "absent")
             self.assertFalse(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_all_absent_records_masked_404_hint_without_warning(self, mock_extract, mock_fetch):
+        """#3754: the masked-404 hint is result data, never a default-mode WARNING."""
+        from apm_cli.core.auth import _redact_secrets
+
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent", not_found=True)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertNoLogs("apm_cli.policy.discovery", level="WARNING"):
+                result = _auto_discover(Path(tmpdir), no_cache=True)
+        self.assertEqual(result.outcome, "absent")
+        hint = result.discovery_hint
+        self.assertIn("contoso/.github-private", hint)
+        self.assertIn("Contents: read", hint)
+        # The secret redaction filter must leave the wording readable.
+        self.assertEqual(_redact_secrets(hint), hint)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_policy_in_dot_github_gets_no_masked_404_hint(self, mock_extract, mock_fetch):
+        """#3754: an absent .github-private says nothing when .github has the policy."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.side_effect = [
+            PolicyFetchResult(outcome="absent", not_found=True),
+            PolicyFetchResult(policy=ApmPolicy(), source="org:contoso/.github", outcome="found"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertNoLogs("apm_cli.policy.discovery", level="WARNING"):
+                result = _auto_discover(Path(tmpdir), no_cache=True)
+        self.assertTrue(result.found)
+        self.assertIsNone(result.discovery_hint)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_cache_only_miss_gets_no_masked_404_hint(self, mock_extract, mock_fetch):
+        """#3754: a cache-only miss sent no request, so it must not claim a 404."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), cache_only=True)
+        self.assertEqual(result.outcome, "absent")
+        self.assertIsNone(result.discovery_hint)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
@@ -1109,7 +1243,7 @@ class TestAutoDiscover(unittest.TestCase):
         mock_candidates.return_value = ("_apm",)
 
         with (
-            patch("apm_cli.policy.discovery.subprocess.run", side_effect=fake_run) as mock_run,
+            patch("apm_cli.policy._remote.subprocess.run", side_effect=fake_run) as mock_run,
             patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False),
             tempfile.TemporaryDirectory() as tmpdir,
         ):
@@ -1173,6 +1307,176 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertFalse(result.found)
             self.assertEqual(result.outcome, "absent")
             self.assertIsNone(result.error)
+
+    # --- GitLab namespace ancestry walk (#2753) ---
+
+    def _walk(self, side_effect, namespaces=None, **kwargs):
+        """Run _auto_discover over a nested GitLab ancestry with a fake fetch."""
+        levels = namespaces or ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        with (
+            patch(
+                "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
+                return_value=("acme", "gitlab.com", None),
+            ),
+            patch("apm_cli.policy._gitlab._gitlab_namespace_descending", return_value=levels),
+            patch(
+                "apm_cli.policy._gitlab._fetch_from_gitlab_repo", side_effect=side_effect
+            ) as fetch,
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _auto_discover(Path(tmpdir), no_cache=True, **kwargs)
+        return result, fetch
+
+    @staticmethod
+    def _found(namespace, outcome="found"):
+        return PolicyFetchResult(
+            policy=ApmPolicy(),
+            source=f"org:gitlab.com/{namespace}/apm-policy",
+            outcome=outcome,
+        )
+
+    def test_gitlab_ancestry_nearest_policy_is_leaf_with_ancestor_parents(self):
+        """Every level is probed; the nearest policy is the leaf, ancestors compose."""
+        result, fetch = self._walk(
+            [self._found("acme/dept-a/team-x"), PolicyFetchResult(outcome="absent"),
+             self._found("acme")]
+        )  # fmt: skip
+
+        self.assertTrue(result.found)
+        self.assertEqual(result.source, "org:gitlab.com/acme/dept-a/team-x/apm-policy")
+        self.assertEqual(
+            [parent.source for parent in result.ancestry_parents],
+            ["org:gitlab.com/acme/apm-policy"],
+        )
+        self.assertEqual(result.cache_ref, "gitlab.com/acme/dept-a/team-x/apm-policy#ancestry")
+        probed = [c.kwargs["org"] for c in fetch.call_args_list]
+        self.assertEqual(probed, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
+
+    def test_gitlab_ancestry_company_only_is_leaf_without_parents(self):
+        """Absent subgroups leave the top-level policy as the composed leaf."""
+        result, fetch = self._walk(
+            [PolicyFetchResult(outcome="absent"), PolicyFetchResult(outcome="absent"),
+             self._found("acme")]
+        )  # fmt: skip
+
+        self.assertTrue(result.found)
+        self.assertEqual(result.source, "org:gitlab.com/acme/apm-policy")
+        self.assertEqual(result.ancestry_parents, [])
+        self.assertEqual(fetch.call_count, 3)
+
+    def test_gitlab_ancestry_all_absent_is_clean_absent(self):
+        """No policy at any level -> clean absent, every level probed once."""
+        result, fetch = self._walk(lambda **_: PolicyFetchResult(outcome="absent"))
+
+        self.assertEqual(result.outcome, "absent")
+        self.assertIsNone(result.error)
+        self.assertEqual(fetch.call_count, 3)
+
+    def test_gitlab_ancestry_error_with_discovered_policy_is_incomplete_chain(self):
+        """A non-404 failure never yields a weaker partial chain (#2753)."""
+        for failing in (0, 1, 2):
+            with self.subTest(failing=failing):
+                levels = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+                side_effect = [self._found(namespace) for namespace in levels]
+                side_effect[failing] = PolicyFetchResult(
+                    source=f"org:gitlab.com/{levels[failing]}/apm-policy",
+                    error="403: Access denied",
+                    outcome="cache_miss_fetch_fail",
+                )
+                result, fetch = self._walk(side_effect)
+
+                self.assertEqual(result.outcome, "incomplete_chain")
+                self.assertIsNone(result.policy)
+                self.assertIn(f"{levels[failing]}/apm-policy", result.error)
+                self.assertEqual(fetch.call_count, 3)
+
+    def test_gitlab_ancestry_error_without_any_policy_keeps_fetch_failure(self):
+        """With nothing discovered, the failure keeps existing fetch-failure routing."""
+        failure = PolicyFetchResult(error="Connection error", outcome="cache_miss_fetch_fail")
+        result, _fetch = self._walk(
+            [PolicyFetchResult(outcome="absent"), failure, PolicyFetchResult(outcome="absent")]
+        )
+
+        self.assertIs(result, failure)
+
+    def test_gitlab_ancestry_malformed_ancestor_fails_closed(self):
+        """A malformed ancestor policy cannot be dropped from the composition."""
+        result, _fetch = self._walk(
+            [self._found("acme/dept-a/team-x"), PolicyFetchResult(outcome="absent"),
+             PolicyFetchResult(source="org:gitlab.com/acme/apm-policy", error="bad",
+                               outcome="malformed")]
+        )  # fmt: skip
+
+        self.assertEqual(result.outcome, "incomplete_chain")
+
+    def test_gitlab_ancestry_pin_applies_to_nearest_policy_only(self):
+        """policy.hash pins the nearest discovered policy, never its ancestors."""
+        _result, fetch = self._walk(
+            [PolicyFetchResult(outcome="absent"), self._found("acme/dept-a"), self._found("acme")],
+            expected_hash="sha256:" + "a" * 64,
+        )
+
+        pins = [c.kwargs["expected_hash"] for c in fetch.call_args_list]
+        self.assertEqual(pins, ["sha256:" + "a" * 64, "sha256:" + "a" * 64, None])
+
+    def test_gitlab_ancestry_leaf_hash_mismatch_fails_closed_immediately(self):
+        mismatch = PolicyFetchResult(outcome="hash_mismatch", error="pin mismatch")
+        result, fetch = self._walk([mismatch, self._found("acme/dept-a")])
+
+        self.assertIs(result, mismatch)
+        fetch.assert_called_once()
+
+    def test_gitlab_ancestry_empty_child_does_not_shadow_ancestor(self):
+        """An empty team policy is the leaf; the company policy still composes."""
+        result, _fetch = self._walk(
+            [self._found("acme/dept-a/team-x", outcome="empty"),
+             PolicyFetchResult(outcome="absent"), self._found("acme")]
+        )  # fmt: skip
+
+        self.assertEqual(result.outcome, "empty")
+        self.assertEqual(len(result.ancestry_parents), 1)
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_flat_project_falls_back_to_top_level_org(self, mock_extract, mock_fetch):
+        """No derivable namespace -> single top-level org probe (back-compat)."""
+        mock_extract.return_value = ("contoso", "gitlab.com", None)
+        mock_fetch.return_value = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:gitlab.com/contoso/apm-policy", outcome="found"
+        )
+
+        with (
+            patch("apm_cli.policy._gitlab._gitlab_namespace_descending", return_value=None),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertTrue(result.found)
+        self.assertIsNone(result.ancestry_parents)
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "contoso")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy._remote.subprocess.run")
+    def test_gitlab_ancestry_wiring_from_real_remote(self, mock_run, mock_gitlab_fetch):
+        """A real nested origin URL flows through the actual namespace helper:
+        origin is read once and every ancestor level is probed on its host."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="https://gitlab.com/acme/dept-a/team-x/my-project.git\n",
+        )
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(result.outcome, "absent")
+        mock_run.assert_called_once()
+        probed = [c.kwargs["org"] for c in mock_gitlab_fetch.call_args_list]
+        self.assertEqual(probed, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
+        self.assertTrue(
+            all(c.kwargs["host"] == "gitlab.com" for c in mock_gitlab_fetch.call_args_list)
+        )
 
 
 class TestPolicyRepoCandidates(unittest.TestCase):
@@ -1294,6 +1598,173 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
         self.assertEqual(mock_fetch.call_args.kwargs["org"], "platform")
         self.assertEqual(mock_fetch.call_args.kwargs["repo"], "baseline")
 
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_nested_namespace_reference(self, mock_fetch):
+        """An extends: ref into an intermediate subgroup resolves (#2753)."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _fetch_chain_parent(
+                "acme/dept-a/apm-policy",
+                current_source="org:gitlab.com/acme/dept-a/team-x/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        # Namespace is everything before the final segment; repo is the last.
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_host_qualified_nested_namespace(self, mock_fetch):
+        """A host-qualified extends: ref into a nested subgroup strips the host."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _fetch_chain_parent(
+                "gitlab.com/acme/dept-a/apm-policy",
+                current_source="org:gitlab.com/acme/dept-a/team-x/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_host_qualified_ref_with_matching_port(self, mock_fetch):
+        """A host-qualified extends: ref whose ``host:port`` matches the leaf's
+        non-null port is stripped and fetched -- the positive side of the
+        ``explicit.port == port`` gate (mismatch/malformed are covered
+        separately). Pins that a matching self-managed port proceeds."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _fetch_chain_parent(
+                "gitlab.example.test:8443/acme/dept-a/apm-policy",
+                current_source="org:gitlab.example.test:8443/acme/dept-a/team-x/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=8443,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+        self.assertEqual(mock_fetch.call_args.kwargs["port"], 8443)
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_rejects_single_segment_reference(self, mock_fetch):
+        """A bare single-segment extends: ref fails closed, never probes."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="found", policy=ApmPolicy())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_chain_parent(
+                "apm-policy",
+                current_source="org:gitlab.com/acme/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIn("Invalid GitLab policy reference", result.error)
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_rejects_host_prefix_with_mismatched_port(self, mock_fetch):
+        """A host-like prefix that does not match the leaf host+port is rejected,
+        never silently folded into the namespace."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="found", policy=ApmPolicy())
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _fetch_chain_parent(
+                "gitlab.example.test/acme/apm-policy",  # host prefix, but leaf has :8443
+                current_source="org:gitlab.example.test:8443/acme/team/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=8443,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIn("Invalid GitLab policy reference", result.error)
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_rejects_malformed_port_without_crashing(self, mock_fetch):
+        """A host-like prefix with a malformed port fails closed, not raises."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="found", policy=ApmPolicy())
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _fetch_chain_parent(
+                "gitlab.example.test:not-a-port/acme/apm-policy",
+                current_source="org:gitlab.example.test/acme/team/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIn("Invalid GitLab policy reference", result.error)
+        mock_fetch.assert_not_called()
+
+
+class TestValidateExtendsHostNestedNamespace(unittest.TestCase):
+    """The pre-fetch host-pin guard must allow nested GitLab namespaces (#2753).
+
+    ``_validate_extends_host`` runs BEFORE the GitLab adapter fetch, so a bare
+    nested-namespace ``extends:`` ref (single-label first segment) must not be
+    misread as a cross-host reference -- while a real attacker FQDN still is.
+    """
+
+    def test_nested_namespace_ref_is_not_a_host_on_gitlab_leaf(self):
+        # First segment is a top-level group, not a host -> shorthand (GitLab).
+        self.assertIsNone(_extract_extends_host("acme/dept-a/apm-policy", "gitlab.com"))
+
+    def test_single_label_first_segment_stays_a_host_on_github_leaf(self):
+        # F1: on a non-GitLab leaf a single-label first segment is a host, so a
+        # cross-host ``extends: "evil/org/repo"`` must NOT be treated as
+        # same-host (which would route a credential to ``evil``).
+        self.assertEqual(_extract_extends_host("evil/org/.github", "github.com"), "evil")
+
+    def test_host_qualified_nested_ref_extracts_host(self):
+        self.assertEqual(
+            _extract_extends_host("gitlab.com/acme/dept-a/apm-policy", "gitlab.com"),
+            "gitlab.com",
+        )
+
+    def test_validate_allows_nested_same_host_reference(self):
+        # Must NOT raise: this is the exact ref the subgroup feature enables.
+        _validate_extends_host("gitlab.com", "acme/dept-a/apm-policy")
+
+    def test_validate_rejects_single_label_cross_host_on_github_leaf(self):
+        import apm_cli.policy.inheritance as _inh
+
+        with self.assertRaisesRegex(_inh.PolicyInheritanceError, "cross-host"):
+            _validate_extends_host("github.com", "evil/org/.github")
+
+    def test_validate_still_rejects_cross_host_fqdn(self):
+        import apm_cli.policy.inheritance as _inh
+
+        with self.assertRaisesRegex(_inh.PolicyInheritanceError, "cross-host"):
+            _validate_extends_host("gitlab.com", "evil.example.com/org/apm-policy")
+
 
 class TestFetchAdoContents(unittest.TestCase):
     """Test _fetch_ado_contents for Azure DevOps Items API."""
@@ -1302,13 +1773,20 @@ class TestFetchAdoContents(unittest.TestCase):
         ctx = MagicMock()
         ctx.token = token
         ctx.auth_scheme = scheme
-        ctx.git_env = {}
-        if scheme == "bearer" and token:
-            ctx.git_env = {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {token}",
-            }
+        ctx.git_env = (
+            _RealAuthResolver._build_git_env(token, scheme=scheme, host_kind="ado", base_env={})
+            if token
+            else {}
+        )
         return ctx
+
+    @staticmethod
+    def _sent_authorization(call) -> str | None:
+        request = types.SimpleNamespace(headers=dict(call.kwargs.get("headers") or {}))
+        auth = call.kwargs.get("auth")
+        if callable(auth):
+            auth(request)
+        return request.headers.get("Authorization")
 
     def _resolver(self, mock_resolver_cls, token: str | None, scheme: str = "basic"):
         resolver = mock_resolver_cls.return_value
@@ -1326,7 +1804,7 @@ class TestFetchAdoContents(unittest.TestCase):
         return resolver
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_success(self, mock_get, mock_resolver_cls):
         resolver = self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
@@ -1338,13 +1816,11 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
         # Verify Basic auth header was sent with ADO_APM_PAT
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers", {})
-        self.assertIn("Basic", headers.get("Authorization", ""))
+        self.assertIn("Basic", self._sent_authorization(mock_get.call_args) or "")
         resolver.resolve.assert_called_once_with("dev.azure.com", org="contoso")
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_404_returns_error(self, mock_get, mock_resolver_cls):
         self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
@@ -1356,23 +1832,28 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIn("404", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_401_returns_error(self, mock_get, mock_resolver_cls):
+        from apm_cli.core.auth_chain import AdoAuthChainExhaustedError, AuthAttemptLog
+
         resolver = self._resolver(mock_resolver_cls, "my-ado-pat")
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
-        mock_get.return_value = mock_resp
+        attempts = AuthAttemptLog()
+        resolver.try_with_fallback.side_effect = AdoAuthChainExhaustedError(
+            "Authentication failed for dev.azure.com. Tried in order: ADO_APM_PAT was rejected",
+            attempts=attempts,
+        )
 
         content, error = _fetch_ado_contents("contoso", "apm", "apm-policy", "apm-policy.yml")
         self.assertIsNone(content)
-        self.assertIn("401", error)
+        self.assertIn("ADO_APM_PAT was rejected", error)
         self.assertIn("auth remediation", error)
         resolver.build_error_context.assert_called_once_with(
-            "dev.azure.com", "fetch org policy", org="contoso"
+            "dev.azure.com", "fetch org policy", org="contoso", attempts=attempts
         )
+        mock_get.assert_not_called()
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_redirect_rejected(self, mock_get, mock_resolver_cls):
         self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
@@ -1385,7 +1866,7 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIn("redirect", error.lower())
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_no_auth_token_still_sends_request(self, mock_get, mock_resolver_cls):
         """Unauthenticated requests are allowed (public ADO repos)."""
         self._resolver(mock_resolver_cls, None)
@@ -1397,12 +1878,10 @@ class TestFetchAdoContents(unittest.TestCase):
         _content, error = _fetch_ado_contents("contoso", "apm", "apm-policy", "apm-policy.yml")
         self.assertIsNone(error)
         # Verify no Authorization header was sent
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers", {})
-        self.assertNotIn("Authorization", headers)
+        self.assertIsNone(self._sent_authorization(mock_get.call_args))
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_authresolver_bearer_token_uses_bearer_header(self, mock_get, mock_resolver_cls):
         """ADO bearer tokens from AuthResolver use Bearer auth."""
         self._resolver(mock_resolver_cls, "fallback-token", scheme="bearer")
@@ -1413,12 +1892,10 @@ class TestFetchAdoContents(unittest.TestCase):
 
         _content, error = _fetch_ado_contents("contoso", "apm", "apm-policy", "apm-policy.yml")
         self.assertIsNone(error)
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers", {})
-        self.assertEqual(headers.get("Authorization"), "Bearer fallback-token")
+        self.assertEqual(self._sent_authorization(mock_get.call_args), "Bearer fallback-token")
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_custom_server_port_reaches_policy_api(
         self,
         mock_get,
@@ -1452,7 +1929,7 @@ class TestFetchAdoContents(unittest.TestCase):
         )
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy.discovery.requests.get")
+    @patch("apm_cli.policy.discovery.policy_get")
     def test_rejected_services_pat_retries_policy_with_bearer(
         self,
         mock_get,
@@ -1472,6 +1949,7 @@ class TestFetchAdoContents(unittest.TestCase):
                     "fresh-bearer",
                     {
                         "GIT_CONFIG_COUNT": "1",
+                        "GIT_CONFIG_KEY_0": "http.extraheader",
                         "GIT_CONFIG_VALUE_0": ("Authorization: Bearer fresh-bearer"),
                     },
                 )
@@ -1488,9 +1966,7 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
         self.assertEqual(mock_get.call_count, 2)
-        scheme, credential = (
-            mock_get.call_args_list[1].kwargs["headers"]["Authorization"].split(" ", 1)
-        )
+        scheme, credential = self._sent_authorization(mock_get.call_args_list[1]).split(" ", 1)
         self.assertEqual(scheme, "Bearer")
         self.assertEqual(credential, "fresh-bearer")
 
@@ -1661,37 +2137,6 @@ class TestFetchFromAdoRepo(unittest.TestCase):
             self.assertEqual(result.outcome, "hash_mismatch")
 
 
-class TestGetTokenForHost(unittest.TestCase):
-    """Test _get_token_for_host delegation."""
-
-    @patch.dict(os.environ, {"GITHUB_TOKEN": "test-tok"}, clear=True)
-    @patch(
-        "apm_cli.core.auth.AuthResolver.resolve",
-        side_effect=Exception("simulated failure"),
-    )
-    def test_fallback_to_env_vars(self, _mock_method):
-        from apm_cli.policy.discovery import _get_token_for_host
-
-        token = _get_token_for_host("github.com")
-        self.assertEqual(token, "test-tok")
-
-    @patch.dict(
-        os.environ,
-        {"GITHUB_TOKEN": "", "GITHUB_APM_PAT": "", "GH_TOKEN": ""},
-        clear=True,
-    )
-    @patch(
-        "apm_cli.core.auth.AuthResolver.resolve",
-        side_effect=Exception("simulated failure"),
-    )
-    def test_no_token_available(self, _mock_method):
-        from apm_cli.policy.discovery import _get_token_for_host
-
-        token = _get_token_for_host("github.com")
-        # All env vars are empty strings, which are falsy
-        self.assertFalse(token)
-
-
 class TestFetchGitlabContents(unittest.TestCase):
     """Test _fetch_gitlab_contents for the GitLab Repository Files API."""
 
@@ -1725,7 +2170,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         return resolver
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_success(self, mock_get, mock_resolver_cls):
         self._resolver(mock_resolver_cls, "my-gitlab-token")
         mock_resp = MagicMock()
@@ -1778,7 +2223,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         with (
             patch.dict(os.environ, env, clear=True),
             patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None),
-            patch("apm_cli.policy._gitlab.requests.get", side_effect=fake_get) as mock_get,
+            patch("apm_cli.policy._gitlab.policy_get", side_effect=fake_get) as mock_get,
         ):
             content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
 
@@ -1790,7 +2235,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         self.assertEqual(mock_get.call_args.kwargs["headers"].get("PRIVATE-TOKEN"), "glpat_secret")
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_404_returns_error(self, mock_get, mock_resolver_cls):
         self._resolver(mock_resolver_cls, "my-gitlab-token")
         mock_resp = MagicMock()
@@ -1802,7 +2247,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         self.assertIn("404", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_410_returns_not_found_error(self, mock_get, mock_resolver_cls):
         """Self-managed GitLab has been observed returning 410 for a missing project (#2566)."""
         self._resolver(mock_resolver_cls, "my-gitlab-token")
@@ -1815,7 +2260,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         self.assertIn("410", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_401_returns_error(self, mock_get, mock_resolver_cls):
         resolver = self._resolver(mock_resolver_cls, "my-gitlab-token")
         mock_resp = MagicMock()
@@ -1831,7 +2276,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         )
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_request_exception_redacts_header_value(self, mock_get, mock_resolver_cls):
         """Request validation errors must not render credential-bearing headers."""
         from requests.exceptions import InvalidHeader
@@ -1846,7 +2291,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         self.assertNotIn("glpat_secret", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_redirect_rejected(self, mock_get, mock_resolver_cls):
         self._resolver(mock_resolver_cls, "my-gitlab-token")
         mock_resp = MagicMock()
@@ -1860,7 +2305,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         self.assertNotIn("secret", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_no_auth_token_still_sends_request(self, mock_get, mock_resolver_cls):
         """Unauthenticated requests are allowed (public GitLab projects)."""
         self._resolver(mock_resolver_cls, None)
@@ -1877,7 +2322,7 @@ class TestFetchGitlabContents(unittest.TestCase):
         self.assertNotIn("Authorization", headers)
 
     @patch("apm_cli.core.auth.AuthResolver")
-    @patch("apm_cli.policy._gitlab.requests.get")
+    @patch("apm_cli.policy._gitlab.policy_get")
     def test_custom_self_managed_host_and_port(self, mock_get, mock_resolver_cls):
         resolver = self._resolver(mock_resolver_cls, "my-gitlab-token")
         mock_get.return_value = MagicMock(status_code=200, text=VALID_POLICY_YAML)
@@ -2146,3 +2591,26 @@ class TestPolicyFetchResult(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_discovery_emits_no_user_facing_log_output():
+    """#3754 guard: discovery returns diagnostics as data; CommandLogger renders them.
+
+    A ``logger.warning``/``error`` here bypasses the verbose gating of the
+    output owner and prints on every install via the root logging handler.
+    """
+    import ast
+
+    from apm_cli.policy import discovery
+
+    tree = ast.parse(Path(discovery.__file__).read_text(encoding="utf-8"))
+    offenders = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"warning", "error", "critical", "info"}
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "logger"
+    ]
+    assert offenders == [], f"user-facing logger calls in policy/discovery.py: {offenders}"

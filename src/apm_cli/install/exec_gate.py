@@ -65,9 +65,16 @@ def check_executable_approval(
     )
     lsp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_LSP) for k in candidate_keys)
 
+    approved = {
+        EXEC_TYPE_HOOKS: hooks_ok,
+        EXEC_TYPE_BIN: bin_ok,
+        EXEC_TYPE_MCP: mcp_ok,
+        EXEC_TYPE_CANVAS: canvas_ok,
+        EXEC_TYPE_LSP: lsp_ok,
+    }
     # Track blocked packages for the post-loop approval prompt, and record the
     # lockfile exec_status for the audit (Gap B) from the same scan.
-    blocked = not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok or not lsp_ok
+    blocked = not all(approved.values())
     needs_status = ctx is not None and getattr(ctx, "exec_trust_ctx", None) is not None
     if ctx is not None and (blocked or needs_status):
         from apm_cli.security.executables import scan_package_executables
@@ -79,7 +86,8 @@ def check_executable_approval(
             "",
             approval_identity=pkg_key,
         )
-        if _decl.has_executables and blocked:
+        # Only a declared type that stays unapproved parks the package.
+        if any(not approved[t] for t in _decl.exec_types):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
             from apm_cli.security.executables import exec_status_for_declaration
@@ -96,23 +104,14 @@ def check_executable_approval(
 def resolve_package_key(package_info: Any, package_name: str) -> str:
     """Build the ``allowExecutables`` lookup key for a package.
 
-    Tries ``dependency_ref`` first (canonical dependency string), then
+    Routes ``dependency_ref`` through the executable-trust owner, then
     falls back to ``name#version`` from the package's own metadata.
     """
-    from apm_cli.security.executables import build_approval_key
+    from apm_cli.security.executables import build_approval_key, dependency_approval_key
 
-    # Prefer the dependency reference's canonical string (includes version/ref)
     dep_ref = getattr(package_info, "dependency_ref", None)
     if dep_ref is not None:
-        canonical = getattr(dep_ref, "canonical_string", None)
-        if callable(canonical):
-            cs = canonical()
-            if cs:
-                return cs
-        # Fall back to str(dep_ref)
-        s = str(dep_ref)
-        if s:
-            return s
+        return dependency_approval_key(dep_ref)
 
     # Fall back to package metadata
     pkg = getattr(package_info, "package", None)

@@ -5,10 +5,12 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 
 # ruff: noqa: E402
 
+import contextlib
 import ctypes
 import importlib
 import logging
 import os
+import signal
 import sys
 import warnings
 
@@ -501,10 +503,26 @@ def _configure_encoding() -> None:
             _warn_encoding_issue(current_cp)
 
 
+def _interrupt_on_sigterm(signum: int, frame: object) -> None:
+    """Treat SIGTERM like Ctrl+C so rollback, residue reporting and reaping run.
+
+    Default handling is restored first, so a second SIGTERM terminates.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    raise KeyboardInterrupt
+
+
+def _route_sigterm_to_interrupt() -> None:
+    """Install :func:`_interrupt_on_sigterm` for this process (main thread)."""
+    with contextlib.suppress(ValueError, OSError, AttributeError):
+        signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
+
+
 def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
+    _route_sigterm_to_interrupt()
     try:
         cli(obj={})
     except Exception as e:

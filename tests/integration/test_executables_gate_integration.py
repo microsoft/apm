@@ -22,6 +22,7 @@ from apm_cli.install.exec_gate import (
 )
 from apm_cli.install.phases.integrate import _run_executable_approval_prompt
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.executables import (
     ALL_EXEC_TYPES,
     ENFORCED_EXEC_TYPES,
@@ -428,11 +429,9 @@ class TestCheckExecutableApprovalIntegration:
 
     def test_dep_ref_key_takes_priority(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = "github:owner/repo#v1.0"
-        pkg_info.dependency_ref = dep_ref
+        pkg_info.dependency_ref = DependencyReference.parse("owner/repo#v1.0")
 
-        allow = {"github:owner/repo#v1.0": {"hooks": True, "bin": True}}
+        allow = {"owner/repo#v1.0": {"hooks": True, "bin": True}}
         hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
             "pkg", pkg_info, allow
         )
@@ -444,9 +443,7 @@ class TestCheckExecutableApprovalIntegration:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "hook.json").write_text("{}", encoding="utf-8")
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = "./packages/local-ref"
-        pkg_info.dependency_ref = dep_ref
+        pkg_info.dependency_ref = DependencyReference.parse("./packages/local-ref")
         ctx = MagicMock()
         ctx.blocked_executables = []
 
@@ -483,22 +480,25 @@ class TestCheckExecutableApprovalIntegration:
 class TestResolvePackageKeyIntegration:
     """Integration: key resolution with different package_info shapes."""
 
-    def test_dep_ref_canonical_string(self) -> None:
-        pkg_info = MagicMock()
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = "github:owner/repo@main"
-        pkg_info.dependency_ref = dep_ref
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            ("owner/repo#main", "owner/repo#main"),
+            ("https://github.com/owner/repo.git#main", "owner/repo#main"),
+            ("github.com/owner/repo", "owner/repo"),
+            ("gitlab.com/owner/repo#v1", "gitlab.com/owner/repo#v1"),
+            ("./local/path", "./local/path"),
+        ],
+    )
+    def test_dep_ref_uses_locked_identity_domain(self, spelling: str, expected: str) -> None:
+        dep_ref = DependencyReference.parse(spelling)
+        pkg_info = SimpleNamespace(dependency_ref=dep_ref)
 
-        assert resolve_package_key(pkg_info, "fallback") == "github:owner/repo@main"
+        key = resolve_package_key(pkg_info, "fallback")
 
-    def test_dep_ref_str_fallback(self) -> None:
-        pkg_info = MagicMock()
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = ""
-        dep_ref.__str__ = lambda self: "./local/path"
-        pkg_info.dependency_ref = dep_ref
-
-        assert resolve_package_key(pkg_info, "fallback") == "./local/path"
+        assert key == expected
+        # ``apm approve`` keys grants by the locked identity; the gate must agree.
+        assert key.split("#", 1)[0] == dep_ref.get_unique_key()
 
     def test_package_metadata_fallback(self) -> None:
         pkg_info = MagicMock()

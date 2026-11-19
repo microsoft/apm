@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import sys
 import traceback
 from typing import TYPE_CHECKING
@@ -12,10 +11,12 @@ import click
 from ...core.command_logger import CommandLogger
 from ...marketplace.auth_helpers import resolve_auth_for_host
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
-from ...marketplace.ref_resolver import RefResolver, RemoteRef, is_commit_pin_ref
+from ...marketplace.ref_resolver import (
+    RefResolver,
+    explicit_ref_error,
+    package_entry_coordinates,
+)
 from ...marketplace.semver import satisfies_range
-from ...marketplace.yml_schema import PackageEntry
-from ...models.dependency.host_virtual import repository_owner
 from ...utils.github_host import default_host, is_azure_devops_hostname
 from . import (
     _CheckResult,
@@ -28,83 +29,6 @@ from . import (
 
 if TYPE_CHECKING:
     from ...core.auth import AuthResolver
-
-
-def _entry_coordinates(
-    entry: PackageEntry, source_base: str | None
-) -> tuple[str | None, str, str | None, str | None]:
-    """Return ``(host, owner_repo, org, display_url)`` for *entry*, mirroring the build-time
-    routing in ``MarketplaceBuilder._remote_source_coordinates`` so that
-    ``check`` and ``pack`` resolve every entry against the same host AND the
-    same per-org auth hint.
-
-    - Full HTTPS entries retain their encoded display URL while
-      ``DependencyReference`` supplies decoded repository and ADO coordinates.
-    - A host-prefixed shorthand (``host.tld/owner/repo``) is an override with
-      no org hint, matching the builder.
-    - Otherwise, when ``marketplace.sourceBase`` is set, a host-less source
-      composes onto the base. ``DependencyReference`` supplies its decoded
-      identity and ADO org hint, while a non-ADO sourceBase keeps its decoded
-      leading path segment as the per-org hint.
-    - Otherwise the source stays a default-host ``owner/repo`` with no hint.
-    """
-    from ...models.dependency.reference import DependencyReference
-
-    if entry.host:
-        if entry.source_url is not None:
-            dependency = DependencyReference.parse(entry.source_url)
-            return (
-                dependency.host,
-                dependency.repo_url,
-                dependency.ado_organization,
-                entry.source_url,
-            )
-        return entry.host, entry.source, None, None
-    if source_base:
-        source_url = f"{source_base}/{entry.source}"
-        dependency = DependencyReference.parse(source_url)
-        org = dependency.ado_organization or repository_owner(dependency.repo_url)
-        return dependency.host, dependency.repo_url, org, source_url
-    return None, entry.source, None, None
-
-
-_HEX_REF_RE = re.compile(r"[0-9a-fA-F]{7,64}")
-
-
-def _explicit_ref_error(
-    ref: str,
-    refs: list[RemoteRef],
-    *,
-    resolver: RefResolver,
-    owner_repo: str,
-    offline: bool,
-) -> str:
-    """Return an error for an explicit ``ref``, or ``""`` when it resolves.
-
-    Tag and branch names match first, as before. A full commit SHA that no
-    name matches is accepted when it is a branch tip or when the
-    remote serves that commit; ``ls-remote`` alone never lists it.
-    """
-    for r in refs:
-        short = r.name
-        if short.startswith("refs/tags/"):
-            short = short[len("refs/tags/") :]
-        elif short.startswith("refs/heads/"):
-            short = short[len("refs/heads/") :]
-        if ref in (short, r.name):
-            return ""
-    if is_commit_pin_ref(ref):
-        # Only a branch tip is necessarily a commit; a tag may name a tree or blob.
-        if any(r.name.startswith("refs/heads/") and r.sha == ref for r in refs):
-            return ""
-        if offline:
-            return f"Commit '{ref}' cannot be verified offline"
-        if resolver.commit_exists(owner_repo, ref):
-            return ""
-        return f"Commit '{ref}' not reachable on remote"
-    if _HEX_REF_RE.fullmatch(ref):
-        return f"Ref '{ref}' not found; commit pins need the full 40-char lowercase SHA"
-    return f"Ref '{ref}' not found"
 
 
 @marketplace.command(help="Validate marketplace entries are resolvable")
@@ -189,7 +113,7 @@ def check(offline, verbose):
                 continue
             try:
                 # Resolve each entry against its effective host + composed path.
-                host, owner_repo, org, display_url = _entry_coordinates(entry, source_base)
+                host, owner_repo, org, display_url = package_entry_coordinates(entry, source_base)
                 if display_url is not None:
                     remote_label = display_url
                 elif host and is_azure_devops_hostname(host):
@@ -205,7 +129,7 @@ def check(offline, verbose):
 
                 # Check version/ref resolution
                 if entry.ref is not None:
-                    error = _explicit_ref_error(
+                    error = explicit_ref_error(
                         entry.ref,
                         refs,
                         resolver=resolver,

@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import os
-import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -18,18 +17,24 @@ import requests
 import yaml
 
 from ..cache.paths import get_cache_root
-from ..cache.url_normalize import SCP_LIKE_RE
-from ..utils.git_env import get_git_executable
+from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..utils.github_host import (
     build_ado_api_url,
     is_azure_devops_hostname,
     is_gitlab_hostname,
     is_visualstudio_legacy_hostname,
-    parse_ado_repo_url,
 )
 from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from . import _gitlab
+from ._policy_http import policy_get
+from ._remote import (  # noqa: F401  -- re-exported for callers/tests
+    _extract_org_from_git_remote,
+    _extract_org_host_port_from_git_remote,
+    _git_remote_origin_url,
+    _parse_remote_url,
+    _remote_url_parts,
+)
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
     _DEFAULT_HASH_ALGORITHM,
@@ -217,6 +222,10 @@ class PolicyFetchResult:
     outcome: str = ""  # See docstring for valid values
     warnings: list[str] = field(default_factory=list)
     not_found: bool = field(default=False, repr=False)
+    # Diagnostic for an ``absent`` auto-discovery whose cause may be a
+    # masked private-repo 404 (#3754). Data only: CommandLogger renders it
+    # in verbose output, ``apm policy status`` and fail-closed errors.
+    discovery_hint: str | None = None
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -225,9 +234,29 @@ class PolicyFetchResult:
     raw_bytes_hash: str | None = None
     expected_hash: str | None = None  # The pin that was checked, if any
 
+    # -- GitLab ancestry composition fields (#2753) --
+    # ancestry_parents: discovered ancestor-namespace policies (nearest first)
+    # that the chain owner composes under this leaf; None outside a nested
+    # GitLab discovery walk. chain_sources: ordered (root first), redacted
+    # sources of the composed effective policy. subgroup_scoped: a policy
+    # below the top-level group participates, so the resolved chain is
+    # surfaced at default verbosity.
+    ancestry_parents: list[PolicyFetchResult] | None = field(default=None, repr=False)
+    chain_sources: list[str] = field(default_factory=list)
+    subgroup_scoped: bool = False
+
     @property
     def found(self) -> bool:
         return self.policy is not None
+
+
+def policy_disabled_by_env() -> bool:
+    """Return True when ``APM_POLICY_DISABLE`` disables org policy for this process.
+
+    The documented switch value is ``1``; other values leave policy on. Every
+    command that honours the switch reads it through this function.
+    """
+    return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
 
 
 def discover_policy_with_chain(
@@ -276,7 +305,7 @@ def discover_policy_with_chain(
     # The CLI's --no-policy flag is handled by callers; this env-var
     # check stays so third-party use of the API still respects the
     # global disable switch.
-    if os.environ.get("APM_POLICY_DISABLE") == "1":
+    if policy_disabled_by_env():
         return PolicyFetchResult(outcome="disabled")
 
     # -- Resolve project-side hash pin (#827) --------------------------
@@ -313,10 +342,12 @@ def discover_policy_with_chain(
     )
 
     # -- Chain resolution if leaf has extends: -------------------------
-    if (
-        fetch_result.policy is not None
-        and fetch_result.policy.extends is not None
-        and not fetch_result.cached  # Don't re-resolve if served from cache
+    # Duck-typed results (other discovery callers, test doubles) may predate the
+    # GitLab ancestry fields, so read them defensively.
+    if fetch_result.policy is not None and (
+        # Don't re-resolve if served from cache
+        (fetch_result.policy.extends is not None and not fetch_result.cached)
+        or getattr(fetch_result, "ancestry_parents", None) is not None
     ):
         _resolve_and_persist_chain(
             fetch_result,
@@ -389,13 +420,17 @@ def _derive_leaf_host(source: str, project_root: Path) -> str | None:
     return _derive_leaf_identity(source, project_root)[0]
 
 
-def _extract_extends_host(ref: str) -> str | None:
+def _extract_extends_host(ref: str, leaf_host: str | None = None) -> str | None:
     """Return the host an ``extends:`` ref resolves against, if explicit.
 
     * Full URL -> URL host (lowercase)
     * ``<host>/<owner>/<repo>`` (3+ slash-segments) -> ``<host>`` (lowercase)
     * ``<owner>/<repo>`` shorthand -> None (intrinsically same-host)
     * ``<org>`` shorthand (no slash) -> None (intrinsically same-host)
+
+    ``leaf_host`` gates the GitLab-only relaxation for nested-subgroup refs
+    (see the 3-segment branch below); it defaults to ``None`` so non-GitLab
+    callers keep the strict host-pin behaviour.
     """
     if not ref:
         return None
@@ -411,8 +446,19 @@ def _extract_extends_host(ref: str) -> str | None:
         return None
     parts = ref.split("/")
     if len(parts) >= 3:
+        first = parts[0]
+        host_like = "." in first or ":" in first
+        # A bare single-label first segment is a namespace segment ONLY on
+        # GitLab, where nested subgroups make ``acme/dept-a/apm-policy`` a valid
+        # same-host ``extends:`` ref (#2753). On every other provider a
+        # 3-segment ref is ``host/owner/repo``; treating a single label as a
+        # namespace there would let ``extends: "evil/org/repo"`` bypass the
+        # host-pin and route a credential to ``evil`` (Security Finding F1), so
+        # the first segment is parsed as a (cross-)host and rejected.
+        if is_gitlab_hostname(leaf_host) and not host_like:
+            return None
         try:
-            return (urlsplit(f"//{parts[0]}").hostname or "").lower() or None
+            return (urlsplit(f"//{first}").hostname or "").lower() or None
         except ValueError:
             return None
     return None
@@ -432,7 +478,7 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
     """
     from . import inheritance as _inheritance_mod
 
-    extends_host = _extract_extends_host(extends_ref)
+    extends_host = _extract_extends_host(extends_ref, leaf_host)
     if extends_host is None:
         return  # shorthand: intrinsically same-host, allowed.
 
@@ -570,10 +616,17 @@ def _resolve_and_persist_chain(
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
     Walks the ``extends:`` chain depth-first, fetching each parent via the
-    single-policy ``discover_policy`` (so each fetch still hits the
-    well-tested fetch path).  Cycle detection on normalized ``extends:``
+    single-policy fetch path.  Cycle detection on normalized ``extends:``
     refs and ``MAX_CHAIN_DEPTH`` enforcement protect against runaway or
     self-referential chains.
+
+    GitLab ancestry composition (#2753) seeds ``ancestry_parents``: after the
+    leaf's own ``extends:`` chain, every discovered ancestor (nearest first)
+    joins with its own ``extends:`` chain, so an ancestor restriction applies
+    even when a closer policy omits ``extends:``. An ``extends:`` naming a
+    policy already in the composed chain is a duplicate ancestor: reused,
+    never refetched, and not a cycle. ``MAX_CHAIN_DEPTH`` counts distinct
+    policies across the whole composed chain.
 
     If any parent fetch fails, mark the chain incomplete and clear the
     partial policy so enforcement cannot proceed with weaker constraints.
@@ -584,117 +637,109 @@ def _resolve_and_persist_chain(
     """
     from . import inheritance as _inheritance_mod
 
-    leaf_policy = fetch_result.policy
     leaf_source = fetch_result.source
     leaf_cache_ref = fetch_result.cache_ref or _strip_source_prefix(leaf_source)
-
     leaf_host, leaf_port = _derive_leaf_identity(leaf_source, project_root)
+    ancestry = getattr(fetch_result, "ancestry_parents", None)
+    # Composition levels run farthest ancestor first, so the chain is root-first.
+    levels = [*reversed(ancestry or ()), fetch_result]
+    discovered = {level.source: level for level in levels}
+    # Composed (policy, source, fetch result) entries, root first.
+    composed: list[tuple[ApmPolicy, str, PolicyFetchResult]] = []
+    composed_sources: set[str] = set()
 
-    # Ordered ancestors collected as we walk parents.  Built leaf-first
-    # for traversal convenience; reversed before merging.
-    chain_policies: list[ApmPolicy] = [leaf_policy]
-    chain_sources: list[str] = [leaf_source]
-
-    # Track normalized refs we've already followed to break cycles.
-    # We seed with the leaf's source so an extends pointing back at the
-    # leaf is also detected.
-    visited: list[str] = [leaf_cache_ref] if leaf_source else []
-
-    current = leaf_policy
-    incomplete_chain: tuple[str, int, int] | None = None
-    stale_ancestor: PolicyFetchResult | None = None
-
-    while current.extends:
-        next_ref = current.extends
-
-        # Host pin enforcement: must validate BEFORE any fetch so we never
-        # call git credential fill against an attacker-controlled host.
-        _validate_extends_host(leaf_host, next_ref)
-
-        if _inheritance_mod.detect_cycle(visited, next_ref):
-            safe_visited = [_redact_policy_ref(ref) for ref in visited]
-            safe_next_ref = _redact_policy_ref(next_ref)
-            raise _inheritance_mod.PolicyInheritanceError(
-                f"Cycle detected in policy extends chain: "
-                f"{' -> '.join(safe_visited)} -> {safe_next_ref}"
-            )
-
-        # Depth check: chain_policies already has len() entries; next fetch
-        # would push us to len()+1.  resolve_policy_chain enforces this
-        # afterwards, but failing here gives a clearer error.
-        if len(chain_policies) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
-            safe_visited = [_redact_policy_ref(ref) for ref in visited]
-            safe_next_ref = _redact_policy_ref(next_ref)
-            raise _inheritance_mod.PolicyInheritanceError(
+    def _chain_error(kind: str, refs: list[str], next_ref: str) -> Exception:
+        trail = " -> ".join(_redact_policy_ref(ref) for ref in [*refs, next_ref])
+        if kind == "cycle":
+            message = f"Cycle detected in policy extends chain: {trail}"
+        else:
+            message = (
                 f"Policy chain depth exceeds maximum of "
-                f"{_inheritance_mod.MAX_CHAIN_DEPTH} "
-                f"(chain: {' -> '.join(safe_visited)} -> {safe_next_ref})"
+                f"{_inheritance_mod.MAX_CHAIN_DEPTH} (chain: {trail})"
             )
+        return _inheritance_mod.PolicyInheritanceError(message)
 
-        parent_result = _fetch_chain_parent(
-            next_ref,
-            current_source=chain_sources[-1],
-            leaf_host=leaf_host,
-            leaf_port=leaf_port,
-            project_root=project_root,
-            no_cache=no_cache,
-            cache_only=cache_only,
-        )
-        fetch_result.warnings.extend(parent_result.warnings)
+    def _segment(
+        level: PolicyFetchResult, nearer: set[str]
+    ) -> list[tuple[ApmPolicy, str, PolicyFetchResult]] | tuple[str, int, int]:
+        """Return *level* plus its ``extends:`` ancestors (leaf-first), or the
+        ``(ref, resolved, attempted)`` incomplete-chain marker on a failure."""
+        seed_ref = _strip_source_prefix(level.source) if ancestry is not None else leaf_cache_ref
+        # Refs followed in this segment; seeded so a self-reference is a cycle.
+        visited: list[str] = [seed_ref] if level.source else []
+        segment = [(level.policy, level.source, level)]
+        current = level.policy
+        while current.extends:
+            next_ref = current.extends
+            # Host pin enforcement: must validate BEFORE any fetch so we never
+            # call git credential fill against an attacker-controlled host.
+            _validate_extends_host(leaf_host, next_ref)
+            if _inheritance_mod.detect_cycle(visited, next_ref):
+                raise _chain_error("cycle", visited, next_ref)
+            parent_result = None
+            if ancestry is not None and leaf_host:
+                coordinates = _gitlab._gitlab_parent_coordinates(
+                    next_ref, current_source=segment[-1][1], leaf_host=leaf_host, port=leaf_port
+                )
+                if coordinates is not None:
+                    source = _gitlab._gitlab_source_label(leaf_host, leaf_port, *coordinates)
+                    # An ancestor extending itself or a nearer namespace is a cycle.
+                    if source in nearer or any(source == item[1] for item in segment):
+                        raise _chain_error("cycle", visited, next_ref)
+                    if source in composed_sources:
+                        break  # duplicate ancestor, already composed
+                    parent_result = discovered.get(source)
+            if len(composed) + len(segment) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
+                raise _chain_error("depth", visited, next_ref)
+            if parent_result is None:
+                parent_result = _fetch_chain_parent(
+                    next_ref,
+                    current_source=segment[-1][1],
+                    leaf_host=leaf_host,
+                    leaf_port=leaf_port,
+                    project_root=project_root,
+                    no_cache=no_cache,
+                    cache_only=cache_only,
+                )
+                fetch_result.warnings.extend(parent_result.warnings)
+            if parent_result.policy is None:
+                # Parent fetch failed -- never enforce the weaker partial chain.
+                resolved = len(composed) + len(segment)
+                return next_ref, resolved, resolved + 1
+            segment.append((parent_result.policy, parent_result.source, parent_result))
+            visited.append(next_ref)
+            current = parent_result.policy
+        return segment
 
-        if parent_result.policy is None:
-            # Parent fetch failed -- never enforce the weaker partial chain.
-            attempted = len(chain_policies) + 1
-            resolved = len(chain_policies)
-            incomplete_chain = (next_ref, resolved, attempted)
+    incomplete_chain = None
+    for index, level in enumerate(levels):
+        if level.source in composed_sources:
+            continue
+        if len(composed) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
+            raise _chain_error("depth", [src for _, src, _ in composed], level.source)
+        if level is not fetch_result:
+            fetch_result.warnings.extend(level.warnings)
+        outcome = _segment(level, {nearer.source for nearer in levels[index + 1 :]})
+        if isinstance(outcome, tuple):
+            incomplete_chain = outcome
             break
+        composed.extend(reversed(outcome))
+        composed_sources.update(source for _, source, _ in outcome)
 
-        # Keep the nearest stale ancestor's refresh diagnostic. Continue
-        # merging its usable cached policy, but never relabel that ancestry
-        # as fresh or replace a nearer failure with a farther one.
-        if parent_result.outcome == "cached_stale" and stale_ancestor is None:
-            stale_ancestor = parent_result
-
-        chain_policies.append(parent_result.policy)
-        chain_sources.append(parent_result.source)
-        visited.append(next_ref)
-        current = parent_result.policy
-
-    # No actual ancestors fetched -- nothing to merge or re-cache.
-    if len(chain_policies) == 1:
-        if incomplete_chain is not None:
-            ref, resolved, attempted = incomplete_chain
-            fetch_result.outcome = "incomplete_chain"
-            fetch_result.error = (
-                f"Policy chain incomplete: {_redact_policy_ref(ref)} unreachable "
-                f"({resolved} of {attempted} policies resolved)"
-            )
-            fetch_result.policy = None
-        return
-
-    # Merge in [root, ..., leaf] order.  We collected leaf-first, so reverse.
-    ordered = list(reversed(chain_policies))
-    ordered_sources = list(reversed(chain_sources))
-
-    try:
-        merged = _inheritance_mod.resolve_policy_chain(ordered)
-    except _inheritance_mod.PolicyInheritanceError:
-        # Re-raise depth errors from the canonical validator so callers
-        # see a single consistent error type.
-        raise
-
-    chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
-
-    cache_key = leaf_cache_ref if leaf_source else ""
-    if cache_key and incomplete_chain is None and stale_ancestor is None:
-        _write_cache(
-            cache_key,
-            merged,
-            project_root,
-            chain_refs=chain_refs,
-            raw_bytes_hash=fetch_result.raw_bytes_hash,
-            warnings=fetch_result.warnings,
-        )
+    # Keep the nearest stale policy's refresh diagnostic. Continue merging its
+    # usable cached policy, but never relabel that ancestry as fresh or replace
+    # a nearer failure with a farther one. The leaf counts only when composed.
+    stale_ancestor = next(
+        (
+            result
+            for _, _, result in reversed(composed)
+            if result.outcome == "cached_stale"
+            and (result is not fetch_result or ancestry is not None)
+        ),
+        None,
+    )
+    chain_policies = [policy for policy, _, _ in composed]
+    chain_sources = [source for _, source, _ in composed]
 
     if incomplete_chain is not None:
         ref, resolved, attempted = incomplete_chain
@@ -705,6 +750,27 @@ def _resolve_and_persist_chain(
         )
         fetch_result.policy = None
         return
+    # No actual ancestors fetched -- nothing to merge or re-cache.
+    if len(chain_policies) == 1 and ancestry is None:
+        return
+
+    # chain_policies is already ordered [root, ..., leaf].
+    merged = _inheritance_mod.resolve_policy_chain(chain_policies)
+    chain_refs = [_strip_source_prefix(src) for src in chain_sources if src]
+    if ancestry is not None:
+        fetch_result.chain_sources = [_redact_policy_ref(ref) for ref in chain_refs]
+        fetch_result.subgroup_scoped = _gitlab._gitlab_subgroup_scoped(chain_refs)
+
+    cache_key = leaf_cache_ref if leaf_source else ""
+    if cache_key and stale_ancestor is None:
+        _write_cache(
+            cache_key,
+            merged,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=fetch_result.raw_bytes_hash,
+            warnings=fetch_result.warnings,
+        )
 
     fetch_result.policy = merged
     if stale_ancestor is not None:
@@ -872,7 +938,9 @@ def _auto_discover(
        - Found -> return (first match wins)
     5. All candidates exhausted -> outcome="absent"
     """
-    identity = _extract_org_host_port_from_git_remote(project_root)
+    # Read origin once: identity and GitLab ancestry share the same remote.
+    remote_url = _git_remote_origin_url(project_root)
+    identity = _extract_org_host_port_from_git_remote(project_root, remote_url=remote_url)
     if identity is None:
         return PolicyFetchResult(
             error="Could not determine org from git remote",
@@ -885,6 +953,7 @@ def _auto_discover(
     except ValueError as exc:
         return PolicyFetchResult(error=str(exc), outcome="cache_miss_fetch_fail")
     is_ado = is_azure_devops_hostname(host)
+    masked_private_hint: str | None = None
 
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
@@ -899,9 +968,10 @@ def _auto_discover(
                 cache_only=cache_only,
             )
         elif is_gitlab_hostname(host):
-            result = _gitlab._fetch_from_gitlab_repo(
+            result = _gitlab._fetch_gitlab_ancestry(
+                candidate_repo=candidate_repo,
+                remote_url=remote_url,
                 org=org,
-                repo=candidate_repo,
                 host=host,
                 port=port,
                 project_root=project_root,
@@ -928,17 +998,12 @@ def _auto_discover(
                 candidate_repo,
                 host,
             )
-            # Warn when .github-private is absent on a GitHub host -- GitHub
-            # returns 404 (not 403) when the token lacks private-repo scope,
-            # so an absent result may mask a token-permission problem.
-            if candidate_repo == ".github-private" and _is_github_host(host):
-                logger.warning(
-                    "Policy repo %s/%s not found (or token lacks private-repo "
-                    "read scope). If your org publishes policy in .github-private, "
-                    "ensure the token has Contents:read permission on that repo.",
-                    org,
-                    candidate_repo,
-                )
+            # GitHub answers 404 (not 403) for a private repo the caller
+            # cannot read, so an absent .github-private may mask a permission
+            # problem. Record it; it only matters if every candidate is absent.
+            # ``not_found`` marks a real 404, not a cache-only miss.
+            if candidate_repo == ".github-private" and _is_github_host(host) and result.not_found:
+                masked_private_hint = _masked_private_policy_hint(org, candidate_repo)
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
@@ -947,110 +1012,20 @@ def _auto_discover(
     # All candidates exhausted: no policy published anywhere.
     if cache_only and expected_hash is not None:
         return _unverifiable_cache_pin(expected_hash, "")
-    return PolicyFetchResult(error=None, outcome="absent")
+    return PolicyFetchResult(error=None, outcome="absent", discovery_hint=masked_private_hint)
 
 
-def _extract_org_from_git_remote(
-    project_root: Path,
-) -> tuple[str, str] | None:
-    """Extract (org, host) from git remote origin URL.
+def _masked_private_policy_hint(org: str, repo: str) -> str:
+    """Explain a possibly masked 404 on a private policy repo (#3754).
 
-    Handles:
-    - https://github.com/contoso/my-project.git -> ("contoso", "github.com")
-    - git@github.com:contoso/my-project.git -> ("contoso", "github.com")
-    - https://github.example.com/contoso/my-project.git -> ("contoso", "github.example.com")
+    Worded without credential keywords followed by a value, so the secret
+    redaction filter leaves it readable.
     """
-    identity = _extract_org_host_port_from_git_remote(project_root)
-    return (identity[0], identity[1]) if identity is not None else None
-
-
-def _extract_org_host_port_from_git_remote(
-    project_root: Path,
-) -> tuple[str, str, int | None] | None:
-    """Extract ``(org, host, port)`` from git remote origin."""
-    try:
-        result = subprocess.run(
-            [get_git_executable(), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=project_root,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-        remote_url = result.stdout.strip()
-        parsed_identity = _parse_remote_url(remote_url)
-        if parsed_identity is None:
-            return None
-        port = None
-        if "://" in remote_url:
-            try:
-                port = urlparse(remote_url).port
-            except ValueError:
-                return None
-        return parsed_identity[0], parsed_identity[1], port
-    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-
-def _parse_remote_url(url: str) -> tuple[str, str] | None:
-    """Parse a git remote URL into (org, host).
-
-    Accepts SCP-style SSH URLs with any username (not just ``git@``), so
-    EMU/GHE deployments that use a non-``git`` SSH user
-    (e.g. ``enterprise-user@ghe.corp.com:org/repo.git``) parse correctly.
-    Also handles Azure DevOps SSH URLs which carry an extra ``v3/``
-    path prefix (``git@ssh.dev.azure.com:v3/<org>/<project>/<repo>``).
-
-    Returns None if URL can't be parsed.
-    """
-    if not url:
-        return None
-
-    # SCP-like SSH: <user>@<host>:<path> -- any user, not just `git`.
-    # Closes #1159 for non-`git` SSH users (EMU, custom GHE accounts).
-    scp_match = SCP_LIKE_RE.match(url)
-    if scp_match:
-        host = scp_match.group("host")
-        path_part = scp_match.group("path")
-        try:
-            parts = path_part.rstrip("/").removesuffix(".git").split("/")
-            parts = [p for p in parts if p]
-            if not parts:
-                return None
-            # Azure DevOps SSH carries a leading 'v3/' segment that is
-            # NOT the org. The org is the second segment.
-            if host == "ssh.dev.azure.com" and parts[0] == "v3" and len(parts) >= 2:
-                return (parts[1], host)
-            return (parts[0], host)
-        except (ValueError, IndexError):
-            return None
-
-    # HTTPS: https://github.com/owner/repo.git
-    # ADO:   https://dev.azure.com/org/project/_git/repo
-    if "://" in url:
-        try:
-            parsed = urlparse(url)
-            host = parsed.hostname or ""
-            if is_azure_devops_hostname(host):
-                ado_coordinates = parse_ado_repo_url(url)
-                if ado_coordinates is None:
-                    return None
-                return ado_coordinates[0], host
-            path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
-            if is_visualstudio_legacy_hostname(host):
-                return (host[: -len(".visualstudio.com")], host)
-            if host and path_parts and path_parts[0]:
-                return (path_parts[0], host)
-        except ValueError as exc:
-            if "mounted below '/tfs/'" in str(exc):
-                raise
-            return None
-        except Exception:
-            return None
-
-    return None
+    return (
+        f"{org}/{repo} returned 404. GitHub also returns 404 when the credential "
+        "cannot read a private repository; if your org publishes policy there, "
+        f"grant Contents: read on {org}/{repo}."
+    )
 
 
 def _fetch_from_url(
@@ -1098,7 +1073,7 @@ def _fetch_from_url(
     content: str | None = None
 
     try:
-        resp = requests.get(url, timeout=10, allow_redirects=False)
+        resp = policy_get(url)
         if resp.status_code == 404:
             return PolicyFetchResult(
                 source=source_label,
@@ -1301,25 +1276,28 @@ def _fetch_github_contents(
     else:
         api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}"
 
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    token = _get_token_for_host(host)
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth_outcome import AuthAttemptFailed
+
+    def _request(token: str | None, _git_env: dict[str, str]):
+        from ..core.auth import AuthResolver
+
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        headers.update(AuthResolver.github_rest_headers(token))
+        resp = policy_get(api_url, headers=headers)
+        if resp.status_code != 200:
+            raise AuthAttemptFailed(response=resp)
+        return resp
 
     try:
-        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
-        if resp.status_code == 404:
-            return None, "404: Policy file not found"
-        if resp.status_code == 403:
-            return None, f"403: Access denied to {repo_ref}"
-        if 300 <= resp.status_code < 400:
-            location = resp.headers.get("Location", "<no Location header>")
-            return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-            )
-        if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
-
+        # Per-org GITHUB_APM_PAT_{ORG} applies to <org>/.github, and a rejected
+        # credential walks the same fallback chain as dependency access.
+        resp = _policy_auth_resolver().try_with_fallback(
+            host,
+            _request,
+            org=owner,
+            path=f"{owner}/{repo}",
+            unauth_first=False,
+        )
         data = resp.json()
         if data.get("encoding") == "base64" and data.get("content"):
             content = base64.b64decode(data["content"]).decode("utf-8")
@@ -1328,12 +1306,29 @@ def _fetch_github_contents(
             return data["content"], None
         else:
             return None, f"Unexpected response format from {repo_ref}"
+    except AuthAttemptFailed as failed:
+        status = getattr(failed.response, "status_code", None)
+        if status == 404:
+            return None, "404: Policy file not found"
+        if status == 403:
+            return None, f"403: Access denied to {repo_ref}"
+        if isinstance(status, int) and 300 <= status < 400:
+            location = failed.response.headers.get("Location", "<no Location header>")
+            return None, (f"Refusing HTTP redirect ({status}) from {api_url} to {location}")
+        return None, f"HTTP {status} fetching policy from {repo_ref}"
     except requests.exceptions.Timeout:
         return None, f"Timeout fetching policy from {repo_ref}"
     except requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
     except Exception as e:
         return None, f"Error fetching policy from {repo_ref}: {e}"
+
+
+def _policy_auth_resolver():
+    """Return the AuthResolver every policy repository fetch routes through."""
+    from ..core.auth import AuthResolver
+
+    return AuthResolver()
 
 
 # ---------------------------------------------------------------------------
@@ -1484,32 +1479,21 @@ def _fetch_ado_contents(
     host_label = f"{host}:{port}" if port is not None else host
     repo_ref = f"{host_label}/{org}/{project}/{repo}"
 
-    # ADO auth is centralized in AuthResolver: ADO_APM_PAT uses Basic auth,
-    # and az CLI AAD tokens use Bearer auth. No GitHub PATs are consulted.
-    from ..core.auth import AuthResolver
+    from ..core.auth_chain import authorization_headers
+    from ..core.auth_outcome import AuthAttemptFailed
 
-    auth_resolver = AuthResolver()
+    auth_resolver = _policy_auth_resolver()
 
-    def _headers(token: str | None, git_env: dict[str, str]) -> dict[str, str]:
-        if not token:
-            return {}
-        count = int(git_env.get("GIT_CONFIG_COUNT", "0") or "0")
-        for index in range(max(0, count)):
-            value = git_env.get(f"GIT_CONFIG_VALUE_{index}", "")
-            if value.lower().startswith("authorization: bearer "):
-                return {"Authorization": f"Bearer {token}"}
-        basic_cred = base64.b64encode(f":{token}".encode()).decode()
-        return {"Authorization": f"Basic {basic_cred}"}
-
-    def _request(token: str | None, git_env: dict[str, str]):
-        response = requests.get(
+    def _request(_token: str | None, git_env: dict[str, str]):
+        # Send exactly the credential the auth chain selected (PAT, az
+        # bearer, or the path-scoped helper); ambient netrc never replaces it.
+        response = policy_get(
             api_url,
-            headers=_headers(token, git_env),
-            timeout=10,
-            allow_redirects=False,
+            headers=authorization_headers(git_env),
+            ambient_credentials=False,
         )
-        if response.status_code in (401, 403):
-            raise RuntimeError(f"{response.status_code}: unauthorized")
+        if response.status_code != 200:
+            raise AuthAttemptFailed(response=response)
         return response
 
     try:
@@ -1518,26 +1502,25 @@ def _fetch_ado_contents(
             _request,
             org=org,
             port=port,
-            path=f"{org}/{project}/{repo}",
+            path=f"{org}/{project}/_git/{repo}",
             unauth_first=False,
         )
-        if resp.status_code == 404:
-            return None, "404: Policy file not found"
-        if 300 <= resp.status_code < 400:
-            location = resp.headers.get("Location", "<no Location header>")
-            return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-            )
-        if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
         # ADO Items API returns raw file content by default
         return resp.text, None
+    except AuthAttemptFailed as failed:
+        status = getattr(failed.response, "status_code", None)
+        if status == 404:
+            return None, "404: Policy file not found"
+        if isinstance(status, int) and 300 <= status < 400:
+            location = failed.response.headers.get("Location", "<no Location header>")
+            return None, (f"Refusing HTTP redirect ({status}) from {api_url} to {location}")
+        return None, f"HTTP {status} fetching policy from {repo_ref}"
     except requests.exceptions.Timeout:
         return None, f"Timeout fetching policy from {repo_ref}"
     except requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
-    except RuntimeError as exc:
-        error_kwargs = {"org": org}
+    except AdoAuthChainExhaustedError as exc:
+        error_kwargs = {"org": org, "attempts": exc.attempts}
         if port is not None:
             error_kwargs["port"] = port
         remediation = auth_resolver.build_error_context(
@@ -1565,28 +1548,6 @@ def _is_github_host(host: str) -> bool:
     if gh_host and host == gh_host:  # noqa: SIM103
         return True
     return False
-
-
-def _get_token_for_host(host: str) -> str | None:
-    """Get authentication token for a given host.
-
-    Environment-variable tokens (GITHUB_TOKEN, GITHUB_APM_PAT, GH_TOKEN)
-    are only returned when *host* is a recognized GitHub-family hostname.
-    For other hosts the token manager + git credential helpers are used.
-    """
-    try:
-        from ..core.auth import AuthResolver
-
-        return AuthResolver().resolve(host).token
-    except Exception as exc:
-        logger.debug("Token manager failed for %s: %s", host, exc)
-        if _is_github_host(host):
-            return (
-                os.environ.get("GITHUB_TOKEN")
-                or os.environ.get("GITHUB_APM_PAT")
-                or os.environ.get("GH_TOKEN")
-            )
-        return None
 
 
 # -- Cache ----------------------------------------------------------

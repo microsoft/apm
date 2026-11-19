@@ -327,6 +327,10 @@ if sys.platform == 'linux':
         "libffi.so.8",
         "libsqlite3.so.0",
         "libuuid.so.1",
+        # GCC runtime. aarch64 python-build-standalone libpython links it for
+        # GCC_3.0 long-double helpers; the build host's copy needs a newer
+        # glibc than APM_MAX_GLIBC, and every glibc distro ships one.
+        "libgcc_s.so.1",
     }
     a.binaries = [(name, path, typ) for name, path, typ in a.binaries
                   if name not in _exclude_libs]

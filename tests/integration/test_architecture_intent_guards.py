@@ -103,10 +103,10 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
     runtime symptom coverage for an actual replay run.
 
     ``integrate_package_primitives`` is the canonical owner of skill-subset
-    filtering during install/replay. ``run_replay`` must pass through
-    ``package_info.dependency_ref.skill_subset`` untouched (no recomputation,
-    no dropping to ``None``) so the replay pipeline enforces exactly what was
-    locked -- not a value re-derived at replay time.
+    filtering during install/replay. ``run_replay`` must take the locked
+    selection from ``effective_dependency_selection(package_info.dependency_ref)``
+    (the single deploy-selection owner, #3760) without recomputing it or
+    dropping it to ``None``, so the replay enforces exactly what was locked.
     """
     source_path = _REPO_ROOT / "src" / "apm_cli" / "install" / "drift.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
@@ -114,10 +114,14 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
     func = _find_function(tree, "run_replay")
     call = _find_call(func, "integrate_package_primitives")
     value = _keyword_value(call, "skill_subset")
+    owner = _find_call(func, "effective_dependency_selection")
 
-    assert _expression_depends_on(value, "package_info.dependency_ref.skill_subset"), (
+    assert _expression_depends_on(value, "selection.skill_subset"), (
         "run_replay()'s integrate_package_primitives(...) call must pass "
-        "skill_subset derived from package_info.dependency_ref.skill_subset"
+        "skill_subset from the effective selection owner"
+    )
+    assert [_attribute_path(arg) for arg in owner.args] == ["package_info.dependency_ref"], (
+        "run_replay() must derive the selection from package_info.dependency_ref"
     )
 
 

@@ -66,6 +66,7 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         "managed_files": set(),
         "diagnostics": DiagnosticCollector(),
         "package_name": "owner/example",
+        "skill_subset": None,
         "scope": InstallScope.USER,
         "ctx": ctx,
     }
@@ -101,13 +102,13 @@ def test_codex_consumer_scans_the_exact_whole_bundle_before_transport(
             integrate_package_primitives(
                 package,
                 home,
-                allow_executables={"github.com/owner/example": {"mcp": True}},
+                allow_executables={"owner/example": {"mcp": True}},
                 **options,
             )
         assert ctx.codex_native_plugins == {}
     else:
         result = integrate_package_primitives(
-            package, home, allow_executables={"github.com/owner/example": {"mcp": True}}, **options
+            package, home, allow_executables={"owner/example": {"mcp": True}}, **options
         )
         assert result["deployed_files"] == []
         if content == "blocked":

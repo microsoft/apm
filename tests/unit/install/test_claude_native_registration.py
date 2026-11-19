@@ -234,6 +234,26 @@ def test_unsupported_client_has_no_writes(tmp_path, native, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("reported", "accepted"),
+    [
+        ("2.1.291 (Claude Code)", True),
+        ("2.1.322 (Claude Code)", True),
+        ("2.1.3220 (Claude Code)", False),
+        ("2.1.323 (Claude Code)", False),
+        ("", False),
+    ],
+)
+def test_only_exact_qualified_client_versions_are_accepted(monkeypatch, reported, accepted):
+    monkeypatch.setattr("shutil.which", lambda name: "/native/claude")
+    monkeypatch.setattr(ClaudePluginCLI, "run", lambda *args: reported)
+    if accepted:
+        ClaudePluginCLI().check_version()
+    else:
+        with pytest.raises(ClaudeNativePluginError, match="qualified only"):
+            ClaudePluginCLI().check_version()
+
+
+@pytest.mark.parametrize(
     "args",
     [
         ("-p", "hello"),

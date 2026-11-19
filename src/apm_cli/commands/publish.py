@@ -39,6 +39,9 @@ Examples:
   # Choose a registry when multiple are configured:
   apm publish --package acme/my-skill --registry corp-main
 
+  # The host is part of the identity (same as a registry dependency's id:):
+  apm publish --package gitlab.com/acme/my-skill
+
   # Publish a pre-built zip (skip the pack step):
   apm publish --package acme/my-skill --zip ./build/my-package-1.0.0.zip
 
@@ -59,7 +62,11 @@ Examples:
     "package_id",
     required=True,
     metavar="OWNER/REPO",
-    help="Package identity to publish as (owner/repo, e.g. acme/my-skill).",
+    help=(
+        "Package identity to publish as, exactly as consumers write it in a "
+        "registry dependency's 'id:' (e.g. acme/my-skill or "
+        "gitlab.com/acme/my-skill). A host is part of the identity."
+    ),
 )
 @click.option(
     "--zip",
@@ -152,26 +159,29 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
 
 
 def _resolve_package_id(package_id: str) -> tuple[str, str]:
-    """Parse ``--package OWNER/REPO`` into ``(owner, repo)``.
+    """Parse ``--package`` into the registry ``(owner, repo)`` identity.
 
-    Accepts bare ``owner/repo`` or a full URL
-    (``https://github.com/owner/repo``); strips the scheme+host prefix when
-    present.  Raises ``UsageError`` when the value cannot be parsed as a
-    two-segment identity.
+    The value is the package identity exactly as consumers write it in a
+    registry dependency's ``id:`` (``acme/x``, ``gitlab.com/acme/x``). A
+    leading ``http(s)://`` scheme is dropped but the host is kept: it is part
+    of the identity (registry HTTP API section 1.2), so ``acme/x`` and
+    ``gitlab.com/acme/x`` are different packages. The owner/repo split is the
+    consumer's own :func:`split_registry_identity`, so publish and install
+    always address the same registry path. Raises ``UsageError`` when the
+    value has fewer than two parts.
     """
-    raw = re.sub(r"^https?://[^/]+/", "", package_id).strip("/")
-    parts = [p for p in raw.split("/") if p]
-    if len(parts) >= 2:
-        canonical = normalize_package_repo_url(
-            "/".join(parts[-2:]),
-            source="registry",
-        )
-        owner, repo = canonical.split("/", 1)
-        return owner, repo
-    raise click.UsageError(
-        f"--package must be in owner/repo form (got {package_id!r}).\n"
-        "Example: --package acme/my-skill"
-    )
+    from ..deps.registry.resolver import RegistryResolutionError, split_registry_identity
+
+    raw = re.sub(r"^https?://", "", package_id.strip(), flags=re.IGNORECASE).strip("/")
+    identity = "/".join(p for p in raw.split("/") if p)
+    canonical = normalize_package_repo_url(identity, source="registry")
+    try:
+        return split_registry_identity(canonical)
+    except RegistryResolutionError:
+        raise click.UsageError(
+            f"--package must be in owner/repo form (got {package_id!r}).\n"
+            "Example: --package acme/my-skill or --package gitlab.com/acme/my-skill"
+        ) from None
 
 
 def _resolve_registry_name(name: str | None, registries: dict[str, str]) -> str:

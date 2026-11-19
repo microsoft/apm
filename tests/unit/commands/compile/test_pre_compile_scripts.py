@@ -38,14 +38,20 @@ sys.exit(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
 """
 
 LOCK_PROBE = """\
+import os
 from pathlib import Path
 from filelock import FileLock, Timeout
 
-try:
-    FileLock(str(Path.home() / ".apm" / ".apm-lifecycle.lock")).acquire(timeout=0)
-    state = "free"
-except Timeout:
-    state = "held"
+def held(path):
+    try:
+        FileLock(str(path)).acquire(timeout=0)
+    except Timeout:
+        return True
+    return False
+
+metadata = Path(os.environ["APM_HOME"]) / ".apm-lifecycle.lock"
+deployment = Path.home() / ".apm-local" / ".apm-lifecycle.lock"
+state = "held" if held(metadata) and held(deployment) else "free"
 Path("lock-state").write_text(state)
 """
 
@@ -163,7 +169,11 @@ def test_untrusted_scripts_for_other_events_add_no_notice(isolated: Path, monkey
 def test_org_deny_all_suppresses_scripts(isolated: Path, monkeypatch) -> None:
     project = _project(isolated)
     _commit_instruction(project)
-    policy = SimpleNamespace(policy=SimpleNamespace(executables=SimpleNamespace(deny_all=True)))
+    policy = SimpleNamespace(
+        policy=SimpleNamespace(executables=SimpleNamespace(deny_all=True)),
+        outcome="found",
+        source="org",
+    )
     with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=policy):
         result = _compile(project, monkeypatch)
     assert result.exit_code == 0, result.output
@@ -180,6 +190,8 @@ def test_org_deny_all_suppresses_scripts_through_real_policy_discovery(
     leaf = SimpleNamespace(
         policy=SimpleNamespace(extends=None, executables=SimpleNamespace(deny_all=True)),
         cached=False,
+        outcome="found",
+        source="org",
     )
     with (
         patch("apm_cli.policy.discovery.discover_policy_with_chain", _REAL_DISCOVER_WITH_CHAIN),

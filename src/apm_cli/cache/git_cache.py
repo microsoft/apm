@@ -34,9 +34,11 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
+from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
@@ -83,13 +85,13 @@ def _safe_git_args() -> list[str]:
       malicious upstream might ship, so clone and checkout stay inert.
     - ``submodule.recurse=false`` prevents any subcommand from
       recursing into attacker-controlled submodule URLs.
-    - ``core.autocrlf=false`` disables host autocrlf conversion so
-      LF-committed blobs are not rewritten as CRLF on checkout.
+    - ``git_line_ending_pin_args`` disables host autocrlf conversion
+      and sets ``core.eol`` to ``lf`` so ``text`` / ``text=auto`` paths are
+      written with the same bytes on every host (apm#2971, apm#3270).
       ``-c`` outranks host system / global config and
       ``GIT_CONFIG_KEY_n`` snapshots from ``git_network_env``, which
-      otherwise win over a repo-local pin (apm#2971). This pin does
-      not override ``core.eol`` or ``.gitattributes`` ``eol=crlf`` /
-      ``text=auto`` requests.
+      otherwise win over a repo-local pin. Explicit ``.gitattributes``
+      ``eol=`` requests and committed CRLF blobs are still honored.
 
     - ``git_symlink_pin_args`` writes in-repo links as link text on every
       host, so checkout never needs OS symlink capability; the shard then
@@ -100,22 +102,28 @@ def _safe_git_args() -> list[str]:
     truth for git subprocess invocation -- callers must use this
     helper rather than ad-hoc ``git`` argv construction.
     """
-    from ..utils.git_env import git_long_paths_args, git_no_hooks_args, git_symlink_pin_args
+    from ..utils.git_env import (
+        git_line_ending_pin_args,
+        git_long_paths_args,
+        git_no_hooks_args,
+        git_symlink_pin_args,
+    )
 
     return [
         *git_long_paths_args(),
         *git_no_hooks_args(),
         "-c",
         "submodule.recurse=false",
-        "-c",
-        "core.autocrlf=false",
+        *git_line_ending_pin_args(),
         *git_symlink_pin_args(),
     ]
 
 
 # Shards whose tracked links hold their Git-object content carry this local
-# key. Older shards hold OS symlinks or Git link text instead (#3457).
-_LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects")
+# key. Older shards hold OS symlinks or Git link text instead (#3457), and
+# ``git-objects`` shards may hold out-of-cone targets read without their
+# ``.gitattributes`` (e.g. LF for ``eol=crlf``), so the value is versioned.
+_LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects-checkout")
 
 # Sparse (promisor) shards verified to hold every tracked file carry this
 # local key, so cache hits skip the ``ls-files`` probe (#3071).
@@ -148,30 +156,25 @@ def _checkout_config_values(checkout_dir: Path) -> dict[str, str] | None:
     return values
 
 
-def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
-    """Return whether the checkout's local gitconfig pins ``core.autocrlf=false``.
+def _checkout_materialization_pins() -> tuple[tuple[str, str], ...]:
+    """Return every byte-determinism ``(key, value)`` a cached shard must record."""
+    from ..utils.git_env import git_line_ending_pin_entries, git_symlink_pin_entry
 
-    Pre-fix shards materialized under host ``core.autocrlf=true`` omit this
-    pin and may contain CRLF working-tree bytes. Cache hits rematerialize
-    those shards so existing Windows caches heal without ``apm cache clean``.
-    """
-    values = _checkout_config_values(checkout_dir) or {}
-    return values.get("core.autocrlf") in {"false", "0", "no", "off"}
+    return (*git_line_ending_pin_entries(), git_symlink_pin_entry(), _LINK_MATERIALIZATION_PIN)
 
 
 def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     """Return whether a shard was materialized with every byte-determinism pin.
 
-    Shards written before Git-object link materialization hold OS symlinks
-    or Windows link-text files instead of link content (#3457); cache hits
-    rematerialize them.
+    Shards written before a pin existed may hold host-dependent bytes: CRLF
+    from ``core.autocrlf`` (apm#2971) or ``core.eol`` under ``text=auto``
+    (apm#3270), or OS symlinks / Windows link-text files instead of link
+    content (#3457). Cache hits rematerialize them so existing caches heal
+    without ``apm cache clean``.
     """
-    from ..utils.git_env import git_symlink_pin_entry
-
     values = _checkout_config_values(checkout_dir) or {}
-    return _checkout_pins_autocrlf_false(checkout_dir) and all(
-        values.get(key.lower()) == value.lower()
-        for key, value in (git_symlink_pin_entry(), _LINK_MATERIALIZATION_PIN)
+    return all(
+        values.get(key.lower()) == value.lower() for key, value in _checkout_materialization_pins()
     )
 
 
@@ -179,10 +182,9 @@ def _unmaterialized_paths(
     git_exe: str, checkout_dir: Path, *, env: dict[str, str], timeout: int = 60
 ) -> list[str]:
     """Return tracked paths the working tree is missing (skip-worktree excluded)."""
-    result = subprocess.run(
+    result = run_git_text(
         [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "ls-files", "--deleted", "-z"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -199,16 +201,15 @@ def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str,
     """
     key, value = _SPARSE_COMPLETENESS_PIN
     try:
-        subprocess.run(
+        run_git_text(
             [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
             capture_output=True,
-            text=True,
             timeout=10,
             env=env,
             stdin=subprocess.DEVNULL,
             check=True,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    except (subprocess.SubprocessError, OSError):
         _log.debug("Could not pin sparse completeness for %s", checkout_dir)
 
 
@@ -238,7 +239,8 @@ def _sparse_checkout_is_complete(
     try:
         # Local index scan only; a short bound limits shard-lock hold time.
         missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    # SubprocessError also covers GitOutputDecodeError (#3056).
+    except (subprocess.SubprocessError, OSError):
         return False
     if missing:
         return False
@@ -615,16 +617,17 @@ class GitCache:
                 # all blobs must be present locally. The partial path
                 # relies on the consumer being configured as a promisor
                 # so missing blobs trigger an on-demand fetch.
-                subprocess.run(
+                run_git_text(
                     clone_args,
                     capture_output=True,
-                    text=True,
                     timeout=300,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056), so a
+            # rejected clone output still removes the staged tree.
+            except (subprocess.SubprocessError, OSError) as exc:
                 # Partial clone fallback: some servers reject --filter
                 # (old Gerrit / pre-2.20 GHE). Retry once without it so
                 # we never block on this optimization. The resulting
@@ -643,7 +646,7 @@ class GitCache:
                     staged.mkdir(parents=True, exist_ok=True)
                     os.chmod(str(staged), 0o700)
                     try:
-                        subprocess.run(
+                        run_git_text(
                             [
                                 git_exe,
                                 *_safe_git_args(),
@@ -656,7 +659,6 @@ class GitCache:
                                 str(staged),
                             ],
                             capture_output=True,
-                            text=True,
                             timeout=300,
                             env=subprocess_env,
                             stdin=subprocess.DEVNULL,
@@ -666,11 +668,7 @@ class GitCache:
                         from ..utils.console import _rich_warning
 
                         _rich_warning(_partial_clone_fallback_warning(url))
-                    except (
-                        subprocess.CalledProcessError,
-                        subprocess.TimeoutExpired,
-                        OSError,
-                    ) as exc2:
+                    except (subprocess.SubprocessError, OSError) as exc2:
                         from ..utils.file_ops import robust_rmtree
 
                         robust_rmtree(staged, ignore_errors=True)
@@ -745,7 +743,6 @@ class GitCache:
             git_network_env,
             git_no_templates_args,
             git_subprocess_env,
-            git_symlink_pin_entry,
         )
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if promisor_url else "")
@@ -786,7 +783,9 @@ class GitCache:
                     variant,
                 )
                 return self._record_checkout_access(final_dir)
+            remat_started: float | None = None
             if existing_ok:
+                remat_started = time.monotonic()
                 _log.info(
                     "[*] Rematerializing incomplete or unpinned git checkout: %s @ %s [%s]",
                     _sanitize_url(url),
@@ -811,11 +810,14 @@ class GitCache:
             try:
                 # Clone from local bare repo (fast, no network).
                 # ``promisor`` and ``partialclonefilter`` ride on the clone
-                # via ``-c key=val`` (one spawn). ``remote.origin.url``
-                # needs a separate post-clone ``git config`` because git
-                # clone always rewrites it to the clone source after
-                # applying ``-c`` overrides.
-                subprocess.run(
+                # via ``-c key=val`` (one spawn), as do the materialization
+                # pins that cache hits require to recognize post-fix shards.
+                # Checkout itself still needs the ``-c`` pins from
+                # ``_safe_git_args`` because env-frozen host config outranks
+                # these local values. ``remote.origin.url`` needs a separate
+                # post-clone ``git config`` because git clone always rewrites
+                # it to the clone source after applying ``-c`` overrides.
+                run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -825,6 +827,11 @@ class GitCache:
                         "--shared",
                         "--no-checkout",
                         "--no-recurse-submodules",
+                        *(
+                            arg
+                            for key, value in _checkout_materialization_pins()
+                            for arg in ("-c", f"{key}={value}")
+                        ),
                         *(
                             [
                                 "-c",
@@ -839,35 +846,16 @@ class GitCache:
                         str(staged),
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-                # Persist the pins so cache hits can recognize post-fix shards.
-                # Checkout itself still needs the ``-c`` pins from
-                # ``_safe_git_args`` because env-frozen host config outranks
-                # these local values.
-                for key, value in (
-                    ("core.autocrlf", "false"),
-                    git_symlink_pin_entry(),
-                    _LINK_MATERIALIZATION_PIN,
-                ):
-                    subprocess.run(
-                        [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                        env=subprocess_env,
-                        stdin=subprocess.DEVNULL,
-                        check=True,
-                    )
                 if promisor_url:
                     # Point origin at the real upstream (clone set it to the
                     # local bare). Single config call; the other two promisor
                     # keys were already applied via ``-c`` above.
-                    subprocess.run(
+                    run_git_text(
                         [
                             git_exe,
                             *_safe_git_args(),
@@ -878,7 +866,6 @@ class GitCache:
                             promisor_url,
                         ],
                         capture_output=True,
-                        text=True,
                         timeout=10,
                         env=subprocess_env,
                         stdin=subprocess.DEVNULL,
@@ -902,7 +889,7 @@ class GitCache:
                         extra_git_args=_safe_git_args(),
                     )
                 # Checkout the specific SHA.
-                checkout = subprocess.run(
+                checkout = run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -912,7 +899,6 @@ class GitCache:
                         sha,
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
@@ -952,7 +938,8 @@ class GitCache:
 
                 robust_rmtree(staged, ignore_errors=True)
                 raise
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056).
+            except (subprocess.SubprocessError, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
 
                 robust_rmtree(staged, ignore_errors=True)
@@ -975,6 +962,14 @@ class GitCache:
                         f"Race condition: concurrent checkout failed integrity "
                         f"for {_sanitize_url(url)} @ {sha[:12]}"
                     )
+            if remat_started is not None:
+                _log.info(
+                    "[+] Rematerialized git checkout %s @ %s [%s] in %d ms",
+                    _sanitize_url(url),
+                    sha[:12],
+                    variant,
+                    int((time.monotonic() - remat_started) * 1000),
+                )
             return final_dir
 
     def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:
@@ -984,10 +979,9 @@ class GitCache:
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 [git_exe, *_safe_git_args(), "--git-dir", str(bare_dir), "cat-file", "-t", sha],
                 capture_output=True,
-                text=True,
                 timeout=10,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -1033,10 +1027,9 @@ class GitCache:
             fetch_args += ["--filter=blob:none"]
         fetch_args += [url, sha]
         try:
-            subprocess.run(
+            run_git_text(
                 fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -1055,10 +1048,9 @@ class GitCache:
             if is_partial:
                 fallback_fetch_args += ["--filter=blob:none"]
             fallback_fetch_args += [url, *_FALLBACK_REFSPECS]
-            subprocess.run(
+            run_git_text(
                 fallback_fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,

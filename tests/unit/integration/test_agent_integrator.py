@@ -1635,7 +1635,7 @@ class TestCodexAgentIntegration:
         reinstall = AgentIntegrator().integrate_agents_for_target(
             KNOWN_TARGETS["codex"], package_info, self.root, managed_files=managed
         )
-        assert reinstall.files_integrated == 1
+        assert reinstall.files_adopted == 1
         assert target.read_text(encoding="utf-8") == first
 
         source = package_dir / ".apm" / "agents" / "reviewer.agent.md"
@@ -1650,6 +1650,27 @@ class TestCodexAgentIntegration:
         instructions = tomllib.loads(target.read_text(encoding="utf-8"))["developer_instructions"]
         assert instructions.startswith("Updated: read [guide](")
         self._assert_guide_link_reaches(target, instructions, skill)
+
+    def test_codex_agent_adopt_identical_without_managed_files(self) -> None:
+        """Codex agent matching rendered TOML is adopted without managed_files."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, _ = self._linked_package()
+        package_info = self._create_package_info(package_dir)
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+
+        first = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root
+        )
+        assert first.files_integrated == 1
+        assert target.exists()
+
+        second = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root, managed_files=None
+        )
+        assert second.files_adopted == 1
+        assert second.files_integrated == 0
+        assert second.files_skipped == 0
 
     def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self) -> None:
         """A managed TOML written before #2966 is repaired by the next install."""
@@ -1826,6 +1847,76 @@ class TestCodexAgentIntegration:
         )
 
         assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
+
+    def _compile_codex_model(self, model: str, *, extra: str = ""):
+        source = self.root / "shared.agent.md"
+        source.write_text(
+            f"---\nname: shared\ndescription: Agent\nmodel: {model}\n{extra}---\nReview.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "shared.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        return target.read_text(encoding="utf-8"), warnings
+
+    @pytest.mark.parametrize(
+        "model",
+        ["opus", "sonnet", "haiku", "inherit", "claude-sonnet-4-5", "Sonnet", "Claude-Opus-4"],
+    )
+    def test_codex_agent_keeps_claude_model_verbatim_and_warns(self, model):
+        """A Claude model is preserved verbatim (req-tg-015) and warned about (#3477)."""
+        import toml
+
+        rendered, warnings = self._compile_codex_model(model)
+
+        expected = toml.dumps(
+            {
+                "name": "shared",
+                "description": "Agent",
+                "model": model,
+                "developer_instructions": "Review.",
+            }
+        )
+        assert rendered == expected
+        assert tomllib.loads(rendered)["model"] == model
+        assert len(warnings) == 1
+        assert "shared.agent.md" in warnings[0].message
+        assert "'model'" in warnings[0].message
+        assert "Claude model" in warnings[0].message
+        assert "kept as written" in warnings[0].message
+
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-5-codex", "gpt-5.6-sol", "o3", "claude", "sonnet-like", "my-claude-proxy"],
+    )
+    def test_codex_agent_non_claude_model_does_not_warn(self, model):
+        """Other model strings are preserved and produce no Claude-model warning."""
+        rendered, warnings = self._compile_codex_model(model)
+
+        assert tomllib.loads(rendered)["model"] == model
+        assert warnings == []
+
+    def test_codex_claude_model_warning_is_names_only(self):
+        """The warning never echoes the model value or other frontmatter values."""
+        rendered, warnings = self._compile_codex_model(
+            "claude-secret-model-xyz",
+            extra="model_reasoning_effort: effort-secret-value\n",
+        )
+
+        assert tomllib.loads(rendered)["model"] == "claude-secret-model-xyz"
+        assert tomllib.loads(rendered)["model_reasoning_effort"] == "effort-secret-value"
+        assert len(warnings) == 1
+        text = f"{warnings[0].message} {warnings[0].detail}"
+        for value in ("claude-secret-model-xyz", "secret", "Agent", "Review."):
+            assert value not in text
+        assert "codex:" not in text
 
     def test_codex_agent_user_invocable_false_emits_lossy_compilation_warning(self, capsys):
         """Codex cannot encode programmatic-only, so the drop must be announced."""
@@ -2015,6 +2106,100 @@ class TestKiroAgentIntegration:
             if "user-invocable" in diagnostic.message
         ]
         assert user_invocable_warnings == []
+
+
+class TestRenderedAgentAdoption:
+    """Render, then adopt (#3722): every agent writer adopts its own earlier output.
+
+    ``managed_files=None`` models a user-scope install with no lockfile entry
+    for the file, where content adoption is the only idempotency path. Each
+    target transforms the source (Codex TOML, Kiro frontmatter filter, link
+    rewrite for verbatim-copy targets), so a raw-source comparison never
+    matches and the second install used to report the file as skipped.
+    """
+
+    _SOURCE = (
+        "---\nname: reviewer\ndescription: Review code\ntools:\n- read\n---\n"
+        "Use the [guide skill](../skills/guide/SKILL.md#usage) first.\n"
+    )
+
+    @staticmethod
+    def _package(root: Path) -> PackageInfo:
+        package_dir = root / "apm_modules" / "owner" / "pkg"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        skill = package_dir / ".apm" / "skills" / "guide" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: guide\ndescription: Guide\n---\nGuide.\n", encoding="utf-8")
+        (agents_dir / "reviewer.agent.md").write_text(
+            TestRenderedAgentAdoption._SOURCE, encoding="utf-8"
+        )
+        return PackageInfo(
+            package=APMPackage(name="pkg", version="1.0.0", package_path=package_dir),
+            install_path=package_dir,
+            resolved_reference=ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="abc123",
+                ref_name="main",
+            ),
+            installed_at=datetime.now().isoformat(),
+        )
+
+    @pytest.mark.parametrize("target_name", ["codex", "kiro", "copilot", "claude"])
+    def test_rendered_agent_is_adopted_without_managed_files(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        (tmp_path / target.root_dir).mkdir(parents=True, exist_ok=True)
+        package_info = self._package(tmp_path)
+
+        first = AgentIntegrator().integrate_agents_for_target(target, package_info, tmp_path)
+        assert first.files_integrated == 1
+        deployed = first.target_paths[0]
+        written = deployed.read_bytes()
+        # The writer transforms the source, so raw-source identity cannot adopt it.
+        assert written != self._SOURCE.encode("utf-8")
+
+        second = AgentIntegrator().integrate_agents_for_target(
+            target, package_info, tmp_path, managed_files=None
+        )
+        assert (second.files_adopted, second.files_skipped, second.files_integrated) == (1, 0, 0)
+        assert second.target_paths == [deployed]
+        assert deployed.read_bytes() == written
+
+    @pytest.mark.parametrize("target_name", ["codex", "kiro", "copilot"])
+    def test_foreign_agent_content_is_still_skipped(self, tmp_path: Path, target_name: str) -> None:
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        (tmp_path / target.root_dir).mkdir(parents=True, exist_ok=True)
+        package_info = self._package(tmp_path)
+        deployed = (
+            AgentIntegrator()
+            .integrate_agents_for_target(target, package_info, tmp_path)
+            .target_paths[0]
+        )
+        deployed.write_text("user edit\n", encoding="utf-8")
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            target, package_info, tmp_path, managed_files=None
+        )
+        assert (result.files_adopted, result.files_skipped) == (0, 1)
+        assert deployed.read_text(encoding="utf-8") == "user edit\n"
+
+    def test_legacy_multi_target_entry_adopts_rewritten_links(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        package_info = self._package(tmp_path)
+        first = AgentIntegrator().integrate_package_agents(package_info, tmp_path)
+        assert first.files_integrated == 1
+        assert len(first.target_paths) == 2
+
+        second = AgentIntegrator().integrate_package_agents(package_info, tmp_path)
+        assert (second.files_adopted, second.files_skipped, second.files_integrated) == (2, 0, 0)
+        assert sorted(second.target_paths) == sorted(first.target_paths)
 
 
 # ==================================================================

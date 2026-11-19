@@ -19,11 +19,14 @@ import pytest
 
 from apm_cli.core.deployment_state import MaterializationStatus
 from apm_cli.hook_contract import HookContractError
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.hook_command_paths import normalize_quoted_plugin_root
+from apm_cli.integration.hook_file_routing import (
+    legacy_hook_file_selection as _filter_hook_files_for_target,
+)
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,
-    _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
 )
 from apm_cli.integration.hook_ownership import dependency_hook_sources
@@ -1439,7 +1442,12 @@ class TestCursorIntegration:
 
         integrator = HookIntegrator()
         managed_files = {".cursor/hooks/hookify/pretooluse.py"}
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
 
         assert stats["files_removed"] == 1
         assert not (temp_project / ".cursor" / "hooks").exists()
@@ -1512,11 +1520,12 @@ class TestCursorIntegration:
 
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
-        # hook_source_selection=None means the up-front
-        # preflight_hooks_for_targets() gate is a no-op for this plan, so
-        # the unconditional check inside _integrate_merged_hooks is the
-        # ONLY preflight that runs for this single invocation.
-        source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
+        # Only _integrate_merged_hooks runs here, so its unconditional check
+        # is the ONLY preflight for this single invocation.
+        selection = integrator.select_hook_sources_for_target(pkg_info, "cursor")
+        source_plan = DeployableSourcePlan(
+            source_root=temp_project, paths=frozenset(), hook_source_selection=selection
+        )
         expected_retiring = frozenset({"claude"})
 
         with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
@@ -1608,7 +1617,12 @@ class TestSyncIntegration:
 
         integrator = HookIntegrator()
         managed_files = {".github/hooks/scripts/hookify/hooks/pretooluse.py"}
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
 
         assert stats["files_removed"] == 1
         assert not (hooks_dir / "scripts").exists()
@@ -1654,7 +1668,12 @@ class TestSyncIntegration:
 
         integrator = HookIntegrator()
         managed_files = {".claude/hooks/hookify/pretooluse.py"}
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
 
         assert stats["files_removed"] == 1
         assert not (temp_project / ".claude" / "hooks").exists()
@@ -2812,7 +2831,12 @@ class TestEndToEnd:
             str(p.relative_to(temp_project))
             for p in vscode_result.target_paths + claude_result.target_paths
         }
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
         assert stats["files_removed"] > 0
 
         # Verify cleanup
@@ -2854,12 +2878,42 @@ class TestEndToEnd:
         managed_files = {
             str(p.relative_to(temp_project)) for p in r1.target_paths + r2.target_paths
         }
-        stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=managed_files,
+            managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+        )
         assert stats["files_removed"] >= 2
         assert not (temp_project / ".github" / "hooks" / "ralph-loop-hooks.json").exists()
         assert not (
             temp_project / ".github" / "hooks" / "learning-output-style-hooks.json"
         ).exists()
+
+    @pytest.mark.windows_compat
+    def test_cleanup_matches_native_separator_hash_keys(self, temp_project):
+        """Windows-style managed paths and hash keys still prove and remove hook files."""
+        integrator = HookIntegrator()
+        pkg_dir = temp_project / "apm_modules" / "anthropics" / "ralph-loop"
+        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks" / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
+        (pkg_dir / "hooks" / "stop-hook.sh").write_text("#!/bin/bash")
+        result = integrator.integrate_package_hooks(
+            _make_package_info(pkg_dir, "ralph-loop"), temp_project
+        )
+        posix = {p.relative_to(temp_project).as_posix() for p in result.target_paths}
+        hashes = compute_deployed_hashes(posix, temp_project)
+        native = {path.replace("/", "\\") for path in posix}
+
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=native,
+            managed_file_hashes={path.replace("/", "\\"): hashes[path] for path in hashes},
+        )
+
+        assert stats["files_removed"] == len(posix) >= 2
+        assert not any((temp_project / path).exists() for path in posix)
 
 
 # ─── Deep copy safety test ───────────────────────────────────────────────────
@@ -3489,6 +3543,7 @@ class TestScopeResolvedHookDeployment:
             None,
             self.root,
             managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, self.root),
             targets=[copilot_target],
         )
         assert stats["files_removed"] > 0
@@ -3628,7 +3683,8 @@ class TestBackslashPathRewrite:
 class TestIssue1007Fixes:
     """Regression tests for the four bug-fixes shipped in issue #1007.
 
-    Fix 1 -- Target-aware hook file routing (_filter_hook_files_for_target)
+    Fix 1 -- Target-aware hook file routing (retired by #3226; the legacy
+             model now only feeds the migration guard)
     Fix 2 -- Variable pattern expansion (${PLUGIN_ROOT} / ${CURSOR_PLUGIN_ROOT})
     Fix 3 -- Event name normalisation for Claude (camelCase -> PascalCase)
     Fix 4a -- Alias-aware clearing during reinstall
@@ -3776,7 +3832,7 @@ class TestIssue1007Fixes:
         return _make_package_info(project, project.name)
 
     # ------------------------------------------------------------------
-    # Group A: Target-aware file routing
+    # Group A: Retired filename routing (legacy model for the #3226 guard)
     # ------------------------------------------------------------------
 
     def test_filter_copilot_hooks_excluded_from_claude(self, tmp_path: Path) -> None:
@@ -3851,17 +3907,15 @@ class TestIssue1007Fixes:
             "Mixed-case cursor-hooks stem must NOT route to claude"
         )
 
-    def test_claude_integration_skips_cursor_hook_files(self, temp_project: Path) -> None:
-        """End-to-end: .claude/settings.json must not contain entries from cursor-hooks.json."""
+    def test_claude_integration_refuses_hidden_cursor_hook_file(self, temp_project: Path) -> None:
+        """A cursor-named file the old convention hid now fails instead of leaking (#3226)."""
         pkg_info = self._make_pkg(
             temp_project,
             "multi-hooks-pkg",
             {
-                # Claude-specific hooks (PascalCase events, no cursor variable)
                 "hooks.json": {
                     "hooks": {"PostToolUse": [{"type": "command", "command": "echo claude-only"}]}
                 },
-                # Cursor-specific hooks -- must NOT appear in Claude output
                 "cursor-hooks.json": {
                     "hooks": {
                         "postToolUse": [
@@ -3875,26 +3929,10 @@ class TestIssue1007Fixes:
             },
         )
 
-        integrator = HookIntegrator()
-        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        with pytest.raises(HookContractError, match=r"newly activate: hooks/cursor-hooks\.json"):
+            HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
 
-        assert result.files_integrated == 1, "Exactly hooks.json should be integrated"
-        settings = self._read_claude_settings(temp_project)
-        hooks = settings.get("hooks", {})
-
-        # Must have the generic hook entry
-        assert "PostToolUse" in hooks, "PostToolUse from hooks.json must be present"
-
-        # Must NOT have anything from cursor-hooks.json
-        all_commands = [
-            entry.get("command", "")
-            for entries in hooks.values()
-            for entry in entries
-            if isinstance(entry, dict)
-        ]
-        assert not any("CURSOR_PLUGIN_ROOT" in cmd for cmd in all_commands), (
-            "No ${CURSOR_PLUGIN_ROOT} reference should appear in Claude settings.json"
-        )
+        assert not (temp_project / ".claude" / "settings.json").exists()
 
     # ------------------------------------------------------------------
     # Group B: Variable pattern expansion
@@ -4252,25 +4290,18 @@ class TestIssue1007Fixes:
     def test_single_install_no_duplicates(self, temp_project: Path) -> None:
         """End-to-end reproducer for issue #1007.
 
-        A package with copilot-hooks.json, cursor-hooks.json, and hooks.json
-        must produce exactly ONE PostToolUse entry in .claude/settings.json
-        with no residual postToolUse key.
+        Equivalent Claude and Copilot spellings of the same binding must
+        produce exactly ONE PostToolUse entry with no residual postToolUse key.
         """
         pkg_info = self._make_pkg(
             temp_project,
             "multi-format-pkg",
             {
-                # Generic (Claude) hooks -- should be integrated
                 "hooks.json": {
-                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo generic-post"}]}
-                },
-                # Copilot-specific -- must be filtered out for Claude
-                "copilot-hooks.json": {
-                    "hooks": {"postToolUse": [{"type": "command", "command": "echo copilot-post"}]}
-                },
-                # Cursor-specific -- must be filtered out for Claude
-                "cursor-hooks.json": {
-                    "hooks": {"postToolUse": [{"type": "command", "command": "echo cursor-post"}]}
+                    "hooks": {
+                        "PostToolUse": [{"type": "command", "command": "echo generic-post"}],
+                        "postToolUse": [{"type": "command", "command": "echo generic-post"}],
+                    }
                 },
             },
         )
@@ -4853,19 +4884,17 @@ class TestIssue1007Fixes:
     # Group E: Regression
     # ------------------------------------------------------------------
 
-    def test_reinstall_still_idempotent_with_routing(self, temp_project: Path) -> None:
-        """Running Claude integration 3 times with routing active must not grow entries."""
+    def test_reinstall_still_idempotent_with_alias_events(self, temp_project: Path) -> None:
+        """Running Claude integration 3 times with alias events must not grow entries."""
         pkg_info = self._make_pkg(
             temp_project,
             "idempotent-pkg",
             {
-                # Only hooks.json passes the claude filter
                 "hooks.json": {
                     "hooks": {"PostToolUse": [{"type": "command", "command": "echo idempotent"}]}
                 },
-                # This file is filtered out for claude -- must not affect count
-                "cursor-hooks.json": {
-                    "hooks": {"postToolUse": [{"type": "command", "command": "echo cursor-only"}]}
+                "more-hooks.json": {
+                    "hooks": {"postToolUse": [{"type": "command", "command": "echo idempotent"}]}
                 },
             },
         )
@@ -5040,3 +5069,22 @@ class TestHookScriptAdopt:
         for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             assert (scripts_dir_target / script) in result.target_paths
         assert (scripts_dir_target / "pretooluse.py") not in result.target_paths
+
+
+@pytest.mark.parametrize("spec", ["local-bundle/x", "gitlab.com/local-bundle/x"])
+def test_dependency_named_local_bundle_stays_dependency_owned(spec: str) -> None:
+    """A dependency cannot claim the local-bundle hook marker namespace (#3700)."""
+    from apm_cli.integration.hook_ownership import (
+        dependency_hook_source_marker,
+        drop_dependency_owned_entries,
+        is_local_bundle_hook_source,
+        local_bundle_hook_source_marker,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    marker = dependency_hook_source_marker(DependencyReference.parse(spec))
+    bundle_marker = local_bundle_hook_source_marker("x")
+    assert not is_local_bundle_hook_source(marker)
+    hooks = {"PreToolUse": [{"_apm_source": marker}, {"_apm_source": bundle_marker}]}
+    assert drop_dependency_owned_entries(hooks)
+    assert hooks == {"PreToolUse": [{"_apm_source": bundle_marker}]}

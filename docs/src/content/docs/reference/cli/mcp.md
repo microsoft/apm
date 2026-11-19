@@ -26,9 +26,9 @@ The canonical install path for MCP servers is
 [`apm install --mcp NAME`](../install/#mcp-server-entry-use-only-with---mcp). It
 edits `apm.yml`, resolves the registry entry, and writes the resulting
 `mcpServers` block to your project. With `-g` or `--global`, it creates or
-updates `~/.apm/apm.yml` and writes only to global-capable runtime
-configurations. `apm mcp install` is a forwarder that calls the same code path
--- use whichever spelling you prefer.
+updates `$APM_HOME/apm.yml` (default `~/.apm/apm.yml`) and writes only to
+global-capable runtime configurations. `apm mcp install` is a forwarder that
+calls the same code path -- use whichever spelling you prefer.
 
 For an end-to-end consumer walkthrough (declaring an MCP server in
 `apm.yml`, configuring transport and credentials, deploying to a
@@ -100,7 +100,9 @@ completion come from `apm install` itself, so they always match
 `--mcp-version`, `-g`/`--global`, `--trust-transitive-mcp`, `--dev`,
 `--dry-run`, `--force`, `-v`/`--verbose`, `--no-policy`.
 
-Other `apm install` options are passed through unchanged.
+Other `apm install` options are passed through unchanged. With `-g`, the
+server is recorded in `$APM_HOME/apm.yml` (default `~/.apm/apm.yml`);
+`APM_HOME` does not redirect runtime configuration.
 
 ## Environment variables
 
@@ -144,8 +146,8 @@ Install the same server at user scope:
 apm mcp install fetch -g --target claude -- npx -y @modelcontextprotocol/server-fetch
 ```
 
-This creates or updates `~/.apm/apm.yml` and the selected runtime's user
-configuration.
+This creates or updates `$APM_HOME/apm.yml` (default `~/.apm/apm.yml`) and the
+selected runtime's user configuration.
 
 Install a remote HTTP server:
 

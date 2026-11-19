@@ -21,6 +21,9 @@ from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
 from scripts.architecture_linter.checks.contracts_legacy import LEGACY_CHECKS
+from scripts.architecture_linter.checks.contracts_strip_charset import (
+    check_strip_charset_literals,
+)
 from scripts.architecture_linter.checks.contracts_structural_authorities import (
     find_binary_selection_violations,
     find_ratchet_authority_violations,
@@ -85,6 +88,9 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
+_GUARD_STRIP_CHARSET = "contracts-tooling-strip-charset"
+
+_GUARD_LOCKFILE_SYMLINK_WRITE = "contracts-tooling-lockfile-symlink-write-guard"
 
 _GUARD_NATIVE_LIFECYCLE = "contracts-tooling-native-lifecycle-evidence"
 
@@ -430,6 +436,60 @@ def check_lockfile_timestamp_fallback(provider: FactsProvider) -> tuple[Violatio
     return tuple(findings)
 
 
+def check_lockfile_symlink_write_guard(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Lockfile symlink write refusal must be centralized in deps/lockfile.py.
+
+    The owner provides ``ensure_lockfile_writable`` and
+    ``refuse_lockfile_before_mutation``; consumers that would rewrite the
+    lockfile must route through them instead of inlining ``is_symlink()``
+    checks on lockfile paths.
+    """
+    rule_id = _GUARD_LOCKFILE_SYMLINK_WRITE
+    owner, owner_failures = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    if owner_failures:
+        return tuple(owner_failures)
+
+    findings: list[Violation] = []
+    # The owner must define both centralized functions.
+    if not _present(owner, "def ensure_lockfile_writable("):
+        findings.append(
+            _summary(
+                rule_id, _LOCKFILE_OWNER, "ensure_lockfile_writable must exist in lockfile owner"
+            )
+        )
+    if not _present(owner, "def refuse_lockfile_before_mutation("):
+        findings.append(
+            _summary(
+                rule_id,
+                _LOCKFILE_OWNER,
+                "refuse_lockfile_before_mutation must exist in lockfile owner",
+            )
+        )
+    # Consumers that import LockfileSymlinkError must also import or call the
+    # owner API, never raise LockfileSymlinkError directly with their own
+    # is_symlink() logic.
+    _LOCKFILE_SYMLINK_CONSUMERS = (
+        "src/apm_cli/commands/uninstall/cli.py",
+        "src/apm_cli/install/helpers/plan_inputs.py",
+    )
+    for path in _LOCKFILE_SYMLINK_CONSUMERS:
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        if not _present(facts, "ensure_lockfile_writable") and not _present(
+            facts, "refuse_lockfile_before_mutation"
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    "Lockfile symlink write refusal must route through lockfile owner API",
+                )
+            )
+    return tuple(findings)
+
+
 _TAXONOMY_PLUGIN = "tests/quality/taxonomy_inventory_plugin.py"
 
 
@@ -619,6 +679,51 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Dependency discovery must consume canonical materialization and lockfile paths",
             )
         )
+    # #3699: root declarations whose package directories nest are rejected by
+    # the materialization owner before any package is fetched.
+    resolver, errors = _facts_for(provider, "src/apm_cli/deps/apm_resolver.py", rule_id)
+    findings.extend(errors)
+    if not errors and (
+        not _present_re(materialization, re.compile(r"^def nested_materialization_pairs\("))
+        or not _present(resolver, "nested = nested_materialization_pairs(")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _MATERIALIZATION_OWNER,
+                "Nested root package directories must be rejected via nested_materialization_pairs",
+            )
+        )
+    # #3696: distinct packages sharing one host-blind directory are rejected by
+    # the materialization owner before the resolver fetches or stages them.
+    replacement_path = "src/apm_cli/models/dependency/replacement.py"
+    replacement, replacement_errors = _facts_for(provider, replacement_path, rule_id)
+    findings.extend(replacement_errors)
+    if not replacement_errors and _present_re(
+        replacement, re.compile(r"\.get_install_path\(|_slots\b")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                replacement_path,
+                "Replacement binding must not keep its own apm_modules slot occupancy; "
+                "MaterializationSlots owns shared-directory rejection",
+            )
+        )
+    if not errors and (
+        not _present_re(materialization, re.compile(r"^class MaterializationSlots\b"))
+        or not _present(resolver, "slots = MaterializationSlots(modules_dir)")
+        or not _present(resolver, "collision = slots.claim(dep_ref, parent)")
+        or not _present(resolver, "if self._reject_shared_slots(tree, slots,")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _MATERIALIZATION_OWNER,
+                "Packages sharing one apm_modules directory must be rejected via "
+                "MaterializationSlots before fetch",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )
@@ -700,9 +805,8 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         plan, re.compile(r"^def lockfile_satisfies_manifest\("), re.compile(r"^def ")
     )
     if (
-        not _body_has(plan_body, "is_full_revision_pin(reference)")
+        not _body_has(plan_body, "revision_pin_mismatch(dep.reference, locked_dep)")
         or not _body_has(plan_body, "detect_ref_change(dep, locked_dep)")
-        or not _body_has(plan_body, "locked_dep.resolved_commit")
         or _body_has(plan_body, "is_insecure")
     ):
         findings.append(_summary(rule_id, _INSTALL_PLAN, frozen_identity_message))
@@ -1931,9 +2035,19 @@ RULES: tuple[Rule, ...] = (
         check_lockfile_timestamp_fallback,
     ),
     _owner_rule(
+        _GUARD_LOCKFILE_SYMLINK_WRITE,
+        "Lockfile symlink write refusal stays owned by deps/lockfile.py.",
+        check_lockfile_symlink_write_guard,
+    ),
+    _owner_rule(
         _GUARD_GENERATION_FOOTER,
         "Generated-content footer wording stays owned by compilation/footer.py.",
         lambda provider: check_generation_footer_authority(provider, _GUARD_GENERATION_FOOTER),
+    ),
+    _owner_rule(
+        _GUARD_STRIP_CHARSET,
+        "Prefix/suffix removal uses removeprefix/removesuffix, never a strip character set.",
+        lambda provider: check_strip_charset_literals(provider, _GUARD_STRIP_CHARSET),
     ),
     _structural_rule(
         _CONTRACT_RULE_ID,

@@ -4,6 +4,8 @@ import contextlib
 import json
 import os
 
+from apm_cli.core.scope import get_apm_home
+
 # ---------------------------------------------------------------------------
 # Public env-var names (re-declared here to avoid a circular import with the
 # transport_selection module which also defines them).
@@ -12,7 +14,7 @@ _ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
 _ENV_GITHUB_AUTH_FIRST = "APM_GITHUB_AUTH_FIRST"
 
-CONFIG_DIR = os.path.expanduser("~/.apm")
+CONFIG_DIR = os.fspath(get_apm_home())
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 _INSTALL_TARGET_KEY = "install_target"
 _SELF_UPDATE_CHANNEL_KEY = "self_update_channel"
@@ -36,7 +38,7 @@ def ensure_config_exists():
         try:
             fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"default_client": "vscode"}, f)
+                json.dump({"default_client": "copilot"}, f)
         except FileExistsError:
             pass
         with contextlib.suppress(NotImplementedError, OSError):
@@ -119,7 +121,10 @@ def get_default_client():
     Returns:
         str: Default MCP client type.
     """
-    return get_config().get("default_client", "vscode")
+    from apm_cli.core.target_catalog import canonical_target_token
+
+    # ``vscode`` is a deprecated alias of ``copilot`` (#3866).
+    return canonical_target_token(get_config().get("default_client", "copilot"))
 
 
 def set_default_client(client_type):
@@ -132,7 +137,10 @@ def set_default_client(client_type):
 
 
 def get_auto_integrate() -> bool:
-    """Get the auto-integrate setting.
+    """Get the deprecated auto-integrate setting.
+
+    Deprecated: no command reads this value. Kept only so
+    ``apm config get auto-integrate`` keeps working (#3839).
 
     Returns:
         bool: Whether auto-integration is enabled (default: True).
@@ -141,7 +149,7 @@ def get_auto_integrate() -> bool:
 
 
 def set_auto_integrate(enabled: bool) -> None:
-    """Set the auto-integrate setting.
+    """Set the deprecated auto-integrate setting (stored, but has no effect).
 
     Args:
         enabled: Whether to enable auto-integration.

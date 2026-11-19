@@ -59,12 +59,32 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
-| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
+| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` |
+| `PreToolUse`, `preToolUse` | `preToolUse` | `PreToolUse` |
+| `PostToolUse`, `postToolUse` | `postToolUse` | `PostToolUse` |
+| `subagentStop` | unchanged | `SubagentStop` |
+| `sessionEnd` | unchanged | `SessionEnd` |
+| `postToolUseFailure` | unchanged | `PostToolUseFailure` |
+| `preCompact` | unchanged | `PreCompact` |
 
-For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
-camelCase or PascalCase name that conflicts with the target convention emits
-an install warning. All-lowercase names such as `stop` pass through silently;
-`stop` is not a native Copilot or Claude event and will not fire.
+The Claude column follows the alias pairs in the
+[Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference)
+and the [Claude Code hook events](https://code.claude.com/docs/en/hooks).
+Claude Code rejects unknown events, so a lower-case event without a
+documented Claude alias (for example `errorOccurred`, `subagentStart`, or
+`stop`) fails
+the install for that package before `.claude/settings.json` changes. Limit
+such a package to targets that support the event with `target:` or
+dependency `targets:`. PascalCase names absent from the table pass to Claude
+unchanged.
+
+For Copilot, names absent from the table are preserved unchanged; an unmapped
+name whose casing conflicts with the target convention emits an install
+warning.
+
+Equivalent spellings of the same binding, such as `SubagentStop` and
+`subagentStop` with the same handler, are written once. Bindings with
+different matchers, such as `Bash` and `*`, stay separate.
 
 ```json
 {
@@ -136,7 +156,8 @@ available at runtime:
   Copilot or VS Code, use the `.mjs` file extension -- Node.js
   recognises it without a `package.json`.
 
-Use simple hook filenames. APM computes their reach as:
+Use simple hook filenames; names never select targets. APM computes their
+reach as:
 
 ```text
 effective hook targets =
@@ -156,12 +177,13 @@ For example, this package can write hooks only to Claude:
 ```yaml
 name: claude-hooks
 version: "1.0.0"
-target: claude
+targets: [claude]
 ```
 
-`target:` accepts scalar, CSV, and list spellings, including aliases such
-as `vscode` (normalized to `copilot`). `targets:` accepts a scalar or list
-of canonical names. Unknown names, both keys together, and an empty
+The deprecated `target:` key accepts scalar, CSV, and list spellings, including
+aliases such as `vscode` (normalized to `copilot`); its warning names the
+`targets:` replacement. `targets:` accepts a scalar or list
+of canonical names (`vscode` is a deprecated alias of `copilot`). Unknown names, both keys together, and an empty
 or null `targets:` value fail validation. A null singular `target:` is
 treated as omission for legacy compatibility; an empty string or list fails
 validation. Both keys conflict even when either value is null. Consumers
@@ -177,18 +199,11 @@ the target vocabulary in
 [Primitives and targets](../../../concepts/primitives-and-targets/).
 :::
 
-:::caution[Deprecated]
-Hook filename routing (`*-<harness>-hooks.json`) is deprecated and warns
-at install time. When renaming `my-pkg-codex-hooks.json` to generic
-`hooks.json`, preserve package intent with `target: codex` in the package's
-own `apm.yml`. Consumer per-dependency `targets:` may narrow that scope
-further, but cannot expand it.
-
-During migration, suffix routing still filters within the effective target
-set. Multi-target stems such as `claude-codex-hooks.json` match each named
-target. Ambiguous stems such as `codex-launch-hooks.json` use universal
-fallback and warn that the apparent target token was ignored.
-:::
+Every hook file in a package reaches every effective target. To ship
+different hooks for different harnesses,
+publish one package per target set, each with its own `target:`, and keep
+shared content in a common package. Declaring several targets on one package
+does not assign different files to each target.
 
 Supported targets and where the integrator writes:
 
@@ -201,6 +216,7 @@ Supported targets and where the integrator writes:
 | gemini   | `.gemini/settings.json`               | merged               |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
+| antigravity | `.agents/hooks.json`              | merged               |
 | kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
@@ -219,6 +235,32 @@ Kiro trigger names are PascalCase and command timeouts remain in seconds.
 For Claude, Codex, Gemini, and Antigravity, other handler and hook-group
 fields, including nested objects and arrays such as `env`, are written to the
 native JSON unchanged.
+
+### Migrating from filename routing
+
+APM used to route files named `*-<target>-hooks.json` or
+`hooks-<target>.json` (for example `my-pkg-codex-hooks.json`) only to the
+named target, and skipped generic files such as `hooks.json` for a target
+that had its own file. That routing is removed.
+
+If removing it would give a target a hook file the old names kept from it,
+`apm install` fails for that package with a message naming the target and
+files, and writes nothing from it. APM does not guess the intended target.
+Until the package is migrated, `apm uninstall` of another package also stops
+with the same message before it changes any hook settings.
+
+- **Package authors:** split the package so each target set has its own
+  package whose `apm.yml` declares it (for example `target: codex`) with an
+  ordinary `hooks/hooks.json`. Keep shared hooks in a common package.
+- **Consumers:** if the package ships hook files for one target only, narrow
+  the dependency in your `apm.yml` with object-form `targets: [codex]`.
+  Narrowing does not help when the package also ships a generic `hooks.json`
+  or files for other targets; ask its author to split it.
+
+Then reinstall.
+
+A file whose old name already matched every effective target keeps
+installing unchanged; renaming it to `hooks.json` is optional.
 
 ### Cursor native hooks and Claude import
 
@@ -290,8 +332,8 @@ Reinstall migrates matching APM-owned legacy Cursor entries and keeps unrelated
 user hooks. Switching a dependency to one route can retire its old project
 route; it does not remove user hooks or matching hooks in another scope.
 Invalid or unsupported user configuration is rejected without being
-overwritten. Target-specific files retain the existing filename-routing rules;
-this repair does not add per-file target declarations or dry-run hook previews.
+overwritten. Hook filenames do not select targets; this repair does not add
+per-file target declarations or dry-run hook previews.
 
 These mappings follow the [Cursor hook reference](https://cursor.com/docs/hooks)
 and [third-party hook reference](https://cursor.com/docs/reference/third-party-hooks).
@@ -356,6 +398,7 @@ Supported targets and output paths:
 | opencode | `.opencode/commands/<name>.md`   | opencode markdown     |
 | gemini   | `.gemini/commands/<name>.toml`   | TOML                  |
 | windsurf | `.windsurf/workflows/<name>.md`  | called "workflows"    |
+| kiro     | `.kiro/prompts/<name>.md`        | body-only Kiro prompt |
 | codex    | -- not supported --              | silently skipped      |
 
 Verified against `src/apm_cli/integration/targets.py` and
@@ -365,19 +408,19 @@ Verified against `src/apm_cli/integration/targets.py` and
 
 Reach for a skill, instruction, or prompt first. Use hooks or commands
 only when the behavior is a runtime callback (hook) or a
-command-palette entry (command), you accept that consumers on Copilot,
-Codex, or OpenCode will not get them, and you will own per-target
+command-palette entry (command), you accept that consumers on some
+harnesses will not get them (see the tables above), and you will own per-target
 formats. "Run a script before every tool call" fits a hook. "Give the
 agent a procedure" fits a skill -- and reaches every harness.
 
 ## Pitfalls
 
 - **Hook event names.** Use the documented
-  [session lifecycle aliases](#session-lifecycle-event-aliases) for Copilot
-  and Claude. Their unknown names are preserved. An install warning appears
-  only when an unmapped name starts
-  with a capital letter or starts lowercase and contains a later capital
-  letter, and that casing conflicts with the target convention. Cursor
+  [event aliases](#session-lifecycle-event-aliases) for Copilot
+  and Claude. Claude rejects lower-case names without a documented Claude alias
+  before writing settings. For Copilot, unknown names are preserved; an
+  install warning appears only when an unmapped name's casing conflicts with
+  the target convention. Cursor
   instead rejects unsupported events, fields and restrictions; see
   [Cursor native hooks](#cursor-native-hooks-and-claude-import). Diagnostics
   name unsupported source-level, matcher-group and handler fields and identify
@@ -433,7 +476,7 @@ agent a procedure" fits a skill -- and reaches every harness.
   in mind.
 - **OpenCode and hooks.** OpenCode has no hooks concept. Do not author
   a Claude+OpenCode package and assume hooks reach both -- they do
-  not. The install log notes the skip.
+  not. The skip is silent: the install log does not mention it.
 
 Once your hooks and commands are in place, inspect a real installation's
 native configuration, then run `apm pack` to bundle.

@@ -44,6 +44,6 @@ Thank you for contributing this pull request. APM starts with an
 issue, not an implementation
 (https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md).
 Please open an issue describing the user problem so a maintainer
-can review and accept the scope first. This PR is labelled
-status/deferred until that happens.>
+can review and accept the scope first. This PR is awaiting maintainer
+review and acceptance of its scope.>
 ```

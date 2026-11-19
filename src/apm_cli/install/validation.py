@@ -31,6 +31,9 @@ from pathlib import Path
 
 import requests
 
+from ..core.auth import AuthResolver
+from ..core.auth_chain import AdoAuthChainExhaustedError, AuthAttemptLog
+from ..core.auth_outcome import AuthAttemptFailed, classify_auth_outcome
 from ..core.tls_trust import tls_failure_guidance
 from ..deps.github_rate_limit import GitHubThrottleError, raise_for_github_throttle
 from ..models.dependency.host_virtual import (
@@ -46,9 +49,14 @@ from ..utils.git_env import (
 )
 from ..utils.github_host import (
     default_host,
-    is_ado_auth_failure_signal,
     is_github_hostname,
     is_gitlab_hostname,
+)
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
 )
 from .errors import AuthenticationError
 from .phases.local_content import LocalPackageError, read_local_package_source
@@ -96,6 +104,8 @@ def _inconclusive_github_probe_detail(exc: BaseException) -> str | None:
         if exc.status_code == 408 or 500 <= exc.status_code < 600:
             return f"HTTP {exc.status_code}"
         return None
+    if isinstance(exc, RedirectRefusedError):
+        return f"redirect not followed: {exc}"
     if isinstance(exc, requests.exceptions.Timeout):
         return "request timeout"
     if isinstance(exc, requests.exceptions.ConnectionError):
@@ -528,77 +538,106 @@ def _validate_ado_git_package(
                 break
         return run_result, final_attempt, final_url, final_env
 
-    bearer_attempted = False
-    primary_outcome = None
+    is_ado = bool(dep_ref.is_azure_devops())
+    chain_attempts = AuthAttemptLog()
 
-    def _primary_probe():
-        nonlocal primary_outcome
-        primary_outcome = _probe_attempts(attempts)
-        return primary_outcome
+    def _probe_ado_https(
+        attempt: object,
+        probe_url: str,
+    ) -> tuple[object | None, object | None, str | None, dict[str, str] | None]:
+        """Run one ADO HTTPS probe under the AuthResolver credential chain."""
+        from ..utils.git_env import git_remote_refs
 
-    def _bearer_probe(bearer):
-        if dep_ctx is None or primary_outcome is None or primary_outcome[2] is None:
-            return primary_outcome
-        primary_attempt = primary_outcome[1]
-        primary_url = primary_outcome[2]
-        bearer_url = ado_downloader._build_repo_url(
-            dep_ref.repo_url,
-            use_ssh=False,
-            dep_ref=dep_ref,
-            token=None,
-            auth_scheme="bearer",
-        )
-        if getattr(primary_attempt, "requested_url", None) is not None:
-            bearer_url = primary_url
-        bearer_env = auth_resolver.build_ado_bearer_git_env(
-            dep_ctx,
-            bearer,
-            getattr(primary_attempt, "effective_url", None) or bearer_url,
-            base_env=ado_downloader.git_env,
-        )
-        return _probe_attempts([(primary_attempt, bearer_url, bearer_env)])
+        chain_env: dict[str, str] = {}
 
-    def _outcome_is_ado_auth_failure(outcome) -> bool:
-        if outcome is None or outcome[0] is None or outcome[1] is None:
-            return False
-        run_result, attempt = outcome[0], outcome[1]
-        return bool(
-            getattr(dep_ctx, "source", "") == "ADO_APM_PAT"
-            and getattr(attempt, "scheme", None) == "https"
-            and getattr(attempt, "use_token", False)
-            and run_result.returncode != 0
-            and is_ado_auth_failure_signal(run_result.stderr or "")
-        )
+        def _ls_remote(_token: str | None, git_env: dict[str, str]):
+            chain_env.clear()
+            chain_env.update(git_env)
+            run_result = git_remote_refs(
+                probe_url,
+                timeout=30,
+                env=git_env,
+                options=("--heads", "--exit-code"),
+            )
+            _log_attempt_result("https", git_env, run_result)
+            if run_result.returncode != 0:
+                # auth-delegated: the resolver classifies and escalates.
+                raise AuthAttemptFailed(result=run_result)
+            return run_result
 
-    if dep_ref.is_azure_devops():
-        fallback = auth_resolver.execute_with_bearer_fallback(
-            dep_ref,
-            _primary_probe,
-            _bearer_probe,
-            _outcome_is_ado_auth_failure,
+        try:
+            run_result = auth_resolver.try_with_fallback(
+                dep_ref.host or "dev.azure.com",
+                _ls_remote,
+                org=org,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
+                remote_url=getattr(attempt, "effective_url", None) or probe_url,
+                base_env=ado_downloader.git_env,
+                attempts=chain_attempts,
+                verbose_callback=verbose_log,
+            )
+        except AuthAttemptFailed as failed:
+            run_result = failed.result
+        return run_result, attempt, probe_url, dict(chain_env)
+
+    def _probe_all() -> tuple[object | None, object | None, str | None, dict[str, str] | None]:
+        outcome: tuple[object | None, object | None, str | None, dict[str, str] | None] = (
+            None,
+            None,
+            None,
+            None,
         )
-        result, _failed_attempt, _failed_url, _failed_env = fallback.outcome
-        bearer_attempted = fallback.bearer_attempted
-    else:
-        result, _failed_attempt, _failed_url, _failed_env = _primary_probe()
+        for attempt, probe_url, probe_env in attempts:
+            if is_ado and _scheme_of(probe_url) == "https":
+                outcome = _probe_ado_https(attempt, probe_url)
+            else:
+                outcome = _probe_attempts([(attempt, probe_url, probe_env)])
+            if outcome[0] is not None and outcome[0].returncode == 0:
+                break
+        return outcome
+
+    try:
+        result, _failed_attempt, _failed_url, _failed_env = _probe_all()
+    except AdoAuthChainExhaustedError as exhausted:
+        _host = dep_ref.host or "dev.azure.com"
+        raise AuthenticationError(
+            f"Authentication failed for {_host}",
+            diagnostic_context=(
+                f"\n    {exhausted}\n"
+                + auth_resolver.build_error_context(
+                    _host,
+                    "validate",
+                    org=dependency_repository_owner(dep_ref),
+                    dep_url=dep_ref.repo_url,
+                    attempts=exhausted.attempts,
+                )
+            ),
+        ) from exhausted
 
     if result is None:
         return False
 
-    # ADO PAT-to-bearer fallback is owned by AuthResolver. ADO validation
-    # never constructs or invokes a native Git credential-helper attempt.
-
-    # Per-attempt verbose logging is emitted inside the probe loop
-    # (and by the bearer-fallback branch above), so the result is
-    # already on screen by the time we get here. Git diagnostics are
-    # redacted by the canonical helper before verbose rendering.
+    # The ADO credential chain (PAT -> az bearer -> path-scoped helper) is
+    # owned by AuthResolver.try_with_fallback. ADO children never invoke a
+    # native Git credential helper; helper credentials arrive as a header.
 
     # #1015: distinguish auth failures from non-auth failures (DNS,
     # timeout, repo-truly-not-found 404). Auth failures get a typed
     # exception with actionable diagnostics; non-auth failures keep
     # the legacy False return so the caller can word its own message.
     if result.returncode != 0 and not is_generic:
-        if is_ado_auth_failure_signal(result.stderr or ""):
+        outcome = classify_auth_outcome(
+            host_info=auth_resolver.classify_host(
+                dep_ref.host or "dev.azure.com",
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            ),
+            error=result.stderr or "",
+            credential_presented=bool(dep_ctx and getattr(dep_ctx, "token", None)),
+        )
+        if outcome.is_auth_failure:
             _host = dep_ref.host or "dev.azure.com"
             _org = dependency_repository_owner(dep_ref)
             _diag = auth_resolver.build_error_context(
@@ -606,7 +645,7 @@ def _validate_ado_git_package(
                 "validate",
                 org=_org,
                 dep_url=dep_ref.repo_url,
-                bearer_also_failed=bearer_attempted,
+                attempts=chain_attempts if is_ado else None,
             )
             raise AuthenticationError(
                 f"Authentication failed for {_host}",
@@ -614,6 +653,14 @@ def _validate_ado_git_package(
             )
 
     return result.returncode == 0
+
+
+def _github_api_get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
+    """GET one GitHub REST URL; redirects are followed only within its origin."""
+    with CredentialScopedSession() as session:
+        return origin_bounded_request(
+            session, "GET", url, base_url=origin_root(url), headers=headers, timeout=timeout
+        )
 
 
 def _validate_github_package(
@@ -666,11 +713,10 @@ def _validate_github_package(
             "Accept": "application/vnd.github+json",
             "User-Agent": "apm-cli",
         }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers.update(AuthResolver.github_rest_headers(token))
 
         try:
-            resp = requests.get(api_url, headers=headers, timeout=15)
+            resp = _github_api_get(api_url, headers=headers, timeout=15)
         except requests.exceptions.SSLError as e:
             raise RuntimeError(f"TLS verification failed for {host_info.display_name}") from e
         except requests.exceptions.RequestException as e:
@@ -769,11 +815,10 @@ def _validate_parse_failure_fallback(
             "Accept": "application/vnd.github+json",
             "User-Agent": "apm-cli",
         }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers.update(AuthResolver.github_rest_headers(token))
 
         try:
-            resp = requests.get(api_url, headers=headers, timeout=15)
+            resp = _github_api_get(api_url, headers=headers, timeout=15)
         except requests.exceptions.SSLError as e:
             raise RuntimeError(f"TLS verification failed for {host_info.display_name}") from e
         except requests.exceptions.RequestException as e:

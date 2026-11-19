@@ -38,6 +38,7 @@ detection repo-wide.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -100,6 +101,25 @@ def resolve_local_dep_dir(
         parent_index=index,
         resolved_cache=cache,
         seen=set(),
+    )
+
+
+def resolve_local_dep_base(
+    lock_dep: LockedDependency,
+    lockfile: LockFile | None,
+    project_root: Path,
+    *,
+    parent_index: dict[str, tuple[LockedDependency, ...]] | None = None,
+) -> Path:
+    """Return the directory a locked local dep's ``local_path`` is admitted from.
+
+    Mirrors install: a local replacement is anchored on the consumer root;
+    any other local dep on the directory of the package that declared it.
+    """
+    if lock_dep.replacement is not None:
+        return project_root
+    return resolve_local_dep_dir(
+        replace(lock_dep, local_path="."), lockfile, project_root, parent_index=parent_index
     )
 
 

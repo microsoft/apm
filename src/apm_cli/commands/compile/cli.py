@@ -337,28 +337,15 @@ def _resolve_effective_target(
         (str | list | None) for user-facing label rendering.
     """
     from ...core.target_detection import detect_target
-    from ...models.apm_package import APMPackage
+    from ...models.apm_package import APMPackage, package_target_selection
 
     _root = source_root or Path(".")
     config_target = None
     apm_yml_path = _root / APM_YML_FILENAME
     if apm_yml_path.exists():
-        apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
-        config_target = apm_pkg.target
-        if config_target is None:
-            try:
-                from ...core.apm_yml import parse_targets_field
-                from ...utils.yaml_io import load_yaml
-
-                _raw = load_yaml(apm_yml_path)
-                if isinstance(_raw, dict):
-                    _yaml_targets = parse_targets_field(_raw)
-                    if _yaml_targets:
-                        config_target = (
-                            _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
-                        )
-            except Exception:
-                pass
+        config_target = package_target_selection(APMPackage.from_apm_yml(apm_yml_path))
+        if isinstance(config_target, list) and len(config_target) == 1:
+            config_target = config_target[0]
 
     compile_target = _resolve_compile_target(target)
     compile_config_target = _resolve_compile_target(config_target)
@@ -390,13 +377,20 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
     Declared names are normalized before lookup because ``apm.yml`` accepts the
     ``vscode`` alias, which is not a ``KNOWN_TARGETS`` key; matching raw tokens
     would drop it and silently compile nothing.
+
+    The manifest is read strictly through the declaration owner: a broken user
+    manifest fails closed instead of widening to every harness, and singular
+    ``target: all`` expands to every target like ``apm install -g`` does.
     """
-    from ...core.apm_yml import read_declared_target_names
     from ...core.target_catalog import normalize_target_name
     from ...integration.targets import KNOWN_TARGETS
+    from ...models.manifest_targets import read_manifest_target_declaration
 
-    declared = read_declared_target_names(source_root)
-    if declared is None or not declared:
+    declaration = read_manifest_target_declaration(source_root / APM_YML_FILENAME)
+    if declaration is None or declaration.spelling is None:
+        return list(KNOWN_TARGETS.values()), None
+    declared = declaration.restriction(strict=True)
+    if not declared:
         return list(KNOWN_TARGETS.values()), None
     canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
     profiles = (KNOWN_TARGETS.get(name) for name in canonical)
@@ -415,6 +409,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     from ...compilation import compile_user_root_contexts
     from ...core.errors import TargetResolutionError
     from ...core.scope import InstallScope, get_apm_dir
+    from ...models.manifest_io import InvalidManifestError
 
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
@@ -437,7 +432,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
         logger.error(
             f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
-            symbol="",
+            symbol="error",
         )
         return 1
     except yaml.YAMLError as exc:
@@ -446,6 +441,9 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
             symbol="error",
         )
+        return 1
+    except InvalidManifestError as exc:
+        logger.error(f"{exc}", symbol="error")
         return 1
     except OSError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
@@ -467,7 +465,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             if declared_names == target_names
             else f"{declared_names} -> {target_names}"
         )
-        selection_source = "~/.apm/apm.yml"
+        selection_source = _display_user_path(source_root / APM_YML_FILENAME)
     logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
 
     results = compile_user_root_contexts(
@@ -774,7 +772,7 @@ def _report_distributed_dry_run_protection(
         return
     noun = "file" if protected_count == 1 else "files"
     logger.progress(
-        f"Would retain {protected_count} hand-authored root {noun}; "
+        f"Would retain {protected_count} hand-authored context {noun}; "
         "no protected files would be generated.",
         symbol="info",
     )
@@ -803,7 +801,7 @@ def _report_distributed_live_success(
         protected_note = ""
         if protected_count:
             protected_noun = "file" if protected_count == 1 else "files"
-            protected_note = f"; retained {protected_count} hand-authored root {protected_noun}"
+            protected_note = f"; retained {protected_count} hand-authored context {protected_noun}"
         logger.success(
             f"Compiled {files_written} output {output_noun} "
             f"({agents_generated} AGENTS.md {generated_noun}){protected_note}; "
@@ -814,7 +812,7 @@ def _report_distributed_live_success(
         protected_noun = "file" if protected_count == 1 else "files"
         logger.success(
             f"Generated {files_written} output {output_noun}; "
-            f"retained {protected_count} hand-authored root {protected_noun}.",
+            f"retained {protected_count} hand-authored context {protected_noun}.",
             symbol="check",
         )
     else:
@@ -841,10 +839,47 @@ def _report_protected_no_write(
         skipped_noun = "placement" if nested_skips == 1 else "placements"
         skipped_note = f" skipped {nested_skips} nested Git repository {skipped_noun};"
     logger.progress(
-        f"Retained {protected_count} hand-authored root {protected_noun};"
+        f"Retained {protected_count} hand-authored context {protected_noun};"
         f"{skipped_note} no files generated.",
         symbol="info",
     )
+
+
+def _coerce_provenance_targets(value: object) -> list[str]:
+    """Return the user-facing target names shown on the provenance line."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    if isinstance(value, list):
+        return [str(t) for t in value]
+    if isinstance(value, frozenset):
+        return sorted(value)
+    return []
+
+
+def _report_target_without_compile_output(
+    logger: CommandLogger, effective_target: CompileTargetType
+) -> bool:
+    """Report the no-op for a target without root-context output.
+
+    Returns True when *effective_target* compiles nothing, so the caller
+    stops before running the compiler. Experimental targets whose flag is
+    off also get the canonical enable hint.
+    """
+    from ...core.target_detection import target_without_compile_output
+    from ...install.target_hints import emit_disabled_experimental_target_hint
+
+    capability = target_without_compile_output(effective_target)
+    if capability is None:
+        return False
+    emit_disabled_experimental_target_hint(capability.name, (), logger, create_config=False)
+    logger.progress(
+        f"{capability.name} has no compile outputs -- skipping. "
+        f"Run 'apm install --target {capability.name}' to deploy to it.",
+        symbol="info",
+    )
+    return True
 
 
 @serialized_lifecycle_unless("dry_run")
@@ -900,17 +935,6 @@ def _run_compilation(
     # the user wrote (e.g. "copilot"), so compile must too, otherwise
     # parity drifts (compile would print "agents, vscode" for the
     # same input).
-    def _coerce_provenance_targets(value):
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [t.strip() for t in value.split(",") if t.strip()]
-        if isinstance(value, list):
-            return [str(t) for t in value]
-        if isinstance(value, frozenset):
-            return sorted(value)
-        return []
-
     if detection_reason == "explicit --target flag":
         _provenance_targets = _coerce_provenance_targets(target)
         _provenance_source = "--target flag"
@@ -937,6 +961,9 @@ def _run_compilation(
             ),
             symbol="info",
         )
+
+    if _report_target_without_compile_output(logger, effective_target):
+        return
 
     # Build config with distributed compilation flags (Task 7)
     config = CompilationConfig.from_apm_yml(
@@ -1347,7 +1374,7 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules, using target(s) from ~/.apm/apm.yml or every "
+        "from the APM user home, using its manifest targets or every "
         "supported target when undeclared. Cannot be combined with project-scoped "
         "output flags such as --target, --all, --watch, --root, or --output; "
         "use with --dry-run to preview changes."

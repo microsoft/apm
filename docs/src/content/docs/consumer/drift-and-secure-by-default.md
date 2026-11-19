@@ -47,15 +47,16 @@ aborts:
 [x] Content hash mismatch for owner/repo: expected sha256:abc..., got sha256:def...
     The downloaded content differs from the lockfile record.
     This may indicate a supply-chain attack.
-    Use 'apm install --update' to accept new content and update the
-    lockfile.
+    Use 'apm update owner/repo' to accept new content for this package and re-pin it in the lockfile.
 ```
 
 Exit code is non-zero and the partially-downloaded directory is
 removed before APM exits. Source: `src/apm_cli/install/sources.py`.
 
-The opt-in escape hatch is `apm install --update`, which re-resolves
-refs and accepts new content into the lockfile. Use it when you
+The opt-in escape hatch is `apm update <pkg>` (`apm update -g <pkg>` at
+user scope), which re-resolves that package and accepts its new content
+into the lockfile. A transitive dependency cannot be targeted, so its
+hint names the full `apm update`. Use it when you
 intentionally bumped a dependency upstream and expect the hash to
 change.
 
@@ -94,7 +95,7 @@ configuration:
 - **Cross-host token leak.** Auth tokens are scoped per host:
   `GITHUB_APM_PAT` is sent only to GitHub hosts, `ADO_APM_PAT` only
   to Azure DevOps. APM never forwards a credential to a host you did
-  not configure it for. See `../authentication/`.
+  not configure it for. See [Authentication](../authentication/).
 
 What these checks do **not** cover, by design:
 
@@ -129,7 +130,7 @@ Removes hidden characters from scanned files in place. Combine with
 
 `apm audit` also runs **install-replay drift detection** by default:
 it replays your install into a scratch tmpdir from the cache and
-diffs the result against your working tree. Four drift kinds get
+diffs the result against your working tree. Five drift kinds get
 reported:
 
 | Kind | Meaning |
@@ -138,6 +139,7 @@ reported:
 | `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. For edits to a remote dependency's files, the text output also suggests [`apm export-patch`](../../reference/cli/export-patch/) to export them as upstream patches before the next install overwrites them. |
 | `orphaned` | A deployed file exists with no current source. Fix: `apm install` (orphan cleanup runs automatically). |
 | `unrecorded` | Install replay produces the same normalized bytes as the project, but no exact or directory `deployed_files` claim covers the path. Shared merge-hook configs compare only APM-owned entries, so user hooks do not create drift; the APM-owned sidecar remains byte-for-byte checked. Fix: `apm install`, then commit the regenerated `apm.lock.yaml`. |
+| `unmanaged-conflict` | A replayed file differs at a path no lockfile entry claims (a skipped user-authored file, a refused skill, or a case-only name variant). Fix: rename the local file or correct the skill/target selection; ordinary `apm install` does not repair it. |
 
 When your project has `.apm/` content, install does not promote a sibling
 `skills/<name>/SKILL.md` at the project root into a project-local skill. Audit
@@ -160,7 +162,7 @@ For the full flag set, see [CLI audit](../../reference/cli/audit/).
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| `Content hash mismatch` on install | Lockfile-pinned content no longer matches what the source serves | Investigate upstream; if intended, run `apm install --update` |
+| `Content hash mismatch` on install | Lockfile-pinned content no longer matches what the source serves | Investigate upstream; if intended, run `apm update` |
 | `cache pin mismatch` from `apm audit` | The cache holds content from a different `resolved_commit` than the lockfile records | `apm install` to repopulate the cache, then re-audit |
 | `unintegrated` drift | Source committed without re-running install | `apm install`, then commit the regenerated `apm.lock.yaml` |
 | `modified` drift | Hand-edit to a generated file | Revert, or move the change into the corresponding `.apm/` source; for a remote dependency's files, run `apm export-patch` to send the edit upstream |

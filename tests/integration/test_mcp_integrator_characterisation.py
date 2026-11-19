@@ -214,7 +214,7 @@ class TestBuildSelfDefinedInfo:
 
         assert info["remotes"] == [
             {
-                "transport_type": "http",
+                "transport": "streamable-http",
                 "url": "https://example.com/mcp",
                 "headers": [{"name": "X-Token", "value": "abc"}],
             }
@@ -231,7 +231,7 @@ class TestBuildSelfDefinedInfo:
 
         info = MCPIntegrator._build_self_defined_info(dep)
 
-        assert info["remotes"][0]["transport_type"] == "sse"
+        assert info["remotes"][0]["transport"] == "sse"
         assert info["remotes"][0]["url"] == "https://example.com/sse"
 
     def test_builds_runtime_arguments_from_dict_args(self) -> None:
@@ -447,10 +447,17 @@ class TestRemoveStale:
             {"mcp": {"stale": {"command": "echo"}}},
         )
 
+        # Broadcast cleanup (no runtime) skips a project that never opted in.
+        with patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["opencode"]):
+            MCPIntegrator.remove_stale({"stale"}, runtime=None, project_root=tmp_path)
+
+        assert "stale" in json.loads(config_path.read_text(encoding="utf-8"))["mcp"]
+
+        # Runtime-scoped cleanup stays reachable after .opencode/ was pruned (#3664).
         with patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["opencode"]):
             MCPIntegrator.remove_stale({"stale"}, runtime="opencode", project_root=tmp_path)
 
-        assert "stale" in json.loads(config_path.read_text(encoding="utf-8"))["mcp"]
+        assert "stale" not in json.loads(config_path.read_text(encoding="utf-8"))["mcp"]
 
     def test_removes_from_opencode_config(self, tmp_path: Path) -> None:
         (tmp_path / ".opencode").mkdir()
@@ -539,11 +546,23 @@ class TestRemoveStale:
             tmp_path / ".mcp.json",
             {"mcpServers": {"stale": {"command": "echo"}}},
         )
+        before = config_path.read_bytes()
 
+        # Broadcast cleanup (no runtime) skips a project that never opted in.
         with patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["claude"]):
+            MCPIntegrator.remove_stale({"stale"}, runtime=None, project_root=tmp_path)
+
+        assert config_path.read_bytes() == before
+
+        # Runtime-scoped cleanup is reachable without .claude/ (#3664) but still
+        # refuses to remove an entry with no managed baseline proving ownership.
+        with (
+            patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["claude"]),
+            pytest.raises(RequiredIntegrationError, match="managed baseline"),
+        ):
             MCPIntegrator.remove_stale({"stale"}, runtime="claude", project_root=tmp_path)
 
-        assert "stale" in json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+        assert config_path.read_bytes() == before
 
     def test_removes_from_claude_user_config_at_user_scope(self, tmp_path: Path) -> None:
         config_path = _write_json(

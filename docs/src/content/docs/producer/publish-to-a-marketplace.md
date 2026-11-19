@@ -13,6 +13,20 @@ your repo with `apm marketplace add`. This page covers the
 authoring surface: the registry schema and the `apm marketplace`
 verbs.
 
+For a local preview, register the authoring file directly instead of generating
+JSON first:
+
+```bash
+apm marketplace add ./apm.yml --name alice-dev
+apm marketplace browse alice-dev
+```
+
+APM rereads the file on each command and resolves relative package paths from
+its directory. It does not build, install, run hooks or publish. Keep using
+`apm pack` for generated outputs and publication. See
+[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
+for offline and locked-replay rules.
+
 For the operational concerns that surround a marketplace, see:
 
 - [Repo shapes](../repo-shapes/) -- single-plugin, aggregator, and
@@ -283,7 +297,7 @@ ref, and package subdirectory.
 For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
 
-The same `apm pack` run also produces a bundle to `./build/<name>/`
+The same `apm pack` run also produces a bundle to `./build/<name>-<version>/`
 when `apm.yml` declares a `dependencies:` mapping, including an empty
 mapping (`dependencies: {}`). Marketplace projects with an omitted or null
 `dependencies:` value produce only `marketplace.json`. See
@@ -301,6 +315,50 @@ apm marketplace outdated     # packages with newer matching tags
 range exits non-zero before you push the release commit. A full
 40-character commit SHA `ref` passes when the remote serves that commit;
 abbreviated SHAs are rejected.
+
+## One catalog per audience
+
+One `apm.yml` holds one `marketplace:` block. To publish a separate catalog
+per audience from one repository, give each audience a subfolder with its
+own `apm.yml` and run `apm pack` in that subfolder:
+
+```text
+agent-skills/
+  packages/lint/  packages/review/  packages/deploy/
+  catalogs/frontend/apm.yml   -> catalogs/frontend/marketplace.json
+  catalogs/backend/apm.yml    -> catalogs/backend/marketplace.json
+```
+
+```yaml
+# catalogs/frontend/apm.yml
+name: acme-frontend-catalog
+version: 1.0.0
+marketplace:
+  name: acme-frontend
+  owner:
+    name: Acme
+  output: marketplace.json
+  packages:
+    - name: lint
+      source: acme/agent-skills
+      subdir: packages/lint
+      version: "^1.0.0"
+```
+
+List packages as remote entries for this repository with `subdir`, as above.
+Local `./` entries are read relative to the subfolder when you pack, but
+consumers resolve them from the repository root, so they break in a
+subfolder catalog.
+
+Consumers register each catalog by path:
+
+```bash
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+```
+
+Separate catalogs help each audience find its packages. They are not access
+control: anyone who can read the repository can read every catalog and
+package in it. Use separate repositories when audiences need separate access.
 
 ## Pitfalls
 

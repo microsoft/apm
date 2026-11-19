@@ -17,12 +17,13 @@ Detection priority (highest to lowest):
    - Multiple target folders -> all
    - None exist -> minimal (AGENTS.md only, no folder integration)
 
-"copilot" is the recommended user-facing target name. "vscode" and "agents"
-are accepted as aliases and map to the same internal value.
+"copilot" is the user-facing target name; "agents" is a deprecated alias.
+"vscode" is a deprecated alias of "copilot" (#3866); the internal compile
+family for Copilot is still spelled "vscode".
 """
 
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
@@ -33,7 +34,10 @@ from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
     accepted_target_values,
+    canonical_target_token,
+    deprecated_target_alias_message,
     expand_all,
+    first_deprecated_target_alias,
     get_target_capability,
     normalize_target_name,
     target_error_values,
@@ -67,12 +71,16 @@ TargetType = Literal[
     "antigravity",
     "claude",
     "codex",
+    "copilot-app",
+    "copilot-cowork",
     "cursor",
     "gemini",
     "grok-bot",
     "grok-build",
+    "grok-cloud",
     "hermes",
     "kiro",
+    "openclaw",
     "opencode",
     "vscode",
     "windsurf",
@@ -125,6 +133,27 @@ UserTargetType = Literal[
 ]
 
 
+def _declared_target(value: str | None) -> TargetType | None:
+    """Resolve an explicit or configured target through the target catalog.
+
+    Copilot spellings and MCP-only targets route to the internal ``vscode``
+    value; every other catalog target keeps its canonical name, so targets
+    without root-context output (skills-only and experimental targets) are
+    honored instead of falling back to auto-detection (#3842).
+    """
+    if not value:
+        return None
+    if value == "all":
+        return "all"
+    try:
+        capability = get_target_capability(value)
+    except KeyError:
+        return None
+    if capability.compile_family == "vscode" or capability.mcp_only:
+        return "vscode"
+    return capability.name  # type: ignore[return-value]
+
+
 def detect_target(  # noqa: PLR0911
     project_root: Path,
     explicit_target: str | None = None,
@@ -143,69 +172,14 @@ def detect_target(  # noqa: PLR0911
         - reason: Human-readable explanation for the choice
     """
     # Priority 1: Explicit --target flag
-    if explicit_target:
-        if (
-            explicit_target in ("copilot", "vscode", "agents")
-            or explicit_target in MCP_ONLY_TARGETS
-        ):
-            return "vscode", "explicit --target flag"
-        elif explicit_target == "claude":
-            return "claude", "explicit --target flag"
-        elif explicit_target == "cursor":
-            return "cursor", "explicit --target flag"
-        elif explicit_target == "opencode":
-            return "opencode", "explicit --target flag"
-        elif explicit_target == "codex":
-            return "codex", "explicit --target flag"
-        elif explicit_target == "gemini":
-            return "gemini", "explicit --target flag"
-        elif explicit_target == "antigravity":
-            return "antigravity", "explicit --target flag"
-        elif explicit_target == "windsurf":
-            return "windsurf", "explicit --target flag"
-        elif explicit_target == "kiro":
-            return "kiro", "explicit --target flag"
-        elif explicit_target == "grok-bot":
-            return "grok-bot", "explicit --target flag"
-        elif explicit_target == "grok-build":
-            return "grok-build", "explicit --target flag"
-        elif explicit_target == "agent-skills":
-            return "agent-skills", "explicit --target flag"
-        elif explicit_target == "hermes":
-            return "hermes", "explicit --target flag"
-        elif explicit_target == "all":
-            return "all", "explicit --target flag"
+    declared = _declared_target(explicit_target)
+    if declared is not None:
+        return declared, "explicit --target flag"
 
     # Priority 2: apm.yml target setting
-    if config_target:
-        if config_target in ("copilot", "vscode", "agents") or config_target in MCP_ONLY_TARGETS:
-            return "vscode", "apm.yml target"
-        elif config_target == "claude":
-            return "claude", "apm.yml target"
-        elif config_target == "cursor":
-            return "cursor", "apm.yml target"
-        elif config_target == "opencode":
-            return "opencode", "apm.yml target"
-        elif config_target == "codex":
-            return "codex", "apm.yml target"
-        elif config_target == "gemini":
-            return "gemini", "apm.yml target"
-        elif config_target == "antigravity":
-            return "antigravity", "apm.yml target"
-        elif config_target == "windsurf":
-            return "windsurf", "apm.yml target"
-        elif config_target == "kiro":
-            return "kiro", "apm.yml target"
-        elif config_target == "grok-bot":
-            return "grok-bot", "apm.yml target"
-        elif config_target == "grok-build":
-            return "grok-build", "apm.yml target"
-        elif config_target == "agent-skills":
-            return "agent-skills", "apm.yml target"
-        elif config_target == "hermes":
-            return "hermes", "apm.yml target"
-        elif config_target == "all":
-            return "all", "apm.yml target"
+    declared = _declared_target(config_target)
+    if declared is not None:
+        return declared, "apm.yml target"
 
     # Priority 3: Auto-detect from existing folders
     github_exists = (project_root / ".github").exists()
@@ -293,6 +267,22 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     )
 
 
+def target_without_compile_output(target: CompileTargetType | None) -> TargetCapability | None:
+    """Return the catalog capability when *target* has no root-context output.
+
+    Derived from ``TargetCapability.compile_family``: targets without a compile
+    family (skills-only and experimental targets) make ``apm compile`` a
+    successful no-op, so new catalog targets inherit the behavior.
+    """
+    if not isinstance(target, str):
+        return None
+    try:
+        capability = get_target_capability(target)
+    except KeyError:
+        return None
+    return capability if capability.compile_family is None else None
+
+
 def should_compile_claude_md(target: CompileTargetType) -> bool:
     """Check if CLAUDE.md should be compiled.
 
@@ -371,7 +361,8 @@ def get_dedup_rules_dir(target: CompileTargetType) -> tuple[str, str] | None:
         return None
     if isinstance(target, str):
         target = TARGET_ALIASES.get(target, target)
-    if target == "vscode":
+    if target in ("vscode", "copilot", "agents"):
+        # "vscode" is the internal Copilot compile family.
         return ".github/instructions", "copilot"
     if target == "antigravity":
         return ".agents/rules", "antigravity"
@@ -485,27 +476,6 @@ TARGET_ALIASES: dict[str, str] = {
 }
 
 
-def manifest_targets_from_target_option(target: str | list[str] | None) -> list[str] | None:
-    """Return manifest-safe targets for an install-time ``--target`` value."""
-    if target is None:
-        return None
-
-    from apm_cli.core.apm_yml import CANONICAL_TARGETS
-
-    raw_targets = [target] if isinstance(target, str) else list(target)
-    seen: set[str] = set()
-    manifest_targets: list[str] = []
-    for raw_target in raw_targets:
-        expanded = expand_all("install") if raw_target == "all" else [str(raw_target)]
-        for item in expanded:
-            capability = get_target_capability(item)
-            canonical = capability.primitive_profile if item in capability.runtimes else item
-            if canonical in CANONICAL_TARGETS and canonical not in seen:
-                seen.add(canonical)
-                manifest_targets.append(canonical)
-    return sorted(manifest_targets) if manifest_targets else None
-
-
 def normalize_target_list(
     value: str | list[str] | None,
 ) -> list[str] | None:
@@ -514,9 +484,9 @@ def normalize_target_list(
     Handles:
     - ``None`` -> ``None`` (auto-detect)
     - ``"claude"`` -> ``["claude"]``
-    - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
-    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "kiro", "opencode", "vscode", "windsurf"]``
-    - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
+    - ``"agents"`` -> ``["copilot"]``  (alias resolution)
+    - ``"all"`` -> every stable target in ``expand_all("install")``
+    - ``["claude", "copilot"]`` -> ``["claude", "copilot"]``
     - Deduplicates while preserving first-seen order.
 
     Args:
@@ -551,36 +521,6 @@ def normalize_target_list(
     return result
 
 
-def normalize_policy_targets(value: str | list[str] | None) -> str | list[str] | None:
-    """Normalize MCP-only selectors for compilation-target policy checks.
-
-    The return shape matches the input shape so scalar callers remain
-    backward-compatible while plural target sets are evaluated together.
-    """
-    if value is None:
-        return None
-
-    values = [value] if isinstance(value, str) else list(value)
-    normalized: list[str] = []
-    for target in values:
-        if target == "all":
-            if target not in normalized:
-                normalized.append(target)
-            continue
-        if target in MCP_ONLY_TARGETS:
-            try:
-                canonical = get_target_capability(target).primitive_profile
-            except KeyError:
-                canonical = None
-            if canonical is None:
-                raise RuntimeError(f"MCP-only target '{target}' has no canonical policy mapping")
-            target = canonical
-        if target not in normalized:
-            normalized.append(target)
-
-    return normalized[0] if isinstance(value, str) else normalized
-
-
 # ---------------------------------------------------------------------------
 # Click parameter type for --target (comma-separated multi-target support)
 # ---------------------------------------------------------------------------
@@ -613,10 +553,10 @@ def parse_target_field(
     * ``None`` -> ``None`` (auto-detect at consumption time -- this is the
       "field absent" path; an apm.yml without ``target:`` lands here).
     * Single token (``"claude"``) -> the same lowercased token as ``str``.
-      Aliases are NOT resolved for solo input -- ``"copilot"`` returns
-      ``"copilot"`` (not the canonical ``"vscode"``) to match the
-      long-standing CLI contract; downstream consumers handle the alias
-      set explicitly.
+      Aliases are NOT resolved for solo input -- ``"agents"`` returns
+      ``"agents"`` to match the long-standing CLI contract; downstream
+      consumers handle the alias set explicitly. The deprecated ``vscode``
+      alias is the exception: it always resolves to ``copilot``.
     * CSV string (``"claude,copilot"``) -> deduplicated ``List[str]`` with
       aliases resolved to canonical names. Collapses to a bare ``str`` if
       after dedup only one canonical token remains.
@@ -677,6 +617,9 @@ def parse_target_field(
     if not raw_parts:
         raise ValueError(_target_error("target value must not be empty", source_path))
 
+    # Deprecated aliases (``vscode``) select their replacement exactly.
+    raw_parts = [canonical_target_token(p) for p in raw_parts]
+
     # ---- validate every token ----
     for p in raw_parts:
         if p not in accepted_target_values():
@@ -717,8 +660,8 @@ def parse_target_field(
         return expanded
 
     # Single-token input is returned as-is (no alias resolution).  This
-    # preserves the long-standing CLI contract where ``--target copilot``
-    # yields ``"copilot"`` rather than the canonical ``"vscode"``; every
+    # preserves the long-standing CLI contract where ``--target agents``
+    # yields ``"agents"`` rather than ``"copilot"``; every
     # downstream consumer (active_targets, agents_compiler,
     # _CROSS_TARGET_MAPS, _get_target_prefixes) already accepts both alias
     # spellings, so resolving here would be a visible behaviour change
@@ -729,12 +672,11 @@ def parse_target_field(
     if len(raw_parts) == 1:
         return raw_parts[0]
 
-    # Multi-token: preserve the distinct Copilot and VS Code MCP destinations
-    # while resolving every other alias to its canonical profile.
+    # Multi-token: resolve every alias to its canonical profile.
     seen: set[str] = set()
     result: list[str] = []
     for p in raw_parts:
-        canonical = p if p in {"copilot", "vscode"} else normalize_target_name(p)
+        canonical = normalize_target_name(p)
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)
@@ -751,6 +693,47 @@ def _target_error(message: str, source_path: Path | None) -> str:
     return f"Invalid target: {message}"
 
 
+_deprecated_flag_aliases_warned: set[str] = set()
+
+
+def warn_deprecated_target_alias_flag(
+    value: str | list[str] | None, *, flag: str = "--target"
+) -> None:
+    """Warn once per process when a CLI target flag uses a deprecated alias."""
+    tokens = value.split(",") if isinstance(value, str) else list(value or ())
+    alias = first_deprecated_target_alias(tokens)
+    if alias is None or alias in _deprecated_flag_aliases_warned:
+        return
+    _deprecated_flag_aliases_warned.add(alias)
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(deprecated_target_alias_message(alias, where=flag), symbol="warning", err=True)
+
+
+def canonical_runtime_option(
+    ctx: click.Context | None, param: click.Parameter | None, value: str | None
+) -> str | None:
+    """Click callback: read a deprecated alias passed as ``--runtime`` as its target."""
+    if value is None:
+        return value
+    warn_deprecated_target_alias_flag(value, flag="--runtime")
+    return canonical_target_token(value.strip().lower())
+
+
+def install_runtime_option(func):
+    """``apm install --runtime``: the legacy single-value spelling of ``--target``."""
+    from apm_cli.core.target_catalog import target_help_fragment
+
+    return click.option(
+        "--runtime",
+        callback=canonical_runtime_option,
+        help=(
+            f"Target a specific runtime only. {target_help_fragment('install')} "
+            "(legacy alias for --target, single value only; prefer --target)"
+        ),
+    )(func)
+
+
 class TargetParamType(click.ParamType):
     """Click parameter type accepting comma-separated target values.
 
@@ -761,9 +744,10 @@ class TargetParamType(click.ParamType):
     Examples::
 
         -t claude             -> "claude"
-        -t claude,copilot     -> ["claude", "vscode"]
+        -t claude,copilot     -> ["claude", "copilot"]
         -t all                -> "all"
-        -t copilot,vscode     -> ["vscode"]  (deduped aliases)
+        -t copilot,agents     -> "copilot"  (deduped aliases)
+        -t vscode             -> "copilot"  (deprecated alias; warns once)
     """
 
     name = "target"
@@ -775,7 +759,9 @@ class TargetParamType(click.ParamType):
         ctx: click.Context | None,
     ) -> str | list[str] | None:
         try:
-            return parse_target_field(value)
+            parsed = parse_target_field(value)
+            warn_deprecated_target_alias_flag(value)
+            return parsed
         except ValueError as e:
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
@@ -833,6 +819,60 @@ def _target_capabilities(
             yield target, get_target_capability(target)
 
 
+def _canonical_profile(target: str, capability: TargetCapability) -> str:
+    """Return the native profile a target spelling selects.
+
+    Aliases resolve to their capability name and MCP-only targets map to the
+    primitive profile they configure; an MCP-only target without one fails
+    closed instead of escaping policy under its own name.
+    """
+    if not capability.mcp_only:
+        return normalize_target_name(target)
+    if capability.primitive_profile is None:
+        raise RuntimeError(f"MCP-only target '{target}' has no canonical policy mapping")
+    return capability.primitive_profile
+
+
+def canonical_policy_target_names(
+    values: str | Iterable[str] | None,
+) -> tuple[str, ...] | None:
+    """Canonicalize a policy target list so it compares against decisions.
+
+    ``all`` means unrestricted and yields ``None``. Known spellings resolve
+    through the same profile mapping as
+    :attr:`EffectiveTargetDecision.canonical_targets`; unknown spellings are kept
+    verbatim so they can never match a real target.
+    """
+    if values is None:
+        return None
+    spellings = [values] if isinstance(values, str) else list(values)
+    names: list[str] = []
+    for raw in spellings:
+        spelling = str(raw).strip().lower()
+        if not spelling:
+            continue
+        if spelling == "all":
+            return None
+        try:
+            name = _canonical_profile(spelling, get_target_capability(spelling))
+        except KeyError:
+            name = spelling
+        if name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+def canonical_policy_target_name(value: str | None) -> str | None:
+    """Canonicalize one policy target (``enforce``); ``all`` stays ``all``."""
+    if value is None:
+        return None
+    spelling = str(value).strip().lower()
+    if spelling == "all":
+        return spelling
+    names = canonical_policy_target_names(spelling)
+    return names[0] if names else None
+
+
 @dataclass(frozen=True)
 class EffectiveTargetDecision:
     """One install-time target decision shared by package, MCP, and LSP phases."""
@@ -849,11 +889,7 @@ class EffectiveTargetDecision:
         canonical: list[str] = []
         seen: set[str] = set()
         for target, capability in _target_capabilities(self.value):
-            name = (
-                capability.primitive_profile
-                if capability.mcp_only and capability.primitive_profile is not None
-                else normalize_target_name(target)
-            )
+            name = _canonical_profile(target, capability)
             if name not in seen:
                 seen.add(name)
                 canonical.append(name)
@@ -867,11 +903,9 @@ class EffectiveTargetDecision:
 
         runtimes: list[str] = []
         seen: set[str] = set()
-        for target, capability in _target_capabilities(self.value):
+        for _target, capability in _target_capabilities(self.value):
             runtime = (
-                "vscode"
-                if target == "vscode" and "vscode" in capability.runtimes
-                else capability.name
+                capability.name
                 if capability.name in capability.runtimes
                 else capability.compile_family
                 if capability.compile_family in capability.runtimes
@@ -1006,19 +1040,14 @@ def resolve_audit_target_decision(
 
 def read_manifest_target(project_root: Path) -> list[str] | None:
     """Read audit's manifest target hint; manifest checks own parse failures."""
-    import yaml
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    from apm_cli.core.apm_yml import parse_targets_field
-    from apm_cli.utils.yaml_io import load_yaml
-
-    apm_yml = project_root / "apm.yml"
-    if not apm_yml.exists():
+    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    if declaration is None:
         return None
     try:
-        data = load_yaml(apm_yml) or {}
-        tokens = parse_targets_field(data)
-        return tokens if tokens else None
-    except (OSError, ValueError, TypeError, yaml.YAMLError, click.UsageError):
+        return declaration.restriction()
+    except (ValueError, TypeError, click.UsageError):
         return None
 
 
@@ -1028,6 +1057,7 @@ def resolve_manifest_target_decision(
     manifest_path: Path,
     explicit_target: str | list[str] | None,
     user_scope: bool = False,
+    auto_detect: bool = True,
     create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from an optional manifest path."""
@@ -1041,6 +1071,7 @@ def resolve_manifest_target_decision(
         package=package,
         explicit_target=explicit_target,
         user_scope=user_scope,
+        auto_detect=auto_detect,
         create_config=create_config,
     )
 
@@ -1054,6 +1085,9 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    # Copilot CLI still reads a user's MCP file under .github/, so it stays a
+    # copilot signal although APM now writes .mcp.json (#3866). The root
+    # .mcp.json is not a signal: Claude Code reads it too.
     ("copilot", "file", ".github/mcp.json"),  # architecture-authority-exempt: detection signal
     ("copilot", "dir", ".github/instructions"),
     ("copilot", "dir", ".github/agents"),
@@ -1158,6 +1192,7 @@ def resolve_targets(
     # Priority 1: --target flag
     if flag is not None:
         tokens = [flag] if isinstance(flag, str) else list(flag)
+        tokens = list(dict.fromkeys(canonical_target_token(token) for token in tokens))
         _validate_canonical_v2(tokens)
         return ResolvedTargets(
             targets=sorted(tokens),

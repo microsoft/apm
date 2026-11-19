@@ -503,14 +503,9 @@ class CanvasIntegrator(BaseIntegrator):
         install is refused in that case for the MVP.  An unset (or empty)
         ``$COPILOT_HOME`` resolves to the default and is allowed.
         """
-        import os
+        from apm_cli.integration.targets import user_root_is_default
 
-        env = os.environ.get("COPILOT_HOME", "").strip()
-        if not env:
-            return False
-        resolved = Path(env).expanduser().resolve(strict=False)
-        default = (Path.home() / ".copilot").resolve(strict=False)
-        return resolved != default
+        return not user_root_is_default("copilot")
 
     @staticmethod
     def _warn(diagnostics, message: str, package_name: str) -> None:

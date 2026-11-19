@@ -358,12 +358,11 @@ class InstructionIntegrator(BaseIntegrator):
         * ``windsurf_rules``  -- convert ``applyTo:`` to ``trigger: glob`` frontmatter
         * anything else       -- copy verbatim (identity transform)
 
-        ``managed_files`` is consulted for collision detection on identity
-        targets only.  For rule-dir targets (``mapping.output_compare``) it is
-        deliberately NOT consulted: those files are APM-owned per-file
-        (``target_name`` derives 1:1 from a source instruction), so an existing
-        file there is always APM's and is adopted-or-rewritten regardless of
-        whether it was recorded as managed (apm#1662).
+        Every format shares one collision decision: an existing file that
+        matches the rendered output is adopted, a ``managed_files`` path is
+        rewritten, and any other existing file is user-authored and skipped
+        unless ``force``. Rule-dir targets (``mapping.output_compare``) compare
+        against their transformed output rather than the source (apm#1662).
         """
         mapping = target.primitives.get("instructions")
         if not mapping:
@@ -401,12 +400,12 @@ class InstructionIntegrator(BaseIntegrator):
 
         fmt = mapping.format_id
 
-        # APM-owned rule dirs (.claude/rules, .cursor/rules, .windsurf/rules):
-        # the deployed file is a format-transform of its source and the target
-        # name derives 1:1 from the source, so APM owns it per-file. Gates both
-        # the filename rename and the output-comparison / collision-guard
-        # bypass. Single source of truth: mapping.output_compare (targets.py).
-        apm_owned_rule_dir = mapping.output_compare
+        # Rule dirs (.claude/rules, .cursor/rules, .windsurf/rules): the
+        # deployed file is a format-transform of its source with a derived
+        # filename. Gates the rename and the pre-rendered output comparison.
+        # Single source of truth: mapping.output_compare (targets.py).
+        rule_dir_format = mapping.output_compare
+        breadcrumbs = rule_dir_format and bool(getattr(diagnostics, "verbose", False))
 
         files_integrated = 0
         files_skipped = 0
@@ -421,7 +420,7 @@ class InstructionIntegrator(BaseIntegrator):
             fmt,
         )
         rendered_rules = self._prepared_rule_plans.pop(plan_key, None)
-        if apm_owned_rule_dir:
+        if rule_dir_format:
             # Direct integrator callers may bypass install-level preflight.
             if rendered_rules is None:
                 rendered_rules = self._prepare_rule_plan(
@@ -435,7 +434,7 @@ class InstructionIntegrator(BaseIntegrator):
             rendered_rules = {}
 
         for source_file in instruction_files:
-            if apm_owned_rule_dir:
+            if rule_dir_format:
                 target_path, new_content, links_resolved = rendered_rules[source_file]
             else:
                 target_path = deploy_dir / source_file.name
@@ -452,44 +451,11 @@ class InstructionIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            if apm_owned_rule_dir:
-                # Path containment already validated by ensure_path_within above.
-                # Structural invariant: target_name derives 1:1 from source, so
-                # ANY existing file here is APM's -- must hold for every format
-                # with output_compare=True. managed_files is not consulted.
-                #
-                # The deployed file is format-transformed, so it is never
-                # byte-identical to the *source* -- the source-based adopt always
-                # misses, the file gets treated as a user-authored collision and
-                # skipped, and it falls out of ``local_deployed_files`` so later
-                # edits never propagate (apm#1662). Instead compare against the
-                # transformed *output*: adopt when up-to-date (no churn), else
-                # (re)write. Always record the path so it stays managed on the
-                # next run.
-                # Compare the on-disk bytes against the exact bytes
-                # write_text_lf would emit (LF-normalized). A text-mode
-                # read_text() comparison would collapse CRLF->LF and wrongly
-                # adopt a stale CRLF file left by a pre-fix install, pinning a
-                # platform-dependent hash in the lockfile (apm#1889).
-                if (
-                    not force
-                    and target_path.exists()
-                    and target_path.read_bytes()
-                    == normalize_crlf_to_lf(new_content).encode("utf-8")
-                ):
-                    files_adopted += 1
-                    target_paths.append(target_path)
-                    if diagnostics is not None and getattr(diagnostics, "verbose", False):
-                        _rich_echo(f"  [=] adopted-unchanged: {rel_path}", color="dim")
-                    continue
-                write_text_lf(target_path, new_content)
-                total_links_resolved += links_resolved
-                files_integrated += 1
-                target_paths.append(target_path)
-                if diagnostics is not None and getattr(diagnostics, "verbose", False):
-                    _rich_echo(f"  [*] rewritten: {rel_path}", color="dim")
-                continue
-
+            # Compare against the rendered output, not the source: rule-dir
+            # formats transform content, so a source-based adopt never matches
+            # and up-to-date rules would churn (apm#1662). Managed rules are
+            # rewritten; an unmanaged differing file is user-authored and is
+            # skipped like every other primitive unless --force.
             skip, adopted = self._check_adopt_or_skip(
                 target_path,
                 source_file,
@@ -503,6 +469,8 @@ class InstructionIntegrator(BaseIntegrator):
             if skip:
                 if adopted:
                     files_adopted += 1
+                    if breadcrumbs:
+                        _rich_echo(f"  [=] adopted-unchanged: {rel_path}", color="dim")
                 else:
                     files_skipped += 1
                 continue
@@ -511,6 +479,8 @@ class InstructionIntegrator(BaseIntegrator):
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
+            if breadcrumbs:
+                _rich_echo(f"  [*] rewritten: {rel_path}", color="dim")
 
         return IntegrationResult(
             files_integrated=files_integrated,
@@ -534,37 +504,13 @@ class InstructionIntegrator(BaseIntegrator):
             return {"files_removed": 0, "errors": 0}
         effective_root = mapping.deploy_root or target.root_dir
         prefix = f"{effective_root}/{mapping.subdir}/"
-        legacy_dir = project_root / effective_root / mapping.subdir
-        if mapping.format_id == "cursor_rules":
-            legacy_pattern = "*.mdc"
-        elif mapping.format_id == "windsurf_rules":
-            # Do not use a broad legacy glob for Windsurf rules to avoid
-            # deleting user-authored .md files under .windsurf/rules/.
-            legacy_pattern = None
-        elif mapping.format_id == "claude_rules":
-            # Do not use a broad legacy glob for Claude rules to avoid
-            # deleting user-authored .md files under .claude/rules/.
-            legacy_pattern = None
-        elif mapping.format_id == "kiro_steering":
-            # Do not delete user-authored steering markdown under .kiro/steering/.
-            legacy_pattern = None
-        elif mapping.format_id == "github_instructions" and target.root_dir == target.user_root_dir:
-            # Copilot user scope only recently gained modular instructions
-            # (~/.copilot/instructions/**/*.instructions.md). A broad legacy
-            # glob there could delete user-authored instruction files for
-            # other tools sharing that directory tree, so skip it -- same
-            # precedent as Claude/Windsurf/Kiro above. Project scope
-            # (.github/instructions/) keeps the broad glob below since that
-            # directory has always been APM-managed.
-            legacy_pattern = None
-        else:
-            legacy_pattern = "*.instructions.md"
+        # No legacy glob fallback: without a lockfile inventory every native
+        # instruction directory may hold user-authored files, and uninstall
+        # deletes only lockfile-tracked paths.
         return self.sync_remove_files(
             project_root,
             managed_files,
             prefix=prefix,
-            legacy_glob_dir=legacy_dir,
-            legacy_glob_pattern=legacy_pattern,
             targets=[target],
         )
 

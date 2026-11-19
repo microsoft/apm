@@ -145,8 +145,11 @@ def test_nested_skill_plan_excludes_unapproved_bin(tmp_path: Path) -> None:
     assert SecurityGate.scan_files(tmp_path, paths=plan.paths).should_block is False
 
 
-def test_hook_plan_routes_descriptors_before_scanning(tmp_path: Path) -> None:
-    """Copilot cannot scan a hostile Claude-only descriptor or its script."""
+def test_hook_plan_scans_configured_descriptors_and_records_legacy_widening(
+    tmp_path: Path,
+) -> None:
+    """Filenames no longer route (#3226): every target plan scans the same
+    descriptors, and a target the old convention excluded records a conflict."""
     hooks_dir = tmp_path / ".apm" / "hooks"
     hooks_dir.mkdir(parents=True)
     (hooks_dir / "hooks-claude.json").write_text(
@@ -154,28 +157,27 @@ def test_hook_plan_routes_descriptors_before_scanning(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (hooks_dir / "claude.sh").write_text("#!/bin/sh\n# \u202e\n", encoding="utf-8")
+    expected = frozenset({".apm/hooks/hooks-claude.json", ".apm/hooks/claude.sh"})
 
-    copilot_plan = DeployableSourcePlan.create(
-        _package(tmp_path),
-        [KNOWN_TARGETS["copilot"]],
-        skill_subset=None,
-        hooks_approved=True,
-        canvas_approved=False,
-        skip_bin=True,
-    )
-    claude_plan = DeployableSourcePlan.create(
-        _package(tmp_path),
-        [KNOWN_TARGETS["claude"]],
-        skill_subset=None,
-        hooks_approved=True,
-        canvas_approved=False,
-        skip_bin=True,
-    )
+    plans = {
+        name: DeployableSourcePlan.create(
+            _package(tmp_path),
+            [KNOWN_TARGETS[name]],
+            skill_subset=None,
+            hooks_approved=True,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        for name in ("copilot", "claude")
+    }
 
-    assert copilot_plan.paths == frozenset()
-    assert SecurityGate.scan_files(tmp_path, paths=copilot_plan.paths).should_block is False
-    assert claude_plan.paths == frozenset({".apm/hooks/hooks-claude.json", ".apm/hooks/claude.sh"})
-    assert SecurityGate.scan_files(tmp_path, paths=claude_plan.paths).should_block is True
+    for plan in plans.values():
+        assert plan.paths == expected
+        assert SecurityGate.scan_files(tmp_path, paths=plan.paths).should_block is True
+    assert plans["copilot"].hook_source_selection.legacy_routing_conflicts == {
+        "copilot": (".apm/hooks/hooks-claude.json",)
+    }
+    assert plans["claude"].hook_source_selection.legacy_routing_conflicts == {}
 
 
 def test_source_only_canvas_content_is_not_authorized_for_scan(tmp_path: Path) -> None:

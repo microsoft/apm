@@ -10,11 +10,14 @@ Covers W1-logger deliverables from issue #827:
 - _render_policy_group renders blocked vs warn items correctly
 """
 
+import re
 from unittest.mock import call, patch  # noqa: F401
+from urllib.parse import urlsplit
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.policy.models import PolicyRemedy
 from apm_cli.utils.diagnostics import (
     _CATEGORY_ORDER,
     CATEGORY_POLICY,
@@ -106,6 +109,24 @@ class TestPolicyDiscoveryMiss:
         mock_info.assert_called_once()
         msg = mock_info.call_args[0][0]
         assert "No org policy found for acme/.github" in msg
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_absent_hint_silent_in_non_verbose(self, mock_warning, mock_info):
+        """#3754: the masked-404 hint never prints in default mode."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_discovery_miss(outcome="absent", source="", hint="acme/.github-private hint")
+        mock_info.assert_not_called()
+        mock_warning.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_absent_hint_visible_in_verbose(self, mock_info, mock_warning):
+        logger = InstallLogger(verbose=True)
+        logger.policy_discovery_miss(outcome="absent", source="", hint="acme/.github-private hint")
+        messages = [args[0][0] for args in mock_info.call_args_list]
+        assert "acme/.github-private hint" in messages
+        mock_warning.assert_not_called()
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_absent_explicit_host_org(self, mock_info):
@@ -244,6 +265,7 @@ class TestPolicyViolationBlockNextStep:
             reason="denied by pattern: acme/*",
             severity="block",
             source="org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
         )
         mock_error.assert_called_once()
         # Secondary dim line should mention apm.yml and --no-policy
@@ -344,6 +366,67 @@ class TestPolicyResolved:
             source="acme/.github/apm-policy.yml",
             cached=False,
             enforcement="warn",
+        )
+        mock_info.assert_not_called()
+
+    @staticmethod
+    def _coordinate(ref):
+        """Return the (host, path) of an ``org:host/namespace/repo`` source."""
+        parts = urlsplit(f"//{ref.removeprefix('org:')}")
+        return parts.hostname, parts.path
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_subgroup_scoped_visible_non_verbose_warn(self, mock_info):
+        """#2753: a composed GitLab subgroup policy names its ordered extends
+        chain (ancestors, root first) at info even in non-verbose warn mode."""
+        chain = [
+            "gitlab.com/acme/apm-policy",
+            "gitlab.com/acme/dept-a/apm-policy",
+        ]
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/dept-a/apm-policy",
+            cached=False,
+            enforcement="warn",
+            subgroup_scoped=True,
+            chain=chain,
+        )
+        mock_info.assert_called_once()
+        msg = mock_info.call_args[0][0]
+        match = re.fullmatch(
+            r"Policy: (?P<source>\S+) \(extends chain: (?P<chain>[^)]*)\) -- enforcement=warn",
+            msg,
+        )
+        assert match is not None, msg
+        assert self._coordinate(match["source"]) == ("gitlab.com", "/acme/dept-a/apm-policy")
+        assert [self._coordinate(ref) for ref in match["chain"].split(" -> ")] == [
+            ("gitlab.com", "/acme/apm-policy"),
+        ]
+        assert mock_info.call_args[1].get("symbol") == "info"
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_subgroup_scoped_off_stays_silent_non_verbose(self, mock_info):
+        """An ``off`` composed policy needs no action: silent without --verbose."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/dept-a/apm-policy",
+            cached=False,
+            enforcement="off",
+            subgroup_scoped=True,
+            chain=["gitlab.com/acme/apm-policy", "gitlab.com/acme/dept-a/apm-policy"],
+        )
+        mock_info.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_top_level_scope_stays_silent_non_verbose_warn(self, mock_info):
+        """A top-level (non-subgroup) policy keeps the pre-#2753 silence:
+        non-verbose + warn emits nothing when subgroup_scoped is False."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/apm-policy",
+            cached=False,
+            enforcement="warn",
+            subgroup_scoped=False,
         )
         mock_info.assert_not_called()
 
@@ -590,11 +673,78 @@ class TestPolicyReasonHelpers:
         assert "org admin" in msg
 
     def test_reason_blocked(self):
-        msg = InstallLogger._policy_reason_blocked("acme/evil-pkg", "acme/.github/apm-policy.yml")
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/evil-pkg", "acme/.github/apm-policy.yml", remedy=PolicyRemedy.REMOVE
+        )
         assert "acme/evil-pkg" in msg
         assert "acme/.github/apm-policy.yml" in msg
         assert "--no-policy" in msg
         assert "apm.yml" in msg
+
+    def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "evil-srv",
+            "org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
+            declared_by="acme/parent-pkg",
+        )
+        assert "remove `acme/parent-pkg` (it brings in `evil-srv`) from apm.yml" in msg
+
+    def test_reason_blocked_cites_rule_as_category(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "github.com/evilcorp/bad-pkg",
+            "org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
+            rule="dependency-denylist",
+        )
+        assert msg.startswith("Blocked by org policy at org:acme/.github (dependency-denylist) --")
+        assert "remove `github.com/evilcorp/bad-pkg` from apm.yml" in msg
+        assert "remove `dependency-denylist`" not in msg
+
+    def test_reason_blocked_required_package_says_add(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/std", "org:acme/.github", remedy=PolicyRemedy.ADD
+        )
+        assert "add `acme/std` to apm.yml" in msg
+        assert "remove" not in msg
+
+    def test_reason_blocked_pin_says_pin(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/std", "org:acme/.github", remedy=PolicyRemedy.PIN
+        )
+        assert "pin `acme/std` to a semver range, tag, or SHA in apm.yml" in msg
+        assert "remove" not in msg
+
+    @pytest.mark.parametrize("remedy", [None, "delete", "bogus"])
+    def test_reason_blocked_unknown_remedy_never_defaults_to_remove(self, remedy):
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/evil-pkg", "org:acme/.github", remedy=remedy, declared_by="acme/parent"
+        )
+        assert "remove" not in msg
+        assert "apm.yml" not in msg
+        assert "--no-policy" in msg
+
+    def test_reason_blocked_default_remedy_suggests_no_apm_yml_edit(self):
+        msg = InstallLogger._policy_reason_blocked("acme/evil-pkg", "org:acme/.github")
+        assert "apm.yml" not in msg
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_policy_violation_without_remedy_renders_no_remove(self, _error, mock_echo):
+        InstallLogger().policy_violation(
+            dep_ref="acme/evil", reason="denied", severity="block", source="org:acme/.github"
+        )
+        dim_text = mock_echo.call_args[0][0]
+        assert "remove" not in dim_text
+        assert "apm.yml" not in dim_text
+
+    def test_reason_blocked_without_remedy_suggests_no_apm_yml_edit(self):
+        msg = InstallLogger._policy_reason_blocked(
+            "compilation-target", "org:acme/.github", remedy=None
+        )
+        assert "compilation-target" not in msg
+        assert "apm.yml" not in msg
+        assert "--no-policy" in msg
 
 
 # ── _render_policy_group (via DiagnosticCollector.render_summary) ───

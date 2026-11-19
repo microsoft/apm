@@ -39,6 +39,7 @@ from ..utils.git_env import (
     git_subprocess_error_text,
     git_worktree_head,
     redact_git_diagnostic,
+    run_git_text,
 )
 from ..utils.git_sparse import (
     apply_sparse_cone,
@@ -495,9 +496,9 @@ class GitHubPackageDownloader:
 
     # --- Artifactory VCS archive download support ---
 
-    def _get_artifactory_headers(self) -> dict[str, str]:
+    def _get_artifactory_headers(self, *, scheme: str, host: str) -> dict[str, str]:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.get_artifactory_headers()
+        return self._strategies.get_artifactory_headers(scheme=scheme, host=host)
 
     def _download_artifactory_archive(
         self,
@@ -648,8 +649,10 @@ class GitHubPackageDownloader:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
+        extra = {} if redirect_base is None else {"redirect_base": redirect_base}
         return self._strategies.resilient_get(
             url,
             headers,
@@ -658,6 +661,7 @@ class GitHubPackageDownloader:
             stream=stream,
             retry_throttles=retry_throttles,
             allow_netrc=allow_netrc,
+            **extra,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:
@@ -1204,7 +1208,7 @@ class GitHubPackageDownloader:
                         worktree=temp_clone_path,
                     )
                     if token is not None:
-                        remote_result = subprocess.run(
+                        remote_result = run_git_text(
                             [
                                 get_git_executable(),
                                 "remote",
@@ -1215,8 +1219,6 @@ class GitHubPackageDownloader:
                             cwd=str(temp_clone_path),
                             env=git_env,
                             capture_output=True,
-                            text=True,
-                            encoding="utf-8",
                             timeout=120,
                         )
                         if remote_result.returncode != 0:
@@ -1226,13 +1228,11 @@ class GitHubPackageDownloader:
                                 output=remote_result.stdout,
                                 stderr=remote_result.stderr,
                             )
-                    fetch_result = subprocess.run(
+                    fetch_result = run_git_text(
                         [get_git_executable(), "fetch", "origin", ref or "HEAD", "--depth=1"],
                         cwd=str(temp_clone_path),
                         env=git_env,
                         capture_output=True,
-                        text=True,
-                        encoding="utf-8",
                         timeout=120,
                     )
                     if fetch_result.returncode != 0:
@@ -1254,13 +1254,11 @@ class GitHubPackageDownloader:
                     unauth_first=True,
                     base_env=self.git_env,
                 )
-                checkout_result = subprocess.run(
+                checkout_result = run_git_text(
                     [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
                     cwd=str(temp_clone_path),
                     env=setup_env,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
                     timeout=120,
                 )
                 if checkout_result.returncode != 0:
@@ -1320,13 +1318,11 @@ class GitHubPackageDownloader:
             ]
 
             for step_name, cmd in checkout_steps:
-                result = subprocess.run(
+                result = run_git_text(
                     cmd,
                     cwd=str(temp_clone_path),
                     env=env,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
                     timeout=120,
                 )
                 if result.returncode != 0:

@@ -102,6 +102,7 @@ class _SourceIndex:
 
     by_digest: dict[str, list[str]]  # sha256(normalized bytes) -> source rel paths
     unindexed: tuple[str, ...]  # rel paths excluded by size cap or read errors
+    source_root: Path | None = None  # cached tree root for owner-delegated queries
 
 
 def _filename_segment(value: str, fallback: str) -> str:
@@ -151,17 +152,18 @@ def patch_filename(dep_key: str, ref: str) -> str:
 def patch_filenames(refs_by_key: dict[str, str]) -> dict[str, str]:
     """Assign a unique ``<pkg>@<ref>.patch`` filename to every dependency key.
 
-    The sanitizer is many-to-one, so colliding keys get a short digest
-    suffix on the ``<pkg>`` segment; without this, one package's patch
-    would silently overwrite another's.
+    The sanitizer is many-to-one, and case-insensitive filesystems (macOS,
+    Windows) fold names differing only by case, so keys whose names collide
+    case-insensitively get a short digest suffix on the ``<pkg>`` segment;
+    without this, one package's patch would silently overwrite another's.
     """
     by_name: dict[str, list[str]] = {}
     for key, ref in refs_by_key.items():
-        by_name.setdefault(patch_filename(key, ref), []).append(key)
+        by_name.setdefault(patch_filename(key, ref).casefold(), []).append(key)
     result: dict[str, str] = {}
-    for name, keys in by_name.items():
+    for keys in by_name.values():
         if len(keys) == 1:
-            result[keys[0]] = name
+            result[keys[0]] = patch_filename(keys[0], refs_by_key[keys[0]])
             continue
         for key in keys:
             pkg, safe_ref = _patch_stem_parts(key, refs_by_key[key])
@@ -212,7 +214,47 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
             unindexed.append(rel)
             continue
         by_digest.setdefault(digest, []).append(rel)
-    return _SourceIndex(by_digest=by_digest, unindexed=tuple(unindexed))
+    return _SourceIndex(
+        by_digest=by_digest,
+        unindexed=tuple(unindexed),
+        source_root=source_root,
+    )
+
+
+def _upstream_candidates(index: _SourceIndex, candidates: list[str]) -> list[str]:
+    """Drop install-generated ``.apm/`` mirrors from digest-matched candidates.
+
+    A candidate is dropped only when the normalization owner
+    (:func:`~apm_cli.deps.plugin_parser.install_generated_mirror_source`)
+    proves it was copied from another candidate; otherwise ambiguity stays.
+    """
+    if len(candidates) < 2 or index.source_root is None:
+        return candidates
+    from ..deps.plugin_parser import install_generated_mirror_source
+
+    mirrors = set()
+    for rel in candidates:
+        source = install_generated_mirror_source(rel, index.source_root)
+        if source is not None and source in candidates:
+            mirrors.add(rel)
+    return [rel for rel in candidates if rel not in mirrors]
+
+
+def _repository_prefix(dep: LockedDependency) -> str:
+    """Repository-relative directory a subdirectory package was cached from.
+
+    The cache holds only the package subdirectory, so source paths are
+    relative to it; the patch must be relative to the repository root.
+    """
+    if not dep.is_virtual or not dep.virtual_path:
+        return ""
+    try:
+        is_subdirectory = dep.to_dependency_ref().is_virtual_subdirectory()
+    except (ValueError, TypeError):
+        return ""
+    if not is_subdirectory:
+        return ""
+    return dep.virtual_path.strip("/")
 
 
 def _diff_lines(text: str) -> list[str]:
@@ -407,12 +449,15 @@ def build_patch_export(
             continue
 
         index = _index_source_tree(source_root)
+        repo_prefix = _repository_prefix(dep)
         # (deployed path, source rel, diff text) per successful mapping;
         # grouped afterwards so several deployed copies of one source
         # file cannot emit clashing hunks into a single patch.
         successes: list[tuple[str, str, str]] = []
         for finding in sorted(group, key=lambda f: f.path):
-            edit = _export_one(finding, key, index, scratch_root, project_root, source_root)
+            edit = _export_one(
+                finding, key, index, scratch_root, project_root, source_root, repo_prefix
+            )
             if isinstance(edit, SkippedEdit):
                 result_skipped.append(edit)
                 continue
@@ -458,6 +503,7 @@ def _export_one(
     scratch_root: Path,
     project_root: Path,
     source_root: Path,
+    repo_prefix: str = "",
 ) -> SkippedEdit | tuple[str, str, str]:
     """Map one ``modified`` finding to (deployed, source rel, diff text).
 
@@ -473,7 +519,7 @@ def _export_one(
         return SkippedEdit(finding.path, dep_key, f"unreadable: {exc}")
 
     digest = hashlib.sha256(scratch_bytes).hexdigest()
-    candidates = index.by_digest.get(digest, [])
+    candidates = _upstream_candidates(index, index.by_digest.get(digest, []))
     if not candidates:
         reason = (
             "deployed content does not match any source file byte-for-byte "
@@ -517,7 +563,8 @@ def _export_one(
     except UnicodeDecodeError:
         return SkippedEdit(finding.path, dep_key, "binary or non-UTF-8 content")
 
-    diff_text = _unified_diff(a_text, b_text, source_rel)
+    patch_rel = f"{repo_prefix}/{source_rel}" if repo_prefix else source_rel
+    diff_text = _unified_diff(a_text, b_text, patch_rel)
     return finding.path, source_rel, diff_text
 
 
@@ -526,17 +573,24 @@ def _export_one(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
+def _resolve_diff_targets(
+    project_root: Path, lockfile: LockFile | None = None
+) -> list[TargetProfile]:
     """Resolve targets for the diff phase, honoring apm.yml ``target:``.
 
     Must match how the replay resolves targets (drift.py, #1924):
     auto-detection alone would skip declared targets whose root
-    directory does not exist, silently hiding their findings.
+    directory does not exist, silently hiding their findings. Skills
+    keep the layout recorded in *lockfile*, as in the replay (#3773).
     """
     from ..core.target_detection import read_manifest_target
-    from ..integration.targets import resolve_targets
+    from ..integration.skill_layout import recorded_deployed_paths, resolve_reintegration_targets
 
-    return resolve_targets(project_root, explicit_target=read_manifest_target(project_root))
+    return resolve_reintegration_targets(
+        project_root,
+        explicit_target=read_manifest_target(project_root),
+        recorded_paths=recorded_deployed_paths(lockfile),
+    )
 
 
 @click.command(
@@ -662,7 +716,7 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
         logger.error(f"Drift replay failed: {exc}")
         sys.exit(1)
 
-    targets = _resolve_diff_targets(project_root)
+    targets = _resolve_diff_targets(project_root, lockfile)
     findings = diff_scratch_against_project(scratch, project_root, lockfile, targets)
 
     export = build_patch_export(project_root, scratch, lockfile, findings)

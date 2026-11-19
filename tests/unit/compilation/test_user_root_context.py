@@ -842,3 +842,91 @@ class TestDiscoverGlobalInstructions:
 
         # scoped dropped; remaining sorted by file_path (aaa before bbb)
         assert result == [global_a, global_b]
+
+
+# ---------------------------------------------------------------------------
+# Codex user-scope root honours CODEX_HOME (issue #3483)
+# ---------------------------------------------------------------------------
+
+
+def _seed_global_instruction(source_root: Path) -> None:
+    """Write one real global instruction into a package under apm_modules."""
+    instructions_dir = (
+        source_root / "apm_modules" / "example" / "instructions" / ".apm" / "instructions"
+    )
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global test instruction\n---\n\nUse concise responses.\n",
+        encoding="utf-8",
+    )
+
+
+class TestCodexHomeUserRootCompile:
+    """``compile_user_root_contexts`` writes Codex AGENTS.md under CODEX_HOME."""
+
+    @staticmethod
+    def _compile(home: Path, monkeypatch):
+        from apm_cli.compilation.user_root_context import compile_user_root_contexts
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        source_root = home / ".apm"
+        _seed_global_instruction(source_root)
+        return compile_user_root_contexts([KNOWN_TARGETS["codex"]], source_root)
+
+    def test_codex_home_under_home_receives_agents_md(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        codex_home = home / ".config" / "codex"
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+        result = self._compile(home, monkeypatch)
+
+        assert [(r.target, r.status) for r in result] == [("codex", "written")]
+        assert result[0].path == codex_home / "AGENTS.md"
+        assert "Use concise responses." in (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+        assert not (home / ".codex").exists()
+
+    def test_codex_home_outside_home_receives_agents_md(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        codex_home = tmp_path / "elsewhere" / "codex"
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+        result = self._compile(home, monkeypatch)
+
+        assert [(r.target, r.status) for r in result] == [("codex", "written")]
+        assert (codex_home / "AGENTS.md").is_file()
+        assert not (home / ".codex").exists()
+
+    def test_unset_codex_home_defaults_to_home_dot_codex(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+
+        result = self._compile(home, monkeypatch)
+
+        assert [(r.target, r.status) for r in result] == [("codex", "written")]
+        assert result[0].path == home / ".codex" / "AGENTS.md"
+        assert (home / ".codex" / "AGENTS.md").is_file()
+
+    def test_blank_codex_home_defaults_to_home_dot_codex(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        monkeypatch.setenv("CODEX_HOME", "   ")
+
+        result = self._compile(home, monkeypatch)
+
+        assert [(r.target, r.status) for r in result] == [("codex", "written")]
+        assert (home / ".codex" / "AGENTS.md").is_file()
+
+    def test_relative_codex_home_fails_without_writing(self, tmp_path, monkeypatch):
+        import pytest
+
+        from apm_cli.utils.path_security import PathTraversalError
+
+        home = tmp_path / "home"
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("CODEX_HOME", "relative/codex")
+
+        with pytest.raises(PathTraversalError, match="CODEX_HOME is set to a non-absolute path"):
+            self._compile(home, monkeypatch)
+
+        assert not (home / ".codex").exists()
+        assert not (tmp_path / "relative").exists()

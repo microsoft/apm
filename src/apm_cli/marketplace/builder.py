@@ -20,18 +20,24 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import urllib.error
-import urllib.request
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+
+import requests
 
 if TYPE_CHECKING:
     from ..core.auth import AuthContext, HostInfo
 
 from ..utils.github_host import default_host, is_azure_devops_hostname
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
+)
 from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str, loads_frontmatter
 from ._io import atomic_write
@@ -91,7 +97,7 @@ MetadataEnrichmentStatus = Literal[
 ]
 
 
-def _read_capped_text(resp: Any) -> str:
+def _read_capped_text(resp: requests.Response) -> str:
     """Read a remote metadata body bounded to ``_LOCAL_METADATA_MAX_BYTES``.
 
     Cosmetic metadata enrichment must never buffer an unbounded remote
@@ -99,19 +105,28 @@ def _read_capped_text(resp: Any) -> str:
     ``except Exception`` turns into a fail-closed ``None`` (no metadata) -- the
     same byte ceiling the local on-disk reader applies.
     """
-    raw = resp.read(_LOCAL_METADATA_MAX_BYTES + 1)
-    if len(raw) > _LOCAL_METADATA_MAX_BYTES:
-        raise ValueError("remote metadata exceeds byte cap")
-    return raw.decode("utf-8")
+    raw = bytearray()
+    for chunk in resp.iter_content(chunk_size=64 * 1024):
+        raw.extend(chunk)
+        if len(raw) > _LOCAL_METADATA_MAX_BYTES:
+            raise ValueError("remote metadata exceeds byte cap")
+    return bytes(raw).decode("utf-8")
+
+
+def _http_status(exc: BaseException) -> int | None:
+    """Return the HTTP status carried by a ``requests`` error, if any."""
+    return getattr(getattr(exc, "response", None), "status_code", None)
 
 
 def _safe_metadata_failure_cause(exc: BaseException) -> str:
     """Return a stable failure category without propagating exception secrets."""
-    if isinstance(exc, urllib.error.HTTPError):
-        return f"HTTP {exc.code}"
-    if isinstance(exc, TimeoutError):
+    if isinstance(exc, RedirectRefusedError):
+        return "redirect outside the metadata origin refused"
+    if isinstance(exc, requests.HTTPError):
+        return f"HTTP {_http_status(exc)}"
+    if isinstance(exc, (TimeoutError, requests.Timeout)):
         return "request timed out"
-    if isinstance(exc, urllib.error.URLError):
+    if isinstance(exc, requests.RequestException):
         return "network request failed"
     if isinstance(exc, PermissionError):
         return "authentication required"
@@ -740,11 +755,13 @@ class MarketplaceBuilder:
         profile: MarketplaceOutputProfile,
         resolved: tuple[ResolvedPackage, ...],
         remote_metadata: Mapping[str, dict[str, str]] | None = None,
+        *,
+        config: MarketplaceYml | None = None,
     ) -> MapperResult:
         """Map resolved packages into one marketplace output format."""
         mapper = self._mapper_for_profile(profile)
         return mapper.compose(
-            config=self._load_yml(),
+            config=config if config is not None else self._load_yml(),
             resolved=resolved,
             remote_metadata=remote_metadata,
         )
@@ -1060,14 +1077,16 @@ class MarketplaceBuilder:
         # Eagerly resolve auth + create the shared RefResolver before
         # spawning workers -- avoids a race on _ensure_auth() and
         # matches the pattern used in _prefetch_metadata().
-        self._get_resolver()
+        remote_entries = [entry for entry in entries if not entry.is_local]
+        if remote_entries:
+            self._get_resolver()
         # Pre-warm per-host resolvers on the main thread so workers never race
         # to create the same resolver. Include the sourceBase host because
         # base-relative entries derive their host during composition.
-        source_base_parts = self._get_source_base_parts()
+        source_base_parts = self._get_source_base_parts() if remote_entries else None
         if source_base_parts is not None:
             self._get_resolver_for_host(source_base_parts.host, org=source_base_parts.org_hint)
-        for entry in entries:
+        for entry in remote_entries:
             if entry.host:
                 self._get_resolver_for_host(entry.host)
 
@@ -1239,20 +1258,33 @@ class MarketplaceBuilder:
 
                 def _request_text(url: str, *, rest: bool = False) -> str:
                     """Read one bounded remote document with attempt credentials."""
-                    req = urllib.request.Request(url)  # noqa: S310
+                    headers: dict[str, str] = {}
                     if rest:
-                        req.add_header("Accept", "application/vnd.github.raw")
-                    if token:
-                        req.add_header("Authorization", f"token {token}")
-                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        return _read_capped_text(resp)
+                        headers["Accept"] = "application/vnd.github.raw"
+                    headers.update(AuthResolver.github_rest_headers(token))
+                    with CredentialScopedSession() as session:
+                        resp = origin_bounded_request(
+                            session,
+                            "GET",
+                            url,
+                            base_url=origin_root(url),
+                            headers=headers,
+                            ambient_credentials=False,
+                            timeout=5,
+                            stream=True,
+                        )
+                        try:
+                            resp.raise_for_status()
+                            return _read_capped_text(resp)
+                        finally:
+                            resp.close()
 
                 def _is_valid_skill(url: str, *, rest: bool = False) -> bool:
                     """Return whether the URL contains parseable Agent Skills metadata."""
                     try:
                         skill = loads_frontmatter(_request_text(url, rest=rest))
-                    except urllib.error.HTTPError as exc:
-                        if exc.code == 404:
+                    except requests.HTTPError as exc:
+                        if _http_status(exc) == 404:
                             return False
                         raise
                     name = skill.metadata.get("name")
@@ -1280,8 +1312,8 @@ class MarketplaceBuilder:
                     )
                     try:
                         return _RemoteMetadataDocument(_request_text(raw_manifest_url))
-                    except urllib.error.HTTPError as exc:
-                        if exc.code != 404:
+                    except requests.HTTPError as exc:
+                        if _http_status(exc) != 404:
                             raise
                         raw_skill_url = (
                             "https://raw.githubusercontent.com/"
@@ -1294,8 +1326,8 @@ class MarketplaceBuilder:
                 rest_manifest_url = _rest_url(manifest_path)
                 try:
                     return _RemoteMetadataDocument(_request_text(rest_manifest_url, rest=True))
-                except urllib.error.HTTPError as exc:
-                    if exc.code != 404:
+                except requests.HTTPError as exc:
+                    if _http_status(exc) != 404:
                         raise
                     if _is_valid_skill(_rest_url(skill_path), rest=True):
                         return _RemoteMetadataDocument(None, manifestless=True)
@@ -1507,6 +1539,32 @@ class MarketplaceBuilder:
         self._compose_warnings = mapper_result.warnings
         self._compose_diagnostics = mapper_result.diagnostics
         return mapper_result.document
+
+    def compose_discovery_catalog(self, resolved: tuple[ResolvedPackage, ...]) -> dict[str, Any]:
+        """Compose an in-memory discovery catalog with local metadata only.
+
+        Ref resolution is separate and may require network access. Discovery
+        does not fetch cosmetic manifests for every remote package, but keeps
+        the existing local metadata and curator precedence through the mapper.
+        """
+        metadata = {
+            pkg.name: self._fetch_local_metadata(pkg) or {}
+            for pkg in resolved
+            if not pkg.source_repo
+        }
+        # Authored paths are already relative to the authoring file. pluginRoot
+        # is a native-output layout hint: applying its stripped representation
+        # to APM's local consumer would rebase bare and nested paths differently.
+        # Compose a separate immutable view; native output and the parsed
+        # configuration retain their original pluginRoot contract.
+        config = self._load_yml()
+        discovery_config = replace(
+            config,
+            metadata={key: value for key, value in config.metadata.items() if key != "pluginRoot"},
+        )
+        return self._map_output(
+            DEFAULT_MARKETPLACE_OUTPUT, resolved, remote_metadata=metadata, config=discovery_config
+        ).document
 
     def compose_codex_marketplace_json(
         self,

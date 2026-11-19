@@ -28,6 +28,7 @@ from pathlib import Path
 from apm_cli.utils.atomic_io import atomic_write_text
 
 from ...utils.path_security import PathTraversalError, ensure_path_within
+from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
 _CONFIG_SUFFIX = ("github-copilot", "intellij")
@@ -176,7 +177,11 @@ def _config_without_servers(
 class IntelliJClientAdapter(CopilotClientAdapter):
     """MCP client adapter for GitHub Copilot inside JetBrains IDEs."""
 
+    remote_shape = remote_shape_row("intellij")
+
     supports_user_scope: bool = True
+    # Non-JSON or JetBrains-managed config: no native content comparison yet.
+    compares_native_connections: bool = False
     _client_label: str = "JetBrains Copilot"
     target_name: str = "intellij"
     mcp_servers_key: str = "servers"

@@ -31,7 +31,7 @@ content. Global uninstalls also reconcile APM-owned Claude plugin registrations.
 |---|---|
 | `--dry-run` | Show the removal plan without writes from the uninstall engine. `pre-uninstall` lifecycle scripts still run and may have side effects. Registry fallback and shared-slot survivor staging are skipped. |
 | `-v, --verbose` | Show detailed removal information. |
-| `-g, --global` | Remove from the user scope (`~/.apm/`) instead of the current project. |
+| `-g, --global` | Remove from the user scope under `$APM_HOME` (default `~/.apm`) instead of the current project. Target deployment cleanup still uses target-specific home variables or the operating-system home. |
 
 ## Examples
 
@@ -122,20 +122,27 @@ What gets removed, in order:
    lockfile processing: remove retired registrations, retain native plugin data,
    and preserve surviving registrations and activation choices.
 
-When uninstall rebuilds a surviving package's loose skills, APM records those
-actual writes locally and binds them after the final lockfile update succeeds.
+When uninstall rebuilds a surviving package's loose skills, it deploys only the
+skills that package selects with `skills:`, as `apm install` does. APM records
+those actual writes locally and binds them after the final lockfile update succeeds.
 Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
-### Claude Code profiles
+### Harness profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
 removes a package's files and lockfile rows only under the selected
 `CLAUDE_CONFIG_DIR` (or `~/.claude`). Files deployed to another profile stay.
 If another profile still uses the package, it stays in `~/.apm/apm.yml` and
 `apm_modules/`; uninstall it with that profile selected to remove it everywhere.
+Hermes homes (`HERMES_HOME`) follow the same rule. Only the runtime whose
+profiles share the package loses files: selecting a Claude profile leaves
+`~/.hermes` (and other targets such as `~/.agents`) untouched, and the reverse.
 The selected profile is matched by path; symlinks are not resolved.
+Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
+Codex agents and hooks, and Copilot CLI homes selected by `COPILOT_HOME` (or
+`~/.copilot`) for Copilot instructions, agents and hooks.
 
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message
@@ -161,10 +168,11 @@ command; `--verbose` includes the underlying error. Earlier deletions in a
 multi-package request are not rolled back.
 
 If a target-scoped file owned only by a removed package was edited or cannot be
-deleted, uninstall lists the retained paths and exits before changing `apm.yml`
-or the on-disk `apm.lock.yaml`. Direct and orphan directories run first and may
-already be gone; declarations and deployed ownership remain. Resolve the listed
-files and retry the same uninstall command.
+deleted, uninstall lists the retained paths and exits before changing `apm.yml`.
+Files it already removed are dropped from `apm.lock.yaml`, so the lockfile
+claims only what is still on disk. Direct and orphan directories run first and
+may already be gone; declarations remain. Resolve the listed files and retry the
+same uninstall command.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the
@@ -186,11 +194,16 @@ the reported issue, then reconcile remaining declarations with
 the full original `--target` list. Do not re-add removed package arguments. See
 [native registration and runtime qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
+A package declared more than once -- in both `dependencies` and
+`devDependencies`, or under two spellings such as `owner/repo` and its HTTPS
+URL -- is one package: uninstall removes every declaration of it.
+
 `_local/<name>` is resolved from the manifest and lockfile metadata that produced
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an
 absolute path. If two declared local dependencies have the same portable key,
 selection is ambiguous and exits nonzero without changes. Use one exact path
-already declared in the relevant manifest (`apm.yml` or `~/.apm/apm.yml`); APM
+already declared in the relevant manifest (`apm.yml` or `$APM_HOME/apm.yml`,
+default `~/.apm/apm.yml`); APM
 never removes both or guesses, and diagnostics do not print declared paths.
 When an exact path removes one declaration from a shared local install slot, APM
 validates and stages the survivor before changing the manifest, then activates
@@ -212,6 +225,8 @@ When marketplace notation (`name@marketplace`) falls through to the registry (St
 ### No-lockfile behavior
 
 If `apm.lock.yaml` is not present, marketplace notation has no offline anchor: Stage 1 finds nothing, and the supply-chain guard cannot cross-check the registry result. APM still attempts registry resolution and proceeds if the canonical matches an entry in `apm.yml`, but this path has weaker integrity guarantees. A local `_local/<name>` key also has no persisted mapping without the lockfile, so use its exact declared path or run `apm install` to regenerate the lockfile first.
+
+Without a lockfile, nothing proves which skill directories APM deployed, so uninstall (project and `-g`) removes no skill directories and prints a notice. Run `apm install` first to restore lockfile ownership if you want deployed skills cleaned up.
 
 `--dry-run` keeps the uninstall engine read-only, but `pre-uninstall` lifecycle scripts still run and may have their own side effects. Registry fallback and shared-slot staging are skipped, so marketplace refs not already in the lockfile cannot be previewed and a real shared-slot uninstall can still fail validation; use `owner/repo` notation or re-run without `--dry-run`.
 

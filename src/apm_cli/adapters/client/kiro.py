@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-from ...utils.atomic_io import atomic_write_text
+from ...mcp_transport import canonical_remote_transport
 from ...utils.console import _rich_error, _rich_success
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 class KiroClientAdapter(CopilotClientAdapter):
     """Kiro IDE MCP client adapter."""
+
+    remote_shape = remote_shape_row("kiro")
 
     supports_user_scope: bool = True
     _client_label: str = "Kiro"
@@ -67,19 +69,11 @@ class KiroClientAdapter(CopilotClientAdapter):
             return None
 
         config_path = Path(self.get_config_path())
-        current_config = self.get_current_config()
-        if not isinstance(current_config.get(self.mcp_servers_key), dict):
-            current_config[self.mcp_servers_key] = {}
-        current_config[self.mcp_servers_key].update(config_updates)
-
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            config_path,
-            json.dumps(current_config, indent=2),
-            new_file_mode=0o600,
-        )
-        # Keep existing config files private after updates too.
-        os.chmod(config_path, 0o600)
+        current_config = self._parse_json_config_for_update(config_path)
+        if current_config is None:
+            return False
+        current_config.setdefault(self.mcp_servers_key, {}).update(config_updates)
+        self._write_json_config(config_path, current_config)
         return True
 
     @staticmethod
@@ -138,17 +132,14 @@ class KiroClientAdapter(CopilotClientAdapter):
         remotes = server_info.get("remotes", [])
         if remotes:
             remote = self._select_remote_with_url(remotes) or remotes[0]
-            transport = (remote.get("transport_type") or "").strip()
-            if not transport:
-                transport = "http"
-            elif transport not in ("sse", "http", "streamable-http"):
-                raise ValueError(
-                    f"Unsupported remote transport '{transport}' for Kiro. "
-                    f"Server: {server_info.get('name', 'unknown')}. "
-                    "Supported transports: http, sse, streamable-http."
-                )
-
-            config = {"url": (remote.get("url") or "").strip()}
+            server_name = server_info.get("name", "unknown")
+            transport = canonical_remote_transport(
+                remote, runtime_label="Kiro", server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
+            config = shape.render(transport, (remote.get("url") or "").strip())
             headers = {
                 name: self._resolve_env_variable(name, value, env_overrides)
                 if isinstance(value, str)
@@ -209,14 +200,14 @@ class KiroClientAdapter(CopilotClientAdapter):
             return True
 
         # Fallback key for the error message when the registry lookup raises.
-        config_key = self._determine_config_key(server_url, server_name)
+        config_key = self.determine_config_key(server_url, server_name)
 
         try:
             server_info = self._fetch_server_info(server_url, server_info_cache)
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             self._last_env_placeholder_keys = set()
             self._last_legacy_angle_vars = set()
@@ -224,7 +215,8 @@ class KiroClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if not enabled:
                 server_config["disabled"] = True
-            self.update_config({config_key: server_config})
+            if self.update_config({config_key: server_config}) is False:
+                return False
 
             _rich_success(f"Configured MCP server '{config_key}' for Kiro", symbol="success")
             return True

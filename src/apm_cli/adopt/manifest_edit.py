@@ -9,8 +9,8 @@ from apm_cli.deps.path_anchoring import _join
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.dependency.object_fields import local_path_apm_yml_entry
+from apm_cli.models.manifest_io import load_manifest_roundtrip
 from apm_cli.utils.yaml_io import (
-    load_yaml_roundtrip,
     write_yaml_text_atomic,
     yaml_roundtrip_to_str,
 )
@@ -25,7 +25,7 @@ def read_manifest(path: Path, root: Path) -> tuple[Any, list[DependencyReference
         return {"name": "onboarded-project", "version": "1.0.0"}, [], None
     checked_file(path, root)
     original = path.read_bytes()
-    data = load_yaml_roundtrip(path)
+    data = load_manifest_roundtrip(path)
     if not isinstance(data, dict):
         raise ValueError("Invalid apm.yml: expected a mapping. Repair the manifest and retry.")
     for group in ("dependencies", "devDependencies"):

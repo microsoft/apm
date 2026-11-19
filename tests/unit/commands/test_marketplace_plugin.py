@@ -563,6 +563,54 @@ class TestResolveRef:
         )
         assert result == "v1.0.0"
 
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA)],
+    )
+    def test_missing_tag_exits_like_check(self, mock_list):
+        """--ref naming no tag or branch on a reachable remote is refused."""
+        with pytest.raises(SystemExit) as exc_info:
+            _resolve_ref(
+                self._make_logger(),
+                "acme/tools",
+                ref="v9.9.9",
+                version=None,
+                no_verify=False,
+            )
+        assert exc_info.value.code == 2
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA)],
+    )
+    def test_missing_tag_with_no_verify_is_stored(self, mock_list):
+        """--no-verify keeps the explicit opt-out for unpublished tags."""
+        result = _resolve_ref(
+            self._make_logger(),
+            "acme/tools",
+            ref="v9.9.9",
+            version=None,
+            no_verify=True,
+        )
+        assert result == "v9.9.9"
+
+    def test_ref_lookup_uses_the_source_host(self):
+        """A host-qualified source is listed on its own host, not the default."""
+        with patch("apm_cli.marketplace.ref_resolver.RefResolver") as resolver_cls:
+            resolver_cls.return_value.list_remote_refs.return_value = [
+                RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA)
+            ]
+            result = _resolve_ref(
+                self._make_logger(),
+                "acme/tools",
+                ref="v1.0.0",
+                version=None,
+                no_verify=False,
+                host="git.example.invalid",
+            )
+        assert result == "v1.0.0"
+        resolver_cls.assert_called_once_with(host="git.example.invalid")
+
 
 # ---------------------------------------------------------------------------
 # Integration: package add with ref auto-resolution

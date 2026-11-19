@@ -14,7 +14,6 @@ AFTER the targets phase when the effective target is known
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from apm_cli.install.errors import PolicyViolationError
@@ -118,43 +117,30 @@ def run(ctx: InstallContext) -> None:
         fetch_outcome=fetch_result.outcome,
         fail_fast=(enforcement == "block"),
         direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
+        declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
         **extra_kwargs,
     )
 
     # ------------------------------------------------------------------
     # 5. Route violations through logger
     # ------------------------------------------------------------------
+    # One violation per offending dependency / MCP server; the check
+    # name is only the category (#3835).
+    from apm_cli.policy.install_preflight import emit_check_violations
+
     has_blocking = False
     for check in audit_result.checks:
         if not check.passed:
             severity = "block" if enforcement == "block" else "warn"
-            reason = check.message
-            # Include detail lines for richer diagnostics
-            if check.details:
-                reason = f"{check.message}: {', '.join(check.details[:5])}"
             if logger:
-                logger.policy_violation(
-                    dep_ref=check.name,
-                    reason=reason,
-                    severity=severity,
-                    source=source,
-                )
+                emit_check_violations(logger, check, severity=severity, source=source)
             if severity == "block":
                 has_blocking = True
-        elif check.details:
-            # project-wins version-pin mismatches are passed=True with
-            # warning details (policy_checks.py:228-235).  Emit them so
+        elif check.details and logger:
+            # project-wins version-pin mismatches and self-defined MCP
+            # warnings are passed=True with warning details.  Emit them so
             # warn-mode surfaces all diagnostics.
-            if logger:
-                reason = check.message
-                if check.details:
-                    reason = f"{check.message}: {', '.join(check.details[:5])}"
-                logger.policy_violation(
-                    dep_ref=check.name,
-                    reason=reason,
-                    severity="warn",
-                    source=source,
-                )
+            emit_check_violations(logger, check, severity="warn", source=source)
 
     if has_blocking:
         raise PolicyViolationError(
@@ -178,7 +164,9 @@ def _is_policy_disabled(ctx: InstallContext) -> bool:
             logger.policy_disabled("--no-policy")
         return True
 
-    if os.environ.get("APM_POLICY_DISABLE") == "1":
+    from apm_cli.policy.discovery import policy_disabled_by_env
+
+    if policy_disabled_by_env():
         if logger:
             logger.policy_disabled("APM_POLICY_DISABLE=1")
         return True

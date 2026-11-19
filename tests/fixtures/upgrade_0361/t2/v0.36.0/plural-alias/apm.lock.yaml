@@ -1,0 +1,65 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: _local/pkg
+  name: pkg
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/pkg-skill
+  - .agents/skills/pkg-skill/SKILL.md
+  - .github/instructions/style.instructions.md
+  deployed_file_hashes:
+    .agents/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .github/instructions/style.instructions.md: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+  source: local
+  local_path: ../pkg
+  content_hash: sha256:4bd06327422aecf0af60576e08fd0a2b47c74ca3db45dcb21fec87af8f9f3057
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/style.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: vscode
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a61b5eaf39b93a51e231f31f99b9eb72a86411645bc53171a44b2888e11ae385
+mcp_servers:
+- srv
+mcp_configs:
+  srv:
+    name: srv
+    transport: http
+    registry: false
+    url: https://mcp.example.com/mcp
+mcp_target_servers:
+  vscode:
+  - srv

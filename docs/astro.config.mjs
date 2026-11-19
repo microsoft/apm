@@ -43,8 +43,6 @@ export default defineConfig({
 		'/introduction/anatomy-of-an-apm-package': '/apm/concepts/package-anatomy',
 		// Legacy getting-started -> persona ramps
 		'/getting-started/quick-start': '/apm/quickstart',
-		'/getting-started/authentication': '/apm/consumer/authentication',
-		'/getting-started/migration': '/apm/troubleshooting/migration',
 		// Legacy guides -> consumer/producer ramps
 		'/guides/dependencies': '/apm/consumer/manage-dependencies',
 		'/guides/skills': '/apm/producer/author-primitives/skills',

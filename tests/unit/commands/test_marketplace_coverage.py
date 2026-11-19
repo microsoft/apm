@@ -273,8 +273,26 @@ class TestResolveRef:
 
         assert exc_info.value.code == 2
 
-    def test_list_remote_refs_error_returns_unresolved(self) -> None:
-        """Lines 155-162: GitLsRemoteError on list_remote_refs → warning + return ref."""
+    def test_list_remote_refs_error_exits_without_no_verify(self) -> None:
+        """An unreachable remote fails a verified --ref instead of storing it."""
+        from apm_cli.commands.marketplace.plugin import _resolve_ref
+        from apm_cli.marketplace.errors import GitLsRemoteError
+
+        logger = MagicMock()
+        with patch(
+            "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+            side_effect=GitLsRemoteError("pkg", "offline", "try later"),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                _resolve_ref(
+                    logger, "https://example.com/repo.git", "my-feature-branch", None, False
+                )
+
+        assert exc_info.value.code == 2
+        logger.error.assert_called()
+
+    def test_list_remote_refs_error_with_no_verify_returns_unresolved(self) -> None:
+        """--no-verify keeps the opt-out: warn and store the ref unresolved."""
         from apm_cli.commands.marketplace.plugin import _resolve_ref
         from apm_cli.marketplace.errors import GitLsRemoteError
 
@@ -284,7 +302,7 @@ class TestResolveRef:
             side_effect=GitLsRemoteError("pkg", "offline", "try later"),
         ):
             result = _resolve_ref(
-                logger, "https://example.com/repo.git", "my-feature-branch", None, False
+                logger, "https://example.com/repo.git", "my-feature-branch", None, True
             )
 
         assert result == "my-feature-branch"

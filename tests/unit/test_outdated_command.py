@@ -862,7 +862,7 @@ class TestOutdatedCommand:
             result = self.runner.invoke(cli, ["outdated", "--global"])
 
             assert result.exit_code == 1
-            assert "~/.apm/" in result.output
+            assert str(tmp) in result.output
 
     # --- Virtual package deps ---
 

@@ -261,6 +261,12 @@ _TRANSPORT_SELECTION = re.compile(r"from .*transport_selection import|TransportS
 _SEMVER_REF_KIND = re.compile(r"""dep_ref\.ref_kind\s*==\s*["']semver["']""")
 
 
+_CONSTRAINT_PINNING = "src/apm_cli/policy/_constraint_pinning.py"
+
+
+_PACKAGE_NAME_DUP = re.compile(r"(virtual_path|repo_url)\b.*\.rsplit\(")
+
+
 def _check_git_semver_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
@@ -360,6 +366,40 @@ def _check_git_semver_preflight(provider: FactsProvider) -> tuple[Violation, ...
             ("src/apm_cli/commands/install.py",),
             _SEMVER_REF_KIND,
             "Semver preflight must not re-derive eligibility from dep_ref.ref_kind",
+            exempt=False,
+        )
+    )
+
+    # The git-tag ``{name}`` is owned by ref_reuse.py; the pinned-constraint
+    # policy recognises a dependency's own release tags through it (#3224).
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_SEMVER,
+            _REF_REUSE,
+            (("re", r"^def git_semver_package_name\(", 1, "eq"),),
+            "ref_reuse must own git_semver_package_name",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_SEMVER,
+            _CONSTRAINT_PINNING,
+            ("name = git_semver_package_name(dep)",),
+            "pinned-constraint policy must take the tag name from ref_reuse",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_SEMVER,
+            _paths_under(provider, "src/apm_cli/policy/", (".py",)),
+            _PACKAGE_NAME_DUP,
+            "Policy must not re-derive the git-semver package name",
             exempt=False,
         )
     )

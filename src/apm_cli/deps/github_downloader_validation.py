@@ -48,10 +48,9 @@ from ..models.dependency.host_virtual import (
     dependency_repository_owner,
     repository_owner_and_repo,
 )
-from ..utils.git_env import get_git_executable, git_subprocess_error_text
+from ..utils.git_env import get_git_executable, git_subprocess_error_text, run_git_text
 from ..utils.github_host import (
     default_host,
-    is_ado_auth_failure_signal,
     is_github_hostname,
 )
 from ..utils.path_security import (
@@ -317,8 +316,9 @@ def _directory_exists_at_ref(
 
     def _request(token: str | None, _git_env: dict[str, str]) -> bool:
         headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
-        if token:
-            headers["Authorization"] = f"token {token}"
+        from ..core.auth import AuthResolver
+
+        headers.update(AuthResolver.github_rest_headers(token))
         response = downloader._resilient_get(
             api_url,
             headers=headers,
@@ -668,59 +668,43 @@ def _ref_exists_via_ls_remote(
 
     if dep_ref.is_azure_devops():
         primary_attempt = attempts[0]
-        primary_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
+        winning: list[AttemptSpec] = []
 
-        def _probe_ado(
-            attempt: AttemptSpec,
-        ) -> tuple[str, AttemptSpec, BaseException | None]:
-            try:
-                output = (
-                    _run_remote(attempt.url, attempt.env)
-                    if is_sha
-                    else _run_remote(
-                        attempt.url,
-                        attempt.env,
-                        options=("--heads", "--tags"),
-                        patterns=(ref,),
-                    )
+        def _probe_ado(_token: str | None, git_env: dict[str, str]) -> str:
+            # auth-delegated: try_with_fallback selects PAT, az bearer, or the
+            # path-scoped helper credential carried in git_env.
+            output = (
+                _run_remote(primary_attempt.url, git_env)
+                if is_sha
+                else _run_remote(
+                    primary_attempt.url,
+                    git_env,
+                    options=("--heads", "--tags"),
+                    patterns=(ref,),
                 )
-                return output, attempt, None
-            except (GitCommandError, OSError) as exc:
-                return "", attempt, exc
-
-        def _bearer_probe(bearer: str) -> tuple[str, AttemptSpec, BaseException | None]:
-            if primary_ctx is None:
-                return "", primary_attempt, RuntimeError("ADO auth context unavailable")
-            bearer_env = downloader.auth_resolver.build_ado_bearer_git_env(
-                primary_ctx,
-                bearer,
-                primary_attempt.url,
             )
-            bearer_attempt = AttemptSpec(
-                "ADO authenticated HTTPS (bearer header)",
-                primary_attempt.url,
-                bearer_env,
-            )
-            return _probe_ado(bearer_attempt)
+            # The follow-up tree probe must reuse the credential that worked.
+            winning[:] = [AttemptSpec(primary_attempt.label, primary_attempt.url, dict(git_env))]
+            return output
 
-        fallback = downloader.auth_resolver.execute_with_bearer_fallback(
-            dep_ref,
-            lambda: _probe_ado(primary_attempt),
-            _bearer_probe,
-            lambda outcome: bool(
-                primary_ctx is not None
-                and getattr(primary_ctx, "source", "") == "ADO_APM_PAT"
-                and outcome[2] is not None
-                and is_ado_auth_failure_signal(git_subprocess_error_text(outcome[2]))
-            ),
-        )
-        output, winning_attempt, error = fallback.outcome
-        if error is not None:
+        try:
+            output = downloader.auth_resolver.try_with_fallback(
+                dep_ref.host or "dev.azure.com",
+                _probe_ado,
+                org=dependency_repository_owner(dep_ref),
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
+                remote_url=primary_attempt.url,
+                base_env=downloader.git_env,
+            )
+        except (GitCommandError, OSError, RuntimeError) as error:
             log(
-                f"  [x] ls-remote failed via {winning_attempt.label}: "
+                f"  [x] ls-remote failed via {primary_attempt.label}: "
                 f"{git_subprocess_error_text(error)}"
             )
             return False, None
+        winning_attempt = winning[0] if winning else primary_attempt
         matched = bool(
             output
             and (
@@ -853,11 +837,10 @@ def _path_exists_in_tree_at_ref(
             return False
 
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 [git_exe, "--git-dir", str(bare), "ls-tree", "-d", "FETCH_HEAD", vpath],
                 check=True,
                 capture_output=True,
-                text=True,
                 env=remote_env,
             )
             output = result.stdout

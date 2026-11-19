@@ -93,6 +93,30 @@ def _optional_string_attr(dep: Any, name: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def revision_pin_mismatch(reference: str | None, locked_dep: LockedDependency) -> str | None:
+    """Return why a full-SHA manifest pin disagrees with the locked commit.
+
+    A manifest ref that is a full commit SHA is immutable: the locked
+    ``resolved_commit`` must name that same commit, whatever ``resolved_ref``
+    the row records. Returns ``None`` when *reference* is not a full SHA or
+    the commits agree.
+    """
+    from apm_cli.deps.revision_pins import is_full_revision_pin
+
+    if not is_full_revision_pin(reference):
+        return None
+    locked_commit = locked_dep.resolved_commit
+    if (
+        isinstance(locked_commit, str)
+        and locked_commit.strip().lower() == reference.strip().lower()
+    ):
+        return None
+    return (
+        f"manifest commit '{reference}' != "
+        f"lockfile resolved_commit '{locked_commit or '(missing)'}'"
+    )
+
+
 def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
@@ -108,11 +132,7 @@ def marketplace_ref_mismatch(
     if not spec:
         return None
     if is_full_revision_pin(spec):
-        if locked_dep.resolved_commit.lower() != spec.lower():
-            return (
-                f"manifest commit '{spec}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit}'"
-            )
+        return revision_pin_mismatch(spec, locked_dep)
     elif is_version_constraint(spec):
         # Git semver locks already distinguish selected versions from package
         # inventory using constraint + resolved_tag. Never infer tag patterns
@@ -130,6 +150,13 @@ def marketplace_ref_mismatch(
     elif spec != locked_dep.resolved_ref:
         return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
     return None
+
+
+def _routes_to_locked_proxy(dep_ref: DependencyReference, locked_dep: Any) -> bool:
+    """Ask the proxy routing owner whether *dep_ref* reaches *locked_dep*'s proxy."""
+    from apm_cli.deps.artifactory_orchestrator import ArtifactoryRouter
+
+    return ArtifactoryRouter.routes_to_locked_proxy(dep_ref, locked_dep)
 
 
 def detect_ref_change(
@@ -201,7 +228,11 @@ def detect_ref_change(
         except (ValueError, RuntimeError):
             # An unclassifiable lock cannot safely authorize replay.
             return True
-        if manifest_provider != locked_provider:
+        # A proxy-routed row records the proxy host instead of the upstream
+        # one; the current route to that same proxy keeps it the same source.
+        if manifest_provider != locked_provider and not _routes_to_locked_proxy(
+            dep_ref, selected_locked
+        ):
             return True
 
     # Registry-sourced deps: the manifest carries a semver range
@@ -234,13 +265,19 @@ def detect_ref_change(
     # instead, treat the dep as unchanged when the lockfile already
     # stores the same constraint (and we therefore trust its resolution
     # until the user runs ``--update``).
-    if getattr(dep_ref, "ref_kind", None) == "semver":
+    # A row locked without a constraint recorded the selector literally (an
+    # exact pin under PROXY_REGISTRY_ONLY), so the literal comparison applies.
+    if getattr(dep_ref, "ref_kind", None) == "semver" and locked_dep.constraint is not None:
         return dep_ref.reference != locked_dep.constraint
 
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
     # and value→value. No truthiness guard on locked_dep.resolved_ref —
-    # None != "v1.0.0" is True.
-    return dep_ref.reference != locked_dep.resolved_ref
+    # None != "v1.0.0" is True. A full-SHA pin is satisfied only by that exact
+    # locked commit, whatever resolved_ref the lock row records.
+    return (
+        dep_ref.reference != locked_dep.resolved_ref
+        or revision_pin_mismatch(dep_ref.reference, locked_dep) is not None
+    )
 
 
 def should_force_ref_recheck(
@@ -257,7 +294,9 @@ def should_force_ref_recheck(
     callback. The resolver reads a package's ``apm.yml`` from whatever path this
     gate leaves in place, so returning False means "the materialized copy is
     current". A normal install rechecks local packages (their source can change
-    without any ref moving) and manifest/lock drift. An explicit update also
+    without any ref moving) and manifest/lock drift; *update_keys* scopes both
+    the local recheck and the update rechecks to a targeted run's selected
+    subtree. An explicit update also
     rechecks mutable Git refs, semver ranges and hook-only packages. Hook
     replacements must pass staged admission before any live content is replaced.
 
@@ -270,8 +309,10 @@ def should_force_ref_recheck(
         return True
     if dep_ref.is_local:
         # #3401 / #3501: the apm_modules copy is from the previous install, so
-        # reading it would resolve transitive deps from a stale manifest.
-        return True
+        # reading it would resolve transitive deps from a stale manifest. A
+        # targeted run re-reads only its selected subtree; an unselected local
+        # package keeps its locked state, even mid-edit (#3649).
+        return update_keys is None or dep_ref.get_unique_key() in update_keys
     if getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:
@@ -499,7 +540,13 @@ def build_download_ref(
             # When registry_prefix is set, also restore the artifactory_prefix
             # field on dep_ref so the downloader takes the proxy code-path and
             # uses PROXY_REGISTRY_TOKEN for auth instead of the GitHub PAT.
-            if locked_dep.registry_prefix and locked_dep.host:
+            # A dep whose current route already lands on that proxy keeps it,
+            # with the configured scheme (#3657).
+            if (
+                locked_dep.registry_prefix
+                and locked_dep.host
+                and not _routes_to_locked_proxy(dep_ref, locked_dep)
+            ):
                 overrides["host"] = locked_dep.host
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
 
