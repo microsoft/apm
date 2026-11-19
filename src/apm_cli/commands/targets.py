@@ -20,6 +20,26 @@ from pathlib import Path
 import click
 
 
+def _manifest_targets(project_root: Path) -> list[str] | None:
+    """Return the targets apm.yml restricts deployment to, read like install does."""
+    from apm_cli.constants import APM_YML_FILENAME
+    from apm_cli.models.apm_package import APMPackage, package_target_declaration
+
+    manifest = project_root / APM_YML_FILENAME
+    if not manifest.is_file():
+        return None
+    try:
+        declaration = package_target_declaration(APMPackage.from_apm_yml(manifest))
+        if declaration.selection == "all":
+            from apm_cli.core.target_catalog import expand_all
+
+            # Singular ``target: all`` deploys the install set; restriction() folds it.
+            return list(expand_all("install"))
+        return declaration.restriction()
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(f"Failed to read {APM_YML_FILENAME}: {exc}") from exc
+
+
 @click.group(
     invoke_without_command=True,
     help=(
@@ -58,6 +78,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     )
 
     project_root = Path.cwd()
+    yaml_targets = _manifest_targets(project_root)
     # Explicit-only targets (agent-skills, grok-bot, ...) are never
     # auto-detected, so they are excluded from the apm targets table and
     # visible only in JSON output with --all (convergence item 13).
@@ -67,7 +88,8 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     # ``apm targets`` precisely to see what's there).
     # On no-harness error, report empty active list.
     try:
-        resolved = resolve_targets(project_root)
+        # Same precedence as install: apm.yml targets win over detected signals (#3792).
+        resolved = resolve_targets(project_root, yaml_targets=yaml_targets)
         active = resolved.targets
     except AmbiguousHarnessError:
         signals = detect_signals(project_root)

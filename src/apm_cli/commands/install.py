@@ -213,6 +213,16 @@ except ImportError as e:
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
 
 
+def _scoped_lockfile(scope):
+    """Read the lockfile the scope's marketplace entries were locked in (#3959)."""
+    from ..core.scope import InstallScope, get_apm_dir
+    from ..deps.lockfile import resolve_lockfile_path_for_read
+
+    # Read-only: a legacy apm.lock not yet migrated still carries the origin.
+    apm_dir = get_apm_dir(scope or InstallScope.PROJECT)
+    return LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True))
+
+
 def _resolve_package_references(
     packages,
     current_deps,
@@ -229,6 +239,7 @@ def _resolve_package_references(
     updated_packages_out=None,
     protocol_pref=None,
     allow_protocol_fallback: bool | None = None,
+    existing_lockfile=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -265,6 +276,7 @@ def _resolve_package_references(
         marketplace_dep_ref = None
         if "/" not in package and not DependencyReference.is_local_path(package):
             try:
+                from ..marketplace.catalog_origin import require_locked_catalog_origin
                 from ..marketplace.dependency_confusion import admit_marketplace_resolution
                 from ..marketplace.resolver import (
                     parse_marketplace_ref,
@@ -287,6 +299,10 @@ def _resolve_package_references(
                         logger.verbose_detail(
                             f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
                         )
+                    # #3959: a rebound alias fails closed before any catalog I/O.
+                    if existing_lockfile is None:
+                        existing_lockfile = _scoped_lockfile(scope)
+                    require_locked_catalog_origin(marketplace_name, plugin_name, existing_lockfile)
                     resolution = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,

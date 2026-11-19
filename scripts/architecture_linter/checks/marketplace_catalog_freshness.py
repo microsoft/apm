@@ -14,8 +14,6 @@ RULE_ID = "marketplace-integrations-catalog-freshness"
 _CLIENT = "src/apm_cli/marketplace/client.py"
 _MARKETPLACE_COMMANDS = "src/apm_cli/commands/marketplace/__init__.py"
 _ROUTES = (
-    ("src/apm_cli/commands/install.py", "install", "InstallService.catalog_freshness"),
-    ("src/apm_cli/commands/update.py", "_run_dep_update", "InstallService.catalog_freshness"),
     ("src/apm_cli/install/service.py", "catalog_freshness", "catalog_freshness_scope"),
     (
         "src/apm_cli/install/service.py",
@@ -27,6 +25,24 @@ _ROUTES = (
     (_CLIENT, "fetch_or_cache", "fetch_marketplace"),
     (_MARKETPLACE_COMMANDS, "update", "fetch_marketplace"),
 )
+# Closed world (#3961): every caller of the shared install entry runs inside the
+# command's freshness envelope. Maps (path, caller) to the function that opens
+# the envelope; an unregistered caller fails, so a new update path cannot skip
+# revalidation the way `apm deps update` and `apm lock --update` did.
+_INSTALL_ENTRY = "_install_apm_dependencies"
+_ENVELOPE = "InstallService.catalog_freshness"
+_ENVELOPED_CALLERS = {
+    ("src/apm_cli/commands/install.py", "_install_apm_packages"): (
+        "src/apm_cli/commands/install.py",
+        "install",
+    ),
+    ("src/apm_cli/commands/update.py", "_run_dep_update_locked"): (
+        "src/apm_cli/commands/update.py",
+        "_run_dep_update",
+    ),
+    ("src/apm_cli/commands/deps/cli.py", "update"): ("src/apm_cli/commands/deps/cli.py", "update"),
+    ("src/apm_cli/commands/lock.py", "_run_lock"): ("src/apm_cli/commands/lock.py", "_run_lock"),
+}
 # Revalidation-or-fail must stay explicit where the owner is invoked.
 _REQUIRED_TEXT = (
     (_CLIENT, "fetch_or_cache", "require_fresh=invocation.require_fresh"),
@@ -66,6 +82,36 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             for call in facts.calls
         ):
             findings.append(violation(RULE_ID, path, f"{function} must call {callee}"))
+    for path in provider.inventory:
+        if not (path.startswith("src/apm_cli/") and path.endswith(".py")):
+            continue
+        facts = facts_for(path)
+        if facts is None:
+            continue
+        for call in facts.calls:
+            if call.qualname.rsplit(".", 1)[-1] != _INSTALL_ENTRY:
+                continue
+            envelope = _ENVELOPED_CALLERS.get((path, call.scope))
+            if envelope is None:
+                findings.append(
+                    violation(
+                        RULE_ID,
+                        path,
+                        f"{call.scope} calls {_INSTALL_ENTRY} outside a registered "
+                        f"{_ENVELOPE} envelope (#3961)",
+                        line=call.line,
+                    )
+                )
+                continue
+            env_facts = facts_for(envelope[0])
+            definition = _single_definition(env_facts, envelope[1]) if env_facts else None
+            if definition is None or not any(
+                c.qualname == _ENVELOPE and definition.line <= c.line <= definition.end_line
+                for c in env_facts.calls
+            ):
+                findings.append(
+                    violation(RULE_ID, envelope[0], f"{envelope[1]} must open {_ENVELOPE}")
+                )
     for path, function, text in _REQUIRED_TEXT:
         facts = facts_for(path)
         if facts is None:

@@ -213,6 +213,9 @@ version in CI as your team uses locally. Prereleases sort before their release
 `apm_version` appears twice or is not a valid APM version is refused too:
 restore it from version control.
 
+`apm install <bundle>` warns, but still installs, when the bundle's embedded
+`apm.lock.yaml` was written by a newer APM; the warning names both versions.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:

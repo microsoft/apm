@@ -257,6 +257,20 @@ def test_update_follows_changed_pins_and_respects_selection(world: _World) -> No
     assert world.deployed("bar") == _skill("bar", "v2")
 
 
+def test_deprecated_deps_update_follows_a_repinned_catalog(world: _World) -> None:
+    """`apm deps update` revalidates the catalog like `apm update` (#3961)."""
+    _register(world, "acme")
+    _declare_from_catalog(world, "foo")
+    seeded = world.run("install", *_INSTALL, scenario="deps-update-seed")
+    assert seeded.returncode == 0, _evidence(seeded)
+    world.catalogs.publish("acme", [_entry("foo", "v2")])
+
+    updated = world.run("deps", "update", "--target", "codex", scenario="deps-update")
+    assert updated.returncode == 0, _evidence(updated)
+    assert world.catalogs.statuses("acme") == [200, 200]
+    assert world.deployed("foo") == _skill("foo", "v2")
+
+
 @pytest.mark.parametrize("mode", ["unavailable", "invalid", "malformed-entry"])
 def test_refresh_fails_closed_and_preserves_state(world: _World, mode: str) -> None:
     """An unverifiable catalog fails --refresh and update without touching any bytes."""
@@ -272,8 +286,11 @@ def test_refresh_fails_closed_and_preserves_state(world: _World, mode: str) -> N
             ("install", "--refresh", *_INSTALL),
             ("install", "--refresh", "bar@acme", *_INSTALL),
             ("update", "--yes", "--target", "codex"),
+            # Every update-intent entry point revalidates (#3961).
+            ("deps", "update", "--target", "codex"),
+            ("lock", "--update"),
         ),
-        expected_returncodes=(1, 1, 1),
+        expected_returncodes=(1, 1, 1, 1, 1),
         scenario_id=f"refresh-{mode}",
         cwd=world.consumer.root,
         env=world.env,

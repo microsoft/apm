@@ -9,6 +9,8 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch  # noqa: F401
 
+import pytest
+
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.factory import ClientFactory
@@ -688,3 +690,15 @@ class TestCodexClientAdapter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("runtime", ["claude", "copilot", "cursor", "codex", "gemini"])
+def test_root_mcp_json_destination_matches_the_adapter(tmp_path, runtime):
+    """The read-only destination answer agrees with each adapter's project config path."""
+    client = ClientFactory.create_client(runtime, project_root=tmp_path, user_scope=False)
+    expected = Path(client.get_config_path()) == tmp_path / ".mcp.json"
+    assert ClientFactory.project_destination_is_root_mcp_json(runtime) is expected
+
+
+def test_unknown_runtime_has_no_destination_answer():
+    assert ClientFactory.project_destination_is_root_mcp_json("not-a-runtime") is None

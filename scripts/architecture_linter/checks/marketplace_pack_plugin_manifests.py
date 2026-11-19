@@ -35,6 +35,22 @@ _HOST_MANIFEST_LITERAL = re.compile(
     r"[\"'](?:\.claude-plugin|\.codex-plugin|\.github/plugin)(?:/plugin\.json)?[\"']"
 )
 _CODEX_NAME_RULE_LITERAL = re.compile(re.escape("[A-Za-z0-9][A-Za-z0-9._-]*"))
+# Pack never ships the .mcp.json servers APM itself rendered (#3966): reading a
+# root .mcp.json excludes APM-managed servers by default, and the only opt-out
+# is a dependency's own authored file.
+_MCP_OPT_OUT = "exclude_apm_managed=False"
+_MCP_OPT_OUT_SITES = {
+    ("src/apm_cli/bundle/plugin_exporter.py", "_cache_would_contribute_hooks_or_mcp")
+}
+_MCP_DEFAULT = "exclude_apm_managed: bool = True"
+# Authored sources only (#3966): apm.yml declarations ship from apm.yml, and a
+# lock claim hides a root entry only when its runtime writes root .mcp.json.
+_MCP_AUTHORED_TOKENS = {
+    "servers.update(authored)": "root apm.yml MCP declarations must ship from apm.yml",
+    "ClientFactory.project_destination_is_root_mcp_json(": (
+        "only a claim whose destination is root .mcp.json may hide a root entry"
+    ),
+}
 
 
 def _check(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -77,7 +93,46 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             exempt=False,
         )
     )
+    findings.extend(_mcp_ownership_findings(provider))
     return tuple(findings)
+
+
+def _mcp_ownership_findings(provider: FactsProvider) -> list[Violation]:
+    findings: list[Violation] = []
+    owner_lines = getattr(provider.file_facts(_OWNER), "lines", ())
+    if not any(_MCP_DEFAULT in line for line in owner_lines):
+        findings.append(
+            violation(
+                RULE_ID, _OWNER, "collect_mcp_servers must exclude APM-managed servers by default"
+            )
+        )
+    for token, message in _MCP_AUTHORED_TOKENS.items():
+        if not any(token in line for line in owner_lines):
+            findings.append(violation(RULE_ID, _OWNER, message))
+    for path in _src_python(provider):
+        facts = provider.file_facts(path)
+        lines = getattr(facts, "lines", ())
+        scopes = {
+            (d.line, d.end_line, d.name)
+            for d in getattr(facts, "definitions", ())
+            if d.kind != "class"
+        }
+        for number, line in enumerate(lines, start=1):
+            if _MCP_OPT_OUT not in line:
+                continue
+            enclosing = [s for s in scopes if s[0] <= number <= s[1]]
+            name = min(enclosing, key=lambda s: s[1] - s[0])[2] if enclosing else ""
+            if (path, name) not in _MCP_OPT_OUT_SITES:
+                findings.append(
+                    violation(
+                        RULE_ID,
+                        path,
+                        "pack must not ship APM-rendered .mcp.json servers; only a dependency's "
+                        "own .mcp.json may opt out of the ownership exclusion (#3966)",
+                        line=number,
+                    )
+                )
+    return findings
 
 
 RULES = (

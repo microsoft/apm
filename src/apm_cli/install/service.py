@@ -22,6 +22,7 @@ the blast radius of a deeper DI rewrite.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -645,7 +646,13 @@ class InstallService:
         for name in sorted(diff.source_only):
             reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
         for name in sorted(diff.lock_only - pending - set(consent)):
-            reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
+            evidence = current.omissions.get(name)
+            reason = evidence.get("reason") if isinstance(evidence, Mapping) else None
+            if reason is not None:
+                # Still declared: the gate left it out this run (#3957).
+                reasons.append(f"  - MCP server {name!r} is now left out ({reason})")
+            else:
+                reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
         if set(current.configs) | pending != set(lockfile.mcp_servers) and not reasons:
             reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")
         return reasons

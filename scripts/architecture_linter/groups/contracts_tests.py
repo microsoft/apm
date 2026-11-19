@@ -13,6 +13,9 @@ from scripts.architecture_linter.checks.contracts_dependency_replacements import
     RULES as REPLACEMENT_RULES,
 )
 from scripts.architecture_linter.checks.contracts_governance import RULES as GOVERNANCE_RULES
+from scripts.architecture_linter.checks.contracts_lifecycle_script_gate import (
+    RULES as LIFECYCLE_SCRIPT_GATE_RULES,
+)
 from scripts.architecture_linter.checks.contracts_lockfile_generator import (
     RULES as LOCKFILE_GENERATOR_RULES,
 )
@@ -25,6 +28,7 @@ RULES = (
     *GOVERNANCE_RULES,
     *REPLACEMENT_RULES,
     *LOCKFILE_GENERATOR_RULES,
+    *LIFECYCLE_SCRIPT_GATE_RULES,
 )
 
 __all__ = ["COLLECTORS", "RULES"]

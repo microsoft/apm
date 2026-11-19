@@ -169,13 +169,17 @@ def require_current_cli(project_root: Path, *, command: str) -> Path:
         raise click.ClickException(str(exc)) from exc
 
 
-def warn_if_newer(path: Path, recorded: object) -> None:
-    """Warn once when a read-only command reads a lockfile it cannot vouch for."""
+def warn_if_newer(path: Path, recorded: object, *, bundle: bool = False) -> None:
+    """Warn once when a read-only command reads a lockfile it cannot vouch for.
+
+    *bundle* marks a local bundle's embedded lockfile: no command rewrites it,
+    so its warning carries the remedy rather than the refusal notice (#3963).
+    """
     # Reads stay cheap: duplicate detection is left to the refusing gates.
     blocked = _blocking_reason(recorded, int(recorded is not None), running_cli_version())
     if blocked is None:
         return
-    reason = blocked[0]
+    reason, remedy = blocked
     resolved = Path(path).absolute()
     with _warned_lock:
         if resolved in _warned:
@@ -183,8 +187,11 @@ def warn_if_newer(path: Path, recorded: object) -> None:
         _warned.add(resolved)
     from ..utils.console import _rich_warning
 
-    _rich_warning(
-        f"{Path(path).name}: {reason}; results may be incomplete. "
-        "Commands that change or verify it will refuse until this is fixed.",
-        symbol="warning",
-    )
+    if bundle:
+        message = f"Bundle {Path(path).name}: {reason}; continuing anyway.\n{remedy}"
+    else:
+        message = (
+            f"{Path(path).name}: {reason}; results may be incomplete. "
+            "Commands that change or verify it will refuse until this is fixed."
+        )
+    _rich_warning(message, symbol="warning")

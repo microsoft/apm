@@ -1089,7 +1089,7 @@ def _run_compilation(
                     logger.warning(
                         "Compilation completed but produced no output "
                         "files. Check that target directories exist "
-                        "(e.g. .github/, .claude/) or set 'target:' "
+                        "(e.g. .github/, .claude/) or set 'targets:' "
                         "in apm.yml / pass --target explicitly."
                     )
 

@@ -138,7 +138,7 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
         logger.warning(
-            f"{_pkg_label}: canvas extension(s) skipped (not approved in allowExecutables). "
+            f"{_pkg_label}: canvas extension(s) skipped (not approved in executables.allow). "
             f"Run 'apm approve {_pkg_label}' to approve.",
             symbol="warning",
         )

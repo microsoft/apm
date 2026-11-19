@@ -229,18 +229,21 @@ def _run_lock(
 
     try:
         from apm_cli.commands.install import _install_apm_dependencies
+        from apm_cli.install.service import InstallService
 
-        result = _install_apm_dependencies(
-            apm_package,
-            update_refs=update_refs,
-            verbose=verbose,
-            scope=scope,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            no_policy=no_policy,
-            target=target,
-            lockfile_only=True,
-        )
+        # `apm lock --update` re-resolves like `apm update`: revalidate catalogs (#3961).
+        with InstallService.catalog_freshness(update_refs=update_refs, refresh=False):
+            result = _install_apm_dependencies(
+                apm_package,
+                update_refs=update_refs,
+                verbose=verbose,
+                scope=scope,
+                parallel_downloads=parallel_downloads,
+                logger=logger,
+                no_policy=no_policy,
+                target=target,
+                lockfile_only=True,
+            )
     except click.UsageError:
         raise
     except Exception as e:

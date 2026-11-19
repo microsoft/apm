@@ -1462,6 +1462,66 @@ class TestInstallLocalBundleLsp:
         plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
 
+    def test_bundle_lsp_retires_on_revoke_deny_and_repack(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A reinstall that no longer approves, or no longer ships, LSP retires it (#3956)."""
+        bundle = self._bundle(tmp_path / "source", include_skill=True)
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        manifest_path = project / "apm.yml"
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+
+        def set_executables(executables: dict | None) -> None:
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            manifest.pop("executables", None)
+            if executables is not None:
+                manifest["executables"] = executables
+            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+        def install(source: Path, *extra: str) -> None:
+            result = _invoke_install(
+                project, str(source), "--target", "claude", *extra, monkeypatch=monkeypatch
+            )
+            assert result.exit_code == 0, result.output
+
+        def lsp_servers() -> list[str]:
+            if not plugin_path.exists():
+                return []
+            return sorted(json.loads(plugin_path.read_text()).get("lspServers", {}))
+
+        def assert_retired() -> None:
+            assert lsp_servers() == []
+            lockfile = LockFile.read(project / "apm.lock.yaml")
+            assert lockfile is not None
+            assert "bundle-lsp" not in lockfile.lsp_servers
+            assert "bundle-lsp" not in lockfile.lsp_config_provenance
+
+        key = self._approve_exact_bundle(project, bundle)
+        approved = {"allow": {key: {"lsp": True}}}
+        install(bundle)
+        assert lsp_servers() == ["bundle-lsp"]
+
+        set_executables({})
+        install(bundle)
+        assert_retired()
+
+        set_executables(approved)
+        install(bundle)
+        assert lsp_servers() == ["bundle-lsp"]
+        result = _invoke_cli(project, "deny", key, monkeypatch=monkeypatch)
+        assert result.exit_code == 0, result.output
+        install(bundle)
+        assert_retired()
+
+        set_executables(None)
+        install(bundle)
+        assert lsp_servers() == ["bundle-lsp"]
+        lspless = _make_plugin_bundle(
+            tmp_path / "repacked", files={"skills/coding/SKILL.md": "# Coding Skill\n"}
+        )
+        install(lspless)
+        assert_retired()
+
     def test_unsupported_target_refuses_bundle_lsp(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

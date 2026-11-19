@@ -608,7 +608,9 @@ contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
+contracts-tooling-lifecycle-script-gate
 contracts-tooling-lockfile-generator-gate
+contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
 contracts-tooling-lockfile-symlink-write-guard
 contracts-tooling-lockfile-timestamp

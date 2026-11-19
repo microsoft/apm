@@ -124,8 +124,7 @@ with the re-approve command. Per-file hook pins never admit a native plugin.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
 copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
 with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.
-A denied plugin points at `apm policy explain <pkg>`; `apm approve` cannot
-lift a deny.
+A denied plugin points at `apm policy explain <pkg>`.
 
 ### The gate opt-in
 
@@ -148,6 +147,15 @@ the next install will park and asks before writing:
 Without a TTY it writes and keeps the warning; answering `N` writes nothing
 and exits 1. `--user` never turns the gate on.
 
+### Approving a denied package
+
+Naming a package lifts its deny in the store you write (`apm.yml`, or
+`$APM_HOME/config.json` with `--user`), the mirror of `apm deny` dropping the
+matching allow: approve prints `Cleared deny for <pkg>`. `--all` and
+`--recommended` skip denied packages instead. When a deny in another layer
+still blocks the package (a `--user` deny, or org policy), approve exits 1 and
+names that layer and how to lift it.
+
 ## Options
 
 ### `apm approve`
@@ -159,7 +167,7 @@ and exits 1. `--user` never turns the gate on.
 | `--all` | Pin and approve every package `--pending` lists. |
 | `--recommended` | Pin and approve the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
-| `--user` | Write the grant, in the same pinned shape, to `$APM_HOME/config.json` instead of `apm.yml`. |
+| `--user` | Write the grant, in the same pinned shape, to `$APM_HOME/config.json` instead of `apm.yml`. Works outside a project, for packages `apm install -g` installed. |
 
 #### Output
 

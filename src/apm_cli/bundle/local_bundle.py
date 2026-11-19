@@ -163,7 +163,10 @@ def _reject_metadata_collisions(bundle_dir: Path) -> None:
 
 
 def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
-    """Parse ``apm.lock.yaml`` at *bundle_dir*; return ``None`` if missing."""
+    """Parse ``apm.lock.yaml`` at *bundle_dir*; return ``None`` if missing.
+
+    Warns (never refuses) when a newer APM than this one wrote it.
+    """
     lf_path = bundle_dir / "apm.lock.yaml"
     if not lf_path.is_file():
         return None
@@ -174,8 +177,10 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         return None
     from ..deps.lockfile import require_supported_lockfile_version
+    from ..deps.lockfile_generator import warn_if_newer
 
     data["lockfile_version"] = require_supported_lockfile_version(data)
+    warn_if_newer(lf_path, data.get("apm_version"), bundle=True)
     return data
 
 
