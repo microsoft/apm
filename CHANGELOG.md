@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes and upgrade notes
+
+- Claude projects load always-on and directory instructions from `AGENTS.md`, imported by `CLAUDE.md`: run `apm install`, then `apm compile`, and commit; hand-authored `CLAUDE.md` needs `@AGENTS.md`. (closes #3939, #4005)
+
 ### Changed
 
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
