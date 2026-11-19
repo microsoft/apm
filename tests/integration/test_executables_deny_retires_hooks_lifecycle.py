@@ -176,8 +176,8 @@ def test_gating_a_package_retires_its_deployed_hooks(
 def test_audit_and_update_honor_the_current_executables_decision(
     tmp_path: Path, apm_binary_path: Path, target: str
 ) -> None:
-    """A gated package audits green; a deny no install reconciled audits red
-    until ``apm update`` with no ref changes retires the hooks (#3958)."""
+    """A gated package audits green; ``apm update`` with no ref changes deploys
+    an approval and retires a deny, which audits red until then (#3958)."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     _hook_package(isolated.work_root / "hooky")
@@ -205,13 +205,20 @@ def test_audit_and_update_honor_the_current_executables_decision(
     apm("audit", "--ci", "--no-policy")
 
     apm("approve", "../hooky")
-    apm("install", "--no-policy")
+    approved = " ".join(apm("update", "--yes").split())
+    assert "Reconciled executables without changing refs." in approved, approved
     assert _exec_status(project) == "deployed"
     assert _hook_residue(project)
 
     apm("deny", "../hooky")
     lingering = apm("audit", "--ci", "--no-policy", expect=1)
     assert "Drift detected" in lingering, lingering
+
+    lock_bytes, residue = (project / "apm.lock.yaml").read_bytes(), _hook_residue(project)
+    preview = " ".join(apm("update", "--dry-run").split())
+    assert "Dry run: no changes applied" in preview, preview
+    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
+    assert _hook_residue(project) == residue
 
     updated = " ".join(apm("update", "--yes").split())
     assert "already at their latest" not in updated, updated

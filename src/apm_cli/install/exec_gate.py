@@ -274,45 +274,86 @@ def _candidate_keys(pkg_key: str) -> list[str]:
     return [pkg_key] if name_blind == pkg_key else [pkg_key, name_blind]
 
 
-def current_exec_status(
+class ExecPolicyUnavailable(Exception):
+    """Org policy could not be read, so the current trust decision is unknown."""
+
+
+def _native_capable(install_path: Path) -> bool:
+    """Whether install could load this package intact as a native plugin."""
+    from apm_cli.agent_plugins.errors import AgentPluginError
+    from apm_cli.bundle.local_bundle import route_agent_plugin_package
+    from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
+    from apm_cli.models.validation import detect_package_type
+
+    try:
+        if route_agent_plugin_package(install_path) is not None:
+            return True
+    except AgentPluginError:
+        return True
+    _, manifest = detect_package_type(install_path)
+    return is_codex_compatibility_manifest(install_path, manifest)
+
+
+def current_exec_statuses(
     trust_ctx_provider: Callable[[], Any], package_info: Any, package_name: str
-) -> str | None:
-    """Return the ``exec_status`` the install gate would record now.
+) -> tuple[str | None, ...]:
+    """Return the ``exec_status`` values the install gate could record now.
 
     Scans the materialized package and resolves its declared executable
-    types through the deny-wins trust context, exactly as
+    types through the trust owner (:func:`package_exec_status`), as
     :func:`check_executable_approval` does during install. ``None`` means
     the package declares no executables or the gate is disabled.
+
+    With a full ``PackageInfo`` (audit replay) native installs are decided
+    exactly. Without one (``apm update``'s probe has no target context), a
+    native-capable package yields both the native and the split verdict.
     *trust_ctx_provider* is called only for a package that declares some.
     """
     from apm_cli.security.executables import scan_package_executables
-    from apm_cli.security.trust import package_exec_status
+    from apm_cli.security.trust import native_root_exec_types, package_exec_status
 
     pkg_key = resolve_package_key(package_info, package_name)
+    keys = tuple(_candidate_keys(pkg_key))
     install = Path(package_info.install_path)
-    native = hasattr(package_info, "package") and native_install(package_info)
-    decl = scan_package_executables(install, package_name, "", approval_identity=pkg_key)
-    exec_types = decl.exec_types
-    if native:
-        exec_types = tuple(dict.fromkeys((*exec_types, *native_declared_types(package_info))))
-    if not exec_types:
-        return None
-    return package_exec_status(
-        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
-    )
+    split_types = scan_package_executables(
+        install, package_name, "", approval_identity=pkg_key
+    ).exec_types
+    if hasattr(package_info, "package"):
+        modes = (native_install(package_info),)
+    else:
+        modes = (False, True) if _native_capable(install) else (False,)
+    statuses: list[str | None] = []
+    for native in modes:
+        types = tuple(split_types)
+        if native:
+            extra = (
+                native_declared_types(package_info)
+                if hasattr(package_info, "package")
+                else native_root_exec_types(install)
+            )
+            types = tuple(dict.fromkeys((*types, *extra)))
+        statuses.append(
+            package_exec_status(trust_ctx_provider(), keys, install, types, native=native)
+            if types
+            else None
+        )
+    return tuple(statuses)
 
 
-def recorded_exec_status_is_stale(recorded: str | None, current: str | None) -> bool:
+def recorded_exec_status_is_stale(recorded: str | None, current: tuple[str | None, ...]) -> bool:
     """Return whether a lock row's executables decision no longer holds.
 
     A row recorded as gated or denied, or one that is now gated or denied,
     must be re-integrated so install deploys or retires its executables.
-    Unrecorded and deployed rows are both ungated, so they agree.
+    Unrecorded and deployed rows are both ungated, so they agree. A row is
+    stale only when it agrees with none of the *current* verdicts.
     """
     from apm_cli.security.executables import TRUST_DEPLOYED
 
     ungated = {None, TRUST_DEPLOYED}
-    return recorded != current and not (recorded in ungated and current in ungated)
+    return all(
+        recorded != status and not (recorded in ungated and status in ungated) for status in current
+    )
 
 
 def lock_exec_decisions_stale(
@@ -329,7 +370,8 @@ def lock_exec_decisions_stale(
     ``apm approve`` / ``apm deny`` (or a policy change) still needs the
     install gate to deploy or retire executables and rewrite the lock.
     Trust (and *policy_provider*) resolve only when a package declares
-    executables.
+    executables. A provider raising :class:`ExecPolicyUnavailable` fails
+    toward running the gate, which applies the policy fetch-failure posture.
     """
     from apm_cli.security.executables import TRUST_ABSENT, exec_trust_context_for_project
 
@@ -347,17 +389,20 @@ def lock_exec_decisions_stale(
             )
         return trust[0]
 
-    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
-        if key == "." or dep.exec_status == TRUST_ABSENT:
-            continue
-        dep_ref = dep.to_dependency_ref()
-        install_path = dep_ref.get_install_path(modules_dir)
-        if not install_path.is_dir():
-            continue
-        package_info = SimpleNamespace(dependency_ref=dep_ref, install_path=install_path)
-        current = current_exec_status(_trust_ctx, package_info, dep.get_unique_key())
-        if recorded_exec_status_is_stale(dep.exec_status, current):
-            return True
+    try:
+        for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+            if key == "." or dep.exec_status == TRUST_ABSENT:
+                continue
+            dep_ref = dep.to_dependency_ref()
+            install_path = dep_ref.get_install_path(modules_dir)
+            if not install_path.is_dir():
+                continue
+            package_info = SimpleNamespace(dependency_ref=dep_ref, install_path=install_path)
+            current = current_exec_statuses(_trust_ctx, package_info, dep.get_unique_key())
+            if recorded_exec_status_is_stale(dep.exec_status, current):
+                return True
+    except ExecPolicyUnavailable:
+        return True
     return False
 
 
@@ -573,7 +618,9 @@ class ReplayExecAllowMap:
             # The project's own content is always trusted (see the install gate).
             if package_info is None or getattr(lock_dep, "local_path", None) == ".":
                 return None
-            current = current_exec_status(self._trust_ctx, package_info, lock_dep.get_unique_key())
+            current = current_exec_statuses(
+                self._trust_ctx, package_info, lock_dep.get_unique_key()
+            )
             if not recorded_exec_status_is_stale(status, current):
                 return None
         self._resolve()
