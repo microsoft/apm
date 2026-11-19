@@ -24,27 +24,35 @@ def require_locked_catalog_origin(
 ) -> None:
     """Refuse to resolve through an alias that now names a different catalog.
 
-    A lock row without ``source_url`` (written before origins were recorded)
-    is accepted, so older lockfiles keep working and gain the origin on their
+    Every locked row recorded for this alias/plugin pair is checked, so an
+    ambiguous association (two rows sharing the pair) cannot skip the check.
+    A row without ``source_url`` (written before origins were recorded) is
+    accepted, so older lockfiles keep working and gain the origin on their
     next resolution.
 
     Raises:
         MarketplaceOriginConflictError: The alias's registered origin differs
-            from the origin the lockfile recorded for this plugin.
+            from an origin the lockfile recorded for this plugin.
         MarketplaceNotFoundError: The alias is not registered.
     """
     if lockfile is None:
         return
-    locked = lockfile.get_dependency_by_marketplace(marketplace_name, plugin_name)
-    if locked is None or not locked.source_url:
+    locked_origins = [
+        dep.source_url
+        for dep in lockfile.dependencies.values()
+        if dep.source_url
+        and dep.discovered_via == marketplace_name
+        and dep.marketplace_plugin_name == plugin_name
+    ]
+    if not locked_origins:
         return
     source = get_marketplace_by_name(marketplace_name)
     current = marketplace_origin(source)
-    if same_marketplace_origin(locked.source_url, current):
-        return
-    raise MarketplaceOriginConflictError(
-        marketplace_name, plugin_name, locked.source_url, current or source.display_source
-    )
+    for locked_origin in locked_origins:
+        if not same_marketplace_origin(locked_origin, current):
+            raise MarketplaceOriginConflictError(
+                marketplace_name, plugin_name, locked_origin, current or source.display_source
+            )
 
 
 def registrations_sharing_origin(

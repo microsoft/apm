@@ -124,7 +124,13 @@ def same_marketplace_origin(left: str | None, right: str | None) -> bool:
 def _origin_comparison_key(origin: str) -> str:
     _scheme, _, rest = normalize_repo_url(origin).partition("://")
     authority, slash, path = rest.partition("/")
-    return f"{authority.rpartition('@')[2]}{slash}{path}"
+    key = f"{authority.rpartition('@')[2]}{slash}{path}"
+    # A hosted catalog URL's query can select a different catalog; keep it.
+    try:
+        query = urlsplit(origin).query
+    except ValueError:
+        query = ""
+    return f"{key}?{query}" if query else key
 
 
 def admit_marketplace_catalog_path(path: str) -> str:

@@ -1,5 +1,6 @@
 """Static regression traps for marketplace locked-evidence consumers."""
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -65,12 +66,12 @@ def test_marketplace_catalog_origin_routes_through_owners() -> None:
         ),
         (
             "marketplace/catalog_origin.py",
-            "if same_marketplace_origin(locked.source_url, current):",
-            "if locked.discovered_via == marketplace_name:",
+            "if not same_marketplace_origin(locked_origin, current):",
+            "if locked_origin != current:",
         ),
         (
             "commands/marketplace/__init__.py",
-            "_warn_if_duplicate_origin(logger, final_source)\n",
+            "        _warn_if_duplicate_origin(logger, final_source)\n",
             "",
         ),
     ],
@@ -82,9 +83,9 @@ def test_marketplace_catalog_origin_guard_rejects_bypasses(
     source_path = f"src/apm_cli/{path}"
     source = (_ROOT / source_path).read_text(encoding="utf-8")
     assert source.count(before) == 1
-    report = run_selected_rules(
-        _ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: source.replace(before, after)}
-    )
+    mutated = source.replace(before, after)
+    ast.parse(mutated)  # a syntax error would trip the rule for the wrong reason
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: mutated})
     assert any(item.rule_id == ORIGIN_RULE_ID for item in report.violations)
 
 
@@ -104,6 +105,7 @@ def test_marketplace_catalog_origin_guard_requires_check_before_catalog_io() -> 
         guard + "        return resolved\n\n    def _resolve_marketplace_or_record_error",
     )
     assert moved != source.replace(guard, "")
+    ast.parse(moved)
     report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: moved})
     assert any(
         item.rule_id == ORIGIN_RULE_ID and "before" in item.message for item in report.violations

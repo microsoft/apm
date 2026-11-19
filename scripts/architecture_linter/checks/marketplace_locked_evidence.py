@@ -38,6 +38,7 @@ _ORIGIN_ROUTES = (
         "registrations_sharing_origin",
         "same_marketplace_origin",
     ),
+    ("src/apm_cli/commands/marketplace/__init__.py", "add", "_warn_if_duplicate_origin"),
     (
         "src/apm_cli/commands/marketplace/__init__.py",
         "_warn_if_duplicate_origin",
