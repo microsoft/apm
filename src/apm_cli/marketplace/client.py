@@ -1387,15 +1387,14 @@ def _parse_catalog(
     source_url: str = "",
     source_digest: str = "",
 ) -> MarketplaceManifest:
-    """Parse fetched catalog JSON, rejecting shapes that cannot be a catalog.
+    """Parse fetched catalog JSON, rejecting a non-object root.
 
     Runs before any cache write so an invalid response never replaces the
-    last valid cached catalog.
+    last valid cached catalog. Entry-level problems stay tolerated and are
+    reported as structural diagnostics by the model parser.
     """
     if not isinstance(data, dict):
         raise MarketplaceFetchError(source.name, "marketplace.json root must be an object")
-    if "plugins" in data and not isinstance(data["plugins"], list):
-        raise MarketplaceFetchError(source.name, "marketplace.json 'plugins' must be a list")
     return parse_marketplace_json(
         data, source.name, source_url=source_url, source_digest=source_digest
     )
