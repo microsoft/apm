@@ -791,7 +791,7 @@ OpenCode 2 layout), APM writes there instead: `false` becomes
 `disabled: true`, `true` or omission writes no field, and other values warn
 and leave the file unchanged. Set `codemode: false` as an extra field to
 bypass Code Mode. See the
-[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp----listmcpdependency)
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp--listmcpdependency)
 for the dependency contract and
 [OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
 for format selection.

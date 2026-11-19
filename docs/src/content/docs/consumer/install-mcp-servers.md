@@ -1,685 +1,211 @@
 ---
-title: "Install MCP servers"
-description: "Keep MCP target ownership portable across your team's machines with declarations in apm.yml."
+title: Add MCP and LSP servers
+description: Declare MCP and LSP servers once in apm.yml; APM writes each harness's config, keeps secrets as references, and holds back servers you did not choose.
 ---
 
-`apm install` is the same driver for two artifact kinds: APM packages
-(see [Install Packages](../install-packages/)) and MCP servers. This
-page covers MCP servers: how you declare them, what gets written to
-each runtime, and how tokens get injected.
+Use this page to give every teammate the same MCP servers without
+hand-editing a JSON file per tool. An **MCP server** is a program, local or
+remote, that gives an agent tools (GitHub, a database, a browser). Each
+harness (the agent tool: GitHub Copilot, Claude Code, Cursor, Codex) reads
+servers from its own config file. You declare a server once in `apm.yml`;
+`apm install` writes every harness's file and records what it wrote in
+`apm.lock.yaml`.
 
-## One-line answer
+## Add a server
 
-```bash
-apm install --mcp io.github.github/github-mcp-server
-```
-
-This adds one entry under `dependencies.mcp:` in `apm.yml`. APM then attempts
-runtime-specific MCP config writes for targets that pass selection, scope, and
-adapter prerequisites.
-
-Registry metadata prefetches use up to four concurrent lookups while preserving
-the order of the requested server references.
-
-## The `mcp:` section in apm.yml
-
-The two sections have different propagation rules. In the root project,
-`apm install` activates both sections for the author's environment. A
-direct or transitive dependency package contributes only
-`dependencies.mcp`; its `devDependencies.mcp` entries never enter the
-consumer's target config, lockfile provenance, or audit baseline.
-This keeps package-author debug servers out of consumer tool lists.
-
-MCP servers live under `dependencies.mcp:` (or
-`devDependencies.mcp:`). Four forms are valid -- pick the one that
-matches the source you have:
-
-```yaml
-dependencies:
-  mcp:
-    # 1. Registry reference (bare string)
-    - io.github.github/github-mcp-server
-
-    # 2. Self-defined stdio (local process)
-    - name: filesystem
-      registry: false
-      transport: stdio
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
-
-    # 3. Self-defined remote (HTTP / SSE)
-    - name: linear
-      registry: false
-      transport: http
-      url: https://mcp.linear.app/sse
-      headers:
-        Authorization: "Bearer ${LINEAR_TOKEN}"
-
-    # 4. Self-defined remote with harness-specific extra keys
-    - name: slack
-      registry: false
-      transport: http
-      url: https://mcp.slack.com/mcp
-      oauth:
-        clientId: "<pre-registered-client-id>"
-        callbackPort: 3118
-```
-
-Unknown keys like `oauth` above are **passthrough fields**: they are
-preserved and written into the generated config for every harness you
-install (so a Claude Code `oauth` block reaches all targets; harnesses
-that do not recognise it ignore it). Keys that collide with a modeled
-field (`command`, `url`, `headers`, `env`, ...) are rejected with a
-warning so they cannot redirect a server. See
-[Manifest Schema](../../reference/manifest-schema/) for the full rules.
-
-The full grammar (overlays, `${input:...}` variables, `tools:`
-allowlists, `package:` selection) is in
-[Package Anatomy](../../concepts/package-anatomy/).
-
-## Adding a server from the CLI
-
-`apm install --mcp NAME` writes the entry into `apm.yml` for you,
-then runs install. Three shapes match the registry, stdio, and remote forms:
-
-```bash
-# Registry
+```bash frame="terminal"
+# From an MCP registry
 apm install --mcp io.github.github/github-mcp-server
 
-# stdio (everything after `--` is the spawn command)
-apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+# A local process: everything after -- is the command
+apm install --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
 
-# Remote
-apm install --mcp linear --transport http --url https://mcp.linear.app/sse
-
-# Global stdio install (writes user APM + runtime config only)
-apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
-
-# Global registry install (requires one unique registry match)
-apm install -g --target claude --mcp io.github.github/github-mcp-server
+# A remote endpoint
+apm install --mcp linear --transport http --url https://mcp.linear.app/mcp
 ```
 
-Registry names resolve against one MCP registry, the curated GitHub MCP
-Registry by default. If a name is not found, APM names the registry it
-searched and never switches registries on its own; see
-[Choosing an MCP registry](../choosing-an-mcp-registry/).
+Each command adds an entry to `apm.yml` and installs it:
 
-`apm mcp install NAME ...` is an alias that forwards to the same code
-path. The `apm mcp` group also provides `search`, `list`, and `show`
-for discovery -- see the [CLI reference](../../reference/cli/install/).
+```diff title="apm.yml"
+ dependencies:
+-  mcp: []
++  mcp:
++    - name: fetch
++      registry: false
++      transport: stdio
++      command: npx
++      args:
++        - -y
++        - '@modelcontextprotocol/server-fetch'
+```
 
-## What `apm install` writes to disk
+`--transport` (`stdio`, `http`, `sse`, `streamable-http`) is inferred from
+`--url` or the command when omitted. Add `--env KEY=VALUE` for a local
+process and `--header KEY=VALUE` for a remote one. Rerunning with a different
+definition asks before replacing it (in CI it exits 2; pass `--force`).
 
-For every selected target that passes its scope and adapter prerequisites,
-`apm install` writes a runtime-specific MCP config file. The schemas differ;
-the `apm.yml` source of truth does not.
+## Choosing an MCP registry
 
-Self-defined servers (`registry: false`) are written under their exact
-declared `name`, including names with a slash such as `com.example/server`.
-Registry servers such as `io.github.github/github-mcp-server` keep the short
-`github-mcp-server` key in every target. If an older APM release
-wrote a self-defined server under its final segment, `apm install` removes that
-entry only when APM's recorded ownership proves it wrote it (and, for Claude
-Code and Codex, that it is unchanged); otherwise it leaves the entry and prints
-its name and config path so you can remove it yourself. OpenCode entries are
-not checked.
+A registry name such as `io.github.github/github-mcp-server` resolves against
+one MCP registry:
 
-Registry-declared environment variables honor the registry's
-`required` flag. Servers with optional auth install without token
-prompts until you choose to configure one. See the
-[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
-for the full required-vs-optional runtime config rule.
+| Registry | Who publishes |
+|---|---|
+| GitHub MCP Registry, `https://api.mcp.github.com` (default) | Entries selected by GitHub |
+| Official MCP Registry, `https://registry.modelcontextprotocol.io` | Anyone who verifies a namespace; not reviewed |
+| Your organization's registry | Your organization |
 
-MCP Registry v0.1 container packages use `registryType: oci`. APM
-selects Docker automatically, keeps Docker run options before the image,
-and places package arguments after the image. When `runtimeArguments`
-list only Docker options, APM adds `run -i --rm` ahead of them. Copilot, Codex, Gemini,
-and related adapters prefer packages in `npm`, OCI, then PyPI order.
-OCI packages require Docker to be
-available when the harness starts the server; no per-target launcher
-configuration is needed.
+APM never switches registries on its own: a miss names the registry it
+searched. Choose another with `--registry URL` (recorded on the entry as
+`registry:`), `MCP_REGISTRY_URL` for a shell or CI job, or
+`apm config set mcp-registry-url URL` for your machine, in that precedence.
+`apm mcp search QUERY` searches the selected registry.
 
-When a required registry runtime variable has a default, APM prompts once
-per variable and displays that default as the suggested answer. Press Enter
-to accept it or provide an override. Secret defaults remain accepted on
-Enter but are never displayed. For OCI/Docker launchers, non-secret selected
-values replace every `{variable}` reference across the package's runtime and
-package arguments before the native config is written. A required variable
-without a collected value or default declines that target configuration.
+## How `targets:` gates which configs get written
 
-For a self-defined Codex stdio connection at project scope (`.codex/config.toml`),
-an `env` value written as exactly `KEY: ${KEY}` or `KEY: ${env:KEY}` under the
-same key becomes `env_vars = ["KEY"]`. Codex reads those variables from the
-environment that launches it, so APM never resolves, prompts for, or writes the
-value into `env`, whether or not `KEY` is set during install. An `args`
-reference to the same variable is still resolved. Any other reference, such as
-`TOKEN: ${OTHER}` or `AUTH: Bearer ${TOKEN}`, is still resolved at install time
-and written to `.codex/config.toml`; APM warns with the key names only and
-suggests declaring `KEY: ${KEY}` to forward instead. User scope (`-g`) is
-unchanged: values are resolved and written as before.
+APM writes for the harnesses in your [`targets:`](../choose-harnesses/)
+and prints the ones it skipped:
 
-When a reinstall finds a value APM wrote earlier for a key that is now
-forwarded, and the entry still matches its recorded baseline, APM replaces it
-with `env_vars` and warns. If the entry was edited or cannot be verified, APM
-keeps it and exits `1` with the same
-[manual reconciliation](#resolve-a-connection-name-conflict) steps. In both
-cases, if `.codex/config.toml` was ever shared or committed, rotate the
-credential because Git history still holds it.
+```text frame="none"
+[i] Skipped MCP config for claude, codex  (active targets: copilot)
+```
 
-Claude Code updates self-defined connections only when the native entry matches
-its recorded APM baseline. Updates remove previously managed fields omitted
-from the new declaration, including `env`, while preserving runtime-owned
-`oauthAccount` metadata. Switching from `http` to `stdio` removes `url` and
-`headers`. Modified or unverifiable entries require
-[manual reconciliation](#resolve-a-connection-name-conflict); matching entries
-remain byte-identical.
+| Harness | Project file | User file (`-g`) |
+|---|---|---|
+| GitHub Copilot | `.mcp.json` | `$COPILOT_HOME/mcp-config.json` (`~/.copilot/`) |
+| Claude Code | `.mcp.json` (when `.claude/` exists) | `$CLAUDE_CONFIG_DIR/.claude.json` (`~/.claude.json`) |
+| Cursor | `.cursor/mcp.json` | `~/.cursor/mcp.json` |
+| Codex | `.codex/config.toml` | `$CODEX_HOME/config.toml` (`~/.codex/`) |
 
-Managed Claude stdio updates retain a valid native-only `cwd` when both
-declarations omit it; switching to HTTP removes incompatible stdio fields.
-This exception permits updates, not foreign adoption or cleanup. Edits to a
-declared `cwd` or other managed fields still require reconciliation.
+Gemini, OpenCode, Kiro, Windsurf and others: see the
+[Targets matrix](../../reference/targets-matrix/#mcp-servers). Each harness
+gets its own keys for remote transports; a harness that cannot use a
+transport (for example SSE on Codex) is skipped with a warning.
 
-For Copilot-family adapters, non-container `npm`, `pypi`,
-and generic packages preserve typed v0.1 `runtimeArguments` and
-`packageArguments` in authored order, with exactly one semantic package
-identity. Legacy `value_hint` arguments remain supported. Registry
-defaults resolve normally, secret variables use target-native references,
-unresolved optional groups are omitted atomically, and malformed or
-unresolved required entries fail closed.
-
-| Harness | File | Scope | Format |
-|---|---|---|---|
-| GitHub Copilot (CLI and VS Code) | `.mcp.json` (shared with Claude Code) | project | JSON `mcpServers` |
-| GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
-| Claude Code | `.mcp.json` (project, only if `.claude/` exists) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
-| Cursor | `.cursor/mcp.json` (project, only if `.cursor/` exists) or `~/.cursor/mcp.json` (`-g`) | both | JSON `mcpServers` |
-| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank and absolute; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
-| Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
-| Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
-| Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
-| OpenCode | `opencode.json` (project, only if `.opencode/` exists) or `~/.config/opencode/opencode.json` (`-g`) | both | JSON `mcp` (v1) or `mcp.servers` (v2) |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
-| Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
-| JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
-
-Export referenced variables in the environment that launches OpenCode. APM writes
-runtime references rather than their resolved values; authored static values remain
-literal. See [OpenCode variable handling](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
-for supported fields, registry overlays, and syntax, and
-[Repairing existing credentials](#repairing-existing-credentials) for older configs.
-
-For OpenCode, set the top-level `enabled` field on an MCP dependency to pass a
-value unchanged into that server's `opencode.json` entry. If omitted, APM keeps
-the existing `true` default. APM does not validate or coerce explicit values;
-OpenCode interprets them. Other targets ignore this OpenCode-only field.
-Reinstall applies changes to `enabled`, including its JSON type; removing
-the field restores `true`. For the OpenCode 2 layout, see
-[OpenCode 2 configuration](#opencode-2-configuration).
-
-Global Cursor and OpenCode installs preserve your personal servers, including
-ones that share a name with a package-declared server. Reinstalling and
-pruning change only the entries APM wrote for that target. If you move a direct
-`--mcp` server to a different `--target`, APM writes the new target and then
-removes the entry from the old one; if that removal fails, the server stays in
-both targets and retrying the same install removes the old entry.
-
-If a user config is unreadable, contains JSONC, has a non-object server map, or
-uses a symlink below the home directory, APM warns and fails without rewriting
-it, even on a no-op reinstall. Fix the reported config and rerun the original
-command with `--global` and the same `--target` selection. A home-directory
-alias itself remains supported.
+:::caution[Breaking in 0.37]
+GitHub Copilot servers move from `.github/mcp.json` and `.vscode/mcp.json` to
+root `.mcp.json`, which Claude Code also reads, so Copilot's `tools`
+allow-list does not restrict Claude Code. The next `apm install` moves
+entries APM wrote; entries you edited stay and APM names them. VS Code's
+deprecated Local mode no longer gets servers. Run `apm install`, review static
+`env:` values, and commit.
+:::
 
 ### OpenCode 2 configuration
 
-APM supports OpenCode 1, which reads servers directly under `mcp`, and
-OpenCode 2, which also reads that layout and adds the native
-[`mcp.servers` layout](https://opencode.ai/docs/mcp-servers/). Both read the
-same `opencode.json` files, but OpenCode 1 cannot read `mcp.servers`, so APM
-chooses the layout from the target file itself:
+If `opencode.json` already has an `mcp.servers` object, APM writes the
+OpenCode 2 layout there. Otherwise it writes the OpenCode 1 `mcp` layout,
+which OpenCode 2 also reads. To opt in, add `"mcp": {"servers": {}}` and
+reinstall. APM never converts entries it did not write.
 
-- If the file declares an `mcp.servers` object, APM writes each server
-  there in the OpenCode 2 format.
-- Otherwise APM keeps writing the OpenCode 1 layout, which OpenCode 2 also
-  reads.
+## Keep secrets out of config files
 
-To opt in, add an empty map to the target file and reinstall:
+Write secrets as references, never values:
 
-```json
+```yaml title="apm.yml"
+    - name: linear
+      registry: false
+      transport: http
+      url: https://mcp.linear.app/mcp
+      headers:
+        Authorization: "Bearer ${LINEAR_TOKEN}"
+```
+
+APM writes each harness's own reference syntax (Cursor gets
+`${env:LINEAR_TOKEN}`) so the harness reads the value when it starts the
+server. Static values are written as authored. Registry servers prompt once
+for required variables. Harness-by-harness support:
+[MCP variable compatibility](../../reference/mcp-variable-compatibility/).
+
+### Token injection (GitHub MCP server)
+
+When a remote server is named `github-mcp-server`, `github`, `github-mcp` or
+`github-copilot-mcp-server` and its URL host is a GitHub host, APM adds an
+`Authorization` header from the earliest variable set among
+`GITHUB_COPILOT_PAT`, `GITHUB_TOKEN`, `GITHUB_APM_PAT` and
+`GITHUB_PERSONAL_ACCESS_TOKEN`. It writes a reference where the harness
+supports one. An `Authorization` header in `apm.yml` wins. Other servers need
+an explicit `--header`.
+
+### Repairing existing credentials
+
+Older releases could write resolved values. Start by replacing any static secret
+in `apm.yml` with a `${VAR}` reference. For Claude Code's project
+`.mcp.json`, the next `apm install` replaces the values APM recorded that it wrote;
+otherwise it exits with an error naming each field. For Cursor and others,
+edit the value to the harness's reference syntax by hand, keeping other
+fields. Rotate any credential that was committed: editing the file does not
+revoke it.
+
+## Servers that come from dependencies
+
+A server declared by a package you depend on is code that runs on your
+machine. APM holds back a server from a transitive package when it is
+self-defined, names its own registry or overrides configuration, and tells you
+how to admit it. Re-declare it in your `apm.yml`, or
+[approve the package](../approve-executables/) and commit `apm.yml`.
+`--trust-transitive-mcp` admits it for one run, and `apm audit --ci`
+still fails it. A dependency's `devDependencies` servers never reach you.
+
+## Resolve a connection name conflict
+
+If a harness config already holds a different server under the same name,
+APM keeps yours, names the target and exits 1. Choose one:
+
+1. Rename your entry in that harness's config to keep both.
+2. Or delete your entry, leaving the rest of the file, so APM's entry replaces it.
+3. Rerun the same command with the same scope and targets.
+
+`--force` does not take over a connection, and deleting the lockfile does not
+either.
+
+## LSP servers
+
+An LSP server gives an agent code intelligence for a language. Declare it and
+install the server binary yourself; APM writes the config, not the binary:
+
+```yaml title="apm.yml"
+dependencies:
+  lsp:
+    - name: gopls
+      command: gopls
+      args: ["serve"]
+      extensionToLanguage:
+        ".go": go
+```
+
+APM writes LSP config for Claude Code
+(`.claude/skills/apm-lsp/.claude-plugin/plugin.json`, Claude Code 2.1.157 or
+later; trust the workspace, then run `/reload-plugins`), Copilot CLI
+(`.github/lsp.json`) and OpenCode (`opencode.json`). Fields:
+[Manifest schema](../../reference/manifest-schema/#43-dependencieslsp----listlspdependency).
+
+## Verify
+
+```bash frame="terminal"
+cat .mcp.json
+```
+
+```json frame="none"
 {
-  "mcp": {
-    "servers": {}
+  "mcpServers": {
+    "fetch": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-fetch"
+      ]
+    }
   }
 }
 ```
 
-In the OpenCode 2 layout, `enabled: false` is written as `disabled: true`,
-and `enabled: true` or an omitted value writes no field, the OpenCode 2
-default. Other values have no OpenCode 2 equivalent, so APM warns and
-leaves the file unchanged. A `disabled` value in the `extra` block is
-ignored, so `enabled` alone decides. To expose a server's tools directly instead of
-through Code Mode, set `codemode: false` in the dependency's `extra` block;
-APM writes extra fields verbatim, so use the OpenCode 2 spelling for any
-other native setting, such as snake_case `oauth` fields.
-
-APM does not convert configuration it did not write. When it switches to
-`mcp.servers`, it removes an OpenCode 1 entry of the same name only if the
-entry is unchanged from what APM wrote; an edited entry stays in place with
-a warning, and OpenCode 2 uses the `mcp.servers` entry. Your own servers,
-`mcp.timeout` and other settings are preserved, and pruning removes only
-entries APM wrote. To go back to OpenCode 1, move any servers you added
-under `mcp.servers` back into `mcp` in the OpenCode 1 format, delete
-`mcp.servers`, and rerun the original install command (with `--global` for
-user scope); APM rewrites its own servers in the OpenCode 1 layout.
-
-## MCP servers from Claude plugins
-
-When a dependency is a Claude plugin, APM reads its MCP servers from inline
-`plugin.json` `mcpServers`, from JSON files that field names, or from an
-auto-discovered `mcp.json`, `.mcp.json` or `.github/.mcp.json`. Each file may
-wrap servers as `{"mcpServers": {...}}` or list them as a flat top-level map
-(`{"linear": {...}}`); a flat file counts only when every value is a server
-object. A file with no usable server is skipped with a warning naming the file
-and plugin. Servers then install like `apm.yml`-declared self-defined servers.
-
-`${CLAUDE_PLUGIN_ROOT}` stays as written in `apm.lock.yaml`, so `apm install
---frozen` and `apm audit --ci` pass in a clone at any path. Each target config
-gets its own project-root form for a package under `apm_modules/`:
-
-| Target | Written form |
-| --- | --- |
-| Claude and Copilot (`.mcp.json`) | `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<package>/...` |
-| Cursor (`.cursor/mcp.json`) | `${workspaceFolder}/apm_modules/<package>/...` |
-| Other targets, and every target with `--global` | Absolute package path |
-
-In `.mcp.json`, the default `.` resolves from the directory you start Claude
-Code or Copilot CLI in, so start them from the project root. A lockfile from an
-earlier release that holds the absolute path still passes `--frozen`, which
-replays that recorded path and leaves the target configs unchanged; the next
-`apm install` rewrites the lockfile and the configs in the portable form.
-
-`apm pack --format agent-plugin` refuses an MCP server that uses
-`${CLAUDE_PLUGIN_ROOT}`: Agent Plugins do not resolve it and the bundle does not
-include that plugin's files.
-
-## Resolve a connection name conflict
-
-For every JSON-config target (Copilot, Cursor, Gemini, Kiro,
-OpenCode, Windsurf, Antigravity) and for Claude, Codex and Hermes, a normal
-package update or root override updates an unchanged managed connection. A
-differing native entry is preserved, the affected target is named, and install
-exits `1`; it is never reported as "already configured". JetBrains still skips
-an existing connection by name.
-Successful writes, including registry entries written before a later
-self-defined conflict, remain recorded. This is not a whole-command rollback.
-
-If Claude has a personal `notes` connection and a package requests a different
-`notes` connection for Claude and Codex, APM preserves the personal connection
-even if Codex succeeds. Choose which connection to keep:
-
-1. To keep both, rename your personal connection in the affected runtime's
-   native config, leaving unrelated settings intact.
-2. To replace the personal connection, remove only that native entry yourself.
-3. Rerun the original install command with the same scope and targets, such as
-   `apm install --global --target claude,codex`.
-
-An identical foreign connection stays byte-identical and unowned: APM revokes
-any stale ownership claim without attempting target retirement.
-Registry conflicts do not prevent nonconflicting self-defined updates; the
-command still exits `1` and retains ownership of its successful writes.
-`--force` grants no takeover permission; `--frozen` does not turn a conflicting
-connection into a successful install or repair lock intent. Prune, target
-narrowing, and uninstall likewise preserve entries that differ from a
-trustworthy [managed baseline or receipt](../../reference/lockfile-spec/#canonical-deployment-rows).
-If an older ownership record cannot be verified, rename or remove only the
-affected native entry, then retry. Deleting the lockfile never authorizes
-adoption of existing native entries; do not reset it or the entire native config.
-
-These operations change connection settings, not notes or other data stored
-by the MCP service.
-
-## How `targets:` gates which configs get written
-
-MCP install resolves targets in this order:
-
-1. Explicit CLI selection: `--runtime` (legacy, one runtime) or `--target`
-   (one or more targets).
-2. Canonical `targets:` / `target:` values declared in `apm.yml`.
-3. The saved `apm config set target ...` default.
-4. Machine discovery, only when the manifest and saved config do not
-   restrict targets.
-
-`--exclude` narrows whichever set wins. Progress output names that
-post-exclusion selection; project, scope, and adapter gates can still skip a
-write.
-
-A `targets:` list on one `dependencies.mcp` entry narrows that set further
-for that server; see [Manifest Schema](../../reference/manifest-schema/).
-`apm install --target codex` does not remove a server scoped to `[claude]`.
-
-The same effective decision drives package, MCP, and LSP phases; APM does
-not re-resolve each phase independently.
-
-At project scope, the `copilot` target writes MCP servers to the
-workspace-root `.mcp.json` (top-level `mcpServers`), which both Copilot CLI and
-VS Code's Copilot read. The deprecated `vscode` alias selects the same file;
-APM no longer writes `.vscode/mcp.json` or `.github/mcp.json`. At global scope,
-`copilot` writes `$COPILOT_HOME/mcp-config.json`, or
-`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset.
-
-Claude Code reads the same `.mcp.json`. When both `copilot` and `claude` are
-active, they write one identical entry per server in Claude Code's shape
-(`type: stdio`, `http` or `sse`; `${VAR}` references kept), merge per server,
-never overwrite a server you authored, and each record ownership in
-`apm.lock.yaml`. Removing one of the two targets keeps an entry the other still
-uses. Claude Code writes `.mcp.json` only when `.claude/` exists; `copilot`
-always writes it. Because the file is shared, Copilot's `tools` allow-list does
-not restrict Claude Code.
-
-VS Code's deprecated Local mode reads only `.vscode/mcp.json`. If you still use
-it, switch to the Copilot harness, which reads `.mcp.json`. See
-[Copilot CLI MCP servers](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers)
-and [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
-
-`intellij` is an IDE, not a target: `apm init`, `apm install` and
-`apm install -g --mcp` refuse to record it in `apm.yml`. Use `copilot` for
-GitHub Copilot in JetBrains IDEs; once `apm.yml` exists, `--target intellij`
-still writes the JetBrains MCP config.
-
-On the first `apm install` (including `--frozen`) of a project whose lockfile
-was written by APM 0.36 or earlier, APM moves the entries it wrote to
-`.github/mcp.json` (old `copilot`) or `.vscode/mcp.json` (old `vscode`) into
-`.mcp.json`. It moves an entry only when its recorded fingerprint, or what that
-release rendered for the same self-defined declaration, proves APM wrote it
-unchanged. Entries you authored or edited stay where they are, and APM prints
-a [warning naming them](../../troubleshooting/common-errors/#-kept-mcp-server-name-in-githubmcpjson).
-APM deletes one of those files only if it created it: every server in it was
-APM's and nothing but empty scaffolding (such as `"inputs": []`) remains.
-
-**Portability boundary:** A committed target list makes lockfile MCP ownership
-deterministic across machines with different installed harnesses. If `targets:`
-is omitted (or a legacy `all` declaration is folded to omission), machine
-discovery is intentional and ownership can follow each machine's installed
-harnesses. Declare targets when teammates or CI must produce the same MCP
-ownership.
-
-When a runtime is outside the active target set, APM does NOT write
-its MCP config -- and announces the drop on stdout so you can confirm
-the gate took effect:
-
-```text
-[i] Skipped MCP config for claude, codex  (active targets: copilot)
-```
-
-On reinstall, removing a previously configured target also removes the
-verified APM-managed entries from that target's native config. Cleanup checks
-the exact native key: retiring `@company/notes` does not touch personal `notes`.
-User-authored servers and unrelated JSON or TOML settings remain unchanged.
-
-A malformed `targets:` field (both `target:` and `targets:` set,
-`targets: []`, or an unknown target name) fails closed before machine discovery:
-no MCP files are written and an error names the field to fix. A greenfield
-project with no `targets:`, no `--target` flag, no saved target, AND no detected
-signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also fails closed
-(`Error: No harness detected`) -- consistent with how `apm install` treats the same
-input. The command exits non-zero before adding a direct `--mcp` entry to
-`apm.yml` or deploying package files. Pin a target with `--target`, declare one
-in `apm.yml`, or save one with `apm config set target <value>`. A native MCP
-config write failure also exits non-zero and names the target path or
-permissions to check. (#1335)
-
-`apm install -g --mcp NAME` routes the write to each runtime's
-user-scope MCP config (for example, Copilot CLI to
-`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set to an absolute
-path, otherwise `~/.copilot/mcp-config.json` (relative values are rejected);
-Claude Code to
-`$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
-non-whitespace absolute path (both for installation and stale server cleanup). Unset or blank values use `~/.claude.json`;
-relative values are rejected. Codex CLI writes to
-`$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace absolute
-path, or `~/.codex/config.toml` when unset or blank (relative values are
-rejected), Cursor to `~/.cursor/mcp.json`, OpenCode to
-`~/.config/opencode/opencode.json`, Gemini CLI to `~/.gemini/settings.json`,
-Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
-`$HERMES_HOME/config.yaml` whenever selected explicitly (or
-`~/.hermes/config.yaml` when unset or blank), Windsurf to
-`~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
-and JetBrains Copilot to its OS-specific user config).
-When the user-scope manifest declares a `targets:` field (or the CLI passes
-`--target`), only the matching runtimes receive the config write. When no CLI
-target, user-scope manifest target, or saved `apm config set target` value restricts
-targets, all detected user-scope-capable runtimes are configured.
-If none of the
-selected targets supports user scope, the command exits `2` before changing the
-user manifest, lockfile, or runtime configuration. The direct command creates
-or updates `~/.apm/apm.yml`; it does not fall back to the current project's
-manifest. With `--dry-run`, it previews the user-scope entry and runtime
-targets without creating that manifest, lockfile, or runtime configuration.
-APM leaves an existing JSON MCP config (Copilot, Claude Code,
-Cursor, OpenCode, Gemini, Kiro) untouched and reports that target as failed
-when it cannot parse the file as JSON (for example, JSONC comments or a
-trailing comma). It also refuses a project MCP config that is a symbolic link,
-or is reached through one, just as it refuses a user-scope path that runs
-through a symlink below the home directory; replace the link with a regular
-file and rerun the install.
-
-## stdio vs HTTP servers
-
-MCP defines two transport families. APM exposes both:
-
-- **stdio** -- APM (and your harness) spawns a local process and
-  speaks MCP over its stdio. Requires `command:` and optional
-  `args:`. Use `--env KEY=VALUE` (repeatable) for environment
-  variables. Servers do not go through a shell, so `$VAR` and
-  backticks in `args` are passed literally.
-- **http / sse / streamable-http** -- APM points your harness at a
-  remote endpoint. Requires `url:` (http or https only -- websockets
-  and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
-  for HTTP headers such as `Authorization`.
-
-### Remote transport per harness
-
-`http` and `streamable-http` both mean Streamable HTTP; `sse` is the legacy
-HTTP+SSE transport. For a registry server, APM reads the transport from the
-registry's `remotes[].type` (a missing value means Streamable HTTP). `apm mcp
-show` prints the same transport. Each harness gets its own native keys:
-
-| Harness | Streamable HTTP | SSE |
-|---|---|---|
-| Copilot, Claude Code | `type: http`, `url` | `type: sse`, `url` |
-| Gemini CLI | `httpUrl` | `url` |
-| Antigravity | `serverUrl` | not supported |
-| Codex CLI | `url` | not supported |
-| Cursor, Windsurf, JetBrains Copilot | `type: http`, `url` | `type: http`, `url` |
-| Hermes | `url` | `url`, `transport: sse` |
-| Kiro | `url` | `url` |
-| OpenCode | `type: remote`, `url` | `type: remote`, `url` |
-
-When a harness does not support the transport, APM prints one warning naming
-the server and the harness, skips that harness, and continues; the server is
-not recorded for that harness and the install exits `0`, including under
-`apm install --frozen`.
-
-Entries an earlier APM release wrote in a shape the table above replaced (for
-example Antigravity `httpUrl`, `type: http` for an SSE server, or a Hermes
-entry missing `transport: sse`, `cwd` or extra keys) are rewritten
-on the next `apm install`, `apm update` or `apm install --frozen`, even when
-`apm.yml` did not change. APM rewrites only entries it can prove it wrote; a
-same-name entry you added yourself is preserved and reported as a conflict.
-Extra fields cannot add a second endpoint: `extra:` keys named `url`,
-`httpUrl` or `serverUrl` are dropped.
-
-Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
-accepted only for literal loopback addresses such as `localhost`,
-`ip6-localhost`, `127.0.0.0/8`, and `::1`, which keeps local development
-servers usable without sending cleartext traffic off the machine. For example:
-
-```sh
-apm install --target codex --mcp local-dev --url http://localhost:3000/mcp
-```
-
-This writes the endpoint to the Codex MCP configuration.
-
-Codex's [native configuration schema](https://developers.openai.com/codex/config-schema.json)
-does not accept an MCP `id` setting. After upgrading APM, repair older generated
-entries with:
-
-```sh
-apm install --only mcp --target codex
-```
-
-Add `--global` for user-scope configuration. APM repairs only entries that
-match a trustworthy saved configuration, including the historical empty
-`id = ""` spelling of self-defined connections. A recorded owner name alone
-does not verify an entry with a nonempty registry ID, old header spelling,
-or other native edits. Such entries stay untouched and an unresolved
-self-defined connection conflict makes the install incomplete.
-
-If Codex still reports an unsupported `id` on an entry you have verified,
-back up `.codex/config.toml` (or the user-scope file) and remove only that
-entry's `id = ...` setting. Keep generated comments such as
-`# apm-registry-id: "registry-uuid"`: APM uses them to prevent duplicate
-registry installs. Regeneration may expand inline TOML tables while retaining
-their values and comments; it does not change Codex's project trust settings.
-If the connection still conflicts, follow
-[native conflict recovery](#resolve-a-connection-name-conflict) rather than
-retrying with `--force`.
-
-`--transport` is inferred when omitted: a `--url` implies a remote
-transport, a post-`--` command implies `stdio`. The mutually-exclusive
-combinations (`--url` plus stdio command, `--header` without `--url`,
-etc.) are rejected with exit code 2.
-
-## Token injection: GitHub MCP server
-
-For Cursor, env-var references are written using Cursor's native
-`${env:NAME}` syntax, so referenced secret values are resolved by Cursor
-when it starts the MCP server and are not written into the Cursor config for
-the install scope (`.cursor/mcp.json` for a project, `~/.cursor/mcp.json`
-with `-g`). Explicit static values in `mcp.env` remain static and are written
-as authored; keep secrets out of those values.
-
-APM translates supported environment-variable references using each
-target's native syntax. It also injects one specific GitHub credential
-automatically when the server is recognized as the GitHub MCP server:
-
-When an adapter using the shared GitHub auth path writes a remote MCP
-config and the server is identified as the GitHub MCP server, APM selects
-a token source and applies the target's auth behavior described below.
-
-The server is identified as "GitHub" only when it satisfies **both** of
-these narrow checks
-(`_is_github_server` in [copilot.py](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py)):
-
-1. The server name (case-insensitive) is one of:
-   `github-mcp-server`, `github`, `github-mcp`,
-   `github-copilot-mcp-server`.
-2. **And** the parsed URL hostname matches the GitHub host allowlist
-   (`github.com`, `*.github.com`, `githubcopilot.com` hosts, and
-   registered GHES hostnames).
-
-This is a parsed-host allowlist on hostname, not a substring check.
-A URL like `https://github.com.evil.example` does not match because
-the parsed hostname is `github.com.evil.example`, not `github.com`.
-
-The token is selected from this chain (first non-empty wins):
-
-1. `GITHUB_COPILOT_PAT`
-2. `GITHUB_TOKEN`
-3. `GITHUB_APM_PAT`
-4. `GITHUB_PERSONAL_ACCESS_TOKEN` (Copilot CLI compat)
-
-If the manifest declares a nonempty string `Authorization` value (case-insensitive header name),
-that explicit value takes precedence over automatic GitHub authentication.
-Registry-provided headers alone do not disable automatic authentication.
-For Copilot and Cursor, this also applies to dictionary-shaped headers
-accepted from a custom registry: manifest overrides retain their priority.
-This compatibility does not certify the custom response against an upstream
-registry schema.
-Environment references are translated according to the target's interpolation
-rules. This MCP selection is environment-only: it does not use repository
-authentication's per-org variables or credential helpers.
-
-For a target that supports runtime environment substitution, automatic
-GitHub auth writes a target-native reference to the selected variable
-(for example, `${GITHUB_TOKEN}` or `${env:GITHUB_TOKEN}`); the resolved
-credential value is not written into the generated config. Literal-only
-targets keep their existing automatic-token behavior. If none of the
-listed variables is set, no automatic header is added.
-
-Except for the project `.mcp.json` that Claude Code and Copilot share (see below), reinstalling the
-same declaration does not automatically repair credentials already written to
-runtime config. Follow
-[Repairing existing credentials](#repairing-existing-credentials) to preserve
-custom settings and rotate exposed credentials.
-For other authenticated remote servers, set headers explicitly with
-`--header Authorization="Bearer ${MY_TOKEN}"`.
-
-## Updating and replacing a server
-
-Re-run `apm install --mcp NAME ...` against an existing declaration in `apm.yml`:
-
-| Situation | Behaviour |
-|---|---|
-| New `NAME` | Appended to `dependencies.mcp`. |
-| Existing `NAME`, identical config | Leaves `apm.yml` unchanged and re-checks runtime configs (`already declared; checking integrations`). |
-| Existing `NAME`, different config, TTY | Prompts to replace. |
-| Existing `NAME`, different config, CI | Refuses with exit 2. Re-run with `--force`. |
-
-Use `--dry-run` to preview the manifest change without writing.
-`--force` permits replacing that declaration, not taking over a conflicting
-native connection. Follow
-[native conflict recovery](#resolve-a-connection-name-conflict) for the latter.
-
-### Repairing existing credentials
-
-First replace any authored static credential in `apm.yml` with an environment
-reference. Otherwise regenerating the entry writes that static value again.
-Follow the target's [interpolation rules](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
-when making variables available and editing its config.
-
-For Cursor, open the config for the scope you installed into (`.cursor/mcp.json`
-for a project, `~/.cursor/mcp.json` with `-g`; see
-[What `apm install` writes to disk](#what-apm-install-writes-to-disk)). Replace
-only the affected header or `env` values with `${env:NAME}` references.
-Preserve the authorization scheme, for example `Bearer ${env:GITHUB_TOKEN}`,
-and make the variable available to Cursor. Keep all other fields and servers,
-and inspect the diff. An ordinary reinstall of the same declaration does not
-perform this repair.
-
-For Claude Code at project scope, the next `apm install` replaces values in
-`.mcp.json` that APM wrote earlier, either because APM recorded writing that
-exact entry or because the entry matches the declaration expanded from the
-current environment. It prints the affected variable names. An entry APM
-cannot confirm it wrote is kept, and install exits with an error that names
-each field holding a value and the reference it should hold. A field where APM
-writes a package path, such as `${CLAUDE_PROJECT_DIR:-.}/apm_modules/...`,
-instead names the path to restore (the exact value when it is a plain ASCII path).
-Replace those yourself with `${NAME}` references, for example
-`Bearer ${GITHUB_TOKEN}`. Export the variables before starting `claude`.
-Claude Code still asks you to approve project servers; APM does not change
-that approval.
-
-If you instead regenerate an entry, save its custom fields first, remove only
-that server entry, reinstall, and restore those fields without restoring the
-old credential. Do not delete the whole config file. Rotate any credential
-exposed in a committed or shared config; editing the file does not revoke it.
-
-## Sibling commands
-
-The `apm mcp` group is for discovery and standalone install:
-
-```
-apm mcp search <query>    # search the configured registry
-apm mcp list              # list available servers
-apm mcp show <name>       # detailed server info
-apm mcp install <name>    # alias for `apm install --mcp <name>`
-```
-
-Full flag tables and exit codes: [CLI reference](../../reference/cli/install/).
-
-## Next
-
-- Authoring an MCP server as a primitive of your own package -- see
-  the producer ramp.
-- Lockfile and trust boundary for transitive MCP servers --
-  [Lifecycle](../../concepts/lifecycle/).
+Your harness still asks you to trust new project servers; APM does not
+answer that prompt for you.
+
+:::tip[Other options]
+`apm mcp list`, `search` and `show` browse a registry. `--only mcp` installs
+servers and skips packages. `--exclude cursor` skips one harness. Every flag:
+[`apm install`](../../reference/cli/install/) and [`apm mcp`](../../reference/cli/mcp/).
+:::
