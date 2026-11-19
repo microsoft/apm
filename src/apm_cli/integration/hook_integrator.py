@@ -1724,11 +1724,7 @@ class HookIntegrator(BaseIntegrator):
         project_root: Path,
         excluded_targets,
     ) -> HookTargetReconcileStats:
-        """Remove this package's merged hooks from targets it no longer deploys to.
-
-        Covers targets a restriction excluded and, when the executables gate
-        withholds the package's hooks, every active target (#3924).
-        """
+        """Remove this package's merged hooks from targets it no longer deploys to (#3924)."""
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
