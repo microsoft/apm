@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -30,6 +31,11 @@ from ..policy import outcome_routing as policy_outcomes
 from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ..security.executables import ExecutableDeclaration
 
 _POLICY_RESOLUTION_WARNING = (
     "Org policy could not be resolved; approval is proceeding without org "
@@ -216,17 +222,10 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
-    decl_key_map = {d.package_key: d for d in declarations}
-    decl_name_map = {d.package_name: d for d in declarations}
 
     changed = 0
     for pkg in packages:
-        decl = decl_key_map.get(pkg) or decl_name_map.get(pkg)
-        if decl is None:
-            for d in declarations:
-                if d.package_key.startswith(pkg + "#") or d.package_name.startswith(pkg):
-                    decl = d
-                    break
+        decl = _find_declaration(declarations, pkg)
         if decl is None:
             # Allow denying a package that is not (or no longer) installed.
             from ..security.executables import ALL_EXEC_TYPES
@@ -239,6 +238,18 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
         deny[decl.package_key] = {t: True for t in decl.exec_types}
         allow.pop(_find_matching_key(allow, decl.package_key) or decl.package_key, None)
         _rich_info(f"Denied {decl.package_key}: {decl.summary_line()}", symbol="info")
+        if decl.original_identity:
+            # Deny is safety-positive: the upstream the user named stays denied
+            # even after the replace: rule is removed.
+            deny[decl.original_identity] = {t: True for t in decl.exec_types}
+            allow.pop(
+                _find_matching_key(allow, decl.original_identity) or decl.original_identity,
+                None,
+            )
+            _rich_info(
+                f"Denied {decl.original_identity} (replaced by {decl.package_key})",
+                symbol="info",
+            )
         changed += 1
 
     if changed > 0:
@@ -275,15 +286,7 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
 
     ctx = _effective_trust_context(manifest, logger=logger)
 
-    declarations = _scan_installed_packages(manifest)
-    decl = None
-    for d in declarations:
-        if package in (d.package_key, d.package_name):
-            decl = d
-            break
-        if d.package_key.startswith(package + "#") or d.package_name.startswith(package):
-            decl = d
-            break
+    decl = _find_declaration(_scan_installed_packages(manifest), package)
 
     if decl is None:
         _rich_warning(f"{package}: not found among installed packages with executables.")
@@ -362,6 +365,35 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
             "[x] = parked. Trust with 'apm approve <package>' or 'apm approve --recommended'.",
             symbol="info",
         )
+
+
+def _find_declaration(
+    declarations: Sequence[ExecutableDeclaration], pkg: str
+) -> ExecutableDeclaration | None:
+    """Return the installed declaration that *pkg* names, or None.
+
+    Lockfile-derived names (the approval key, or the locked identity a
+    ``replace:`` rule redirected) are tried before the package's own
+    ``apm.yml`` name, so another package cannot capture a grant or deny by
+    declaring a lookalike name. Exact matches are tried before prefix forms;
+    ``acme/hooky#1.0.0`` still finds a replaced ``acme/hooky``.
+    """
+
+    def _original_prefix(decl: ExecutableDeclaration) -> bool:
+        original = decl.original_identity
+        return bool(original) and (original.startswith(pkg + "#") or pkg.startswith(original + "#"))
+
+    tiers = (
+        lambda d: pkg in (d.package_key, d.original_identity),
+        lambda d: pkg == d.package_name,
+        lambda d: d.package_key.startswith(pkg + "#") or _original_prefix(d),
+        lambda d: d.package_name.startswith(pkg),
+    )
+    for matches in tiers:
+        for decl in declarations:
+            if matches(decl):
+                return decl
+    return None
 
 
 def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str | None:
@@ -471,17 +503,10 @@ def _approve_packages(
 ) -> None:
     """Approve specific packages by name."""
     declarations = _scan_installed_packages(manifest)
-    decl_map = {d.package_name: d for d in declarations}
-    decl_key_map = {d.package_key: d for d in declarations}
 
     count = 0
     for pkg in packages:
-        decl = decl_key_map.get(pkg) or decl_map.get(pkg)
-        if decl is None:
-            for d in declarations:
-                if d.package_key.startswith(pkg + "#") or d.package_name.startswith(pkg):
-                    decl = d
-                    break
+        decl = _find_declaration(declarations, pkg)
 
         if decl is None:
             _rich_warning(f"{pkg}: not found in installed packages")
@@ -502,7 +527,10 @@ def _approve_packages(
 
 def scan_installed_executable_packages(manifest: Path) -> list:
     """Scan all installed packages under apm_modules/ for executables."""
-    from ..security.executables import ExecutableDeclaration, scan_package_executables
+    from ..security.executables import (
+        locked_dependency_approval,
+        scan_package_executables,
+    )
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
@@ -529,7 +557,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             try:
                 package_dir = (
                     local_dependency_dirs[locked.get_unique_key()]
-                    if locked.source == "local"
+                    if locked.is_local_source
                     else locked.to_dependency_ref().get_install_path(apm_modules)
                 )
             except (OSError, ValueError):
@@ -550,12 +578,14 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         version = str(manifest_data.get("version", version))
                 except Exception:
                     manifest_data = {}
+            approval = locked_dependency_approval(locked, version)
             declaration = scan_package_executables(
                 package_dir,
                 name,
-                version,
-                approval_identity=locked.get_unique_key(),
+                approval.version,
+                approval_identity=approval.identity,
                 manifest_data=manifest_data,
+                original_identity=approval.original_identity,
             )
             if declaration.has_executables:
                 results.append(declaration)
