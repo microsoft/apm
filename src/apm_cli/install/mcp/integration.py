@@ -21,11 +21,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PreparedMcpIntegration:
-    """Selected comparison view, filtered declarations, and pre-write omission evidence."""
+    """Selected comparison view, filtered declarations, and omission candidates."""
 
     dependencies: list["MCPDependency"]
     current_view: "CurrentMcpConfigView | None"
-    omissions: dict[str, dict[str, str]] | None
+    omission_view: "CurrentMcpConfigView | None"
+
+    def omissions(self, lockfile: "LockFile") -> dict[str, dict[str, str]] | None:
+        """Evidence against the lock this run produced: a kept baseline supersedes it."""
+        if self.omission_view is None:
+            return None
+        return self.omission_view.omission_evidence(lockfile)
 
 
 def prepare_mcp_integration(
@@ -49,11 +55,11 @@ def prepare_mcp_integration(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.executables import (
         filter_mcp_by_allow_executables,
+        is_executable_gated_mcp,
         resolve_project_exec_allow_map,
     )
 
     current_view = None
-    omissions = None
     if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
         lockfile = LockFile.read(lock_path) if lock_path.exists() else None
         current_view = CurrentMcpConfigView.derive(
@@ -67,7 +73,6 @@ def prepare_mcp_integration(
             active_package_keys=active_package_keys,
             include_dependency_mcp=should_install,
         )
-        omissions = current_view.omission_evidence(lockfile or LockFile())
     if should_install and current_view is not None:
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)
@@ -75,7 +80,7 @@ def prepare_mcp_integration(
             logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
         mcp_deps = list(current_view.dependencies)
     allow_map = None
-    if any(dep.resolved_by is not None and dep.is_self_defined for dep in mcp_deps):
+    if any(is_executable_gated_mcp(dep) for dep in mcp_deps):
         allow_map = resolve_project_exec_allow_map(
             project_root or apm_package.package_path or Path.cwd(),
             apm_package,
@@ -83,10 +88,13 @@ def prepare_mcp_integration(
             no_policy=no_policy,
             logger=logger,
         )
+    approved = filter_mcp_by_allow_executables(mcp_deps, allow_map, logger)
+    if current_view is not None:
+        current_view = current_view.with_unapproved_executables(approved)
     return PreparedMcpIntegration(
-        filter_mcp_by_allow_executables(mcp_deps, allow_map, logger),
+        approved,
         current_view if should_install else None,
-        omissions,
+        current_view,
     )
 
 
@@ -337,6 +345,8 @@ def run_mcp_integration(  # noqa: PLR0913
         RetiredMcpClaims,
         heal_retired_project_mcp_destinations,
         healable_names,
+        lock_holds_untranslated_mcp_claims,
+        moved_root_entry_fingerprints,
         report_retired_mcp_heal,
         restore_pending_retired_claims,
         split_mcp_claims,
@@ -416,6 +426,20 @@ def run_mcp_integration(  # noqa: PLR0913
         if should_install and old_mcp_target_servers and heal_basis is not None
         else RetiredMcpClaims({}, {})
     )
+    # A --frozen install moved these servers and they are no longer
+    # declared: their .mcp.json entry is removed on the same proof as adoption.
+    undeclared_moved = moved_root_entry_fingerprints(
+        retired_owned.moved_unrecorded - MCPIntegrator.get_server_names(mcp_deps),
+        project_root=project_root,
+        stored_configs=old_mcp_configs,
+    )
+    if undeclared_moved:
+        old_native_hashes.setdefault("copilot", {}).update(undeclared_moved)
+    # The claims are translated once this install persists them (heal and
+    # receipts), so the lock may then record the running version.
+    translated = heal_basis is not None and lock_holds_untranslated_mcp_claims(
+        heal_basis.apm_version, heal_basis.mcp_target_servers
+    )
 
     def _heal_retired(
         declared: builtins.set, copilot_claims: builtins.set | None
@@ -475,24 +499,30 @@ def run_mcp_integration(  # noqa: PLR0913
             target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
         }
         conflict = None
+        from apm_cli.install.mcp.ownership import adoptable_root_mcp_entries
+
+        # A --frozen install may already have moved these declared servers to
+        # .mcp.json without recording it; their root entry is APM's write.
+        adoptable = retired_owned.moved_unrecorded & MCPIntegrator.get_server_names(mcp_deps)
         try:
-            mcp_count = MCPIntegrator.install(
-                mcp_deps,
-                runtime,
-                exclude,
-                verbose,
-                stored_mcp_configs=old_mcp_configs,
-                apm_config=mcp_apm_config,
-                project_root=project_root,
-                user_scope=user_scope,
-                explicit_target=explicit_target,
-                target_decision=target_decision,
-                fail_on_write_error=True,
-                diagnostics=diagnostics,
-                scope=scope,
-                managed_target_servers=managed_target_servers,
-                native_hashes=native_hashes,
-            )
+            with adoptable_root_mcp_entries(frozenset(adoptable)):
+                mcp_count = MCPIntegrator.install(
+                    mcp_deps,
+                    runtime,
+                    exclude,
+                    verbose,
+                    stored_mcp_configs=old_mcp_configs,
+                    apm_config=mcp_apm_config,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                    explicit_target=explicit_target,
+                    target_decision=target_decision,
+                    fail_on_write_error=True,
+                    diagnostics=diagnostics,
+                    scope=scope,
+                    managed_target_servers=managed_target_servers,
+                    native_hashes=native_hashes,
+                )
         except MCPNativeConflictError as exc:
             if not exc.wrote_connections:
                 raise
@@ -563,6 +593,8 @@ def run_mcp_integration(  # noqa: PLR0913
             cleanup_owners = {
                 target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
             }
+            if undeclared_moved:
+                cleanup_owners.setdefault("copilot", builtins.set()).update(undeclared_moved)
             if not old_mcp_target_servers_present and not user_scope:
                 # A lockfile written before per-target ownership names no runtime for
                 # its servers, so a project install cleans the runtimes it targets,
@@ -600,6 +632,7 @@ def run_mcp_integration(  # noqa: PLR0913
             native_hashes=native_hashes,
             logger=logger,
             fail_on_write_error=True,
+            stamp_version=translated,
         )
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
@@ -615,6 +648,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 project_root=project_root,
                 user_scope=user_scope,
             )
+            if undeclared_moved:
+                cleanup_owners.setdefault("copilot", builtins.set()).update(undeclared_moved)
             for cleanup_runtime, managed_servers in sorted(cleanup_owners.items()):
                 scoped_stale = builtins.set(old_mcp_servers).intersection(managed_servers)
                 if not scoped_stale:
@@ -638,6 +673,7 @@ def run_mcp_integration(  # noqa: PLR0913
                 mcp_config_provenance={},
                 logger=logger,
                 fail_on_write_error=True,
+                stamp_version=translated,
             )
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install and old_mcp_servers:
@@ -653,11 +689,10 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
-    if prepared.omissions is not None and lock_path.exists():
+    if prepared.omission_view is not None and lock_path.exists():
         lockfile = LockFile.read(lock_path)
-        if lockfile is not None and prepared.omissions != lockfile.mcp_omissions:
-            replace(lockfile, mcp_omissions=prepared.omissions).write(
-                lock_path, existing_lockfile=lockfile
-            )
+        omissions = prepared.omissions(lockfile) if lockfile is not None else None
+        if lockfile is not None and omissions != lockfile.mcp_omissions:
+            replace(lockfile, mcp_omissions=omissions).write(lock_path, existing_lockfile=lockfile)
 
     return mcp_count, mcp_apm_config

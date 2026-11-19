@@ -625,6 +625,16 @@ class LockfileBuilder:
                 self.ctx.existing_lockfile.mcp_config_provenance
             )
             target_servers = self.ctx.existing_lockfile.mcp_target_servers
+            from apm_cli.install.mcp.retired_destinations import (
+                lock_holds_untranslated_mcp_claims,
+            )
+
+            # Until the MCP phase translates them, these claims mean what the
+            # recorded version meant; restamping would make the heal skip them.
+            if lock_holds_untranslated_mcp_claims(
+                self.ctx.existing_lockfile.apm_version, target_servers
+            ):
+                lockfile.apm_version = self.ctx.existing_lockfile.apm_version
             # The codec rebuild is linear in deployment rows and also marks the
             # compatibility view present, so skip it when there is no target
             # state to preserve.
