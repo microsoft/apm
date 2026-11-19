@@ -1233,18 +1233,9 @@ def _resolve_target_runtimes(
     # Exclusion narrows every selected source, including explicit CLI choices.
     # Apply it before progress output so the message names the narrowed set.
     if exclude:
-        exclusions = {exclude}
-        try:
-            from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
-            exclusions.update(
-                EffectiveTargetDecision(exclude, "--exclude").runtime_equivalents or ()
-            )
-        except KeyError:
-            pass
-        target_runtimes = [
-            candidate for candidate in target_runtimes if candidate not in exclusions
-        ]
+        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)
         # Invalid manifests continue to the shared gate for canonical rendering.
         if not target_runtimes and selection_source is not _TargetSelectionSource.INVALID_MANIFEST:
             logger.warning(

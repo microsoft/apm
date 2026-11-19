@@ -4541,3 +4541,37 @@ def test_lockfile_refusal_guard_keeps_one_renderer(path: str, old: str, new: str
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            "        target_runtimes = [rt for rt in target_runtimes if rt != exclude]\n",
+            id="project-exclusion-filters-the-raw-spelling",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            "        exclusions = {exclude}\n"
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            id="project-exclusion-keeps-a-second-set",
+        ),
+    ],
+)
+def test_mcp_exclusion_guard_routes_project_scope_through_the_normalizer(
+    path: str, old: str, new: str
+) -> None:
+    """C4 (#3967): project ``--exclude`` reads through the one runtime normalizer."""
+    rule_id = "mutation_writes.mcp_target_selection"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

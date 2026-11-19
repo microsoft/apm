@@ -82,6 +82,10 @@ def discover_user_scope_mcp_runtimes(
     return partition_user_scope_runtimes(discovered)
 
 
+# One warning per process: frozen install resolves MCP runtimes twice.
+_unknown_exclusions_warned: set[str] = set()
+
+
 def filter_excluded_mcp_runtimes(
     target_runtimes: list[str],
     exclude: str | None,
@@ -109,8 +113,14 @@ def filter_excluded_mcp_runtimes(
     except KeyError:
         from apm_cli.integration.targets import KNOWN_TARGETS, RUNTIME_TO_CANONICAL_TARGET
 
-        if canonical not in KNOWN_TARGETS and canonical not in RUNTIME_TO_CANONICAL_TARGET:
+        if (
+            canonical not in KNOWN_TARGETS
+            and canonical not in RUNTIME_TO_CANONICAL_TARGET
+            and token not in _unknown_exclusions_warned
+        ):
             from apm_cli.utils.console import _rich_warning
+
+            _unknown_exclusions_warned.add(token)
 
             _rich_warning(
                 f"--exclude {exclude!r} names no target or MCP runtime; nothing was excluded.",

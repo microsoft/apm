@@ -229,6 +229,17 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
         findings.append(
             violation(rule_id, _MCP_INSTALL, "resolver must not parse manifest targets itself")
         )
+    # C4 (#3967): project and user scope read --exclude through one normalizer.
+    if not _span_has_fixed(
+        install_facts, resolver_span, "filter_excluded_mcp_runtimes(target_runtimes, exclude)"
+    ) or _span_has_regex(install_facts, resolver_span, r"= \{exclude\b|\(exclude, \"--exclude\"\)"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_INSTALL,
+                "resolver must apply --exclude through filter_excluded_mcp_runtimes",
+            )
+        )
     validation_line = _first_span_line(
         integration_facts,
         integration_span,
