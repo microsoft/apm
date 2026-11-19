@@ -71,6 +71,12 @@ An org `executables.enforce` rung degrades to `recommend` (allowed but still
 overridable by a deny). Local bundle hook, MCP, LSP, and canvas approvals are bound to
 the exact SHA-256 content key printed by `apm install`.
 
+A dependency redirected by a [`replace:` rule](../../../consumer/manage-dependencies/#replace-a-source-candidate)
+is trusted by its selected source, never by the original. `apm approve` and
+`apm deny` accept either name and write the selected source key, for example
+`../local-hooky` or `my-org/hooky-fork#patched`. `apm deny` also denies the
+original name, so removing the `replace:` rule does not revive an old grant.
+
 ### The gate opt-in
 
 The gate is enabled when any layer opts in: the project declares an

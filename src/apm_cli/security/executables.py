@@ -62,6 +62,9 @@ class ExecutableDeclaration:
         is_transitive: Whether this package is a transitive dependency.
         parent_name: Name of the direct dependency that pulled this in
             (only set when *is_transitive* is True).
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            so commands can find the package by its declared name while the
+            grant names the selected source.
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
         lsp_count: Number of LSP server entries discovered.
@@ -78,6 +81,7 @@ class ExecutableDeclaration:
     package_name: str
     is_transitive: bool = False
     parent_name: str | None = None
+    original_identity: str | None = None
     hook_count: int = 0
     mcp_count: int = 0
     lsp_count: int = 0
@@ -522,11 +526,54 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
+@dataclass(frozen=True)
+class LockedApproval:
+    """The trust principal a locked dependency is granted under.
+
+    Attributes:
+        identity: Approval name the install gate checks.
+        version: Version bound into the grant key; empty for a replaced row,
+            whose identity already carries the selected ``with:`` ref.
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            or None for a row that was not replaced.
+    """
+
+    identity: str
+    version: str
+    original_identity: str | None = None
+
+    @property
+    def key(self) -> str:
+        """Return the full approval key (``identity#version``)."""
+        return build_approval_key(self.identity, self.version)
+
+
+def locked_dependency_approval(dependency: Any, version: str | None = None) -> LockedApproval:
+    """Return the trust principal for a locked dependency.
+
+    A replaced row is keyed by its selected source, exactly as the install
+    gate keys the resolved reference, so an upstream grant never unlocks the
+    replacement and ``apm approve`` writes the key the gate checks. *version*
+    overrides the locked version for a row that was not replaced; ``apm
+    approve`` passes the package's ``apm.yml`` version there, as it always has.
+    """
+    if getattr(dependency, "replacement", None) is not None:
+        return LockedApproval(
+            identity=dependency_approval_key(dependency.to_dependency_ref()),
+            version="",
+            original_identity=dependency.get_unique_key(),
+        )
+    if version is None:
+        version = dependency.version or ""
+    return LockedApproval(identity=dependency.get_unique_key(), version=version)
+
+
 def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     """Return trust keys derived only from a locked package identity."""
-    identity = dependency.get_unique_key()
-    versioned = build_approval_key(identity, dependency.version or "")
-    return tuple(dict.fromkeys((identity, versioned)))
+    approval = locked_dependency_approval(dependency)
+    if approval.original_identity is not None:
+        return tuple(dict.fromkeys((approval.key, _strip_version(approval.key))))
+    return tuple(dict.fromkeys((approval.identity, approval.key)))
 
 
 def dependency_approval_key(dependency_ref: Any) -> str:
@@ -602,6 +649,7 @@ def scan_package_executables(
     manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
+    original_identity: str | None = None,
 ) -> ExecutableDeclaration:
     """Scan a materialised package directory for executable primitives.
 
@@ -699,6 +747,7 @@ def scan_package_executables(
         package_name=package_name,
         is_transitive=is_transitive,
         parent_name=parent_name,
+        original_identity=original_identity,
         hook_count=len(hook_files),
         mcp_count=mcp_count,
         lsp_count=lsp_count,
