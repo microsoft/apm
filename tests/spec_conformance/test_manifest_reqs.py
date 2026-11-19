@@ -1949,8 +1949,10 @@ def test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings(tmp_path: Path
     """req-tg-009: one non-conformant agent MUST NOT block a conformant sibling.
 
     The rejected agent writes zero bytes and is named in a diagnostic; the
-    conformant sibling from the same dependency deploys and is recorded in
-    the lockfile, and the install completes successfully.
+    conformant siblings from the same dependency deploy and are recorded in
+    the lockfile, and the install completes successfully. On reinstall, an
+    agent whose tools became unsupported is removed and dropped from the
+    lockfile while its siblings are untouched.
     """
     import os
     import sys
@@ -1975,6 +1977,10 @@ def test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings(tmp_path: Path
         "---\ndescription: Conformant\ntools:\n- read\n- web_fetch\n- '@git'\n---\n\n# Ok\n",
         encoding="utf-8",
     )
+    (agents / "steady.agent.md").write_text(
+        "---\ndescription: Steady\ntools:\n- read\n---\n\n# Steady\n",
+        encoding="utf-8",
+    )
 
     project = isolated.work_root
     (project / ".kiro").mkdir(parents=True, exist_ok=True)
@@ -1995,11 +2001,34 @@ def test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings(tmp_path: Path
     assert not (project / ".kiro" / "agents" / "rejected.md").exists()
     assert (project / ".kiro" / "agents" / "conformant.md").is_file()
 
-    lockfile = LockFile.read(project / "apm.lock.yaml")
-    assert lockfile is not None
-    deployed = {path for dep in lockfile.dependencies.values() for path in dep.deployed_files}
+    def deployed_paths() -> set[str]:
+        lockfile = LockFile.read(project / "apm.lock.yaml")
+        assert lockfile is not None
+        return {path for dep in lockfile.dependencies.values() for path in dep.deployed_files}
+
+    deployed = deployed_paths()
     assert ".kiro/agents/conformant.md" in deployed
+    assert ".kiro/agents/steady.md" in deployed
     assert ".kiro/agents/rejected.md" not in deployed
+
+    # A deployed agent whose tools become unsupported is removed and unrecorded
+    # on reinstall, and MUST NOT be retained; its siblings stay deployed.
+    steady = project / ".kiro" / "agents" / "steady.md"
+    steady_before = steady.read_bytes()
+    (agents / "conformant.agent.md").write_text(
+        "---\ndescription: Conformant\ntools:\n- read\n- EVIL_TOOL\n---\n\n# Ok\n",
+        encoding="utf-8",
+    )
+    reinstall = runner.run(("install", "--no-policy"), cwd=project, env=environment)
+    reinstall_output = " ".join((reinstall.stdout + reinstall.stderr).split())
+
+    assert reinstall.returncode == 0, reinstall_output
+    assert "EVIL_TOOL" in reinstall_output
+    assert not (project / ".kiro" / "agents" / "conformant.md").exists()
+    deployed = deployed_paths()
+    assert ".kiro/agents/conformant.md" not in deployed
+    assert ".kiro/agents/steady.md" in deployed
+    assert steady.read_bytes() == steady_before
 
     assert_spec_contains(
         "failure for one agent MUST NOT prevent\ndeployment of other, vocabulary-conformant "
