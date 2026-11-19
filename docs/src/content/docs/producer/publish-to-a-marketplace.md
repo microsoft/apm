@@ -433,7 +433,10 @@ package in it. Use separate repositories when audiences need separate access.
   package repository or writing any file. The refusal applies wherever a
   consumer resolves the entry: `apm install name@marketplace`, a
   marketplace entry in `apm.yml`, a transitive marketplace dependency, and
-  `apm update`.
+  `apm update`. The rule covers every source type (`github`, `git-subdir`,
+  `gitlab`, `url`) and every locator key (`repo:`, `repository:`, `url:`).
+  Only a `repo:` that names the marketplace project itself counts as
+  in-marketplace; host-qualify other keys.
 
   ```yaml
   # Refused -- ambiguous bare form on enterprise marketplace:
