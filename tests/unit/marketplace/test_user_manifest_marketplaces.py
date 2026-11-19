@@ -286,6 +286,21 @@ class TestReconcile:
         assert report.removed == ["acme"]
         assert registry_mod.marketplace_names() == []
 
+    def test_two_manifest_aliases_for_one_catalog_warn_once(self, user_manifest, probe):
+        _write_manifest(
+            user_manifest,
+            [
+                {"name": "acme", "source": "https://github.com/acme-org/m"},
+                {"name": "acme-mirror", "source": "https://github.com/acme-org/m.git"},
+            ],
+        )
+        logger = MagicMock()
+        report = reconcile_user_marketplaces(user_manifest, logger=logger)
+        assert sorted(report.registered) == ["acme", "acme-mirror"]
+        warnings = [c.args[0] for c in logger.warning.call_args_list if "same catalog" in c.args[0]]
+        assert len(warnings) == 1
+        assert "'acme'" in warnings[0] and "'acme-mirror'" in warnings[0]
+
     def test_manual_name_conflict_is_reported_not_overwritten(self, user_manifest, probe):
         registry_mod.add_marketplace(MarketplaceSource(name="acme", owner="manual", repo="r"))
         _write_manifest(user_manifest, [{"name": "acme", "source": "decl/m"}])
