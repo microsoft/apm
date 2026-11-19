@@ -190,10 +190,10 @@ contract.
 
 Transitive **APM** packages flow through automatically. Transitive
 **MCP servers** are gated: if a deep dependency declares a self-defined
-MCP server, a custom registry, or a configuration overlay, install skips
-it with a warning asking you to re-declare it in your top-level
-`apm.yml`. Use `--trust-transitive-mcp` to skip this in trusted
-environments. See
+MCP server, a custom registry, or a configuration overlay, install parks
+it with a warning. Re-declare it in your top-level `apm.yml`, or pin it with
+[`apm approve <pkg>`](../../reference/cli/approve/) and commit `apm.yml`.
+`--trust-transitive-mcp` deploys it for one run only. See
 [Drift and secure-by-default](../drift-and-secure-by-default/) for
 the rationale.
 

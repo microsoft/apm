@@ -144,10 +144,9 @@ for the canonical per-target and required-vs-optional rules.
 A self-defined MCP server (`registry: false`) declared by your package
 is trusted only when your package is a **direct** dependency of the
 consumer. If your package is pulled in transitively, APM warns and
-**skips** the MCP entry unless the consumer passes
-`--trust-transitive-mcp`. Source:
-`src/apm_cli/integration/mcp_integrator_install.py` and
-`src/apm_cli/integration/mcp_integrator.py`.
+**skips** the MCP entry unless the consumer pins it with `apm approve`
+(or passes `--trust-transitive-mcp` for one run). Source:
+`src/apm_cli/security/trust.py`.
 
 Implications for producers:
 
@@ -155,8 +154,10 @@ Implications for producers:
   without a trust prompt only as plain references to the consumer's
   registry. A transitive entry that sets its own `registry:` URL or any
   `env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys is
-  skipped like a self-defined server unless the consumer passes
-  `--trust-transitive-mcp`.
+  skipped like a self-defined server until the consumer approves it.
+- A consumer's approval pins your server's exact definition. Any change to
+  it (command, args, env, URL, headers) parks it again until they
+  re-approve.
 - Self-defined `stdio` and remote servers should be reserved for
   things the consumer would expect from a direct dependency.
 - Document any self-defined MCP server in your README so a transitive

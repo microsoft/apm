@@ -50,17 +50,24 @@ def prepare_mcp_integration(
     executable_context: tuple[dict | None, bool] = (None, False),
     no_policy: bool = False,
 ) -> PreparedMcpIntegration:
-    """Collect and filter once, without native writes or ownership adoption."""
+    """Collect and admit once, without native writes or ownership adoption.
+
+    Every dependency-declared server is admitted by the security/trust.py
+    owner inside ``CurrentMcpConfigView.select``; parked servers carry their
+    omission evidence on the same view.
+    """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
-    from apm_cli.security.executables import project_mcp_executables_gate
+    from apm_cli.security.trust import McpAdmission
 
-    gate = project_mcp_executables_gate(
-        project_root or apm_package.package_path or Path.cwd(),
-        apm_package,
-        executable_context=executable_context,
+    project = project_root or apm_package.package_path or Path.cwd()
+    allow_map, _resolved = executable_context
+    admission = McpAdmission.for_project(
+        project,
+        one_off=trust_transitive_mcp,
         no_policy=no_policy,
         logger=logger,
+        trust_context=getattr(allow_map, "trust_context", None),
     )
     current_view = None
     if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
@@ -70,9 +77,8 @@ def prepare_mcp_integration(
             apm_package,
             lockfile,
             apm_modules_path,
-            approve=gate,
+            admission=admission,
             recorded=None,
-            trust_transitive_self_defined=trust_transitive_mcp,
             diagnostics=diagnostics,
             logger=logger,
             allow_pending=allow_pending,
@@ -84,13 +90,29 @@ def prepare_mcp_integration(
         transitive_count = max(0, len(current_view.dependencies) - root_count)
         if transitive_count:
             logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
-        approved = list(current_view.dependencies)
-    else:
-        approved = gate(mcp_deps)
+        mcp_deps = list(current_view.dependencies)
+        warn_one_off_trust(current_view.one_off_admitted, logger)
     return PreparedMcpIntegration(
-        approved,
+        mcp_deps,
         current_view if should_install else None,
         current_view,
+    )
+
+
+def warn_one_off_trust(one_off: tuple[tuple[str, str], ...], logger: "InstallLogger") -> None:
+    """Say that --trust-transitive-mcp consent lasts for this run only."""
+    if not one_off:
+        return
+    noun = "server" if len(one_off) == 1 else "servers"
+    shown = "; ".join(f"{name}, {package}" for name, package in one_off[:3])
+    more = f"; and {len(one_off) - 3} more" if len(one_off) > 3 else ""
+    first_package = one_off[0][1]
+    logger.warning(
+        f"--trust-transitive-mcp deployed {len(one_off)} unapproved MCP {noun} for this run "
+        f"only ({shown}{more})\n"
+        "    It is not saved: the next install without the flag removes it. "
+        f"Keep it: apm approve {first_package}",
+        symbol="warning",
     )
 
 

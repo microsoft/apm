@@ -16,9 +16,9 @@ from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
     build_exec_trust_context,
+    effective_exec_map_for_project,
     load_user_executables,
     parse_project_executables,
-    read_bundle_allow_executables,
     save_user_executables,
 )
 
@@ -94,7 +94,7 @@ class TestReadBundleAllowExecutables:
         manifest = tmp_path / "apm.yml"
         manifest.write_text("executables:\n  allow: {}\n", encoding="utf-8")
 
-        assert read_bundle_allow_executables(manifest, logger=None) == {}
+        assert effective_exec_map_for_project(tmp_path, policy=None) == {}
 
     def test_canonical_allow_is_accepted_for_bundle_gate(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "config.json")
@@ -105,7 +105,7 @@ class TestReadBundleAllowExecutables:
             encoding="utf-8",
         )
 
-        assert read_bundle_allow_executables(manifest, logger=None) == {
+        assert effective_exec_map_for_project(tmp_path, policy=None) == {
             "test-plugin": {"canvas": True}
         }
 
@@ -120,9 +120,9 @@ class TestReadBundleAllowExecutables:
         manifest.write_text("executables:\n  allow: {}\n", encoding="utf-8")
         legacy.write_text("owner/repo:\n  hooks: true\n", encoding="utf-8")
 
-        result = read_bundle_allow_executables(
-            manifest,
-            logger=None,
+        result = effective_exec_map_for_project(
+            tmp_path,
+            policy=None,
             migrate_user_legacy=False,
         )
 

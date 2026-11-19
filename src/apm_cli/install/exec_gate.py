@@ -56,9 +56,20 @@ def check_executable_approval(
     if name_blind not in candidate_keys:
         candidate_keys.append(name_blind)
 
+    from apm_cli.security.trust import hooks_package_admissible
+
+    # A NATIVE install (the harness loads the plugin intact) is decided once,
+    # for every executable type, by the trust owner; a split install of the
+    # same package uses the per-type and per-item path below.
+    if native_install(package_info):
+        return _native_approval(
+            package_name, package_info, allow_executables, tuple(candidate_keys), pkg_key, ctx
+        )
+
+    # Pinned hook items admit per file at the source plan (hook_file_admission).
     hooks_ok = any(
         is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
-    )
+    ) or hooks_package_admissible(allow_executables, tuple(candidate_keys))
     bin_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_BIN) for k in candidate_keys)
     mcp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_MCP) for k in candidate_keys)
     canvas_ok = any(
@@ -78,37 +89,182 @@ def check_executable_approval(
     blocked = not all(approved.values())
     needs_status = ctx is not None and getattr(ctx, "exec_trust_ctx", None) is not None
     if ctx is not None and (blocked or needs_status):
+        from dataclasses import replace
+
         from apm_cli.security.executables import scan_package_executables
 
         _install = Path(package_info.install_path)
-        _decl = scan_package_executables(
-            _install,
-            package_name,
-            "",
-            approval_identity=pkg_key,
+        _decl = replace(
+            scan_package_executables(
+                _install,
+                package_name,
+                "",
+                approval_identity=pkg_key,
+            ),
+            install_path=str(_install),
         )
-        unapproved = [t for t in _decl.exec_types if not approved[t]]
+        from apm_cli.security.trust import pinned_exec_status
+
+        pinned_status = pinned_exec_status(
+            getattr(allow_executables, "trust_context", None),
+            tuple(candidate_keys),
+            _install,
+            _decl.exec_types,
+        )
+        unapproved = [t for t in _decl.exec_types if t not in pinned_status and not approved[t]]
         denied: frozenset[str] = frozenset()
-        from apm_cli.security.executables import ExecTrustContext, denied_exec_types
+        from apm_cli.security.executables import TRUST_GATED, ExecTrustContext, denied_exec_types
 
         if unapproved and isinstance(ctx.exec_trust_ctx, ExecTrustContext):
             denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
             if denied:
                 ctx.package_denied_exec_types[package_name] = denied
-        # Only a declared type that stays unapproved, and is not hard-denied
-        # (approving cannot lift a deny), parks the package for approval.
-        if any(t not in denied for t in unapproved):
+        # Only a declared type that stays unapproved and is not hard-denied
+        # (approving cannot lift a deny), or a pinned item awaiting
+        # re-approval, parks the package for approval.
+        if any(t not in denied for t in unapproved) or any(
+            status == TRUST_GATED for status in pinned_status.values()
+        ):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
-            from apm_cli.security.executables import exec_status_for_declaration
+            from apm_cli.security.trust import package_exec_status
 
-            status = exec_status_for_declaration(
-                ctx.exec_trust_ctx, candidate_keys, _decl.exec_types
+            status = package_exec_status(
+                ctx.exec_trust_ctx, tuple(candidate_keys), _install, _decl.exec_types
             )
             if status is not None:
                 ctx.package_exec_status[package_name] = status
 
     return hooks_ok, bin_ok, mcp_ok, canvas_ok, lsp_ok
+
+
+def _native_approval(
+    package_name: str,
+    package_info: Any,
+    allow_executables: Any,
+    candidate_keys: tuple[str, ...],
+    pkg_key: str,
+    ctx: InstallContext | None,
+) -> tuple[bool, bool, bool, bool, bool]:
+    """One trust-owner verdict for a native install's hooks, bin, MCP, canvas and LSP."""
+    from dataclasses import replace
+
+    from apm_cli.security.executables import (
+        TRUST_DENIED,
+        TRUST_DEPLOYED,
+        TRUST_GATED,
+        scan_package_executables,
+    )
+    from apm_cli.security.trust import REASON_DENIED, admit_native_plugin
+
+    install = Path(package_info.install_path)
+    verdict = admit_native_plugin(
+        allow_executables,
+        candidate_keys,
+        install,
+        transitive=_is_transitive(package_info, ctx),
+        extra_types=native_declared_types(package_info),
+    )
+    if ctx is not None:
+        if not verdict.allowed:
+            ctx.blocked_executables.append(
+                replace(
+                    scan_package_executables(install, package_name, "", approval_identity=pkg_key),
+                    install_path=str(install),
+                )
+            )
+        if getattr(ctx, "exec_trust_ctx", None) is not None:
+            ctx.package_exec_status[package_name] = (
+                TRUST_DEPLOYED
+                if verdict.allowed
+                else TRUST_DENIED
+                if verdict.reason == REASON_DENIED
+                else TRUST_GATED
+            )
+    return (verdict.allowed,) * 5
+
+
+def _is_transitive(package_info: Any, ctx: InstallContext | None) -> bool:
+    """Whether the resolved graph places this package below a direct dependency."""
+    dep_ref = getattr(package_info, "dependency_ref", None)
+    graph = getattr(ctx, "dependency_graph", None)
+    tree = getattr(graph, "dependency_tree", None)
+    if dep_ref is None or tree is None:
+        return False
+    depth = getattr(tree.get_node(dep_ref.get_unique_key()), "depth", 1)
+    return isinstance(depth, int) and depth > 1
+
+
+def native_declared_types(package_info: Any) -> tuple[str, ...]:
+    """Exec types a native plugin's IR or manifest declares beyond its files."""
+    from apm_cli.install.native_plugin_admission import agent_plugin_exec_types
+    from apm_cli.security.executables import EXEC_TYPE_HOOKS, EXEC_TYPE_MCP
+
+    types = list(agent_plugin_exec_types(package_info))
+    manifest = getattr(getattr(package_info, "package", None), "codex_plugin", None)
+    if getattr(manifest, "has_mcp", False):
+        types.append(EXEC_TYPE_MCP)
+    if getattr(manifest, "has_hooks", False):
+        types.append(EXEC_TYPE_HOOKS)
+    return tuple(dict.fromkeys(types))
+
+
+def native_install(package_info: Any) -> bool:
+    """Whether install loads this package intact as a native plugin.
+
+    The same predicates the native paths use: an admitted Copilot Agent
+    Plugin, or a Codex compatibility bundle (which never splits).
+    """
+    from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+
+    package = getattr(package_info, "package", None)
+    if isinstance(getattr(package, "codex_plugin", None), CodexCompatibilityPlugin):
+        return True
+    return admits_native_plugin(package_info)
+
+
+def plugin_admission(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+    *,
+    ctx: InstallContext | None = None,
+):
+    """The trust owner's verdict for a native install, else ``None``."""
+    if package_name == "_local" or allow_executables is None:
+        return None
+    if not native_install(package_info):
+        return None
+    from apm_cli.security.trust import admit_native_plugin
+
+    pkg_key = resolve_package_key(package_info, package_name)
+    keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
+    return admit_native_plugin(
+        allow_executables,
+        keys,
+        Path(package_info.install_path),
+        transitive=_is_transitive(package_info, ctx),
+        extra_types=native_declared_types(package_info),
+    )
+
+
+def hook_file_admission(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+):
+    """Return the per-hook-file admission predicate for pinned hook grants.
+
+    ``None`` means every hook file follows the package-level decision.
+    """
+    if package_name == "_local" or allow_executables is None:
+        return None
+    from apm_cli.security.trust import hook_file_filter
+
+    pkg_key = resolve_package_key(package_info, package_name)
+    keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
+    return hook_file_filter(allow_executables, keys, Path(package_info.install_path))
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:

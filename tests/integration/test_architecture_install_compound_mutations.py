@@ -759,11 +759,11 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
             "        prepared_replay.modules_root\n"
             "        if prepared_replay is not None\n"
             "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
+            "        # Consent is re-evaluated from apm.yml and org policy, never from the\n",
             "        prepared_replay.project_root\n"
             "        if prepared_replay is not None\n"
             "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
+            "        # Consent is re-evaluated from apm.yml and org policy, never from the\n",
         ),
     ),
     CompoundMutation(

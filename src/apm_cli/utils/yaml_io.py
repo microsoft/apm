@@ -417,6 +417,8 @@ def _roundtrip_yaml() -> Any:
     rt.Constructor.add_multi_constructor("tag:yaml.org,2002:python/", reject_python_tag)
     rt.preserve_quotes = True
     rt.indent(mapping=2, sequence=4, offset=2)
+    # Never fold a long scalar: a pinned fingerprint must stay on its key's line.
+    rt.width = 4096
     return rt
 
 
