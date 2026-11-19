@@ -863,6 +863,44 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/commands/deps/cli.py",
+            "InstallService.catalog_freshness(update_refs=True, refresh=False)",
+            "nullcontext()",
+        ),
+        (
+            "src/apm_cli/commands/lock.py",
+            "InstallService.catalog_freshness(update_refs=update_refs, refresh=False)",
+            "nullcontext()",
+        ),
+        (
+            "src/apm_cli/commands/prune.py",
+            "def prune(",
+            "def _refresh_everything(apm_package):\n"
+            "    return _install_apm_dependencies(apm_package, update_refs=True)\n\n\n"
+            "def prune(",
+        ),
+    ],
+)
+def test_update_intent_runs_inside_the_catalog_freshness_envelope(
+    path: str, old: str, new: str
+) -> None:
+    """Every install entry caller revalidates marketplaces through one envelope (#3961)."""
+    rule_id = "marketplace-integrations-catalog-freshness"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.
