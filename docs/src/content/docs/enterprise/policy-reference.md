@@ -4,10 +4,6 @@ sidebar:
   order: 8
 ---
 
-:::caution[Experimental Feature]
-The `apm-policy.yml` schema is an early preview for testing and feedback. Fields, defaults, and inheritance semantics may change based on community input. Pin your policy to a specific APM version and monitor the [CHANGELOG](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for breaking changes.
-:::
-
 Complete reference for `apm-policy.yml` — the configuration file that defines organization-wide governance rules for APM packages.
 
 ## Schema overview

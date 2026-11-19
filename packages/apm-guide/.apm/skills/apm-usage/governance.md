@@ -1,9 +1,5 @@
 # Governance and Policy
 
-**Note:** The policy engine is experimental (early preview). Schema fields and
-defaults may change between releases. Pin your APM version and monitor the
-CHANGELOG when using policy features.
-
 ## Policy file location
 
 - **Org-level:** hosted in a repo, fetched via `--policy org` or `--policy URL`
