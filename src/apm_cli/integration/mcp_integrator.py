@@ -1159,6 +1159,7 @@ class MCPIntegrator:
         native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
         logger: CommandLogger | None = None,
         fail_on_write_error: bool = False,
+        stamp_version: bool = False,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -1177,6 +1178,9 @@ class MCPIntegrator:
                          with ``mcp_configs`` so the two never diverge (#2081).
                          ``None`` leaves the existing value untouched.
             logger: Optional command logger for actionable creation failures.
+            stamp_version: Record the running APM version, once this install
+                         translated the lock's pre-0.37 MCP claims (see
+                         ``lock_holds_untranslated_mcp_claims``).
             fail_on_write_error: Raise a required-integration error on any
                          persistence failure.
 
@@ -1235,8 +1239,12 @@ class MCPIntegrator:
                     for name, pkg in lockfile.mcp_config_provenance.items()
                     if name in lockfile.mcp_configs
                 }
-            if existing_lockfile is not None and lockfile.is_semantically_equivalent(
-                existing_lockfile
+            if stamp_version:
+                lockfile.apm_version = installed_apm_version()
+            if (
+                existing_lockfile is not None
+                and lockfile.apm_version == existing_lockfile.apm_version
+                and lockfile.is_semantically_equivalent(existing_lockfile)
             ):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return

@@ -337,6 +337,7 @@ def run_mcp_integration(  # noqa: PLR0913
         RetiredMcpClaims,
         heal_retired_project_mcp_destinations,
         healable_names,
+        lock_holds_untranslated_mcp_claims,
         report_retired_mcp_heal,
         restore_pending_retired_claims,
         split_mcp_claims,
@@ -416,6 +417,11 @@ def run_mcp_integration(  # noqa: PLR0913
         if should_install and old_mcp_target_servers and heal_basis is not None
         else RetiredMcpClaims({}, {})
     )
+    # The claims are translated once this install persists them (heal and
+    # receipts), so the lock may then record the running version.
+    translated = heal_basis is not None and lock_holds_untranslated_mcp_claims(
+        heal_basis.apm_version, heal_basis.mcp_target_servers
+    )
 
     def _heal_retired(
         declared: builtins.set, copilot_claims: builtins.set | None
@@ -475,24 +481,30 @@ def run_mcp_integration(  # noqa: PLR0913
             target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
         }
         conflict = None
+        from apm_cli.install.mcp.ownership import adoptable_root_mcp_entries
+
+        # A --frozen install may already have moved these declared servers to
+        # .mcp.json without recording it; their root entry is APM's write.
+        adoptable = retired_owned.moved_unrecorded & MCPIntegrator.get_server_names(mcp_deps)
         try:
-            mcp_count = MCPIntegrator.install(
-                mcp_deps,
-                runtime,
-                exclude,
-                verbose,
-                stored_mcp_configs=old_mcp_configs,
-                apm_config=mcp_apm_config,
-                project_root=project_root,
-                user_scope=user_scope,
-                explicit_target=explicit_target,
-                target_decision=target_decision,
-                fail_on_write_error=True,
-                diagnostics=diagnostics,
-                scope=scope,
-                managed_target_servers=managed_target_servers,
-                native_hashes=native_hashes,
-            )
+            with adoptable_root_mcp_entries(frozenset(adoptable)):
+                mcp_count = MCPIntegrator.install(
+                    mcp_deps,
+                    runtime,
+                    exclude,
+                    verbose,
+                    stored_mcp_configs=old_mcp_configs,
+                    apm_config=mcp_apm_config,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                    explicit_target=explicit_target,
+                    target_decision=target_decision,
+                    fail_on_write_error=True,
+                    diagnostics=diagnostics,
+                    scope=scope,
+                    managed_target_servers=managed_target_servers,
+                    native_hashes=native_hashes,
+                )
         except MCPNativeConflictError as exc:
             if not exc.wrote_connections:
                 raise
@@ -600,6 +612,7 @@ def run_mcp_integration(  # noqa: PLR0913
             native_hashes=native_hashes,
             logger=logger,
             fail_on_write_error=True,
+            stamp_version=translated,
         )
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
@@ -638,6 +651,7 @@ def run_mcp_integration(  # noqa: PLR0913
                 mcp_config_provenance={},
                 logger=logger,
                 fail_on_write_error=True,
+                stamp_version=translated,
             )
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install and old_mcp_servers:

@@ -26,7 +26,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +98,20 @@ def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
     except InvalidVersion:
         return False
     return tuple(release[:2]) < _FIRST_ROOT_MCP_JSON_RELEASE
+
+
+def lock_holds_untranslated_mcp_claims(
+    apm_version: str | None, target_servers: Mapping[str, Any]
+) -> bool:
+    """Whether a lock still records ``copilot``/``vscode`` claims in their pre-0.37 meaning.
+
+    Its ``apm_version`` is the only record of that meaning, so a writer that
+    carries these claims forward keeps it; the MCP phase stamps the running
+    version once :func:`split_mcp_claims` has translated them.
+    """
+    return lock_predates_root_mcp_json(apm_version) and any(
+        target_servers.get(runtime) for runtime in ("copilot", "vscode")
+    )
 
 
 @dataclass
@@ -288,6 +302,9 @@ class RetiredMcpClaims:
 
     names: dict[str, set[str]]
     hashes: dict[str, dict[str, str]]
+    # Names a ``--frozen`` install already moved: no retired file holds them,
+    # so their root entry may be APM's own unrecorded write.
+    moved_unrecorded: set[str] = field(default_factory=set)
 
 
 def split_mcp_claims(
@@ -350,10 +367,14 @@ def split_mcp_claims(
         copilot_names - kept - _settled_in_root_mcp_json(live, project_root, stored_configs)
     )
     moved = set(kept)
+    moved_unrecorded: set[str] = set()
     if lock_predates_root_mcp_json(apm_version):
         names["copilot"] |= candidates
         hashes["copilot"].update({name: live[name] for name in candidates if name in live})
         moved |= candidates
+        moved_unrecorded = _absent_from_retired_files(
+            candidates | vscode, project_root=project_root, stored_configs=stored_configs
+        )
     if copilot and moved:
         target_servers["copilot"] = type(copilot)(name for name in copilot if name not in moved)
         for name in moved:
@@ -361,7 +382,33 @@ def split_mcp_claims(
     return RetiredMcpClaims(
         {runtime: claimed for runtime, claimed in names.items() if claimed},
         {runtime: proof for runtime, proof in hashes.items() if proof},
+        moved_unrecorded,
     )
+
+
+def _absent_from_retired_files(
+    names: set[str], *, project_root: Path, stored_configs: Mapping[str, Any]
+) -> set[str]:
+    """The *names* neither retired file holds (an unreadable file holds them all)."""
+    from apm_cli.utils.path_security import has_symlink_component
+
+    absent = set(names)
+    for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
+        path = project_root / destination.relative_path
+        if not absent or not (path.exists() or path.is_symlink()):
+            continue
+        found = (
+            None
+            if has_symlink_component(project_root, path)
+            else _read_retired(destination, project_root)
+        )
+        if found is None:
+            return set()
+        servers = found[3]
+        absent = {
+            name for name in absent if _retired_key(name, stored_configs.get(name), servers) is None
+        }
+    return absent
 
 
 def restore_pending_retired_claims(

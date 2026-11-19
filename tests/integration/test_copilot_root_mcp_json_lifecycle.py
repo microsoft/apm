@@ -552,3 +552,100 @@ def test_legacy_vscode_claim_never_adopts_an_identical_user_root_entry(
     project.install()
     assert project.read_json(".mcp.json")["mcpServers"] == {"echo": entry}
     assert not (project.root / ".vscode/mcp.json").exists()
+
+
+def _seed_pre_root_package_project(project: _Project) -> None:
+    """A pre-0.37 project whose next install also rewrites the package lock."""
+    dep = project.root / "dep"
+    (dep / ".apm/instructions").mkdir(parents=True)
+    dump_yaml({"name": "dep", "version": "1.0.0"}, dep / "apm.yml")
+    (dep / ".apm/instructions/dep.instructions.md").write_text(
+        "---\napplyTo: '**'\n---\nDep guidance.\n", encoding="utf-8"
+    )
+    project.manifest(targets=["copilot"], dependencies={"apm": [{"path": "./dep"}], "mcp": [_ECHO]})
+    legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
+    project.write_json(".github/mcp.json", {"mcpServers": {"echo": legacy}})
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.35.0",
+            "dependencies": [],
+            "mcp_servers": ["echo"],
+            "mcp_configs": {"echo": _ECHO},
+            "mcp_target_servers": {"copilot": ["echo"]},
+        },
+        project.root / "apm.lock.yaml",
+    )
+
+
+@pytest.mark.parametrize("first", ["only-apm", "mcp-conflict"])
+def test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending(
+    tmp_path: Path, apm_binary_path: Path, first: str
+) -> None:
+    """The package phase rewrites the lock; the MCP phase alone may restamp it."""
+    project = _Project(tmp_path, apm_binary_path)
+    _seed_pre_root_package_project(project)
+    if first == "only-apm":
+        project.install("--only", "apm")
+    else:
+        project.write_json(".mcp.json", {"mcpServers": {"echo": _USER_ROOT}})
+        failed = project.apm("install", "--no-policy")
+        assert failed.returncode != 0, failed.stdout + failed.stderr
+        (project.root / ".mcp.json").unlink()
+    lock = project.lock()
+    assert lock["dependencies"], lock
+    # A restamped version would read the 0.36 claim as .mcp.json ownership.
+    assert lock["apm_version"] == "0.35.0"
+    assert lock["mcp_target_servers"] == {"copilot": ["echo"]}
+
+    output = _flat(project.install())
+
+    assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in output
+    assert project.read_json(".github/mcp.json") == {"mcpServers": {}}
+    assert project.lock()["apm_version"] != "0.35.0"
+
+
+@pytest.mark.parametrize("runtime", ["copilot", "vscode"])
+def test_frozen_upgrade_keeps_the_root_entry_apm_wrote(
+    tmp_path: Path, apm_binary_path: Path, runtime: str
+) -> None:
+    """A --frozen heal cannot record its .mcp.json write; the next install adopts it."""
+    project = _Project(tmp_path, apm_binary_path)
+    project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
+    if runtime == "copilot":
+        legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
+        project.write_json(".github/mcp.json", {"mcpServers": {"echo": legacy}})
+    else:
+        entry = {"type": "stdio", "command": "echo", "args": []}
+        project.write_json(".vscode/mcp.json", {"servers": {"echo": entry}, "inputs": []})
+    _seed_036_lock(project, [_ECHO], {runtime: ["echo"]})
+    project.install("--frozen")
+    assert "echo" in project.read_json(".mcp.json")["mcpServers"]
+
+    project.install()
+    assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+
+    project.manifest(targets=["copilot"], dependencies={"mcp": [{**_ECHO, "args": ["hi"]}]})
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"]["echo"]["args"] == ["hi"]
+
+    project.manifest(targets=["copilot"])
+    project.install()
+    assert project.read_json(".mcp.json")["mcpServers"] == {}
+
+
+def test_moved_claim_never_adopts_a_differing_or_undeclared_root_entry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With no retired entry left, only an entry equal to the requested render is APM's."""
+    project = _Project(tmp_path, apm_binary_path)
+    servers = [_ECHO, {**_ECHO, "name": "gone"}]
+    rendered = {"type": "stdio", "command": "echo", "args": []}
+    project.write_json(".mcp.json", {"mcpServers": {"echo": _USER_ROOT, "gone": rendered}})
+    project.manifest(targets=["copilot"], dependencies={"mcp": [_ECHO]})
+    _seed_036_lock(project, servers, {"copilot": ["echo", "gone"]})
+
+    failed = project.apm("install", "--no-policy")
+
+    assert failed.returncode != 0, failed.stdout + failed.stderr
+    assert project.read_json(".mcp.json")["mcpServers"] == {"echo": _USER_ROOT, "gone": rendered}

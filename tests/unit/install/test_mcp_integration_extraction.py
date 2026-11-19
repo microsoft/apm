@@ -107,6 +107,7 @@ class TestRunMcpIntegrationInstallBranch:
             native_hashes={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -365,6 +366,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             mcp_config_provenance={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
 
     @patch(_PATCH_TARGET)

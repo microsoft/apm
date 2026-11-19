@@ -54,6 +54,28 @@ def is_frozen_unrecorded_mcp_pair(name: str, runtime: str) -> bool:
     return (name, runtime) in _frozen_unrecorded_pairs.get()
 
 
+_adoptable_root_names: ContextVar[frozenset[str]] = ContextVar(
+    "apm_adoptable_root_mcp_names", default=frozenset()
+)
+
+
+@contextmanager
+def adoptable_root_mcp_entries(names: frozenset[str]) -> Iterator[None]:
+    """Let one install adopt the root ``.mcp.json`` entries of *names* for ``copilot``.
+
+    For a pre-0.37 lock's declared claims that a ``--frozen`` install already
+    moved (no retired file holds them, see
+    :class:`~apm_cli.install.mcp.retired_destinations.RetiredMcpClaims`), the
+    lock could not record that write. An entry equal to the requested render
+    is that write; any other entry stays a conflict.
+    """
+    token = _adoptable_root_names.set(frozenset(names))
+    try:
+        yield
+    finally:
+        _adoptable_root_names.reset(token)
+
+
 def native_mcp_entry_present(
     runtime: str,
     name: str,
@@ -327,9 +349,14 @@ def compare_native_mcp_connection(
             else client.matches_managed_server_config(requested_native, requested)
         )
         if matches_request:
+            adoptable = (
+                not managed
+                and client.target_name == "copilot"
+                and name in _adoptable_root_names.get()
+            )
             return (
                 NativeMcpConnectionState.MATCHING_MANAGED
-                if matches_baseline
+                if matches_baseline or adoptable
                 else NativeMcpConnectionState.MATCHING_FOREIGN
             )
     if not matches_baseline:
