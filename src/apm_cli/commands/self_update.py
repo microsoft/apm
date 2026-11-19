@@ -34,6 +34,7 @@ _INSTALL_SCRIPT_REF = "main"
 _ENV_SELF_UPDATE_CHANNEL = "APM_SELF_UPDATE_CHANNEL"
 _ENV_INSTALL_DIR = "APM_INSTALL_DIR"
 _ENV_VERSION = "VERSION"
+_ENV_PS_MODULE_PATH = "PSMODULEPATH"
 
 
 @dataclass(frozen=True)
@@ -196,7 +197,13 @@ def _build_self_update_installer_env(
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
     env[_ENV_VERSION] = release.tag
-    if not _is_windows_platform():
+    if _is_windows_platform():
+        # A PowerShell 7 parent leaks its module path into Windows PowerShell
+        # through apm.exe, loading incompatible built-in modules (#3926). Without
+        # PSModulePath, each host rebuilds its own default module path.
+        for key in [key for key in env if key.upper() == _ENV_PS_MODULE_PATH]:
+            del env[key]
+    else:
         # Pass identity, not a second destination policy: install.sh owns routing.
         env["APM_SELF_UPDATE_SOURCE"] = os.path.abspath(
             sys.executable if getattr(sys, "frozen", False) else sys.argv[0]

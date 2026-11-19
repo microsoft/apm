@@ -11,7 +11,9 @@ apm.lock.yaml and the locked sources do:
   the new version. A hand-edited committed file still fails closed.
 * Claude plugin ``${CLAUDE_PLUGIN_ROOT}`` MCP/LSP state recorded portably
   (#3825): a teammate's clone at another path replays ``apm install
-  --frozen`` and ``apm audit --ci`` without rewriting committed files.
+  --frozen`` and ``apm audit --ci`` without rewriting committed files. A
+  conflict on such an entry suggests the path APM writes, not an apm.yml
+  environment reference (#3927).
 """
 
 from __future__ import annotations
@@ -320,6 +322,36 @@ def test_plugin_root_mcp_and_lsp_replay_frozen_in_a_moved_clone(
 
     world.apm(moved, "install", "--no-policy")
     assert tree_bytes(moved, exclude=_COMMITTED) == committed
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+def test_plugin_root_conflict_hint_restores_the_value_apm_writes(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    # #3927: APM's own ${CLAUDE_PROJECT_DIR:-.} path is not an apm.yml env reference.
+    world = CornerWorld.create(tmp_path, apm_binary_path)
+    world.env = {**world.env, "COLUMNS": "400"}
+    _claude_plugin(world.isolated.work_root / "local-synth", "loco")
+    project = world.project("hint", targets=(target,), deps=({"path": "../local-synth"},))
+    (project / ".claude").mkdir()
+    world.apm(project, "install", "--no-policy")
+
+    written = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/local-synth/scripts/server.js"
+    native = project / ".mcp.json"
+    assert _servers(project, ".mcp.json")["loco-db"]["args"] == [written]
+    native.write_text(
+        native.read_text(encoding="utf-8").replace(written, "/somewhere/else/server.js"),
+        encoding="utf-8",
+    )
+    edited = native.read_bytes()
+
+    text = output(world.apm(project, "install", "--no-policy", expect=1))
+    assert f"MCP server 'loco-db' conflicts with the existing {target} connection" in text
+    assert f"(args[0]: {written})" in text
+    assert "environment references" not in text
+    assert "${CLAUDE_PROJECT_DIR}" not in text
+    assert "rotate" not in text
+    assert native.read_bytes() == edited
 
 
 _NATIVE_REFERENCES = {

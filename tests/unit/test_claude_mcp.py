@@ -588,6 +588,72 @@ class TestClaudeLegacyEntries(unittest.TestCase):
 
         self.assertEqual(snapshot, native)
 
+    def test_conflict_guidance_restores_plugin_root_path_without_rotation(self):
+        # #3927: the adapter's own ${CLAUDE_PROJECT_DIR:-.} render is a path.
+        written = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/scripts/server.js"
+        flag = "--config=${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/c.json"
+        expected = {"type": "stdio", "command": "node", "args": [written, flag]}
+        native = dict(expected, args=["/elsewhere/apm_modules/_local/p/scripts/server.js", "-v"])
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn("Fields args[0], args[1] hold values where APM writes a package", guidance)
+        self.assertIn(f"(args[0]: {written}; args[1]: {flag})", guidance)
+        self.assertNotIn("environment references", guidance)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
+        self.assertNotIn("rotate", guidance)
+        self.assertNotIn("/elsewhere", guidance)
+
+    def test_conflict_guidance_keeps_env_hint_beside_plugin_root_path(self):
+        root = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p"
+        expected = {
+            "type": "stdio",
+            "command": "node",
+            "args": [f"{root}/server.js", f"--db={root}/data/${{DB_NAME}}"],
+            "env": {"TOKEN": "${TOKEN}"},
+        }
+        native = dict(
+            expected, args=["/x/server.js", "--db=/x/data/prod"], env={"TOKEN": "leaked-sentinel"}
+        )
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn("Fields args[1], env.TOKEN hold values", guidance)
+        self.assertIn("(args[1]: ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance)
+        self.assertIn(
+            f"(args[0]: {root}/server.js; args[1]: a package path under ${{CLAUDE_PROJECT_DIR:-.}})",
+            guidance,
+        )
+        self.assertIn("rotate those credentials", guidance)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
+        self.assertNotIn("leaked-sentinel", guidance)
+
+    def test_conflict_guidance_names_unprintable_plugin_root_paths_only(self):
+        root = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local"
+        expected = {
+            "type": "stdio",
+            "command": "node",
+            "args": [
+                f"{root}/p/server.js?token=literal-sentinel",
+                f"{root}/m\u00fcnchen/server.js",
+                f"--url=https://u:prefix-sentinel@h/{root}/p/c.json",
+            ],
+        }
+        native = dict(expected, args=["/x/server.js", "/y/server.js", "--url=/z"])
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn(
+            "(args[0]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
+            "args[1]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
+            "args[2]: a package path under ${CLAUDE_PROJECT_DIR:-.})",
+            guidance,
+        )
+        self.assertNotIn("literal-sentinel", guidance)
+        self.assertNotIn("prefix-sentinel", guidance)
+        self.assertNotIn("rotate", guidance)
+        self.assertTrue(guidance.isascii())
+
     def test_conflict_guidance_is_silent_without_expanded_fields(self):
         self.adapter.update_config({"legacy": dict(_LEGACY_EXPECTED, command="other")})
         self.assertIsNone(self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED))
