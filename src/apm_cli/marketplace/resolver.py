@@ -58,6 +58,7 @@ _MARKETPLACE_RE = re.compile(r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$")
 # Characters that signal a semver range rather than a raw git ref
 _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
 _IMPLICIT_MARKETPLACE_REFS = frozenset({"main", "HEAD"})
+_SCP_LOCATOR_RE = re.compile(r"^[^@/:]+@([^:/]+):")
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ class CrossRepoMisconfigRisk:
     marketplace_host: str
     bare_repo_field: str
     suggested_qualified_repo: str
+    locator_field: str = "repo"
 
 
 @dataclass
@@ -325,8 +327,8 @@ def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
     return first_segment.lower() != h.lower()
 
 
-def _dict_source_locator(source: dict) -> str:
-    """Return the repository locator a dict source resolves from, or ``""``.
+def _dict_source_locator(source: dict) -> tuple[str, str]:
+    """Return ``(field, locator)`` a dict source resolves from, or ``("", "")``.
 
     Mirrors the field fallbacks of :func:`_resolve_github_source`,
     :func:`_resolve_git_subdir_source` and :func:`_resolve_url_source`.
@@ -339,12 +341,12 @@ def _dict_source_locator(source: dict) -> str:
     elif source_type == "url":
         keys = ("url",)
     else:
-        return ""
+        return "", ""
     for key in keys:
         value = source.get(key)
         if isinstance(value, str) and value.strip():
-            return value
-    return ""
+            return key, value
+    return "", ""
 
 
 def _compute_cross_repo_misconfig_risk(
@@ -378,7 +380,8 @@ def _compute_cross_repo_misconfig_risk(
         return None
     if not _needs_canonical_host_prefix(canonical, source.host):
         return None
-    bare = _dict_source_locator(plugin.source).strip().lstrip("/")
+    locator_field, locator = _dict_source_locator(plugin.source)
+    bare = locator.strip().lstrip("/")
     if "/" not in bare:
         return None
     # #1326: an already-host-qualified `repo:` field declares explicit intent
@@ -402,9 +405,9 @@ def _compute_cross_repo_misconfig_risk(
     bare_lower = bare.lower()
     if bare_lower.startswith(("https://", "http://", "ssh://")):
         explicit_host = (urlparse(bare).hostname or "").strip()
-    elif bare.startswith("git@") and ":" in bare:
-        # SCP shorthand: ``git@host:owner/repo``
-        explicit_host = bare[4:].split(":", 1)[0].strip()
+    elif scp := _SCP_LOCATOR_RE.match(bare):
+        # SCP shorthand with any user: ``git@host:owner/repo``
+        explicit_host = scp.group(1).strip()
     else:
         explicit_host = bare.split("/", 1)[0]
     # ``is_supported_git_host`` accepts any valid FQDN, not an allowlist.
@@ -419,6 +422,7 @@ def _compute_cross_repo_misconfig_risk(
         marketplace_host=source.host,
         bare_repo_field=bare,
         suggested_qualified_repo=f"{source.host}/{bare}",
+        locator_field=locator_field,
     )
 
 

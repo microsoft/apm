@@ -1,13 +1,14 @@
 """Real-CLI #1326 dependency-confusion refusal on every marketplace install path (#3913).
 
 An enterprise (``*.ghe.com``) marketplace, registered over SSH and served by a
-local Git fixture, lists plugins whose dict sources (``type: github`` and
-``type: git-subdir``, #3937) have a bare cross-repo ``repo: acme/tools``. The
-bare form falls back to public ``github.com``, where the test stages a
-repository under that exact name. Every path that turns the entry into a
-dependency -- ``apm install NAME@MARKETPLACE``, an ``apm.yml`` entry (with or
-without a version range), a transitive declaration and ``apm update`` -- must
-refuse it before any write or package fetch. A host-qualified
+local Git fixture, lists plugins whose dict sources (``type: github``,
+``type: git-subdir`` and ``type: url``, #3937) have a bare cross-repo
+``acme/tools`` locator. The bare form falls back to public ``github.com``,
+where the test stages a repository under that exact name. Every path that
+turns the entry into a dependency -- ``apm install NAME@MARKETPLACE``, an
+``apm.yml`` entry (with or without a version range), a transitive declaration
+and ``apm update`` -- must refuse it before any write or Git request to that
+repository (a ``GIT_TRACE`` log is the tripwire). A host-qualified
 ``repo: github.com/acme/tools`` entry and an in-marketplace ``git-subdir``
 entry still install.
 """
@@ -41,7 +42,7 @@ _BARE = "shared-tool"
 _QUALIFIED = "public-tool"
 _SUBDIR = "plugins/x"
 # Cross-repo plugin names by dict source type; bare and host-qualified pairs.
-_BARE_BY_TYPE = {"github": _BARE, "git-subdir": "shared-subdir-tool"}
+_BARE_BY_TYPE = {"github": _BARE, "git-subdir": "shared-subdir-tool", "url": "shared-url-tool"}
 _QUALIFIED_BY_TYPE = {"github": _QUALIFIED, "git-subdir": "public-subdir-tool"}
 _IN_MARKETPLACE = "internal-subdir-tool"
 _ATTACKER_REMOTE = "https://github.com/acme/tools"
@@ -57,6 +58,8 @@ class _World:
     runner: ApmLifecycleRunner
     repositories: LocalGitRepositoryFactory
     catalog: LocalGitRepository
+    package: LocalGitRepository
+    trace: Path
 
     def publish(self, bare_repo: str) -> None:
         subdir = {"type": "git-subdir", "subdir": _SUBDIR}
@@ -64,6 +67,7 @@ class _World:
             {"name": _BARE, "source": {"type": "github", "repo": bare_repo}},
             {"name": _QUALIFIED, "source": {"type": "github", "repo": "github.com/acme/tools"}},
             {"name": _BARE_BY_TYPE["git-subdir"], "source": {**subdir, "repo": "acme/tools"}},
+            {"name": _BARE_BY_TYPE["url"], "source": {"type": "url", "url": "acme/tools"}},
             {
                 "name": _QUALIFIED_BY_TYPE["git-subdir"],
                 "source": {**subdir, "repo": "github.com/acme/tools"},
@@ -96,6 +100,13 @@ class _World:
             cwd=cwd or self.root,
             env=self.env,
         )
+
+    def contacted_package(self) -> bool:
+        """True when any Git process logged in ``trace`` named the staged repository."""
+        if not self.trace.exists():
+            return False
+        log = self.trace.read_text(encoding="utf-8", errors="replace")
+        return _ATTACKER_REMOTE in log or str(self.package.origin.resolve()) in log
 
 
 def _with_ssh_rewrite(env: dict[str, str], repository: LocalGitRepository) -> dict[str, str]:
@@ -130,12 +141,16 @@ def _world(tmp_path: Path, binary: Path, *, bare_repo: str = "acme/tools") -> _W
     env = repositories.url_rewrite_subprocess_env_many(
         ((package, _ATTACKER_REMOTE), (catalog, _CATALOG_HTTPS))
     )
+    trace = isolated.work_root / "git-trace.log"
+    env["GIT_TRACE"] = str(trace)
     world = _World(
         root=isolated.work_root / "consumer",
         env=_with_ssh_rewrite(env, catalog),
         runner=ApmLifecycleRunner((str(binary),), timeout_seconds=120),
         repositories=repositories,
         catalog=catalog,
+        package=package,
+        trace=trace,
     )
     world.publish(bare_repo)
     world.root.mkdir(parents=True)
@@ -164,8 +179,18 @@ def _arrange(world: _World, path: str, plugin: str = _BARE) -> tuple[str, ...]:
     return ("install", *_FLAGS)
 
 
-@pytest.mark.parametrize("source_type", sorted(_BARE_BY_TYPE))
-@pytest.mark.parametrize("path", ["cli", "apm-yml", "apm-yml-range", "transitive", "update"])
+_PATHS = ("cli", "apm-yml", "apm-yml-range", "transitive", "update")
+
+
+@pytest.mark.parametrize(
+    ("path", "source_type"),
+    [
+        *((path, source_type) for path in _PATHS for source_type in ("git-subdir", "github")),
+        # ``type: url`` reaches the sentinel through a structured reference; the
+        # admission owner is shared, so one path proves it.
+        ("cli", "url"),
+    ],
+)
 def test_bare_cross_repo_marketplace_entry_is_refused_before_any_write(
     tmp_path: Path, apm_binary_path: Path, path: str, source_type: str
 ) -> None:
@@ -173,6 +198,7 @@ def test_bare_cross_repo_marketplace_entry_is_refused_before_any_write(
     world = _world(tmp_path, apm_binary_path)
     command = _arrange(world, path, _BARE_BY_TYPE[source_type])
     manifest_before = (world.root / "apm.yml").read_bytes()
+    world.trace.unlink(missing_ok=True)
 
     result = world.run(*command)
 
@@ -185,6 +211,7 @@ def test_bare_cross_repo_marketplace_entry_is_refused_before_any_write(
     assert not (world.root / "apm.lock.yaml").exists()
     assert not (world.root / "apm_modules" / "acme").exists()
     assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "a Git request reached the github.com lookalike"
 
 
 @pytest.mark.parametrize(
@@ -209,6 +236,8 @@ def test_host_qualified_or_in_marketplace_entry_still_installs(
     assert _REFUSAL not in output
     assert (world.root / "apm.lock.yaml").exists()
     assert list(world.root.rglob(f"{skill}/SKILL.md"))
+    # Positive control for the refusal test's tripwire: a real fetch is logged.
+    assert world.contacted_package() is (skill == "pwned")
 
 
 def test_apm_update_re_admits_an_entry_locked_before_its_catalog_turned_ambiguous(
