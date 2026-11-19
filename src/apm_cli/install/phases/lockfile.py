@@ -146,6 +146,9 @@ class LockfileBuilder:
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
+            # Intact native plugins deployed for their dependency (#3191); after
+            # content hashes, which decide whether an existing record carries over.
+            self._attach_native_plugins(lockfile)
             # Attach declared-license provenance captured at acquire time (U6)
             self._attach_declared_licenses(lockfile)
             # Attach verbatim licence copies carried at materialization (#3556)
@@ -380,6 +383,33 @@ class LockfileBuilder:
         for dep_key, status in statuses.items():
             if dep_key in lockfile.dependencies and status:
                 lockfile.dependencies[dep_key].exec_status = status
+
+    def _attach_native_plugins(self, lockfile: LockFile) -> None:
+        """Record each admitted native Claude plugin as its dependency's ownership.
+
+        A run whose targets exclude Claude did not evaluate Claude admission, so
+        an existing record is carried forward instead of retiring the plugin.
+        """
+        from apm_cli.native_plugins.record import NativePluginRecord
+
+        for dep_key, plugin in (getattr(self.ctx, "claude_native_plugins", None) or {}).items():
+            if dep_key in lockfile.dependencies:
+                lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
+                    plugin.name, plugin.bundle_hash, ("claude",)
+                )
+        existing = getattr(self.ctx, "existing_lockfile", None)
+        if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):
+            return
+        for dep_key, locked in lockfile.dependencies.items():
+            prior = existing.dependencies.get(dep_key)
+            if (
+                locked.native_plugin is None
+                and prior is not None
+                and prior.native_plugin is not None
+                and (prior.resolved_commit, prior.content_hash)
+                == (locked.resolved_commit, locked.content_hash)
+            ):
+                locked.native_plugin = prior.native_plugin
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

@@ -663,10 +663,10 @@ def test_refused_skill_baseline_never_reaches_native_claude_registration(
         ctx.skill_baseline_refused = True
         return planned
 
-    resync = MagicMock(side_effect=AssertionError("native Claude resync ran after a refusal"))
+    resync = MagicMock(side_effect=AssertionError("native Claude reconcile ran after a refusal"))
     monkeypatch.setattr(pipeline, "_run_phase", observed_phase)
     monkeypatch.setattr(integrate, "preflight_skill_materializations", refuse_baseline)
-    monkeypatch.setattr(claude_plugins, "resync_claude_plugins", resync)
+    monkeypatch.setattr(claude_plugins, "reconcile_claude_plugins", resync)
 
     result = pipeline.run_install_pipeline(
         fixture.package,

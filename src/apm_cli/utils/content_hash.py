@@ -2,7 +2,7 @@
 
 import hashlib
 import stat
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
@@ -101,15 +101,44 @@ def compute_native_bundle_hash(package_path: Path) -> str:
     This opt-in contract excludes only Git transport and the root APM pin.
     Existing package/lockfile fingerprints retain their historical semantics.
     """
+    return _native_digest(
+        package_path, lambda package_path: _package_files(package_path, native=True)
+    )
+
+
+def _native_digest(package_path: Path, list_files: Callable[[Path], list[Path]]) -> str:
     if package_path.is_symlink():
         raise PathTraversalError(f"Native bundle integrity refuses symlink: {package_path}")
     hasher = hashlib.sha256()
-    for relative in _package_files(package_path, native=True):
+    for relative in list_files(package_path):
         path = package_path / relative
         hasher.update(relative.as_posix().encode("utf-8") + b"\0")
         hasher.update(b"x" if path.stat().st_mode & stat.S_IXUSR else b"-")
         hasher.update(hashlib.sha256(path.read_bytes()).digest())
     return f"sha256:{hasher.hexdigest()}"
+
+
+# APM's own normalization output inside a materialized legacy plugin; never
+# part of the publisher's plugin root that a harness loads.
+_APM_NORMALIZATION_ROOTS = frozenset({"apm.yml", ".apm"})
+
+
+def native_plugin_files(plugin_root: Path) -> list[Path]:
+    """Return the publisher plugin files a harness loads from *plugin_root*.
+
+    These are the native bundle files minus APM's root ``apm.yml`` and ``.apm/``
+    normalization output (OpenAPM req-na-002: deploy only the plugin root).
+    """
+    return [
+        path
+        for path in _package_files(plugin_root, native=True)
+        if path.parts[0] not in _APM_NORMALIZATION_ROOTS
+    ]
+
+
+def compute_native_plugin_hash(plugin_root: Path) -> str:
+    """Digest of every plugin file's path, bytes and executable bit (req-na-002/005)."""
+    return _native_digest(plugin_root, native_plugin_files)
 
 
 def _canonical_hash_bytes(raw: bytes) -> bytes:

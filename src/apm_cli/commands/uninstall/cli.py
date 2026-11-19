@@ -5,7 +5,6 @@ import contextlib
 import sys
 import traceback
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import click
@@ -126,11 +125,9 @@ def _persist_uninstall_lockfile(
     return _LockPersistence(saved=saved, removal_pending=removal_pending)
 
 
-def _hold_native_registration(modules_dir, logger: CommandLogger) -> None:
+def _hold_native_registration(native_before, logger: CommandLogger) -> None:
     """Report that Claude ownership waits for a durable survivor lock."""
-    from ...claude_plugins.registrar import LEDGER_RELATIVE
-
-    if modules_dir is not None and (Path(modules_dir) / LEDGER_RELATIVE).exists():
+    if native_before:
         logger.warning(
             "Claude native plugin registrations were left unchanged because the lockfile "
             "update did not complete. Resolve the errors above, then run "
@@ -149,6 +146,7 @@ def _persist_lock_then_resync_native(
     deploy_root,
     modules_dir,
     scope,
+    native_before,
 ) -> None:
     """Persist survivors, converge native registrations, then drop an empty lock.
 
@@ -161,7 +159,7 @@ def _persist_lock_then_resync_native(
     if lock_changed and persist_allowed:
         saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
     if lock_changed and (saved is None or not saved.saved):
-        _hold_native_registration(modules_dir, logger)
+        _hold_native_registration(native_before, logger)
         return
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
@@ -169,6 +167,8 @@ def _persist_lock_then_resync_native(
         scope=scope,
         lockfile=lockfile,
         logger=logger,
+        native_before=native_before,
+        lockfile_path=lockfile_path,
     )
     if saved is not None and saved.removal_pending:
         lockfile_path.unlink(missing_ok=True)
@@ -685,6 +685,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             sys.exit(1)
         had_dev_section, prod_deps, dev_deps, current_deps = _prepare_dependency_sections(data)
         lockfile = LockFile.read(lockfile_path)
+        native_before = _native_ownership_before(lockfile, lockfile_path)
         packages_to_remove, packages_not_found = _validate_uninstall_packages(
             packages,
             current_deps,
@@ -1037,6 +1038,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             deploy_root=deploy_root,
             modules_dir=modules_dir,
             scope=scope,
+            native_before=native_before,
         )
 
         # Final summary
@@ -1112,24 +1114,49 @@ def _publish_native_registration(deploy_root, scope, manifest_path):
     return activate_native_registration(resolve_native_registration_capability(targets))
 
 
+@dataclass(frozen=True)
+class _NativeBefore:
+    """Claude native ownership and lock bytes before uninstall mutates the lock."""
+
+    ownership: dict
+    lock_bytes: bytes | None
+
+    def __bool__(self) -> bool:
+        return bool(self.ownership)
+
+
+def _native_ownership_before(lockfile, lockfile_path) -> _NativeBefore:
+    """Snapshot what a failed native reconcile must restore (req-na-004)."""
+    from ...claude_plugins.registrar import native_ownership
+
+    if lockfile is None:
+        return _NativeBefore({}, None)
+    return _NativeBefore(native_ownership(lockfile), lockfile_path.read_bytes())
+
+
 def _resync_native_registration_after_uninstall(
-    *, deploy_root, modules_dir, scope, lockfile, logger
+    *, deploy_root, modules_dir, scope, lockfile, logger, native_before=None, lockfile_path=None
 ) -> None:
     """Rebuild native plugin rows from surviving locked state.
 
     Claude removal errors remain fatal; Copilot settings refresh is advisory.
     """
     from ...claude_plugins.admission import ClaudeNativePluginError
-    from ...claude_plugins.registrar import resync_claude_plugins
+    from ...claude_plugins.registrar import reconcile_claude_plugins
 
     try:
-        resync_claude_plugins(
+        reconcile_claude_plugins(
             modules_dir=modules_dir,
             scope=scope,
+            previous=native_before.ownership if native_before is not None else None,
             lockfile=lockfile,
+            deploy_root=deploy_root,
             logger=logger,
         )
     except ClaudeNativePluginError as exc:
+        if native_before is not None and native_before.lock_bytes and lockfile_path is not None:
+            # One rollback unit: keep the removed plugins' ownership for the retry.
+            lockfile_path.write_bytes(native_before.lock_bytes)
         raise ClaudeNativePluginError(
             "Package removal may already be complete, but Claude registration did not converge. "
             f"{exc} Reconcile remaining declarations with 'apm install --global' and the "

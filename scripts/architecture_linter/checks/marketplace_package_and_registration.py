@@ -450,9 +450,15 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_COPILOT,
-            tuple(p for p in _src_python(provider) if not p.startswith(_COPILOT_PLUGINS_PREFIX)),
+            tuple(
+                p
+                for p in _src_python(provider)
+                if not p.startswith(_COPILOT_PLUGINS_PREFIX)
+                and p != "src/apm_cli/native_plugins/settings.py"
+            ),
             _SETTINGS_KEYS,
-            "Copilot marketplace/settings ownership keys must live only in copilot_plugins/",
+            "Native settings keys must live only in copilot_plugins/ or the shared "
+            "native_plugins/settings.py writer",
             exempt=False,
         )
     )
@@ -467,7 +473,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
     for path, symbol in (
-        (_CLAUDE_OWNER, "synchronize_claude_plugins"),
+        (_CLAUDE_OWNER, "reconcile_claude_plugins"),
         (_CLAUDE_OWNER, "verify_claude_native_cache"),
         ("src/apm_cli/claude_plugins/admission.py", "plan_native_claude_plugin"),
     ):
@@ -493,17 +499,54 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_CLAUDE,
             _CLAUDE_OWNER,
             (
-                '"defaultEnabled": False',
-                'client.run("plugin", "uninstall"',
-                'expected_enabled = live[plugin_id]["enabled"]',
-                "fingerprint_native_claude_source(root) != expected",
-                "_verify_locked_source_hash(locked, lockfile, modules_dir, root, key)",
-                "compute_local_package_hash(resolve_local_dep_dir(locked, lockfile, modules_dir.parent))",
-                "_locked_source_pin(locked)",
-                '_check_bundle_fingerprint(root, prior["bundle_hash"])',
-                '_check_bundle_fingerprint(modules_dir / entry["source"], entry["bundle_hash"])',
+                "None if previous is None else frozenset(prior_names),",
+                "following = native_ownership(lockfile) if lockfile is not None else {}",
+                "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+                "and prior.pin == own.pin",
+                "name not in prior_names\n            and existing.exists()",
+                "_migrate_legacy_registration(modules_dir, settings_path, logger)",
+                "write_declaration(",
             ),
-            "Claude registration must preserve native consent and remove through the native CLI",
+            "Claude declarations must derive ownership from the lockfile and verify approved bytes",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/native_plugins/settings.py",
+            (
+                "if enabled.get(key) is True:",
+                "if current is not None and current != declaration.marketplace_value:",
+                "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
+            ),
+            "Native settings writes must keep explicit user false and unowned marketplaces",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/install/phases/claude_plugins.py",
+            ("previous.write(lock_path)",),
+            "A failed Claude declaration must restore the previous lock (one rollback unit)",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            tuple(
+                p
+                for p in _src_python(provider)
+                if p.startswith(("src/apm_cli/claude_plugins/", "src/apm_cli/native_plugins/"))
+            ),
+            re.compile(r"^\s*(import subprocess|from subprocess import)|shutil\.which\("),
+            "Native Claude declaration never runs a vendor CLI",
+            exempt=False,
         )
     )
     findings.extend(
@@ -512,7 +555,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             inv,
             _RID_CLAUDE,
             "src/apm_cli/claude_plugins/admission.py",
-            ("return compute_native_bundle_hash(root)",),
+            ("return compute_native_plugin_hash(root)",),
             "Claude fingerprinting must consume the canonical complete native hash",
         )
     )

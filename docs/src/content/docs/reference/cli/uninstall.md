@@ -17,7 +17,7 @@ apm uninstall [OPTIONS] PACKAGES...
 
 `apm uninstall` removes selected packages and unused transitive dependencies.
 File cleanup uses the lockfile's `deployed_files` list, preserving hand-authored
-content. Global uninstalls also reconcile APM-owned Claude plugin registrations.
+content. Global uninstalls also remove the Claude plugin declarations APM made.
 
 ## Arguments
 
@@ -118,9 +118,9 @@ What gets removed, in order:
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
-8. For global uninstalls, reconcile APM-owned Claude plugin registrations after
-   lockfile processing: remove retired registrations, retain native plugin data,
-   and preserve surviving registrations and activation choices.
+8. For global uninstalls, after lockfile processing, remove the removed packages'
+   `~/.agents/plugins/<plugin>/` roots and their `enabledPlugins` keys. A key you
+   set to `false`, your own entries and a root you edited are kept.
 
 When uninstall rebuilds a surviving package's loose skills, it deploys only the
 skills that package selects with `skills:`, as `apm install` does. APM records
@@ -184,14 +184,11 @@ preserves the conflicting configuration, and tells you to repair the path or
 ownership conflict. Run `apm install` to reconcile project state, or
 `apm install --global` after a global uninstall.
 
-If Claude native reconciliation fails, uninstall exits nonzero; package and
-manifest removals may already have happened. The lockfile retains the surviving
-dependency set, including an empty set after the last removal, for retry.
-APM does not roll
-back Claude-owned metadata; it retains ownership intent for recovery. Repair
-the reported issue, then reconcile remaining declarations with
-`apm install --global --target claude` (Claude-only). For mixed targets, retain
-the full original `--target` list. Do not re-add removed package arguments. See
+If updating Claude's settings fails, uninstall exits nonzero; package and
+manifest removals may already have happened. APM restores the previous
+`apm.lock.yaml`, so it still records the plugins to remove. Repair the reported
+issue, then run `apm install --global` to finish. Do not re-add removed package
+arguments. See
 [native registration and runtime qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 A package declared more than once -- in both `dependencies` and

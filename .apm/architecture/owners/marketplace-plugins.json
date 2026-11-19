@@ -162,12 +162,14 @@
     },
     {
       "id": "claude-native-plugin-registration",
-      "decision": "Intact legacy Claude plugin admission, complete native fingerprint ownership and read-only verification, and native user marketplace lifecycle without automatic activation",
-      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (synchronize_claude_plugins, resync_claude_plugins, verify_claude_native_cache)",
+      "decision": "Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to ~/.agents/plugins, and settings-only declaration through the shared native settings writer without any vendor CLI",
+      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_claude_plugins, verify_claude_native_cache); native_plugins/ (record, layout, settings)",
       "selectors": [
         "src/apm_cli/claude_plugins/admission.py",
-        "src/apm_cli/claude_plugins/client.py",
-        "src/apm_cli/claude_plugins/registrar.py"
+        "src/apm_cli/claude_plugins/registrar.py",
+        "src/apm_cli/native_plugins/layout.py",
+        "src/apm_cli/native_plugins/record.py",
+        "src/apm_cli/native_plugins/settings.py"
       ],
       "guards": ["marketplace-integrations-claude-ownership"]
     },

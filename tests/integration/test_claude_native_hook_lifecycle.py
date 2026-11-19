@@ -1,4 +1,8 @@
-"""Installed APM lifecycle with metadata transport substituted, not native execution."""
+"""Installed APM lifecycle for settings-only native Claude plugins (#3191, #3181).
+
+Hooks run with a substituted host (CLAUDE_PLUGIN_ROOT set as Claude sets it);
+this is not a native Claude execution witness.
+"""
 
 from __future__ import annotations
 
@@ -7,52 +11,57 @@ import os
 import shutil
 import stat
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from apm_cli.claude_plugins.registrar import marketplace_name
 from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
-from tests.utils.claude_native_protocol import NATIVE_CLIENT_STUB
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 
-_FAILURE_STUB = r"""
-from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-_original_native_run = ClaudePluginCLI.run
-def _controlled_native_run(self, *args):
-    if len(args) > 1 and os.environ.get("APM_NATIVE_FAIL") == args[1]:
-        raise ClaudeNativePluginError("deliberate metadata transport failure")
-    return _original_native_run(self, *args)
-ClaudePluginCLI.run = _controlled_native_run
-"""
-
-
 _RUNTIME_ROOT_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/native_claude_hooks"
 _HOOK_EVENTS = ("SessionStart", "SubagentStart", "UserPromptSubmit")
 
 
-def _native_scenario(tmp_path: Path) -> tuple[IsolatedApmEnvironment, dict[str, str], Path]:
-    """Isolate HOME and substitute only the external Claude metadata transport."""
+@dataclass(frozen=True)
+class _Scenario:
+    isolated: IsolatedApmEnvironment
+    env: dict[str, str]
+    trap: Path
+
+    @property
+    def settings(self) -> Path:
+        return self.isolated.home / ".claude/settings.json"
+
+    @property
+    def plugins(self) -> Path:
+        return self.isolated.home / ".agents/plugins"
+
+    def declared(self) -> dict:
+        if not self.settings.exists():
+            return {}
+        return json.loads(self.settings.read_text(encoding="utf-8"))
+
+
+def _native_scenario(tmp_path: Path) -> _Scenario:
+    """Isolate HOME; a trap ``claude`` on PATH proves APM never runs it."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     env["CLAUDE_CONFIG_DIR"] = str(isolated.home / ".claude")
-    state_file = isolated.root / "native-state.json"
-    env["APM_NATIVE_TEST_STATE"] = str(state_file)
+    trap = isolated.root / "claude-was-run"
     executable_dir = isolated.root / "executables"
     executable_dir.mkdir()
     for name in ("claude", "claude.cmd"):
         executable = executable_dir / name
-        executable.write_text("exit 91\n", encoding="ascii")
+        executable.write_text(f"#!/bin/sh\ntouch '{trap}'\nexit 91\n", encoding="ascii")
         executable.chmod(0o755)
     env["PATH"] = str(executable_dir) + os.pathsep + env["PATH"]
-    guard = isolated.root / "network_guard/sitecustomize.py"
-    guard.write_text(
-        guard.read_text(encoding="utf-8") + NATIVE_CLIENT_STUB + _FAILURE_STUB, encoding="utf-8"
-    )
-    return isolated, env, state_file
+    return _Scenario(isolated, env, trap)
 
 
 def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
@@ -60,14 +69,14 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
 ) -> None:
     """#3191: hooks that join process.env.CLAUDE_PLUGIN_ROOT keep their bundle.
 
-    The command has no ./ path, so loose projection registered it without its
-    script. Two plugins must each register intact under a distinct root, with
-    no loose Claude hook registration, and removal must be owner-scoped.
+    Two plugins deploy intact under distinct roots, are declared and enabled
+    only through Claude settings, keep the user's explicit choices, and are
+    removed owner-scoped.
     """
-    isolated, env, state_file = _native_scenario(tmp_path)
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
     factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
     repository = factory.create("runtime-root-hooks")
-    sources: dict[str, Path] = {}
     for label in ("alpha", "beta"):
         source = repository.worktree / "plugins" / label
         shutil.copytree(_RUNTIME_ROOT_FIXTURE, source)
@@ -76,7 +85,6 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
         plugin_manifest["name"] = f"apm-hook-context-{label}"
         manifest_path.write_text(json.dumps(plugin_manifest), encoding="utf-8")
         (source / "resources/identity.txt").write_text(f"IDENTITY_{label}\n", encoding="ascii")
-        sources[label] = source
     revision = factory.commit(repository, message="Runtime plugin-root hook fixtures").sha
     dependency = "fixture/runtime-root-hooks"
     env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
@@ -87,11 +95,12 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
         "dependencies": {
             "apm": [
                 {"git": dependency, "ref": revision, "path": f"plugins/{label}"}
-                for label in sources
+                for label in ("alpha", "beta")
             ]
         },
         "allowExecutables": {
-            f"{dependency}/plugins/{label}#{revision}": {"hooks": True} for label in sources
+            f"{dependency}/plugins/{label}#{revision}": {"hooks": True}
+            for label in ("alpha", "beta")
         },
     }
     (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
@@ -103,53 +112,61 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
-    def registered() -> dict[str, Path]:
-        plugins = json.loads(state_file.read_text(encoding="utf-8"))["plugins"]
-        return {Path(p["readFromFolder"]).name: Path(p["readFromFolder"]) for p in plugins}
+    names = {label: f"apm-hook-context-{label}" for label in ("alpha", "beta")}
+    mkt = marketplace_name(isolated.config_root)
+    keys = {label: f"{name}@{mkt}" for label, name in names.items()}
+    mine = f"mine@{mkt}"
+    # A user's own settings and a same-namespace entry APM did not write survive.
+    scenario.settings.parent.mkdir(parents=True, exist_ok=True)
+    scenario.settings.write_text(
+        json.dumps({"theme": "dark", "enabledPlugins": {mine: True}}), encoding="utf-8"
+    )
 
     run("install", "--global", "--target", "claude", "--only", "apm")
-    roots = registered()
-    assert sorted(roots) == ["alpha", "beta"]
-    assert roots["alpha"] != roots["beta"]
-    plugins = json.loads(state_file.read_text(encoding="utf-8"))["plugins"]
-    assert all(plugin["enabled"] is False for plugin in plugins)
-    fixture_hooks = (_RUNTIME_ROOT_FIXTURE / "hooks/hooks.json").read_bytes()
+    declared = scenario.declared()
+    assert declared["theme"] == "dark"
+    assert declared["extraKnownMarketplaces"] == {
+        mkt: {"source": {"source": "directory", "path": str(scenario.plugins)}}
+    }
+    assert declared["enabledPlugins"] == {mine: True, **dict.fromkeys(keys.values(), True)}
+    catalog = json.loads((scenario.plugins / ".claude-plugin/marketplace.json").read_text())
+    assert catalog["name"] == mkt
+    assert sorted(entry["source"] for entry in catalog["plugins"]) == [
+        f"./{names['alpha']}",
+        f"./{names['beta']}",
+    ]
+    roots = {label: scenario.plugins / name for label, name in names.items()}
     for label, root in roots.items():
-        assert root.is_relative_to(isolated.config_root / "apm_modules")
-        assert (root / "hooks/hooks.json").read_bytes() == fixture_hooks
-        assert (root / "hooks/context.js").read_bytes() == (
-            _RUNTIME_ROOT_FIXTURE / "hooks/context.js"
+        assert (root / "hooks/hooks.json").read_bytes() == (
+            _RUNTIME_ROOT_FIXTURE / "hooks/hooks.json"
         ).read_bytes()
+        assert (root / "hooks/context.js").is_file()
         assert (root / "resources/identity.txt").read_text() == f"IDENTITY_{label}\n"
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    records = sorted(dep["native_plugin"]["root"] for dep in lock["dependencies"])
+    assert records == [f".agents/plugins/{names['alpha']}", f".agents/plugins/{names['beta']}"]
     claude_home = isolated.home / ".claude"
-    assert not (claude_home / "settings.json").exists()
     assert not (claude_home / "apm-hooks.json").exists()
     assert not (claude_home / "hooks").exists()
+    assert "hooks" not in declared
 
-    # A one-shot --target narrowing keeps declared Claude registrations and consent.
-    state = json.loads(state_file.read_text(encoding="utf-8"))
-    for plugin in state["plugins"]:
-        plugin["enabled"] = Path(plugin["readFromFolder"]).name == "alpha"
-    state_file.write_text(json.dumps(state), encoding="utf-8")
+    # The user's explicit disable survives reinstall and a one-shot --target narrowing.
+    declared["enabledPlugins"][keys["beta"]] = False
+    scenario.settings.write_text(json.dumps(declared), encoding="utf-8")
+    run("install", "--global", "--target", "claude", "--only", "apm")
     run("install", "--global", "--target", "codex", "--only", "apm")
-    narrowed = json.loads(state_file.read_text(encoding="utf-8"))["plugins"]
-    assert {Path(p["readFromFolder"]).name: p["enabled"] for p in narrowed} == {
-        "alpha": True,
-        "beta": False,
-    }
+    assert scenario.declared()["enabledPlugins"][keys["beta"]] is False
+    assert all(root.is_dir() for root in roots.values())
 
-    # Substituted host: Claude sets CLAUDE_PLUGIN_ROOT per plugin; this is not
-    # a native execution witness (see the PR's native hook check).
     executed = shutil.which("node") is not None and os.name != "nt"
     if executed:
         witness = isolated.root / "hook-witness.jsonl"
         for root in roots.values():
             hook_env = dict(env, CLAUDE_PLUGIN_ROOT=str(root), APM_HOOK_PROBE_MARKER=str(witness))
-            declared = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8"))
+            hooks = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8"))
             for event in _HOOK_EVENTS:
-                command = declared["hooks"][event][0]["hooks"][0]["command"]
                 completed = subprocess.run(
-                    command,
+                    hooks["hooks"][event][0]["hooks"][0]["command"],
                     shell=True,
                     input=json.dumps({"hook_event_name": event}),
                     text=True,
@@ -162,21 +179,27 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
                 assert completed.returncode == 0, completed.stderr
         rows = [json.loads(line) for line in witness.read_text().splitlines() if line.strip()]
         assert sorted((Path(row["root"]).name, row["event"], row["resource"]) for row in rows) == [
-            (label, event, f"IDENTITY_{label}")
+            (names[label], event, f"IDENTITY_{label}")
             for label in ("alpha", "beta")
             for event in sorted(_HOOK_EVENTS)
         ]
 
-    run("uninstall", "--global", f"{dependency}/plugins/beta")
-    assert sorted(registered()) == ["alpha"]
-    assert not roots["beta"].exists()
-    assert (roots["alpha"] / "hooks/context.js").is_file()
     run("uninstall", "--global", f"{dependency}/plugins/alpha")
-    assert registered() == {}
-    calls = json.loads(state_file.read_text(encoding="utf-8"))["calls"]
-    assert all(call[1:2] not in (["enable"], ["disable"]) for call in calls)
+    assert not roots["alpha"].exists()
+    assert roots["beta"].is_dir()
+    after = scenario.declared()
+    assert keys["alpha"] not in after["enabledPlugins"]
+    assert after["enabledPlugins"][mine] is True
+    run("uninstall", "--global", f"{dependency}/plugins/beta")
+    final = scenario.declared()
+    assert "extraKnownMarketplaces" not in final
+    # APM never removes a key it did not produce, nor the user's explicit false.
+    assert final["enabledPlugins"] == {mine: True, keys["beta"]: False}
+    assert final["theme"] == "dark"
+    assert not scenario.plugins.exists()
+    assert not scenario.trap.exists()
     if not executed:
-        pytest.skip("Registration checks passed; hook execution needs node on POSIX.")
+        pytest.skip("Declaration checks passed; hook execution needs node on POSIX.")
 
 
 @pytest.mark.parametrize("failure", ["", "install", "uninstall"])
@@ -184,8 +207,9 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
 def test_installed_hook_source_reinstall_and_removal(
     tmp_path: Path, apm_engine_command: tuple[str, ...], failure: str, local: bool
 ) -> None:
-    """Run acquisition, consent, lock, scan and removal through the installed CLI."""
-    isolated, env, state_file = _native_scenario(tmp_path)
+    """Run acquisition, consent, lock, scan, audit and removal through the installed CLI."""
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
     factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
     repository = factory.create("hooks")
     source = repository.worktree / "plugins/context"
@@ -197,7 +221,7 @@ def test_installed_hook_source_reinstall_and_removal(
     hooks = {
         "hooks": {
             event: [{"hooks": [{"type": "command", "command": "echo NEVER_EXECUTE"}]}]
-            for event in ("SessionStart", "SubagentStart", "UserPromptSubmit")
+            for event in _HOOK_EVENTS
         }
     }
     (source / "hooks/hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
@@ -235,6 +259,7 @@ def test_installed_hook_source_reinstall_and_removal(
     }
     (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
     runner = ApmLifecycleRunner(apm_engine_command)
+    deployed = scenario.plugins / "owned-hooks"
 
     def run(*args: str, expected: int = 0) -> str:
         result = runner.run(
@@ -248,95 +273,87 @@ def test_installed_hook_source_reinstall_and_removal(
             return result.stdout
         return " ".join((result.stdout + result.stderr).split())
 
+    def corrupt_settings() -> bytes:
+        scenario.settings.parent.mkdir(parents=True, exist_ok=True)
+        # Valid JSON other readers accept; only the native declaration refuses it.
+        scenario.settings.write_text('{"enabledPlugins": []}', encoding="utf-8")
+        return scenario.settings.read_bytes()
+
     if failure == "install":
-        env["APM_NATIVE_FAIL"] = "install"
+        before = corrupt_settings()
         output = run("install", "--global", "--target", "claude", "--only", "apm", expected=1)
-        assert "deliberate metadata transport failure" in output
+        assert "Claude native plugin declaration failed" in output
         assert "Failed to resolve APM dependencies" not in output
-        assert (isolated.config_root / "apm.lock.yaml").exists()
-        env["APM_NATIVE_FAIL"] = ""
+        assert scenario.settings.read_bytes() == before
+        # One rollback unit: a first install that cannot declare keeps no lock or roots.
+        assert not (isolated.config_root / "apm.lock.yaml").exists()
+        assert not scenario.plugins.exists()
+        scenario.settings.unlink()
 
     for flags in ((), (), ("--frozen",)):
         run("install", "--global", "--target", "claude", "--only", "apm", *flags)
-        state = json.loads(state_file.read_text(encoding="utf-8"))
-        assert len(state["plugins"]) == 1
-        plugin = state["plugins"][0]
-        assert plugin["enabled"] is False
-        live_source = Path(plugin["readFromFolder"])
-        assert live_source.is_relative_to(isolated.config_root / "apm_modules")
-        assert json.loads((live_source / "hooks/hooks.json").read_text()) == hooks
-        assert (live_source / "skills/review/SKILL.md").read_bytes() == native_skill.read_bytes()
+        assert list(scenario.declared()["enabledPlugins"].values()) == [True]
+        assert next(iter(scenario.declared()["enabledPlugins"])) == (
+            f"owned-hooks@{marketplace_name(isolated.config_root)}"
+        )
+        assert json.loads((deployed / "hooks/hooks.json").read_text()) == hooks
+        assert (deployed / "skills/review/SKILL.md").read_bytes() == native_skill.read_bytes()
+        assert (deployed / "__pycache__/resource.bin").is_file()
         assert personal_skill.read_bytes() == personal_before
         lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+        entry = lock["dependencies"][0]
+        assert entry["native_plugin"]["root"] == ".agents/plugins/owned-hooks"
         if local:
-            assert lock["dependencies"][0]["local_path"] == str(source)
+            assert entry["local_path"] == str(source)
         else:
-            assert lock["dependencies"][0]["resolved_commit"] == revision
-        assert not (isolated.home / ".claude/settings.json").exists()
+            assert entry["resolved_commit"] == revision
         assert not (isolated.home / ".claude/hooks").exists()
 
     if not failure:
         audit = ("audit", "--ci", "--no-policy", "--no-fail-fast", "--format", "json")
         healthy = json.loads(run(*audit))
         assert [row["name"] for row in healthy["checks"] if not row["passed"]] == []
-        assert next(row for row in healthy["checks"] if row["name"] == "drift")["passed"] is True
-        ledger = isolated.config_root / "apm_modules/.claude-plugin/apm-registration.json"
-        baseline = ledger.read_bytes()
-        calls_before = state_file.read_bytes()
-        asset = live_source / "__pycache__/resource.bin"
+        settings_before = scenario.settings.read_bytes()
+        asset = deployed / "__pycache__/resource.bin"
         original = asset.read_bytes()
-        asset.write_bytes(b"tampered publisher resource")
+        asset.write_bytes(b"tampered deployed resource")
         output = run(*audit, expected=1)
-        assert "fingerprint changed" in output
-        assert (
-            next(row for row in json.loads(output)["checks"] if row["name"] == "drift")["passed"]
-            is False
-        )
-        assert asset.read_bytes() == b"tampered publisher resource"
+        assert "differs from apm.lock.yaml" in output
+        assert asset.read_bytes() == b"tampered deployed resource"
         asset.write_bytes(original)
         if local:
             original_asset = source / "__pycache__/resource.bin"
             original_asset.write_bytes(b"changed local source")
-            assert "fingerprint changed" in run(*audit, expected=1)
-            assert asset.read_bytes() == original
-            assert original_asset.read_bytes() == b"changed local source"
+            assert "differs from apm.lock.yaml" in run(*audit, expected=1)
             original_asset.write_bytes(original)
         if os.name != "nt":
-            script = live_source / "hooks/resource.cjs"
+            script = deployed / "hooks/resource.cjs"
             mode = script.stat().st_mode
             script.chmod(mode ^ stat.S_IXUSR)
-            assert "fingerprint changed" in run(*audit, expected=1)
-            assert script.stat().st_mode & stat.S_IXUSR != mode & stat.S_IXUSR
+            assert "differs from apm.lock.yaml" in run(*audit, expected=1)
             script.chmod(mode)
         restored = json.loads(run(*audit))
         assert next(row for row in restored["checks"] if row["name"] == "drift")["passed"] is True
-        assert ledger.read_bytes() == baseline
-        assert state_file.read_bytes() == calls_before
+        assert scenario.settings.read_bytes() == settings_before
 
     fails_removal = failure == "uninstall"
-    env["APM_NATIVE_FAIL"] = "uninstall" if fails_removal else ""
+    if fails_removal:
+        corrupt_settings()
     output = run("uninstall", "--global", package_argument, expected=1 if fails_removal else 0)
-    assert not live_source.exists()
     lock_path = isolated.config_root / "apm.lock.yaml"
     assert lock_path.exists() is fails_removal
     assert load_yaml(isolated.config_root / "apm.yml")["dependencies"]["apm"] == []
     if fails_removal:
-        assert load_yaml(lock_path)["dependencies"] == []
+        # The lock is restored, so the retry still owns what it must retire.
+        restored = load_yaml(lock_path)["dependencies"]
+        assert [dep["native_plugin"]["name"] for dep in restored] == ["owned-hooks"]
         assert "Package removal may already be complete" in output
-        assert "original --target selection" in output
         assert "do not re-add the removed package" in output
-        assert json.loads(state_file.read_text())["plugins"]
-        env["APM_NATIVE_FAIL"] = ""
+        scenario.settings.unlink()
         run("install", "--global", "--target", "claude", "--only", "apm")
-        assert json.loads(state_file.read_text())["plugins"] == []
     else:
         assert "native Claude plugin(s) removed" in output
-        assert json.loads(state_file.read_text())["plugins"] == []
-    state = json.loads(state_file.read_text())
-    assert [call[1] for call in state["calls"] if call[1:2] in (["install"], ["update"])] == [
-        "install",
-        "update",
-        "update",
-    ]
-    assert all(call[1:2] not in (["enable"], ["disable"]) for call in state["calls"])
+    assert scenario.declared().get("enabledPlugins", {}) == {}
+    assert not deployed.exists()
     assert personal_skill.read_bytes() == personal_before
+    assert not scenario.trap.exists()

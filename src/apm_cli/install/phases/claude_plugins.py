@@ -1,11 +1,11 @@
-"""Publish admitted native Claude plugins only after lock and security gates."""
+"""Declare admitted native Claude plugins only after lock and security gates."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-from apm_cli.claude_plugins.registrar import resync_claude_plugins
+from apm_cli.claude_plugins.registrar import native_ownership, reconcile_claude_plugins
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
 if TYPE_CHECKING:
@@ -43,21 +43,31 @@ def _refuse_retained_loose_claude_files(ctx: InstallContext) -> None:
 
 
 def run(ctx: InstallContext) -> None:
-    """Use the same reconciliation owner as removal, with scanned new plans."""
+    """Converge Claude onto the saved lock, using the same owner as removal.
+
+    The lock and Claude's declarations are one rollback unit (req-na-004): when
+    declaration fails, the previous lock is restored so a retry still owns
+    everything it must retire.
+    """
     if ctx.apm_modules_dir is None:
         return
-    from apm_cli.install.phases.targets import declared_target_profiles
-
     _refuse_retained_loose_claude_files(ctx)
-    declared = declared_target_profiles(ctx)
-    resync_claude_plugins(
-        modules_dir=ctx.apm_modules_dir,
-        scope=ctx.scope,
-        lockfile=LockFile.read(get_lockfile_path(ctx.apm_dir)),
-        targets=ctx.targets,
-        retained_targets=None if declared is None else list(declared),
-        prepared=ctx.claude_native_plugins,
-        allow_executables=ctx.exec_allow_map,
-        logger=ctx.logger,
-        dry_run=ctx.dry_run,
-    )
+    lock_path = get_lockfile_path(ctx.apm_dir)
+    previous = ctx.existing_lockfile
+    try:
+        reconcile_claude_plugins(
+            modules_dir=ctx.apm_modules_dir,
+            scope=ctx.scope,
+            previous=None if previous is None else native_ownership(previous),
+            lockfile=LockFile.read(lock_path),
+            prepared=ctx.claude_native_plugins,
+            deploy_root=ctx.project_root,
+            logger=ctx.logger,
+            dry_run=ctx.dry_run,
+        )
+    except ClaudeNativePluginError:
+        if previous is not None:
+            previous.write(lock_path)
+        else:
+            lock_path.unlink(missing_ok=True)
+        raise

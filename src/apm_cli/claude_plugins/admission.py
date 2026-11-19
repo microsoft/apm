@@ -14,7 +14,7 @@ from apm_cli.deps.plugin_parser import (
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
-from apm_cli.utils.content_hash import compute_native_bundle_hash
+from apm_cli.utils.content_hash import compute_native_plugin_hash
 from apm_cli.utils.path_security import PathTraversalError, has_symlink_component
 
 
@@ -24,20 +24,24 @@ class ClaudeNativePluginError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ClaudeNativePlugin:
-    """An admitted dependency, not a claim of native activation or execution."""
+    """An admitted dependency, not a claim of native activation or execution.
+
+    A *parked* plugin stays out of loose Claude projection but is not declared
+    to Claude either; ``parked`` carries the one diagnostic shown to the user.
+    """
 
     dependency_key: str
     name: str
     source_root: Path
     bundle_hash: str
-    source_pin: str = ""
+    parked: str | None = None
     target_name: ClassVar[str] = "claude"
 
 
 def fingerprint_native_claude_source(root: Path) -> str:
     """Translate canonical native fingerprint failures at the Claude boundary."""
     try:
-        return compute_native_bundle_hash(root)
+        return compute_native_plugin_hash(root)
     except (OSError, PathTraversalError) as exc:
         raise ClaudeNativePluginError(
             f"Cannot fingerprint native Claude source {root}: unreadable data, unsafe path or "
@@ -118,8 +122,24 @@ def plan_native_claude_plugin(
         manifest = parse_plugin_manifest(manifest_path)
     except (OSError, ValueError) as exc:
         raise ClaudeNativePluginError("Cannot read the native Claude plugin manifest.") from exc
-    unknown = set(manifest) - _MANIFEST_FIELDS
-    unsupported = [name for name in _UNSUPPORTED_ROOTS if (root / name).exists()]
+    name = manifest.get("name")
+    if not isinstance(name, str) or re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", name) is None:
+        raise ClaudeNativePluginError("Native Claude plugin requires a safe, explicit plugin name.")
+    fingerprint = fingerprint_native_claude_source(root)
+    if manifest.get("dependencies"):
+        return ClaudeNativePlugin(
+            package_name,
+            name,
+            root.resolve(),
+            fingerprint,
+            parked=(
+                "it declares plugin dependencies, which APM cannot resolve yet. Install "
+                "each required plugin as its own dependency, or exclude Claude from "
+                "this dependency's targets."
+            ),
+        )
+    unknown = set(manifest) - _MANIFEST_FIELDS - {"dependencies"}
+    unsupported = [entry for entry in _UNSUPPORTED_ROOTS if (root / entry).exists()]
     if unknown or unsupported:
         raise ClaudeNativePluginError(
             "Native Claude plugin has unqualified capabilities: "
@@ -127,14 +147,28 @@ def plan_native_claude_plugin(
             + ". This route supports intact commands, skills, agents and approved hooks only."
         )
     has_hooks = "hooks" in manifest or (root / "hooks").exists()
+    parked = None
     if has_hooks and not hooks_approved:
-        raise ClaudeNativePluginError(
-            "Native Claude plugin hooks are not approved. Review and approve this dependency's "
-            "hooks through allowExecutables, or exclude Claude from its targets."
+        parked = (
+            "its executables are not approved for this content. "
+            f"Review: apm approve --pending  |  Re-approve: apm approve {package_name}"
         )
-    name = manifest.get("name")
-    if not isinstance(name, str) or re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", name) is None:
-        raise ClaudeNativePluginError("Native Claude plugin requires a safe, explicit plugin name.")
-    return ClaudeNativePlugin(
-        package_name, name, root.resolve(), fingerprint_native_claude_source(root)
-    )
+    return ClaudeNativePlugin(package_name, name, root.resolve(), fingerprint, parked=parked)
+
+
+def queue_native_claude(ctx: Any, package_name: str, plugin: Any, diagnostics: Any) -> None:
+    """Hand an admitted plugin to native declaration; report a parked one.
+
+    A parked plugin is neither projected loose nor declared to Claude
+    (OpenAPM req-na-005): it is not deployed and the user sees why.
+    """
+    if plugin is None or ctx is None:
+        return
+    if plugin.parked:
+        if diagnostics is not None:
+            diagnostics.warn(
+                f"Native Claude plugin '{plugin.name}' was not declared: {plugin.parked}",
+                package=package_name,
+            )
+        return
+    ctx.claude_native_plugins[package_name] = plugin

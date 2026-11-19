@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import apm_cli.claude_plugins.admission as _claude_admission
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
@@ -159,12 +160,6 @@ def _check_native_claude_transition(
         raise ClaudeNativePluginError(
             "Cannot switch to native Claude. Hook settings were preserved. " + recovery
         )
-
-
-def _queue_native_claude(ctx: InstallContext | None, package_name: str, plugin: Any) -> None:
-    """Hand an admitted Claude plugin to the native registration phase."""
-    if plugin is not None and ctx is not None:
-        ctx.claude_native_plugins[package_name] = plugin
 
 
 def integrate_package_primitives(  # noqa: PLR0913
@@ -433,7 +428,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             [target for target in targets if target.name in native_target_names],
         )
         if not projection_targets:
-            _queue_native_claude(ctx, package_name, native_claude_plugin)
+            _claude_admission.queue_native_claude(
+                ctx, package_name, native_claude_plugin, diagnostics
+            )
             return result
 
     if codex_native is not None:
@@ -688,7 +685,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
-    _queue_native_claude(ctx, package_name, native_claude_plugin)
+    _claude_admission.queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
     return result
 
 

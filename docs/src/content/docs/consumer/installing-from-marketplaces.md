@@ -129,73 +129,55 @@ fingerprint utility. This does not extend either route's runtime qualification.
 
 ### APM-managed Claude user plugins
 
-With Claude Code **2.1.291** or **2.1.322** on `PATH`, `apm install --global --target claude`
-prepares eligible intact Claude plugins through a local `apm-claude`
-marketplace. APM still owns dependency acquisition, the lockfile, source
-security checks, and the materialized package under `~/.apm/apm_modules`.
-Claude owns native registration and activation. It loads the plugin in place
-from that `apm_modules` directory (Claude's `readFromFolder`), not from its own
-plugin cache, so `CLAUDE_PLUGIN_ROOT` points there. Do not remove or edit the
-source while Claude uses it: edits take effect in Claude immediately. `apm audit`
-reports a changed fingerprint, and a reinstall at the same pin refuses it.
+`apm install --global --target claude` installs an eligible Claude plugin
+intact, so its commands and hooks resolve `${CLAUDE_PLUGIN_ROOT}` to their own
+bundled files. It does not need the `claude` CLI and never runs it:
 
-New plugins default **disabled**; updates preserve activation choices. Activation,
-onboarding and workspace trust remain user decisions; APM does not run hooks.
+1. APM resolves and locks the plugin, scans it, and checks its executable
+   approval, as for any dependency. `~/.apm/apm_modules` keeps the fetched source.
+2. It copies the approved plugin root to `~/.agents/plugins/<plugin>/` and
+   generates `~/.agents/plugins/.claude-plugin/marketplace.json`.
+3. It declares that marketplace in Claude's `settings.json` (`~/.claude`, or
+   `CLAUDE_CONFIG_DIR`): one `extraKnownMarketplaces` entry, named
+   `apm-u-<hash>` per APM home, plus `enabledPlugins["<plugin>@<marketplace>"]: true`.
+
+Restart Claude, or run `/reload-plugins`, to load new plugins. APM writes
+nothing else into your Claude settings:
+
+- It writes `true` only when the key is absent, so a plugin you set to `false`
+  stays disabled across reinstalls.
+- Uninstall removes only the keys and roots its previous `apm.lock.yaml`
+  recorded. It keeps your own entries, your explicit `false`, and any deployed
+  root you edited.
+- If a marketplace with APM's name already points somewhere else, the install
+  fails and changes nothing.
+- If declaring fails, the previous lockfile is restored, so a retry still owns
+  everything it must remove.
+
+A plugin is declared only when its executables are approved. If its hooks are
+not approved, or it declares plugin `dependencies` (APM cannot resolve those
+yet), APM neither deploys nor declares it, prints why, and continues; it never
+falls back to copying loose hooks.
+
+`apm.lock.yaml` records each deployed plugin as `native_plugin`: its name, its
+root, and one fingerprint over every file's path, bytes and executable bit.
+`apm audit --ci`, run from `~/.apm` with `claude` among the manifest's
+`targets`, fails drift when either the source or the deployed copy changes.
+Reinstalling the same revision refuses changed bytes.
+
+The route needs `.claude-plugin/plugin.json` and accepts commands, skills,
+agents and approved hooks. It refuses partial skill subsets, symlinks, MCP/LSP
+servers, `bin/` scripts and other manifest capabilities; resolve the
+restriction or exclude Claude from that dependency's targets. If the package
+already owns loose Claude hooks, run `apm uninstall --global <package>` first,
+then reinstall to switch it to the native route.
 
 :::note[Runtime qualification]
-The metadata lifecycle is qualified on Claude Code **2.1.291** and **2.1.322**,
-macOS arm64. A human runtime witness on **2.1.322** (user scope, enabled plugin)
-observed `SessionStart` and `UserPromptSubmit` hooks and a namespaced plugin
-command resolving bundled resources through `CLAUDE_PLUGIN_ROOT`. `SubagentStart`
-execution, multiple plugin roots at runtime, and runtime behavior on 2.1.291
-remain unverified.
+A human witness on Claude Code 2.1.322 (macOS arm64) observed `SessionStart`
+and `UserPromptSubmit` hooks and a namespaced plugin command reading bundled
+resources through `CLAUDE_PLUGIN_ROOT`. `SubagentStart` was not observed.
+Project scope comes later (#3921).
 :::
-
-APM preserves manifest selection, frontmatter, plugin-root expressions and sibling
-files, without duplicate loose Claude commands or hook-settings merges.
-Same-name personal loose Claude skills are preserved and do not block native
-registration. Standalone APM primitives, project installs and other selected
-targets are unchanged.
-
-Native ownership records fingerprint every publisher file, including
-`__pycache__` resources and the owner executable bit. Git transport metadata and
-the root `.apm-pin` marker are excluded; ordinary lockfile hashes are unchanged.
-Registration checks the admitted fingerprint again after metadata readback.
-Reinstalling the same remote revision cannot adopt changed bytes or modes.
-Freshly admitted revision updates and local-source updates remain supported.
-Audit checks the saved native fingerprint without invoking Claude or repairing
-the source or cache. An older ownership record without this baseline requires
-explicit global uninstall and reinstall with the original targets.
-
-To verify this user installation, run `apm audit --ci` from its manifest
-directory (normally `~/.apm`). Include `claude` in that manifest's `targets`,
-preserving any other targets; audit has no `--target` flag. This checks stored
-source integrity, not native activation or hook execution.
-
-For raw local Claude plugins, frozen install and audit inspect the original
-declarations in a temporary normalized copy; they do not add `apm.yml` to the
-publisher's source. The lock checks the pre-normalization source snapshot,
-while native ownership separately checks the complete installed plugin.
-
-If this package already owns loose Claude hooks, APM preserves them and refuses
-the native transition instead of deleting retained-target state or enabling both
-routes. Explicitly uninstall that package with `apm uninstall --global <package>`,
-then reinstall it with the original targets to choose the native route. Unreadable
-hook settings or ownership records must be repaired first; unrelated hooks remain
-untouched.
-
-This route requires `.claude-plugin/plugin.json` and accepts commands, skills,
-agents and approved hooks. It rejects partial skill subsets, symlinks, MCP/LSP,
-bin scripts and unqualified manifest capabilities. Missing or different clients
-also fail without loose fallback. Resolve the restriction or exclude Claude from
-that dependency's targets.
-
-Updates and global uninstalls reconcile native metadata; uninstall retains native
-plugin data. Interrupted operations retain ownership intent but do not roll back
-Claude-owned state. Repair the problem, then retry
-`apm install --global --target claude` for this Claude-only example. Mixed-target
-installs must retain their complete original target list. A conflicting
-`apm-claude` marketplace or plugin identity is never adopted or overwritten.
 
 ### Direct native installs
 

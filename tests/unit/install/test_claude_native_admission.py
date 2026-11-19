@@ -78,17 +78,29 @@ def test_reset_to_complete_skill_selection_is_not_a_subset(tmp_path: Path) -> No
     assert _plan(_plugin(tmp_path), skill_subset=()).name == "owned"
 
 
-def test_root_hooks_cannot_bypass_approval(tmp_path: Path) -> None:
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-
+def test_unapproved_hooks_park_the_plugin_instead_of_declaring_it(tmp_path: Path) -> None:
+    """req-na-005: no approval means not deployed, not declared, with a diagnostic."""
     info = _plugin(tmp_path)
     (info.install_path / "hooks").mkdir()
     write_json(info.install_path / "hooks/hooks.json", {"hooks": {}})
-    with pytest.raises(ClaudeNativePluginError, match="approve"):
-        _plan(info, hooks_approved=False)
+    plan = _plan(info, hooks_approved=False)
+    assert plan.parked is not None
+    assert "apm approve" in plan.parked
+    assert _plan(info, hooks_approved=True).parked is None
 
 
-@pytest.mark.parametrize("field", ["mcpServers", "lspServers", "dependencies", "experimental"])
+def test_declared_plugin_dependencies_park_with_one_diagnostic(tmp_path: Path) -> None:
+    info = _plugin(tmp_path)
+    write_json(
+        info.install_path / ".claude-plugin/plugin.json",
+        {"name": "owned", "dependencies": ["helper"]},
+    )
+    plan = _plan(info)
+    assert plan.parked is not None
+    assert "plugin dependencies" in plan.parked
+
+
+@pytest.mark.parametrize("field", ["mcpServers", "lspServers", "experimental"])
 def test_unqualified_capabilities_fail_closed(tmp_path: Path, field: str) -> None:
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 

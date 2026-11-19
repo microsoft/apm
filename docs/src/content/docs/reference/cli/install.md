@@ -97,10 +97,12 @@ auto-detection only when `apm.yml` declares no targets.
 does not discover or execute the Copilot CLI; APM owns materialization and
 target-file generation. Use a supported Copilot runtime for that registration.
 
-Plugins installed with `--global --target claude` instead require exactly
-Claude Code **2.1.291** or **2.1.322** on `PATH` for metadata registration. New plugins
-default disabled; updates preserve activation choices. Missing or different
-clients, or rejected capabilities, fail without loose-file fallback. See
+Plugins installed with `--global --target claude` are copied intact to
+`~/.agents/plugins/<plugin>/` and declared in Claude's `settings.json`
+(`extraKnownMarketplaces` and `enabledPlugins`); APM never runs the `claude`
+CLI. A plugin is enabled only when its executables are approved; otherwise it is
+not declared, with a warning. Rejected capabilities fail without loose-file
+fallback. See
 [Claude admission and qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 ### Policy and trust

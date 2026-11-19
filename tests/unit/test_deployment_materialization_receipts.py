@@ -534,6 +534,7 @@ def test_empty_uninstall_lock_is_removed_only_after_native_resync_converges(
             deploy_root=tmp_path,
             modules_dir=tmp_path / "apm_modules",
             scope=InstallScope.USER,
+            native_before=cli._NativeBefore({}, None),
         )
     assert lock_path.exists() is native_fails
 
@@ -545,7 +546,6 @@ def test_native_resync_never_runs_ahead_of_the_survivor_lock(
     """A withheld or failed required save leaves Claude registrations unchanged."""
     from unittest.mock import MagicMock
 
-    from apm_cli.claude_plugins.registrar import LEDGER_RELATIVE
     from apm_cli.commands.uninstall import cli
 
     calls: list[dict] = []
@@ -553,8 +553,6 @@ def test_native_resync_never_runs_ahead_of_the_survivor_lock(
         cli, "_resync_native_registration_after_uninstall", lambda **kw: calls.append(kw)
     )
     modules = tmp_path / "apm_modules"
-    (modules / LEDGER_RELATIVE).parent.mkdir(parents=True)
-    (modules / LEDGER_RELATIVE).write_text("{}", encoding="utf-8")
     lock = LockFile()
     if case == "write_failed":
         monkeypatch.setattr(lock, "write", MagicMock(side_effect=OSError("disk full")))
@@ -569,6 +567,7 @@ def test_native_resync_never_runs_ahead_of_the_survivor_lock(
         deploy_root=tmp_path,
         modules_dir=modules,
         scope=InstallScope.USER,
+        native_before=cli._NativeBefore({"owner/plugin": object()}, b"lock"),
     )
     assert bool(calls) is (case == "unchanged")
     held = [c for c in logger.warning.call_args_list if "left unchanged" in str(c)]

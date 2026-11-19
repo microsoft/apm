@@ -1,508 +1,334 @@
-"""Single reconciliation owner for APM's native Claude user marketplace.
+"""Single owner of APM's native Claude user plugins (#3191, #3181).
 
-Claude owns its settings, cache and installed-plugin registry. APM writes
-only a directory catalog and a recoverable intent ledger in apm_modules.
-Native operations are not a byte-rollback transaction: a retry checks live
-state against intent before continuing a partially completed reconciliation.
+APM deploys each admitted plugin root intact to ``~/.agents/plugins/<plugin>/``,
+generates the directory marketplace beside it, and declares both to Claude
+through the two documented settings keys. Ownership comes only from the
+``native_plugin`` records in the previous and next ``apm.lock.yaml``. APM
+never runs the ``claude`` CLI and keeps no receipt file (OpenAPM req-na-002
+to req-na-004 and req-na-007).
 """
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
-import re
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apm_cli.core.scope import is_user_scope
-from apm_cli.utils.atomic_io import atomic_write_text
-from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
-from apm_cli.utils.paths import portable_relpath
-
-from .admission import (
-    ClaudeNativePlugin,
-    ClaudeNativePluginError,
-    fingerprint_native_claude_source,
+from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
+from apm_cli.native_plugins.layout import (
+    NativeLayoutError,
+    deploy_plugin,
+    plugins_root,
+    prune_empty,
+    retire_plugin,
+    write_catalog,
 )
-from .client import ClaudePluginCLI
+from apm_cli.native_plugins.record import NativePluginRecord, lock_native_plugins
+from apm_cli.native_plugins.settings import (
+    BINDING_CONFLICT,
+    ENABLED_KEY,
+    MARKETPLACES_KEY,
+    PREVIOUS_LOCK_MISSING,
+    NativeSettingsError,
+    SettingsDeclaration,
+    read_settings,
+    write_declaration,
+)
+from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.utils.path_security import has_symlink_component
 
-MARKETPLACE_NAME = "apm-claude"
-CATALOG_RELATIVE = ".claude-plugin/marketplace.json"
-LEDGER_RELATIVE = ".claude-plugin/apm-registration.json"
+from .admission import ClaudeNativePlugin, ClaudeNativePluginError, fingerprint_native_claude_source
 
-
-def _read_ledger(path: Path, modules_dir: Path) -> dict[str, dict[str, str]]:
-    if not path.exists():
-        return {}
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        entries = document["plugins"]
-        version = document["version"]
-        if (
-            type(version) is not int
-            or version not in {1, 2}
-            or document["marketplace"] != MARKETPLACE_NAME
-        ):
-            raise ValueError("unsupported ledger")
-        if not isinstance(entries, dict):
-            raise ValueError("invalid plugin map")
-        for plugin_id, entry in entries.items():
-            # Intent can embed retiring v1 entries in a v2 ledger. Retaining
-            # those identities permits removal retries, never fresh attestation.
-            if (
-                not isinstance(plugin_id, str)
-                or not plugin_id.endswith("@" + MARKETPLACE_NAME)
-                or not isinstance(entry, dict)
-                or set(entry)
-                not in (
-                    {"dependency_key", "source"},
-                    {"dependency_key", "source", "bundle_hash", "source_pin"}
-                    if version == 2
-                    else set(),
-                )
-                or not all(isinstance(value, str) and value for value in entry.values())
-            ):
-                raise ValueError("invalid plugin ownership")
-            ensure_path_within(modules_dir / entry["source"], modules_dir)
-            if (
-                "bundle_hash" in entry
-                and re.fullmatch(r"sha256:[0-9a-f]{64}", entry["bundle_hash"]) is None
-            ):
-                raise ValueError("invalid native fingerprint")
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise ClaudeNativePluginError(
-            "Cannot safely read APM's Claude ownership ledger; refusing native state changes."
-        ) from exc
-    return entries
+HARNESS = "claude"
+# Earlier, unreleased heads of #3290 drove the claude CLI and kept a ledger.
+LEGACY_MARKETPLACE = "apm-claude"
+LEGACY_LEDGER_RELATIVE = ".claude-plugin/apm-registration.json"
+LEGACY_CATALOG_RELATIVE = ".claude-plugin/marketplace.json"
 
 
-def _write_ledger(path: Path, entries: dict[str, dict[str, str]]) -> None:
-    atomic_write_text(
-        path,
-        json.dumps(
-            {
-                "version": 2,
-                "marketplace": MARKETPLACE_NAME,
-                "plugins": entries,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-    )
+@dataclass(frozen=True)
+class NativeOwnership:
+    """One locked dependency's native record and its immutable source pin."""
+
+    record: NativePluginRecord
+    pin: str
+    local: bool
 
 
-def _plugin_rows(client: ClaudePluginCLI) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    for row in client.records("plugin", "list", "--json"):
-        plugin_id = row.get("id")
-        if not isinstance(plugin_id, str):
-            raise ClaudeNativePluginError("Claude plugin metadata has no plugin identity.")
-        if not plugin_id.endswith("@" + MARKETPLACE_NAME):
-            continue
-        if row.get("scope") != "user" or plugin_id in result:
-            raise ClaudeNativePluginError("APM Claude plugin identity collides with another scope.")
-        if not isinstance(row.get("enabled"), bool):
-            raise ClaudeNativePluginError("Claude plugin metadata has no explicit enabled state.")
-        result[plugin_id] = row
-    return result
+def marketplace_name(apm_home: Path) -> str:
+    """Deterministic user-scope marketplace name, unique per APM home (req-na-007)."""
+    digest = hashlib.sha256(str(Path(apm_home).resolve()).encode("utf-8")).hexdigest()
+    return f"apm-u-{digest[:8]}"
 
 
-def _check_live_root(
-    row: dict[str, Any],
-    entry: dict[str, str],
-    modules_dir: Path,
-) -> None:
-    root = row.get("readFromFolder")
-    if (
-        not isinstance(root, str)
-        or Path(root).resolve() != (modules_dir / entry["source"]).resolve()
-    ):
-        raise ClaudeNativePluginError(
-            "Claude native plugin source ownership changed; refusing to adopt or overwrite it."
-        )
+def claude_settings_path() -> Path:
+    """Claude's user settings document, honoring ``CLAUDE_CONFIG_DIR``."""
+    from apm_cli.integration.targets import resolve_user_root
+
+    return resolve_user_root(HARNESS) / "settings.json"
 
 
-def _check_bundle_fingerprint(root: Path, expected: str | None) -> None:
-    """Fail closed when an owned or prepared native snapshot cannot be attested."""
-    if not expected:
-        raise ClaudeNativePluginError(
-            "APM's Claude ownership ledger has no complete native fingerprint. "
-            "Run 'apm uninstall --global <package>', then reinstall with the original targets."
-        )
-    if fingerprint_native_claude_source(root) != expected:
-        raise ClaudeNativePluginError(
-            f"Native Claude source fingerprint changed at {root}. Restore the pinned package "
-            "before retrying; APM will not adopt modified publisher resources or executable modes."
-        )
-
-
-def _locked_source_pin(locked: Any) -> str:
-    """Bind native ownership to the resolver's saved source identity."""
+def _source_pin(locked: Any) -> str:
     revision = (
         locked.local_path
         if locked.source == "local"
         else locked.resolved_commit or locked.resolved_hash
     )
-    if not revision:
-        raise ClaudeNativePluginError(
-            f"Native Claude source {locked.get_unique_key()} has no immutable pin. "
-            "Reinstall from a pinned commit or registry artifact."
+    return f"{locked.source}:{revision}" if revision else ""
+
+
+def native_ownership(lockfile: Any) -> dict[str, NativeOwnership]:
+    """Return ``{dependency_key: ownership}`` for Claude records in *lockfile*."""
+    return {
+        key: NativeOwnership(
+            record,
+            _source_pin(lockfile.dependencies[key]),
+            lockfile.dependencies[key].source == "local",
         )
-    return f"{locked.source}:{revision}"
+        for key, record in lock_native_plugins(lockfile, HARNESS).items()
+    }
+
+
+def _migrate_legacy_registration(modules_dir: Path, settings_path: Path, logger: Any) -> None:
+    """Remove registrations made by earlier heads of this route, when provably theirs."""
+    ledger = modules_dir / LEGACY_LEDGER_RELATIVE
+    if not ledger.is_file() or has_symlink_component(modules_dir, ledger):
+        return
+    try:
+        plugins = json.loads(ledger.read_text(encoding="utf-8")).get("plugins") or {}
+        owned = {key for key in plugins if isinstance(key, str)}
+    except (OSError, ValueError, AttributeError):
+        owned = set()
+    document = read_settings(settings_path)
+    marketplaces = document.get(MARKETPLACES_KEY)
+    enabled = document.get(ENABLED_KEY)
+    changed = False
+    if isinstance(marketplaces, dict):
+        legacy = marketplaces.get(LEGACY_MARKETPLACE)
+        path = legacy.get("source", {}).get("path") if isinstance(legacy, dict) else None
+        if isinstance(path, str) and Path(path).resolve() == modules_dir.resolve():
+            del marketplaces[LEGACY_MARKETPLACE]
+            changed = True
+        if not marketplaces:
+            document.pop(MARKETPLACES_KEY, None)
+    if isinstance(enabled, dict):
+        for key in sorted(owned & set(enabled)):
+            if key.endswith("@" + LEGACY_MARKETPLACE):
+                del enabled[key]
+                changed = True
+        if not enabled:
+            document.pop(ENABLED_KEY, None)
+    if changed:
+        atomic_write_text(settings_path, json.dumps(document, indent=2) + "\n")
+    ledger.unlink()
+    catalog = modules_dir / LEGACY_CATALOG_RELATIVE
+    if catalog.is_file():
+        catalog.unlink()
+    if logger:
+        logger.tree_item("Removed the Claude registration left by an earlier APM build.")
+
+
+def _verify_next(
+    key: str,
+    own: NativeOwnership,
+    lockfile: Any,
+    modules_dir: Path,
+    prepared: Mapping[str, ClaudeNativePlugin],
+    previous: Mapping[str, NativeOwnership],
+) -> Path:
+    """Return the verified ``apm_modules`` source for one declared plugin."""
+    locked = lockfile.dependencies[key]
+    source = locked.to_dependency_ref().get_install_path(modules_dir)
+    if not source.is_dir():
+        raise ClaudeNativePluginError(
+            f"The source of native Claude plugin '{own.record.name}' ({key}) is missing from "
+            "apm_modules. Run 'apm install --global' to restore it; Claude settings were not "
+            "changed."
+        )
+    plan = prepared.get(key)
+    if plan is not None and plan.bundle_hash != own.record.fingerprint:
+        raise ClaudeNativePluginError("Native Claude source changed after deployment admission.")
+    prior = previous.get(key)
+    if (
+        prior is not None
+        and not own.local
+        and prior.pin == own.pin
+        and prior.record.fingerprint != own.record.fingerprint
+    ):
+        raise ClaudeNativePluginError(
+            f"Native Claude plugin '{own.record.name}' ({key}) changed content at the same "
+            "pinned revision. APM will not adopt modified publisher content; restore the "
+            "pinned package or pin a new revision."
+        )
+    if fingerprint_native_claude_source(source) != own.record.fingerprint:
+        raise ClaudeNativePluginError(
+            f"Native Claude source for {key} does not match its locked fingerprint. "
+            "Restore the pinned package with 'apm install --global' before retrying."
+        )
+    return source
+
+
+def reconcile_claude_plugins(
+    *,
+    modules_dir: Path,
+    scope: Any,
+    previous: Mapping[str, NativeOwnership] | None,
+    lockfile: Any,
+    prepared: Mapping[str, ClaudeNativePlugin] | None = None,
+    deploy_root: Path | None = None,
+    logger: Any = None,
+    dry_run: bool = False,
+) -> None:
+    """Converge deployed roots, the catalog and Claude settings onto *lockfile*.
+
+    *previous* is the ownership the lock recorded before this command changed
+    it, or ``None`` when there was no previous lock. A failure leaves settings
+    unchanged and removes roots this run created; the caller restores the lock.
+    """
+    if not is_user_scope(scope) or dry_run:
+        return
+    modules_dir = Path(modules_dir).absolute()
+    root = plugins_root(deploy_root or get_deploy_root(InstallScope.USER))
+    settings_path = claude_settings_path()
+    marketplace = marketplace_name(modules_dir.parent)
+    created: list[str] = []
+    prior = dict(previous or {})
+    prior_names = {own.record.name for own in prior.values()}
+    try:
+        _migrate_legacy_registration(modules_dir, settings_path, logger)
+        following = native_ownership(lockfile) if lockfile is not None else {}
+        if not following and not prior_names:
+            return
+        declared = _declared_plugins(following, lockfile, modules_dir, prepared or {}, prior, root)
+        changed = 0
+        for name, (_key, own, source) in declared.items():
+            fresh = not (root / name).exists()
+            if deploy_plugin(
+                root, name, source, own.record.fingerprint, fingerprint_native_claude_source
+            ):
+                changed += 1
+                if fresh:
+                    created.append(name)
+        write_catalog(root, marketplace, declared, owned=bool(prior_names))
+        change = write_declaration(
+            settings_path,
+            SettingsDeclaration(
+                marketplace,
+                root,
+                frozenset(declared),
+                None if previous is None else frozenset(prior_names),
+            ),
+        )
+        if BINDING_CONFLICT in change.diagnostics:
+            raise NativeSettingsError(
+                f"{settings_path} already declares {MARKETPLACES_KEY}.{marketplace} with "
+                "another source. APM did not change it. Remove or rename that entry, then retry."
+            )
+        retiring = sorted(prior_names - set(declared))
+        fingerprints = {own.record.name: own.record.fingerprint for own in prior.values()}
+        kept = [
+            name
+            for name in retiring
+            if not retire_plugin(
+                root, name, fingerprints.get(name), fingerprint_native_claude_source
+            )
+        ]
+        prune_empty(root)
+    except (NativeLayoutError, NativeSettingsError, OSError) as exc:
+        _roll_back(root, marketplace, created, prior_names)
+        raise ClaudeNativePluginError(f"Claude native plugin declaration failed: {exc}") from exc
+    except ClaudeNativePluginError:
+        _roll_back(root, marketplace, created, prior_names)
+        raise
+    if logger and PREVIOUS_LOCK_MISSING in change.diagnostics:
+        logger.warning(
+            f"{settings_path} already has entries for marketplace '{marketplace}' but no "
+            "previous apm.lock.yaml records them. APM left them in place; review them in "
+            "Claude and remove any you no longer want."
+        )
+    _report(logger, declared, retiring, kept, changed, change.changed)
+
+
+def _declared_plugins(
+    following: Mapping[str, NativeOwnership],
+    lockfile: Any,
+    modules_dir: Path,
+    prepared: Mapping[str, ClaudeNativePlugin],
+    prior: Mapping[str, NativeOwnership],
+    root: Path,
+) -> dict[str, tuple[str, NativeOwnership, Path]]:
+    """Verify every plugin the next lock activates; refuse collisions."""
+    prior_names = {own.record.name for own in prior.values()}
+    declared: dict[str, tuple[str, NativeOwnership, Path]] = {}
+    for key, own in sorted(following.items()):
+        name = own.record.name
+        if name in declared:
+            raise ClaudeNativePluginError(
+                f"Native Claude plugin name collision: '{name}' is declared by both "
+                f"{declared[name][0]} and {key}. Exclude Claude from one of them."
+            )
+        source = _verify_next(key, own, lockfile, modules_dir, prepared, prior)
+        existing = root / name
+        if (
+            name not in prior_names
+            and existing.exists()
+            and fingerprint_native_claude_source(existing) != own.record.fingerprint
+        ):
+            raise ClaudeNativePluginError(
+                f"{existing} already exists and the previous apm.lock.yaml does not record "
+                "it. Move it aside, then retry; APM never replaces content it did not deploy."
+            )
+        declared[name] = (key, own, source)
+    return declared
+
+
+def _roll_back(root: Path, marketplace: str, created: list[str], prior_names: set[str]) -> None:
+    """Undo this run's new roots and catalog; prior roots stay owned by the old lock."""
+    for name in created:
+        retire_plugin(root, name, None, fingerprint_native_claude_source)
+    with contextlib.suppress(NativeLayoutError, OSError):
+        write_catalog(
+            root, marketplace, [name for name in prior_names if (root / name).exists()], owned=True
+        )
+    prune_empty(root)
+
+
+def _report(logger, declared, retiring, kept, changed, settings_changed) -> None:
+    if not logger:
+        return
+    if retiring:
+        logger.tree_item(f"{len(retiring)} native Claude plugin(s) removed.")
+    for name in kept:
+        logger.warning(
+            f"Kept ~/.agents/plugins/{name}: its files changed since APM deployed it. "
+            "Review and delete it yourself; Claude no longer loads it."
+        )
+    if declared and (changed or settings_changed):
+        logger.tree_item(
+            f"{len(declared)} native Claude plugin(s) declared and enabled in Claude settings. "
+            "Restart Claude, or run /reload-plugins, to load them."
+        )
 
 
 def verify_claude_native_cache(*, modules_dir: Path, locked: Any, source_root: Path) -> None:
-    """Verify Claude's saved native baseline without invoking its metadata client."""
+    """Audit: the replay source and the deployed copy both match the lock record."""
     from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 
-    try:
-        ledger = modules_dir / LEDGER_RELATIVE
-        if has_symlink_component(modules_dir, ledger):
-            raise ClaudeNativePluginError("Refusing symlinked native Claude ownership ledger.")
-        entries = [
-            entry
-            for entry in _read_ledger(ledger, modules_dir).values()
-            if entry["dependency_key"] == locked.get_unique_key()
-        ]
-        if len(entries) != 1:
-            raise ClaudeNativePluginError(
-                "Native Claude cache has no unique owned fingerprint. "
-                "Reinstall the package with the original targets before auditing."
-            )
-        entry = entries[0]
-        live_root = locked.to_dependency_ref().get_install_path(modules_dir)
-        if (modules_dir / entry["source"]).resolve() != live_root.resolve() or entry.get(
-            "source_pin"
-        ) != _locked_source_pin(locked):
-            raise ClaudeNativePluginError(
-                "Native Claude fingerprint ownership or source pin changed. "
-                "Reinstall with the original target selection before auditing."
-            )
-        _check_bundle_fingerprint(source_root, entry.get("bundle_hash"))
-        if live_root.exists() and live_root.resolve() != source_root.resolve():
-            _check_bundle_fingerprint(live_root, entry.get("bundle_hash"))
-    except ClaudeNativePluginError as exc:
-        raise AgentPluginDeploymentBoundaryError(str(exc)) from exc
-
-
-def synchronize_claude_plugins(
-    *,
-    modules_dir: Path,
-    scope: Any,
-    plugins: Sequence[ClaudeNativePlugin],
-    logger: Any = None,
-    dry_run: bool = False,
-) -> None:
-    """Reconcile only owned metadata, preserving native consent and user state."""
-    if not is_user_scope(scope) or dry_run:
+    record = locked.native_plugin
+    if record is None or HARNESS not in record.harnesses:
         return
-    modules_dir = Path(modules_dir).absolute()
-    catalog = modules_dir / CATALOG_RELATIVE
-    ledger = modules_dir / LEDGER_RELATIVE
-    if not plugins and not ledger.exists():
-        return
-    for path in (catalog, ledger):
-        ensure_path_within(path, modules_dir)
-        if has_symlink_component(modules_dir, path):
-            raise ClaudeNativePluginError("Refusing symlinked native Claude registration files.")
-    previous = _read_ledger(ledger, modules_dir)
-    if catalog.exists() and not ledger.exists():
-        raise ClaudeNativePluginError("Claude marketplace catalog is not owned by APM.")
-    if not plugins and not previous:
-        # Nothing owned or desired: never require the Claude client.
-        return
-
-    desired: dict[str, dict[str, str]] = {}
-    for plugin in plugins:
-        ensure_path_within(plugin.source_root, modules_dir)
-        plugin_id = f"{plugin.name}@{MARKETPLACE_NAME}"
-        entry = {
-            "dependency_key": plugin.dependency_key,
-            "source": portable_relpath(plugin.source_root, modules_dir),
-            "bundle_hash": plugin.bundle_hash,
-            "source_pin": plugin.source_pin,
-        }
-        if plugin_id in desired or (
-            plugin_id in previous
-            and any(previous[plugin_id][key] != entry[key] for key in ("dependency_key", "source"))
-        ):
-            raise ClaudeNativePluginError(
-                f"Native Claude plugin name collision: {plugin.name}. Use distinct plugin names."
+    deployed = plugins_root(get_deploy_root(InstallScope.USER)) / record.name
+    for label, path in (("source", source_root), ("deployed copy", deployed)):
+        try:
+            matches = path.is_dir() and fingerprint_native_claude_source(path) == record.fingerprint
+        except ClaudeNativePluginError:
+            matches = False
+        if not matches:
+            raise AgentPluginDeploymentBoundaryError(
+                f"Native Claude plugin '{record.name}' {label} differs from apm.lock.yaml "
+                f"({path}). Run 'apm install --global' to restore it."
             )
-        if not plugin.source_pin:
-            raise ClaudeNativePluginError(
-                "Native Claude admission has no immutable source identity. "
-                "Reinstall the package from a pinned source."
-            )
-        # An admitted plan is not exclusive filesystem ownership: another
-        # process can change its source before this independently callable step.
-        _check_bundle_fingerprint(plugin.source_root, plugin.bundle_hash)
-        desired[plugin_id] = entry
-
-    client = ClaudePluginCLI()
-    client.check_version()
-    marketplaces = client.records("plugin", "marketplace", "list", "--json")
-    registered = [row for row in marketplaces if row.get("name") == MARKETPLACE_NAME]
-    if len(registered) > 1 or (
-        registered
-        and (
-            not ledger.exists()
-            or registered[0].get("source") != "directory"
-            or not isinstance(registered[0].get("path"), str)
-            or Path(registered[0]["path"]).resolve() != modules_dir.resolve()
-        )
-    ):
-        raise ClaudeNativePluginError(
-            "The apm-claude marketplace is already owned by another source. "
-            "Resolve the collision in Claude before installing."
-        )
-    live = _plugin_rows(client)
-    for plugin_id, row in live.items():
-        if plugin_id not in previous:
-            raise ClaudeNativePluginError(
-                "The apm-claude marketplace contains an unowned plugin; refusing to mutate it."
-            )
-        _check_live_root(row, previous[plugin_id], modules_dir)
-
-    catalog.parent.mkdir(parents=True, exist_ok=True)
-    # Intent precedes foreign writes. Preserve retiring identities until the
-    # native CLI confirms removal, including when a previous attempt crashed.
-    _write_ledger(ledger, previous | desired)
-    removed = set(previous) - set(desired)
-    for plugin_id in sorted(removed):
-        if plugin_id in live:
-            client.run("plugin", "uninstall", plugin_id, "--scope", "user", "--keep-data")
-    atomic_write_text(
-        catalog,
-        json.dumps(
-            {
-                "name": MARKETPLACE_NAME,
-                "owner": {"name": "APM"},
-                "plugins": [
-                    {
-                        "name": plugin_id.split("@", 1)[0],
-                        "source": "./" + entry["source"],
-                        "defaultEnabled": False,
-                    }
-                    for plugin_id, entry in sorted(desired.items())
-                ],
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-    )
-    if desired and not registered:
-        client.run("plugin", "marketplace", "add", str(modules_dir), "--scope", "user")
-    for plugin_id in sorted(desired):
-        operation = "update" if plugin_id in live else "install"
-        client.run("plugin", operation, plugin_id, "--scope", "user")
-    after = _plugin_rows(client)
-    if set(after) != set(desired):
-        raise ClaudeNativePluginError(
-            "Claude did not converge to the requested plugin registration. "
-            "APM retained its intent ledger; retry with the original target selection."
-        )
-    for plugin_id, entry in desired.items():
-        _check_live_root(after[plugin_id], entry, modules_dir)
-        _check_bundle_fingerprint(modules_dir / entry["source"], entry["bundle_hash"])
-        expected_enabled = live[plugin_id]["enabled"] if plugin_id in live else False
-        if after[plugin_id]["enabled"] != expected_enabled:
-            raise ClaudeNativePluginError(
-                "Claude changed a plugin's native activation state unexpectedly. "
-                "Review it in Claude; APM will not override native user consent."
-            )
-    _write_ledger(ledger, desired)
-    if logger and removed:
-        logger.tree_item(
-            f"{len(removed)} native Claude plugin(s) removed; native plugin data retained."
-        )
-    if logger and desired:
-        logger.tree_item(
-            f"{len(desired)} native Claude plugin(s) registered; existing activation preserved. "
-            "New plugins are disabled. Review and enable them in Claude; restart or "
-            "reload plugins there. Hook execution has not been verified by this install."
-        )
-
-
-def _verify_locked_source_hash(
-    locked: Any, lockfile: Any, modules_dir: Path, root: Path, key: str
-) -> None:
-    """Compare the lock against its source image, not local normalization output."""
-    from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
-    from apm_cli.install.phases.local_content import compute_local_package_hash
-    from apm_cli.utils.content_hash import compute_package_hash
-
-    if not locked.content_hash:
-        return
-    try:
-        observed = (
-            compute_local_package_hash(resolve_local_dep_dir(locked, lockfile, modules_dir.parent))
-            if locked.is_local_source
-            else compute_package_hash(root)
-        )
-    except (OSError, ValueError, LocalResolutionError) as exc:
-        raise ClaudeNativePluginError(
-            f"Cannot verify native Claude source for {key}. "
-            "Restore the locked source before retrying."
-        ) from exc
-    if observed != locked.content_hash:
-        raise ClaudeNativePluginError(
-            f"Native Claude source integrity changed for {key}; refusing registration."
-        )
-
-
-def resync_claude_plugins(
-    *,
-    modules_dir: Path,
-    scope: Any,
-    lockfile: Any,
-    targets: list[Any] | None = None,
-    retained_targets: list[Any] | None = None,
-    prepared: dict[str, ClaudeNativePlugin] | None = None,
-    allow_executables: dict[str, dict[str, bool]] | None = None,
-    logger: Any = None,
-    dry_run: bool = False,
-) -> None:
-    """Reconcile canonical locked survivors; never admit an unscanned new plugin.
-
-    Install supplies freshly admitted plans. Uninstall retains only identities
-    already owned, intersected with the surviving lockfile and its trust state.
-    Owned identities that were not freshly admitted are retained against
-    ``targets`` plus ``retained_targets`` (the declared universe), so a one-shot
-    ``--target`` narrowing never retires them; ``None`` preserves Claude.
-    """
-    from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
-    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
-    from apm_cli.install.exec_gate import check_executable_approval
-    from apm_cli.install.package_resolution import effective_dependency_selection
-    from apm_cli.install.target_filter import resolve_effective_package_targets
-    from apm_cli.integration.targets import KNOWN_TARGETS
-    from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
-
-    from .admission import plan_native_claude_plugin
-
-    if not is_user_scope(scope) or dry_run:
-        return
-    modules_dir = Path(modules_dir).absolute()
-    ledger = modules_dir / LEDGER_RELATIVE
-    if not prepared and not ledger.exists():
-        return
-    if has_symlink_component(modules_dir, ledger):
-        raise ClaudeNativePluginError("Refusing symlinked native Claude ownership ledger.")
-    previous = _read_ledger(ledger, modules_dir)
-    if not prepared and not previous:
-        return
-    if lockfile is None:
-        raise ClaudeNativePluginError(
-            "Native Claude reconciliation requires a readable canonical lockfile. "
-            "Repair the lockfile before changing native registration."
-        )
-    if any(
-        entry["dependency_key"] in lockfile.dependencies
-        and not (modules_dir / entry["source"]).is_dir()
-        for entry in previous.values()
-    ):
-        raise ClaudeNativePluginError(
-            "A retained native Claude source is missing. Restore the pinned package "
-            "before retrying; existing native ownership was preserved."
-        )
-    known_keys = {entry["dependency_key"] for entry in previous.values()} | set(prepared or {})
-    active_targets = targets if targets is not None else [KNOWN_TARGETS["claude"]]
-    retention_targets = list(
-        {
-            target.name: target
-            for target in reversed(
-                [
-                    *active_targets,
-                    *(
-                        retained_targets
-                        if retained_targets is not None
-                        else [KNOWN_TARGETS["claude"]]
-                    ),
-                ]
-            )
-        }.values()
-    )
-    plans: list[ClaudeNativePlugin] = []
-    for candidate in candidates_from_lockfile(lockfile, modules_dir):
-        key = candidate.dependency_key
-        if key not in known_keys:
-            continue
-        locked = lockfile.dependencies[key]
-        root = candidate.install_path
-        manifest = root / "apm.yml"
-        package = APMPackage.from_apm_yml(manifest, source_path=root)
-        info = PackageInfo(
-            package=package,
-            install_path=root,
-            dependency_ref=locked.to_dependency_ref(),
-            package_type=PackageType(locked.package_type),
-        )
-        dep_selection = effective_dependency_selection(info.dependency_ref)
-        selection = resolve_effective_package_targets(
-            active_targets if prepared and key in prepared else retention_targets,
-            dep_selection.target_subset,
-            info,
-            None,
-            key,
-        )
-        hooks_approved, *_ = check_executable_approval(key, info, allow_executables)
-        plan = plan_native_claude_plugin(
-            info,
-            package_name=key,
-            targets=list(selection.targets),
-            scope=scope,
-            skill_subset=dep_selection.skill_subset,
-            hooks_approved=hooks_approved,
-            skip_bin=True,
-        )
-        if plan is None:
-            continue
-        DeployableSourcePlan.create(
-            info,
-            list(selection.targets),
-            skill_subset=dep_selection.skill_subset,
-            hooks_approved=hooks_approved,
-            canvas_approved=False,
-            skip_bin=True,
-            native_plugin_root=plan.source_root,
-        )
-        _verify_locked_source_hash(locked, lockfile, modules_dir, root, key)
-        if prepared and key in prepared and prepared[key] != plan:
-            raise ClaudeNativePluginError(
-                "Native Claude source changed after deployment admission."
-            )
-        source_pin = _locked_source_pin(locked)
-        prior = previous.get(f"{plan.name}@{MARKETPLACE_NAME}")
-        if prior is not None:
-            if not prior.get("bundle_hash"):
-                _check_bundle_fingerprint(root, None)
-            if not prepared or key not in prepared:
-                _check_bundle_fingerprint(root, prior["bundle_hash"])
-                if prior.get("source_pin") != source_pin:
-                    raise ClaudeNativePluginError(
-                        "Native Claude source pin changed without fresh admission. "
-                        "Reinstall with the original target selection before retrying."
-                    )
-            elif (
-                locked.source != "local"
-                and prior.get("source_pin") == source_pin
-                and prior["bundle_hash"] != plan.bundle_hash
-            ):
-                _check_bundle_fingerprint(root, prior["bundle_hash"])
-        plans.append(replace(plan, source_pin=source_pin))
-    if set(prepared or {}) - {plan.dependency_key for plan in plans}:
-        raise ClaudeNativePluginError(
-            "An admitted native Claude plugin is absent from the authorized locked set. "
-            "Resolve the install's dependency or executable-approval errors before retrying."
-        )
-    synchronize_claude_plugins(
-        modules_dir=modules_dir,
-        scope=scope,
-        plugins=plans,
-        logger=logger,
-        dry_run=dry_run,
-    )

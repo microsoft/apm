@@ -1518,10 +1518,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="marketplace-integrations-claude-ownership",
         rule_id="marketplace-integrations-claude-ownership",
-        path="src/apm_cli/claude_plugins/registrar.py",
-        old='"defaultEnabled": False',
-        new='"defaultEnabled": True',
-        intent="New Claude registrations silently activate without native user consent.",
+        path="src/apm_cli/native_plugins/settings.py",
+        old="if enabled.get(key) is True:",
+        new="if key in enabled:",
+        intent="Retiring a native plugin deletes the user's explicit enabledPlugins false.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-codex-native-lifecycle",
@@ -2683,8 +2683,38 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/claude_plugins/registrar.py",
-            "_verify_locked_source_hash(locked, lockfile, modules_dir, root, key)",
+            "and prior.pin == own.pin",
+            "and False",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "name not in prior_names\n            and existing.exists()",
+            "False\n            and existing.exists()",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "None if previous is None else frozenset(prior_names),",
+            "frozenset(prior_names),",
+        ),
+        (
+            "src/apm_cli/native_plugins/settings.py",
+            "if current is not None and current != declaration.marketplace_value:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/native_plugins/settings.py",
+            "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
+            "for plugin in sorted(frozenset(enabled) - declaration.plugins):",
+        ),
+        (
+            "src/apm_cli/install/phases/claude_plugins.py",
+            "previous.write(lock_path)",
             "pass",
+        ),
+        (
+            "src/apm_cli/native_plugins/layout.py",
+            "import json\n",
+            "import json\nimport subprocess\n",
         ),
         (
             "src/apm_cli/integration/mcp_config_view.py",
@@ -2698,13 +2728,13 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/claude_plugins/admission.py",
-            "return compute_native_bundle_hash(root)",
+            "return compute_native_plugin_hash(root)",
             "return compute_package_hash(root)",
         ),
         (
             "src/apm_cli/claude_plugins/registrar.py",
-            "fingerprint_native_claude_source(root) != expected",
-            "False",
+            "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+            "if False:",
         ),
         (
             "src/apm_cli/install/services.py",

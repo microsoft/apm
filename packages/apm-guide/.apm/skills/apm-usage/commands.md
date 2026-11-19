@@ -129,20 +129,19 @@ workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
 configuration.
 
-`apm install -g --target claude` registers Claude plugins natively;
-Claude Code exactly 2.1.291 or 2.1.322 must be on `PATH`. New plugins stay disabled;
-updates preserve activation choices. See [admission limits and outstanding
-runtime qualification](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
-Claude loads the plugin in place from `~/.apm/apm_modules`, so do not edit it there.
+`apm install -g --target claude` installs Claude plugins intact: it copies the
+approved plugin root to `~/.agents/plugins/<plugin>/`, generates
+`~/.agents/plugins/.claude-plugin/marketplace.json`, and writes only
+`extraKnownMarketplaces` and `enabledPlugins` into Claude's `settings.json`. No
+`claude` CLI is needed. Plugins with unapproved hooks or declared plugin
+`dependencies` are not declared (warning, exit 0). An explicit `false` in
+`enabledPlugins` is kept. `apm.lock.yaml` records each as `native_plugin`. See
+[admission limits](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
-Claude-native registration and read-only audit verify a separate complete-source
-fingerprint, including `__pycache__` resources and the owner executable bit.
-Ordinary lockfile hashes are unchanged. Same-revision remote cache edits are
-refused, not adopted; restore the pinned source. Native ownership records without
-this fingerprint require `apm uninstall --global <package>`, then reinstall with
-the original targets. Audit never invokes Claude or repairs its source/cache.
-Run it from the user manifest directory with Claude included in that manifest's
-targets; see the [user-plugin audit recipe](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+`apm audit --ci` checks both the source and the deployed copy against that
+fingerprint (every file's path, bytes and executable bit). Same-revision content
+changes are refused, not adopted. Run audit from the user manifest directory with
+Claude included in that manifest's targets; see the [user-plugin audit recipe](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 An existing package-owned loose Claude hook blocks native transition without
 changing hook settings or ownership. Explicitly uninstall the package with

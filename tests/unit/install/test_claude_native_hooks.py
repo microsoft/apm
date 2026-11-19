@@ -81,7 +81,7 @@ def _integrate(home: Path, info: PackageInfo, **kwargs):
         ),
         force=False,
         managed_files=set(),
-        diagnostics=DiagnosticCollector(),
+        diagnostics=kwargs.pop("diagnostics", None) or DiagnosticCollector(),
         package_name="owner/hooks",
         scope=kwargs.pop("scope", InstallScope.USER),
         skill_subset=kwargs.pop("skill_subset", None),
@@ -94,15 +94,15 @@ def _integrate(home: Path, info: PackageInfo, **kwargs):
 def test_native_hooks_remain_intact_without_loose_settings(tmp_path: Path) -> None:
     info = _fixture(tmp_path / ".apm/apm_modules/owned")
     before = (info.install_path / "hooks/hooks.json").read_bytes()
-    with patch("apm_cli.claude_plugins.client.ClaudePluginCLI.run") as native:
-        result, ctx = _integrate(tmp_path, info)
+    result, ctx = _integrate(tmp_path, info)
     assert result["native_plugin"] is True
     assert result["hooks"] == 0
     assert not (tmp_path / ".claude/settings.json").exists()
     assert not (tmp_path / ".claude/hooks").exists()
     assert (info.install_path / "hooks/hooks.json").read_bytes() == before
     assert ctx.claude_native_plugins["owner/hooks"].source_root == info.install_path.resolve()
-    native.assert_not_called()
+    # Integration only queues; the native phase deploys after the lock is saved.
+    assert not (tmp_path / ".agents").exists()
 
 
 def test_prepared_native_plan_preserves_unmanaged_loose_skill(tmp_path: Path) -> None:
@@ -157,10 +157,7 @@ def test_native_admission_keeps_selected_format_owner_with_both_targets(
     """Both enabled targets must not reinterpret the other native package format."""
     info = _fixture(tmp_path / ".apm/apm_modules/owned", native_target=native_target)
     before = {path: path.read_bytes() for path in info.install_path.rglob("*") if path.is_file()}
-    with (
-        patch("apm_cli.claude_plugins.client.ClaudePluginCLI.run") as claude,
-        patch("apm_cli.codex_plugins.client.CodexNativeClient.connect") as codex,
-    ):
+    with patch("apm_cli.codex_plugins.client.CodexNativeClient.connect") as codex:
         result, ctx = _integrate(
             tmp_path, info, targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]]
         )
@@ -174,7 +171,7 @@ def test_native_admission_keeps_selected_format_owner_with_both_targets(
     other = ctx.codex_native_plugins if native_target == "claude" else ctx.claude_native_plugins
     assert set(queued) == {"owner/hooks"}
     assert other == {}
-    claude.assert_not_called()
+    assert not (tmp_path / ".agents").exists()
     codex.assert_not_called()
 
 
@@ -212,10 +209,16 @@ def test_unsafe_migration_never_queues_native_registration(tmp_path: Path) -> No
 
 
 def test_hook_denial_does_not_register_a_commands_only_subset(tmp_path: Path) -> None:
+    """req-na-005: an unapproved plugin is parked, neither declared nor split."""
     info = _fixture(tmp_path / ".apm/apm_modules/owned")
-    with pytest.raises(ClaudeNativePluginError, match="not approved"):
-        _integrate(tmp_path, info, allow_executables={})
+    diagnostics = DiagnosticCollector()
+    result, ctx = _integrate(tmp_path, info, allow_executables={}, diagnostics=diagnostics)
+    assert result["native_plugin"] is True
+    assert result["hooks"] == 0
+    assert ctx.claude_native_plugins == {}
     assert not (tmp_path / ".claude/settings.json").exists()
+    assert not (tmp_path / ".claude/commands").exists()
+    assert any("was not declared" in d.message for d in diagnostics._diagnostics)
 
 
 def test_standalone_inline_hook_keeps_loose_behavior(tmp_path: Path) -> None:
@@ -249,18 +252,17 @@ def test_native_replay_stays_nonmutating(tmp_path: Path) -> None:
     config = live / ".claude/settings.json"
     config.write_text('{"alwaysThinkingEnabled":false}', encoding="ascii")
     scratch = tmp_path / "scratch"
-    with patch("apm_cli.claude_plugins.client.ClaudePluginCLI.run") as native:
-        result, _ = _integrate(
-            scratch,
-            info,
-            scratch_root=scratch,
-            native_claude_user_scope=True,
-            scope=None,
-        )
+    result, _ = _integrate(
+        scratch,
+        info,
+        scratch_root=scratch,
+        native_claude_user_scope=True,
+        scope=None,
+    )
     assert result["native_plugin"] is True
     assert config.read_text() == '{"alwaysThinkingEnabled":false}'
     assert not (scratch / ".claude/settings.json").exists()
-    native.assert_not_called()
+    assert not (scratch / ".agents").exists()
 
 
 @pytest.mark.parametrize(
