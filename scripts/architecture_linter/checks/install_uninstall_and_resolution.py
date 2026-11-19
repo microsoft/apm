@@ -114,8 +114,60 @@ _SELECTION_OWNER = "src/apm_cli/models/dependency/selection.py"
 
 
 _OWNED_SELECTION_DEFS = frozenset(
-    {"manifest_declarations_of", "parse_dependency_entry", "select_manifest_dependency"}
+    {
+        "manifest_declarations_of",
+        "parse_dependency_entry",
+        "select_manifest_dependency",
+        "select_marketplace_declaration",
+    }
 )
+
+
+# #3928: ``plugin@alias`` selects object-form declarations through the owner,
+# and every lock, checkout and edge identity of a removed declaration routes
+# through _removal_target so object-form entries resolve to their locked row.
+_UNINSTALL_ROUTES = (
+    ("_validate_uninstall_packages", "_select_marketplace_declarations", 1),
+    ("_validate_uninstall_packages", "_refuse_unsafe_marketplace_removals", 1),
+    ("_refuse_unsafe_marketplace_removals", "_removed_lock_key", 2),
+    ("_refuse_unsafe_marketplace_removals", "_locked_marketplace_rows", 1),
+    ("_locked_marketplace_rows", "lockfile.marketplace_rows", 1),
+    ("_select_marketplace_declarations", "select_marketplace_declaration", 1),
+    ("_removal_target", "_locked_marketplace_rows", 1),
+    ("_removal_targets", "_removal_target", 1),
+    ("_removed_lock_key", "_removal_target", 1),
+    ("_remove_packages_from_disk", "_removal_target", 1),
+    ("_dry_run_uninstall", "_removal_target", 1),
+    ("_dry_run_uninstall", "_removal_targets", 1),
+    ("_project_transitive_orphans", "_removal_targets", 1),
+)
+
+
+def _uninstall_route_findings(engine, cli, rule_id: str) -> list[Violation]:
+    findings: list[Violation] = []
+    for facts, path, routes in (
+        (engine, _UNINSTALL_ENGINE, _UNINSTALL_ROUTES),
+        (cli, _UNINSTALL_CLI, (("uninstall", "_removed_lock_key", 1),)),
+    ):
+        for scope, callee, minimum in routes:
+            calls = [c for c in facts.calls if c.qualname == callee and c.scope == scope]
+            if len(calls) < minimum:
+                findings.append(
+                    _summary(rule_id, path, f"{scope} must route through {callee} (#3928)")
+                )
+    # Negative half: cli.py never derives a lock key from a manifest entry itself.
+    for call in cli.calls:
+        terminal = call.qualname.rsplit(".", 1)[-1]
+        if terminal in {"get_unique_key", "parse_dependency_entry", "_parse_dependency_entry"}:
+            findings.append(
+                violation(
+                    rule_id,
+                    _UNINSTALL_CLI,
+                    "uninstall lock keys for removed entries must come from _removed_lock_key",
+                    line=call.line,
+                )
+            )
+    return findings
 
 
 _UNINSTALL_CLI = "src/apm_cli/commands/uninstall/cli.py"
@@ -309,6 +361,8 @@ def check_uninstall_selection(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Cross-section install reconciliation must use manifest_declarations_of()",
             )
         )
+    if not cli_fail:
+        findings.extend(_uninstall_route_findings(engine, cli, rule_id))
     engine_index = provider.tree_index(_UNINSTALL_ENGINE)
     if engine_index is not None:
         findings.extend(_validator_selection_findings(provider, engine_index, rule_id))
