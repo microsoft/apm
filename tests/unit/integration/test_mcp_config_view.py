@@ -84,7 +84,10 @@ def test_unapproved_executables_omission_binds_gated_declaration(
     assert ("tools" in parked.configs) is not omitted
 
     lock.mcp_omissions = {
-        "tools": {"declaration": view.declaration_fingerprints["tools"], "reason": "unapproved-executables"}
+        "tools": {
+            "declaration": view.declaration_fingerprints["tools"],
+            "reason": "unapproved-executables",
+        }
     }
     audited = view.with_recorded_omissions(lock)
     gated = not isinstance(declaration, str)
