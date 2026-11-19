@@ -459,6 +459,17 @@ across targets.
 | **Grok Build** | `.grok/commands/*.md` | Deployed when `.grok/` exists. |
 | **Windsurf** | `.windsurf/workflows/*.md` | Deployed when `.windsurf/` exists. |
 
+## Agent tool capability gate (Kiro)
+
+Kiro agent `tools` are permission-bearing. An agent that declares a value
+outside the [approved Kiro tool selectors](../../reference/targets-matrix/)
+fails closed: APM writes zero bytes for it, does not adopt an existing
+copy, and does not record it in `apm.lock.yaml` (a previously deployed copy
+is removed on reinstall). The gate is per agent and non-fatal: other agents
+still deploy, `apm install` prints a warning naming the value, and the
+command exits 0. Pipelines that need a hard failure should check install
+output for the warning.
+
 ## Executable trust gate
 
 When the executable trust gate is enabled, APM blocks unapproved executable
