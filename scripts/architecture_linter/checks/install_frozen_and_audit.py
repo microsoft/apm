@@ -645,7 +645,8 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     if (
         "replay_modules_root" not in replay_calls
         or {"get_modules_dir", "get_deploy_root"} & replay_calls
-        or not {"get_modules_dir", "get_deploy_root"} <= projection_calls
+        # portable_link_relpath keeps an APM_HOME outside HOME projectable (#3901).
+        or not {"get_modules_dir", "get_deploy_root", "portable_link_relpath"} <= projection_calls
         or not _present(roots, "InstallScope.USER if user_scope else InstallScope.PROJECT")
     ):
         findings.append(

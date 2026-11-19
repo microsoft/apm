@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 
 from apm_cli.core.scope import InstallScope, get_deploy_root, get_modules_dir
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.paths import portable_link_relpath
 
 _EXTERNAL_REPLAY_ROOT = ".apm-audit-targets"
 
 
 def replay_modules_root(scratch_root: Path, *, user_scope: bool) -> Path:
-    """Project the canonical scope's deployment source layout into scratch."""
+    """Project the canonical scope's deployment source layout into scratch.
+
+    ``apm_modules`` may sit outside the deploy root (an absolute ``APM_HOME``
+    outside ``HOME``, #3901). The projection keeps its deploy-root-relative
+    position so replayed link text matches install; it is never written.
+    """
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    return scratch_root / get_modules_dir(scope).relative_to(get_deploy_root(scope))
+    modules_dir = get_modules_dir(scope)
+    relative = portable_link_relpath(modules_dir, get_deploy_root(scope))
+    if relative is None:
+        # No relative link exists across drives, as at install time.
+        return modules_dir
+    return Path(os.path.normpath(scratch_root / relative))
 
 
 def governed_root_dirs(targets: list[TargetProfile] | None) -> set[str]:

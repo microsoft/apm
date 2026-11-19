@@ -68,9 +68,15 @@ ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm
         ),
         pytest.param(
             "src/apm_cli/install/audit_target_roots.py",
-            "get_modules_dir(scope).relative_to(get_deploy_root(scope))",
-            'Path("apm_modules")',
+            "portable_link_relpath(modules_dir, get_deploy_root(scope))",
+            'Path("apm_modules").as_posix()',
             id="canonical-layout",
+        ),
+        pytest.param(
+            "src/apm_cli/install/audit_target_roots.py",
+            "portable_link_relpath(modules_dir, get_deploy_root(scope))",
+            "modules_dir.relative_to(get_deploy_root(scope)).as_posix()",
+            id="external-apm-home-layout",
         ),
         pytest.param(
             "src/apm_cli/install/drift.py",

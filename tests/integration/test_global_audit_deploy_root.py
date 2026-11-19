@@ -336,3 +336,49 @@ def test_global_audit_scans_unrecorded_external_target_content(
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["content-integrity"]["passed"] is False
     assert _tree_snapshot(external_root) == before_audit
+
+
+def test_global_audit_supports_absolute_apm_home_outside_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for #3901: audit replay must not require APM_HOME under HOME."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "external-apm-home", base_env=os.environ)
+    external_apm_home = isolated.root / "metadata"
+    external_apm_home.mkdir()
+    environment = isolated.subprocess_env()
+    environment["APM_HOME"] = str(external_apm_home)
+    environment["APM_NO_CACHE"] = "1"
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    package = isolated.package_root / "demo-package"
+    skill = package / ".apm" / "skills" / "demo" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    (package / "apm.yml").write_text("name: demo-package\nversion: 1.0.0\n", encoding="utf-8")
+    skill.write_text("---\nname: demo\ndescription: Demo skill\n---\n# Demo\n", encoding="utf-8")
+
+    monkeypatch.chdir(isolated.work_root)
+    install = CliRunner().invoke(
+        cli,
+        [
+            "install",
+            "--global",
+            str(package),
+            "--target",
+            "codex",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+        ],
+        env=environment,
+    )
+    assert install.exit_code == 0, install.output
+    assert (external_apm_home / "apm.lock.yaml").is_file()
+
+    monkeypatch.chdir(external_apm_home)
+    audit = CliRunner().invoke(
+        cli, ["audit", "--ci", "--no-policy", "--format", "json"], env=environment
+    )
+    assert not isinstance(audit.exception, ValueError), repr(audit.exception)
+    assert audit.exit_code == 0, audit.output
