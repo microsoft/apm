@@ -274,9 +274,20 @@ repository read access covers all of them.
 local-path source in `apm.lock.yaml`; lockfiles produced this way are
 machine-specific -- do not commit them into a shared repo. Remote
 package entries in the same local marketplace remain remote, host-qualified
-dependencies. Remote `marketplace.json` installs record `source_url` and
-`source_digest` provenance. See
+dependencies. Installs from a remote catalog (hosted `marketplace.json` or
+Git) record the catalog's origin as `source_url` plus a `source_digest`; local
+catalogs record neither. See
 [lockfile reference](../../reference/lockfile-spec/).
+
+**Aliases are machine-local.** A name like `company` only means something on
+the machine that registered it. If `company` later points at a different
+catalog, `apm update` (or any re-resolution of an object-form
+`marketplace: company` entry) fails instead of switching, and names the locked
+and current origins. Re-register the locked origin with
+`apm marketplace add <locked-origin> --name company`, or run
+`apm uninstall <plugin>@company` and add the dependency again to switch on
+purpose. Registering a second name for an already registered catalog (same
+origin and `--path`) succeeds with a `[!]` warning.
 
 ## Declare marketplaces in your user manifest
 

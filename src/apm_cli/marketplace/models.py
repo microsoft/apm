@@ -6,6 +6,8 @@ All dataclasses are frozen for thread-safety.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from copy import deepcopy
@@ -566,6 +568,19 @@ def _parse_plugin_entry(
     )
 
 
+def catalog_digest(data: dict[str, Any]) -> str:
+    """Return the ``sha256:`` digest of a parsed catalog's canonical JSON.
+
+    Used as ``source_digest`` when the fetch path has no raw response bytes
+    (Git-hosted catalogs). Keys are sorted and whitespace is removed, so the
+    same catalog content always yields the same digest.
+    """
+    payload = json.dumps(
+        data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+    )
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def parse_marketplace_json(
     data: dict[str, Any],
     source_name: str = "",
@@ -584,6 +599,7 @@ def parse_marketplace_json(
         source_name: Display name of the marketplace (for provenance).
         source_url: Canonical marketplace source URL for lockfile provenance.
         source_digest: SHA-256 digest of the fetched marketplace.json bytes.
+            When empty, :func:`catalog_digest` of *data* is used.
 
     Returns:
         MarketplaceManifest: Parsed manifest with valid plugin entries.
@@ -633,5 +649,5 @@ def parse_marketplace_json(
         description=description,
         plugin_root=plugin_root,
         source_url=source_url,
-        source_digest=source_digest,
+        source_digest=source_digest or catalog_digest(data),
     )

@@ -391,6 +391,14 @@ catalog registration does not invalidate otherwise valid installed evidence.
 Omitting `version` removes the selector comparison, not the unique-provenance
 and full locked-commit requirements.
 
+The lock also records the catalog origin as `source_url` (and a
+`source_digest`) for every remote catalog kind, including Git; local catalogs
+record neither. The alias is machine-local: if it now points at a different
+origin, re-resolving the entry (for example `apm update`) fails and names both
+origins. Restore the alias with `apm marketplace add <locked-origin> --name
+<alias>`, or uninstall and re-add the dependency to switch. Rows without
+`source_url` (pre-0.37 locks) keep working and gain it on the next lock write.
+
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
 The package URL owns its host, port, explicit transport, and SSH user during

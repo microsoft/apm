@@ -270,6 +270,17 @@ for version selections; it neither guesses a tag pattern nor re-resolves the
 catalog. `discovered_via` + `marketplace_plugin_name` associate a declaration
 with one locked coordinate, not a durable catalog trust identity.
 
+`source_url` is that identity: the catalog's canonical origin, recorded for
+every remote catalog kind (hosted `marketplace.json`, GitHub, GitLab, Azure
+DevOps, generic Git). The alias in `discovered_via` is machine-local, so when
+APM re-resolves a locked object-form entry it fails closed if the alias's
+registered origin no longer matches `source_url`, naming both origins.
+Comparison ignores transport (HTTPS or SSH), userinfo, default ports, a
+trailing `.git` and host case. Local filesystem catalogs record no
+`source_url` or `source_digest`, because their paths are machine-specific.
+Rows written before 0.37 have no `source_url`; they keep working and gain it
+on the next lockfile write. No new fields are added for this.
+
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
@@ -302,8 +313,8 @@ with one locked coordinate, not a durable catalog trust identity.
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |
-| `source_url` | string | no | Canonical marketplace source URL when the package came from a hosted `marketplace.json` catalog. |
-| `source_digest` | string | no | `sha256:<hex>` digest of the hosted `marketplace.json` bytes used for resolution. |
+| `source_url` | string | no | Canonical origin of the catalog the package was selected from: the hosted `marketplace.json` URL as registered, or the Git catalog repository URL without userinfo, default port or `.git`. Omitted for local filesystem catalogs. |
+| `source_digest` | string | no | `sha256:<hex>` digest of the catalog used for resolution: the raw bytes for a hosted `marketplace.json`, or the canonical JSON (sorted keys, no whitespace) for a Git-hosted catalog. Provenance only, never a package trust anchor. |
 | `is_insecure` | bool | no | `true` when the source URL was `http://`. |
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 | `constraint` | string | git-source semver only | The original semver selector from Git `ref:` or marketplace object-form `version` in `apm.yml` (`^1.2.0`, `~1.4`, `1.2.3`). Together with `resolved_tag` and selected `version`, distinguishes a resolved selection from package inventory metadata. Replay pins the selected tag and commit rather than re-resolving the selector. |

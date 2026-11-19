@@ -689,6 +689,7 @@ marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source
 marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-manifest
+marketplace-integrations-catalog-origin
 marketplace-integrations-codex-native-lifecycle
 marketplace-integrations-copilot-ownership
 marketplace-integrations-generated-bundle-lf-writers

@@ -48,6 +48,23 @@ class PluginNotFoundError(MarketplaceError):
         )
 
 
+class MarketplaceOriginConflictError(MarketplaceError):
+    """Raised when an alias now names a different catalog than the lock recorded."""
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        super().__init__(
+            f"marketplace '{marketplace_name}' now points at {current}, but apm.lock.yaml "
+            f"recorded '{plugin_name}' from {locked}. Nothing was changed. To keep the "
+            f"locked catalog, run: apm marketplace add {locked} --name {marketplace_name}. "
+            f"To switch catalogs on purpose, run 'apm uninstall {plugin_name}@{marketplace_name}' "
+            "and add the dependency again."
+        )
+
+
 class MarketplaceYmlError(MarketplaceError):
     """Raised when marketplace.yml validation or parsing fails."""
 

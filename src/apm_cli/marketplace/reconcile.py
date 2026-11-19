@@ -106,6 +106,12 @@ def _apply(
 
     applied, conflicts, removed = apply_manifest_marketplaces([p.source for p in pending], removals)
     applied_set = set(applied)
+    if applied_set:
+        from .catalog_origin import duplicate_origin_warning, registrations_sharing_origin
+        from .registry import get_registered_marketplaces
+
+        registered = get_registered_marketplaces()
+        warned: set[frozenset[str]] = set()
     for item in pending:
         if item.name not in applied_set:
             continue
@@ -115,6 +121,11 @@ def _apply(
             f"{item.action.capitalize()} marketplace '{item.name}' ({item.plugin_count} {noun})",
             symbol="check",
         )
+        for existing in registrations_sharing_origin(item.source, registered):
+            pair = frozenset((item.name.lower(), existing.name.lower()))
+            if pair not in warned:
+                warned.add(pair)
+                logger.warning(duplicate_origin_warning(item.source, existing), symbol="warning")
     for name in conflicts:
         _report_conflict(name, report=report, logger=logger)
     for name in removed:
