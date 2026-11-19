@@ -22,6 +22,17 @@
       ]
     },
     {
+      "id": "marketplace-catalog-origin",
+      "decision": "Which catalog a marketplace alias names: canonical origin recorded as lock source_url/source_digest for every remote catalog kind, fail-closed alias rebind against the lock, and duplicate-origin registration warning",
+      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, registrations_sharing_origin) compares lock and registrations; consumers: deps/apm_resolver.py _resolve_marketplace_dep, marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
+      "selectors": [
+        "src/apm_cli/marketplace/catalog_origin.py"
+      ],
+      "guards": [
+        "marketplace-integrations-catalog-origin"
+      ]
+    },
+    {
       "id": "marketplace-tag-pattern",
       "decision": "Marketplace tag-pattern validation and expansion",
       "owner": "marketplace/tag_pattern.py",
