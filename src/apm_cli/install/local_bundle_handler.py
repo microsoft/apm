@@ -331,7 +331,8 @@ def install_local_bundle(
             )
 
         # Persist into project lockfile -- never mutate apm.yml (per design).
-        if deployed or staged_instructions:
+        staged_fallbacks = result.get("staged_file_fallback_hashes", {})
+        if deployed or staged_instructions or staged_fallbacks:
             from ..deps.lockfile import migrate_lockfile_if_needed
 
             migrate_lockfile_if_needed(project_root)
@@ -340,7 +341,12 @@ def install_local_bundle(
             from ..core.deployment_ledger import DeploymentLedgerCodec
 
             DeploymentLedgerCodec.record_local_bundle_files(
-                lockfile, deployed, deployed_hashes, staged=staged_instructions
+                lockfile,
+                deployed,
+                deployed_hashes,
+                staged=staged_instructions,
+                staged_hashes=result.get("staged_file_hashes", {}),
+                staged_fallback_hashes=staged_fallbacks,
             )
 
             # Auto-migrate legacy per-client skill paths (#737).
