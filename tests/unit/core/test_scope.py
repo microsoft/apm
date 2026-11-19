@@ -491,7 +491,6 @@ def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, m
     """Grants come from $APM_HOME/apm.yml; org policy is still discovered from the deploy root."""
     from types import SimpleNamespace
 
-    from apm_cli.core.scope import manifest_root
     from apm_cli.security import executables
 
     home, apm_home = tmp_path / "home", tmp_path / "elsewhere/apm-home"
@@ -499,6 +498,9 @@ def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, m
     apm_home.mkdir(parents=True)
     (apm_home / "apm.yml").write_text(
         "name: u\nversion: 1.0.0\nexecutables:\n  allow:\n    owner/pkg:\n      hooks: true\n"
+    )
+    (home / "apm.yml").write_text(
+        "name: d\nversion: 1.0.0\nexecutables:\n  allow:\n    owner/decoy:\n      hooks: true\n"
     )
     monkeypatch.setenv("APM_HOME", str(apm_home))
     discovered: list = []
@@ -509,7 +511,8 @@ def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, m
     allow = executables.resolve_project_exec_allow_map(
         home,
         SimpleNamespace(allow_executables=None),
-        manifest_dir=manifest_root(home, user_scope=True),
+        user_scope=True,
     )
     assert discovered == [home]
     assert allow is not None and allow["owner/pkg"]["hooks"] is True
+    assert "owner/decoy" not in allow

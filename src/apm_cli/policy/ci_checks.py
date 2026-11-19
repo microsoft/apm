@@ -543,7 +543,9 @@ def _check_config_consistency(
     # Consent is re-evaluated from apm.yml and org policy, never from the
     # lockfile or personal config, so CI and laptops reach one verdict. Audit
     # accepts structural omission evidence and re-checks consent.
-    admission = McpAdmission.for_project(project_root, include_user=False, no_policy=no_policy)
+    admission = McpAdmission.for_project(
+        project_root, user_scope=False, include_user=False, no_policy=no_policy
+    )
     view = CurrentMcpConfigView.select(
         manifest,
         lock,

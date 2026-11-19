@@ -138,21 +138,12 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
     copies, and only when it is exactly the canonical receipt for this root.
     An Agent Plugin is loaded live and never normalized, so it gets none.
     """
-    from apm_cli.agent_plugins.loader import detect_agent_plugin
-    from apm_cli.deps.plugin_parser import (
-        _PLUGIN_SKILL_SOURCES_FILE,
-        is_canonical_normalization_receipt,
-    )
+    from apm_cli.deps.plugin_parser import canonical_normalization_receipt
 
     apm_dir = plugin_root / ".apm"
     if not apm_dir.exists():
         return None
-    receipt = (
-        apm_dir / _PLUGIN_SKILL_SOURCES_FILE
-        if detect_agent_plugin(plugin_root) is None
-        and is_canonical_normalization_receipt(plugin_root)
-        else None
-    )
+    receipt = canonical_normalization_receipt(plugin_root)
     try:
         pinned = {
             hashlib.sha256((plugin_root / relative).read_bytes()).digest()
@@ -162,7 +153,7 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
             label = path.relative_to(plugin_root).as_posix()
             if path.is_symlink():
                 return f"'{label}' is a symlink"
-            if receipt is not None and path == receipt:
+            if receipt is not None and path == receipt[0] and path.read_bytes() == receipt[1]:
                 continue
             if path.is_file() and hashlib.sha256(path.read_bytes()).digest() not in pinned:
                 return f"'{label}' is not a copy of a pinned plugin file"

@@ -321,45 +321,86 @@ def _read_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, str], bool]
     return sources, data.get("declared") is True
 
 
-def is_canonical_normalization_receipt(plugin_path: Path) -> bool:
-    """Whether ``.apm/<receipt>`` is exactly what normalization writes for this root.
+def _serialize_skill_sources_receipt(declared: bool, sources: dict[str, str]) -> bytes:
+    """The one serialization of the skill-source receipt (writer and validator)."""
+    return json.dumps(
+        {"version": 1, "declared": declared, "sources": sources}, sort_keys=True
+    ).encode("utf-8")
 
-    Its bytes must be the writer's canonical serialization, every recorded
-    source a real skill directory inside the plugin with a flat ``.apm/skills``
-    copy, so the receipt carries nothing beyond facts the plugin pin binds.
+
+def _is_byte_copy_of(copy_dir: Path, source_dir: Path) -> bool:
+    """Every file under *copy_dir* equals the file at the same path in *source_dir*."""
+    found = False
+    for path in copy_dir.rglob("*"):
+        if path.is_symlink():
+            return False
+        if not path.is_file():
+            continue
+        original = source_dir / path.relative_to(copy_dir)
+        if original.is_symlink() or not original.is_file():
+            return False
+        if path.read_bytes() != original.read_bytes():
+            return False
+        found = True
+    return found
+
+
+def canonical_normalization_receipt(plugin_path: Path) -> tuple[Path, bytes] | None:
+    """Return the receipt path and bytes when they are exactly what normalization writes here.
+
+    The bytes must be the writer's serialization; every recorded name a plain
+    directory name; every source a non-symlinked skill directory inside the
+    plugin; and every file of its ``.apm/skills/<name>/`` copy a byte copy of
+    the file at the same path under that source. ``declared`` only selects
+    among those pinned skills. Agent Plugins are loaded live and never
+    normalized, so they have no receipt.
     """
+    from ..agent_plugins.loader import detect_agent_plugin
+
     receipt = plugin_path / ".apm" / _PLUGIN_SKILL_SOURCES_FILE
-    if not receipt.is_file() or receipt.is_symlink():
-        return False
+    if not receipt.is_file() or receipt.is_symlink() or detect_agent_plugin(plugin_path):
+        return None
     try:
+        if receipt.stat().st_size > _MAX_PLUGIN_JSON_BYTES:
+            return None
         raw = receipt.read_bytes()
         data = json.loads(raw.decode("utf-8"))
-    except (OSError, ValueError):
-        return False
+    except (OSError, ValueError, RecursionError):
+        return None
     if (
         not isinstance(data, dict)
         or set(data) != {"version", "declared", "sources"}
         or data["version"] != 1
         or not isinstance(data["declared"], bool)
         or not isinstance(data["sources"], dict)
+        or raw != _serialize_skill_sources_receipt(data["declared"], data["sources"])
     ):
-        return False
+        return None
     root = plugin_path.resolve()
-    for name, source in data["sources"].items():
-        if not isinstance(name, str) or not name or Path(name).name != name:
-            return False
-        if not isinstance(source, str) or not source:
-            return False
-        directory = plugin_path / source
-        if (
-            directory.is_symlink()
-            or not directory.resolve().is_relative_to(root)
-            or not (directory / "SKILL.md").is_file()
-            or not (plugin_path / ".apm" / "skills" / name / "SKILL.md").is_file()
-        ):
-            return False
-    canonical = json.dumps(data, sort_keys=True).encode("utf-8")
-    return raw == canonical
+    try:
+        for name, source in data["sources"].items():
+            if (
+                not isinstance(name, str)
+                or name in {"", ".", ".."}
+                or Path(name).name != name
+                or not isinstance(source, str)
+                or not source
+            ):
+                return None
+            directory = plugin_path / source
+            copy = plugin_path / ".apm" / "skills" / name
+            if (
+                directory.is_symlink()
+                or not directory.resolve().is_relative_to(root)
+                or not (directory / "SKILL.md").is_file()
+                or copy.is_symlink()
+                or not (copy / "SKILL.md").is_file()
+                or not _is_byte_copy_of(copy, directory)
+            ):
+                return None
+    except OSError:
+        return None
+    return receipt, raw
 
 
 def normalized_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, Path], bool]:
@@ -442,10 +483,7 @@ def _write_plugin_skill_sources(
     receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
     if receipt.is_symlink():
         raise PluginIntegrityError(f"Refusing to write symlinked plugin receipt: {receipt}")
-    receipt.write_text(
-        json.dumps({"version": 1, "declared": declared, "sources": serialized}, sort_keys=True),
-        encoding="utf-8",
-    )
+    receipt.write_bytes(_serialize_skill_sources_receipt(declared, serialized))
 
 
 def _remove_stale_normalized_skills(
