@@ -44,7 +44,8 @@ _TARGET = "copilot"
 _INSTALL = ("install", "--target", _TARGET, "--no-policy", "--parallel-downloads", "0")
 
 
-_SERVERS = {"replay-server": {"command": "echo", "args": ["replay"]}}
+_MCP_SERVERS = {"replay-server": {"command": "echo", "args": ["replay"]}}
+_LSP_SERVERS = {"replay-server": {"command": "echo", "extensionToLanguage": {".rpl": "replay"}}}
 
 
 def _skill(body: str) -> str:
@@ -59,7 +60,7 @@ class _World:
     root: Path
     env: dict[str, str]
     runner: ApmLifecycleRunner
-    servers: dict[str, object] | None
+    servers: tuple[str, dict[str, object]] | None
 
     @property
     def deployed(self) -> Path:
@@ -84,7 +85,8 @@ class _World:
             "source": {"source": "url", "url": _PACKAGE_REMOTE, "ref": ref},
         }
         if self.servers:
-            plugin["mcpServers"] = self.servers
+            field, servers = self.servers
+            plugin[field] = servers
         (self.catalog.worktree / "marketplace.json").write_text(
             json.dumps({"name": _CATALOG, "owner": {"name": "APM Test"}, "plugins": [plugin]}),
             encoding="utf-8",
@@ -106,7 +108,9 @@ class _World:
         return rows[0]
 
 
-def _world(tmp_path: Path, binary: Path, *, servers: dict[str, object] | None = None) -> _World:
+def _world(
+    tmp_path: Path, binary: Path, *, servers: tuple[str, dict[str, object]] | None = None
+) -> _World:
     isolated = IsolatedApmEnvironment.create(
         tmp_path.resolve() / "isolated", base_env=dict(os.environ)
     )
@@ -183,21 +187,33 @@ def test_locked_marketplace_entry_replays_without_catalog_until_update(
     assert world.deployed.read_text(encoding="utf-8") == _skill("two")
 
 
+@pytest.mark.parametrize(
+    ("field", "servers", "lock_key", "config"),
+    [
+        ("mcpServers", _MCP_SERVERS, "mcp_servers", ".mcp.json"),
+        ("lspServers", _LSP_SERVERS, "lsp_servers", ".github/lsp.json"),
+    ],
+)
 def test_catalog_defined_servers_replay_warm_and_reresolve_cold(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path,
+    apm_binary_path: Path,
+    field: str,
+    servers: dict[str, object],
+    lock_key: str,
+    config: str,
 ) -> None:
     """Inline catalog servers replay from a warm copy; a cold copy needs the catalog."""
-    world = _world(tmp_path, apm_binary_path, servers=_SERVERS)
+    world = _world(tmp_path, apm_binary_path, servers=(field, servers))
     lock = load_yaml(world.root / "apm.lock.yaml")
-    assert set(lock["mcp_servers"]) == set(_SERVERS)
-    mcp_config = world.root / ".mcp.json"
-    assert "replay-server" in mcp_config.read_text(encoding="utf-8")
+    assert set(lock[lock_key]) == set(servers)
+    server_config = world.root / config
+    assert "replay-server" in server_config.read_text(encoding="utf-8")
     lock_bytes = world.lock_bytes
 
     blocked = world.block_catalog()
     world.run(*_INSTALL)
     assert world.lock_bytes == lock_bytes
-    assert "replay-server" in mcp_config.read_text(encoding="utf-8")
+    assert "replay-server" in server_config.read_text(encoding="utf-8")
 
     # Only the catalog holds the server definitions a cold copy needs.
     world.remove_materialized()
@@ -207,4 +223,4 @@ def test_catalog_defined_servers_replay_warm_and_reresolve_cold(
     world.run(*_INSTALL, "--frozen")
     assert world.lock_bytes == lock_bytes
     assert world.deployed.read_text(encoding="utf-8") == _skill("one")
-    assert "replay-server" in mcp_config.read_text(encoding="utf-8")
+    assert "replay-server" in server_config.read_text(encoding="utf-8")

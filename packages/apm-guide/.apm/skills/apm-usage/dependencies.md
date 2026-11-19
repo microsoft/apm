@@ -380,10 +380,13 @@ Once the lockfile records an entry, `apm install` and `apm install --frozen`
 replay its locked commit without reading the catalog or needing the
 marketplace registration; catalog edits do not move it. New entries, entries
 whose `name`, `marketplace` or `version` changed, and `apm update` resolve
-through the catalog, and `--frozen` fails for an unlocked entry. Exception
-until 0.38 (#2903): the lockfile does not record catalog-inline MCP/LSP
-servers, so a package with locked servers and no `apm_modules/` copy reads
-the catalog, also under `--frozen`.
+through the catalog, and `--frozen` fails for an unlocked entry. Exceptions
+until 0.38 (#2903): registry-routed catalog entries still resolve through the
+catalog (the lockfile has no registry binding), and the lockfile does not
+record catalog-inline MCP/LSP servers, so a package with locked servers and no
+`apm_modules/` copy reads the catalog, also under `--frozen`; one with no
+locked servers (`--only=apm`, root-overridden server) fails its content-hash
+check when cold -- run `apm update` for it.
 
 The `marketplace` value names a marketplace registered with
 `apm marketplace add` or declared in the user manifest's `marketplaces:`

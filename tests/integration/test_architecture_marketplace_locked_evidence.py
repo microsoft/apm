@@ -33,7 +33,13 @@ def test_marketplace_locked_evidence_routes_through_owners() -> None:
             "or marketplace_ref_mismatch(dep_ref, locked_dep) is not None",
             "or False",
         ),
-        ("drift.py", "_owns_locked_servers(lockfile, locked_dep)", "False"),
+        ("drift.py", "_owns_locked_servers(lockfile, locked_dep, install_owner)", "False"),
+        ("drift.py", "package_lsp_owner(owner) for owner", "owner for owner"),
+        (
+            "install/lsp/integration.py",
+            "package_lsp_owner(dependency.resolved_by)",
+            'f"package:{dependency.resolved_by}"',
+        ),
         ("deps/apm_resolver.py", "locked_marketplace_replay(\n", "_skip_replay(\n"),
         ("deps/apm_resolver.py", "locked_marketplace_row(dep_ref", "_no_row(dep_ref"),
         (

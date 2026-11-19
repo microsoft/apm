@@ -173,10 +173,25 @@ def locked_marketplace_row(
     return locked_dep
 
 
-def _owns_locked_servers(lockfile: LockFile, locked_dep: LockedDependency) -> bool:
-    """True when the lock records MCP or LSP servers contributed by *locked_dep*."""
-    owners = {token for token in (locked_dep.name, locked_dep.get_unique_key()) if token}
-    for provenance in (lockfile.mcp_config_provenance, lockfile.lsp_config_provenance):
+def _owns_locked_servers(
+    lockfile: LockFile, locked_dep: LockedDependency, install_owner: str
+) -> bool:
+    """True when the lock records MCP or LSP servers contributed by *locked_dep*.
+
+    MCP provenance names the declaring package; LSP provenance uses its
+    owner's token for the lock key or, on a first install, the package's
+    ``apm_modules``-relative path (*install_owner*).
+    """
+    from apm_cli.install.lsp.integration import package_lsp_owner
+
+    mcp_owners = {locked_dep.name} - {None, ""}
+    lsp_owners = {
+        package_lsp_owner(owner) for owner in (locked_dep.get_unique_key(), install_owner)
+    }
+    for owners, provenance in (
+        (mcp_owners, lockfile.mcp_config_provenance),
+        (lsp_owners, lockfile.lsp_config_provenance),
+    ):
         for recorded in (provenance or {}).values():
             tokens = recorded if isinstance(recorded, list) else [recorded]
             if owners.intersection(tokens):
@@ -218,9 +233,16 @@ def locked_marketplace_replay(
         target_subset=dep_ref.target_subset,
         subset_pairings=dep_ref.subset_pairings,
     )
-    if _owns_locked_servers(lockfile, locked_dep) and (
-        modules_dir is None or not replayed.get_install_path(modules_dir).is_dir()
-    ):
+    if modules_dir is not None:
+        install_path = replayed.get_install_path(modules_dir)
+        if install_path.is_dir():
+            return replayed
+        from apm_cli.utils.paths import portable_relpath
+
+        install_owner = portable_relpath(install_path, modules_dir)
+    else:
+        install_owner = ""
+    if _owns_locked_servers(lockfile, locked_dep, install_owner):
         return None
     return replayed
 

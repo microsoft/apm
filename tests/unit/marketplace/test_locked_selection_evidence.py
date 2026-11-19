@@ -259,24 +259,35 @@ def test_frozen_refuses_unlocked_marketplace_declaration_without_catalog(
 
 @pytest.mark.parametrize("frozen", [False, True])
 @pytest.mark.parametrize(
-    "provenance",
+    ("host", "provenance"),
     [
-        {"mcp_config_provenance": {"server": "tool"}},
-        {"mcp_config_provenance": {"server": ["other", "tool"]}},
-        {"lsp_config_provenance": {"server": "owner/package"}},
+        (None, {"mcp_config_provenance": {"server": "tool"}}),
+        (None, {"mcp_config_provenance": {"server": ["other", "tool"]}}),
+        (None, {"lsp_config_provenance": {"server": "package:owner/package"}}),
+        (
+            "git.example.test",
+            {"lsp_config_provenance": {"server": "package:git.example.test/owner/package"}},
+        ),
+        ("git.example.test", {"lsp_config_provenance": {"server": "package:owner/package"}}),
     ],
 )
 def test_catalog_defined_servers_replay_only_from_a_materialized_copy(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    host: str | None,
     provenance: dict[str, dict],
     frozen: bool,
 ) -> None:
-    """The lock cannot rebuild catalog-inline servers, so a cold copy re-resolves."""
-    locked = _locked(name="tool")
+    """The lock cannot rebuild catalog-inline servers, so a cold copy re-resolves.
+
+    LSP ownership is recorded for the lock key or, on a first install, the
+    package's ``apm_modules``-relative path.
+    """
+    locked = _locked(name="tool", host=host)
     lock = LockFile(dependencies={locked.get_unique_key(): locked}, **provenance)
     with pytest.raises(_CatalogContacted):
         _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(), frozen=frozen)
-    (tmp_path / "apm_modules" / "owner" / "package").mkdir(parents=True)
+    replayed = locked.to_dependency_ref()
+    replayed.get_install_path(tmp_path / "apm_modules").mkdir(parents=True)
     replayed = _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(), frozen=frozen)
     assert replayed.get_unique_key() == locked.get_unique_key()

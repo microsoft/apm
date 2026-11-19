@@ -236,6 +236,9 @@ commit without reading the catalog or needing the marketplace registration, so
 catalog edits do not change what installs. Only new entries, entries whose
 `name`, `marketplace` or `version` changed, and `apm update` resolve through
 the catalog. `--frozen` fails for an entry the lockfile does not record.
+Entries the catalog routes through a package registry are the exception: the
+lockfile does not record that registry binding, so they still resolve through
+the catalog.
 
 Marketplace entries can also provide inline LSP or MCP servers when their
 downloaded source has no package manifest. APM validates these
@@ -243,7 +246,11 @@ downloaded source has no package manifest. APM validates these
 before deployment. The lockfile does not record those inline definitions, so
 when a package with locked servers has no copy in `apm_modules/` (a fresh
 checkout or cold CI runner), install, including `--frozen`, reads the catalog
-for it. Lockfile-only replay for these packages is planned for 0.38 (#2903).
+for it. If the lockfile records none of its servers (for example after
+`apm install --only=apm`, or when a root `mcp:` entry overrides the server),
+a cold copy cannot be rebuilt and fails its content-hash check; run
+`apm update` for that package. Lockfile-only replay for these packages is
+planned for 0.38 (#2903).
 
 Marketplace publishers can route an entry through a configured APM package
 registry with the entry's `registry` and semver `version` fields. Enable the
