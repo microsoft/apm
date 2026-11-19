@@ -54,6 +54,7 @@ from .models import (
     MarketplaceManifest,
     MarketplacePlugin,
     MarketplaceSource,
+    catalog_digest,
     parse_marketplace_json,
 )
 from .registry import get_registered_marketplaces
@@ -1398,6 +1399,10 @@ def _parse_catalog(
     """
     if not isinstance(data, dict):
         raise MarketplaceFetchError(source.name, "marketplace.json root must be an object")
+    if source.kind != "url" and not source_digest:
+        # Git-hosted catalogs arrive parsed, so their lock digest is the
+        # canonical-JSON one. Hosted URLs only ever use the raw-bytes digest.
+        source_digest = catalog_digest(data)
     manifest = parse_marketplace_json(
         data, source.name, source_url=source_url, source_digest=source_digest
     )

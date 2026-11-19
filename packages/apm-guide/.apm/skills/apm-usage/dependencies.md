@@ -376,6 +376,18 @@ placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
 
+Once the lockfile records an entry, `apm install` and `apm install --frozen`
+replay its locked commit without reading the catalog or needing the
+marketplace registration; catalog edits do not move it. New entries, entries
+whose `name`, `marketplace` or `version` changed, and `apm update` resolve
+through the catalog, and `--frozen` fails for an unlocked entry. Exceptions
+until 0.38 (#2903): registry-routed catalog entries still resolve through the
+catalog (the lockfile has no registry binding), and the lockfile does not
+record catalog-inline MCP/LSP servers, so a package with locked servers and no
+`apm_modules/` copy reads the catalog, also under `--frozen`; one with no
+locked servers (`--only=apm`, root-overridden server) fails its content-hash
+check when cold -- run `apm update` for it.
+
 The `marketplace` value names a marketplace registered with
 `apm marketplace add` or declared in the user manifest's `marketplaces:`
 list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
@@ -390,6 +402,16 @@ ambiguous evidence fails. Audit does not fetch the catalog, so removing a local
 catalog registration does not invalidate otherwise valid installed evidence.
 Omitting `version` removes the selector comparison, not the unique-provenance
 and full locked-commit requirements.
+
+The lock also records the catalog origin as `source_url` (and a
+`source_digest`) for every remote catalog kind, including Git; local catalogs
+record neither. The alias is machine-local: if it now points at a different
+origin, re-resolving the entry (for example `apm update`) fails and names both
+origins; `apm install` keeps replaying the locked catalog. Restore the alias with `apm marketplace add <locked-origin>
+--name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
+add it back and run `apm install` again. Only the origin is compared, not the
+catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
+it on the next lock write.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
