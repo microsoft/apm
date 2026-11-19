@@ -1,8 +1,8 @@
 # entry-sanitizer -- one short line per user-visible change
 
 Loaded by `cut-release` at Phase 3. Re-sanitizes the whole
-[Unreleased] block (dedupe, condense, Highlights, upgrade notes)
-into a dated version block with one line per user-facing PR.
+[Unreleased] block into a dated version block where each change
+has one line in one section, plus release-time Highlights.
 
 ## Per-entry rubric
 
@@ -10,10 +10,10 @@ The format contract is `.github/instructions/changelog.instructions.md`
 (source: `.apm/instructions/changelog.instructions.md`). Read it
 first, including its good/bad examples. This rubric applies it:
 
-1. ONE LINE per change. Most PRs get one line. A PR that ships
-   several unrelated user-visible fixes gets one line per fix; a
-   PR may also appear once in Highlights and once in the upgrade
-   notes. Never two lines for the same change.
+1. ONE CHANGE, ONE LINE, ONE SECTION. Most PRs get one line. A PR
+   with several user-visible fixes groups them by theme into as
+   few lines as stay clear. Only release-time Highlights may
+   repeat a change.
 2. EFFECT FIRST, 25 WORDS OR FEWER. Say what users can now do or
    what no longer breaks. Drop mechanism, internal names, and lists
    of every touched command; the PR holds the detail.
@@ -24,10 +24,11 @@ first, including its good/bad examples. This rubric applies it:
    `-- by @username (#NNNN)`. Keep every existing credit variant
    (`-- reported by`, `-- thanks`, `-- with`). Internal
    contributors are not named.
-5. BREAKING and must-act changes go under `### Breaking changes
-   and upgrade notes`, one line each with the migration. Prefix
-   true breakings with `**BREAKING:**`. The change itself may
-   also keep one short line in its type section.
+5. BREAKING and must-act changes (including deprecations that
+   need action) go ONLY under `### Breaking changes and upgrade
+   notes`, one line each with the migration. Prefix true
+   breakings with `**BREAKING:**`. Never restate them under
+   Added, Changed or Deprecated.
 6. CONCRETE LANGUAGE. Use the exact CLI surface affected:
    ``\`apm install -g\` now ...`` not "global install is now ...".
 7. NO REPO INTERNALS. The reader is a user, not a maintainer.
@@ -41,15 +42,16 @@ first, including its good/bad examples. This rubric applies it:
 | Diff shape | Section |
 |------------|---------|
 | New CLI command, new flag with new default ON, new manifest field, new spec, new policy, new feature | **Added** |
-| Behavior change to existing surface (default flip, output format change, exit code change, BREAKING) | **Changed** |
+| BREAKING change, or any change / deprecation users must act on | **Breaking changes and upgrade notes** (only there) |
+| Behavior change to existing surface that needs no user action (output format, message wording) | **Changed** |
 | Bug fix to existing surface (was wrong, now right) | **Fixed** |
-| Surface marked for removal with timeline | **Deprecated** |
+| Surface marked for removal, no action needed yet | **Deprecated** |
 | Surface removed from the CLI / config / manifest | **Removed** |
 | Security-relevant fix or hardening (CVE, attack surface closed) | **Security** |
 | Measurable speedup / memory reduction on a user-visible path | **Changed** |
 
-If a PR fits two sections, pick the user-MOST-VISIBLE one. Do
-not double-list (the upgrade-notes exception in rule 5 aside).
+If a change fits two sections, pick one: upgrade notes if users
+must act, otherwise the user-MOST-VISIBLE type. Never double-list.
 
 ## DROP list (do NOT include in changelog)
 
@@ -85,17 +87,16 @@ hunk to write the entry; ignore the `.apm/` noise.
 The existing [Unreleased] block was written PR by PR and drifts.
 Treat every line as a draft and re-sanitize the whole block:
 
-- DEDUPE. If two lines describe the same change (typically the
-  same PR number, often one short and one long version), MERGE
-  them into one short line; keep the user-visible effect and any
-  caveat, drop the rest.
+- DEDUPE ACROSS SECTIONS. If a change appears in more than one
+  section (Highlights + upgrade notes + Changed is the usual
+  pattern) or twice in one, keep ONE line in the right section and
+  fold any caveat or migration from the others into it.
+- REMOVE PR-written Highlights; they are rebuilt below.
 - CONDENSE. Rewrite any line over ~25 words, any multi-sentence
-  line, and any line that explains mechanism. Move must-act
-  details (migration steps, newly blocked cases) into the upgrade
-  notes as one line.
-- GROUP. Several lines from one PR that describe small fixes to
-  the same surface may become one line; several PRs that deliver
-  one change share one line with all their numbers.
+  line, and any line that explains mechanism.
+- GROUP. Several lines from one PR become as few themed lines as
+  stay clear (for example, one line for all `apm audit` fixes);
+  several PRs that deliver one change share one line.
 - DROP internal-only lines (test, CI, maintainer tooling) per the
   DROP list, even if a contributor added them.
 - PRESERVE every user-facing PR reference and every credit. After
@@ -108,9 +109,11 @@ Treat every line as a draft and re-sanitize the whole block:
 
 ## Highlights
 
-Write `### Highlights` last: 2-4 lines naming the changes a user
-would most want to hear about (new capability, broad fix, anything
-in the upgrade notes). Each is one short line with its PR refs.
+Only cut-release writes `### Highlights`, and only for the
+released version: 2-4 short pointers to the changes a user would
+most want to hear about (new capability, broad fix, anything in
+the upgrade notes), each with its PR refs. This is the one allowed
+repeat of a change.
 
 ## Output shape
 
@@ -157,9 +160,8 @@ recall).
 
 ## Worked example (v0.36.1)
 
-`## [0.36.1]` in `CHANGELOG.md` is the reference shape: three
-Highlights, one upgrade note with its migration, one Changed line,
-and Fixed lines such as:
+Fixed lines from `## [0.36.1]` in `CHANGELOG.md` show the line
+style:
 
 ```
 - `apm uninstall` keeps a surviving package's `skills:` selection instead of redeploying all its skills. (#3784)
