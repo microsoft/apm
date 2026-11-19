@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
-- **BREAKING:** `copilot` project MCP servers move from `.github/mcp.json` and `.vscode/mcp.json` to `.mcp.json`; run `apm install` once and commit the result. (#3875)
+- **BREAKING:** Copilot project MCP servers now live in root `.mcp.json`, read by Copilot CLI and Copilot in VS Code; the next `apm install` moves APM-managed entries out of `.github/mcp.json` and `.vscode/mcp.json`. Commit the result. (#3875)
+- If you still use VS Code's deprecated Local mode, which reads only `.vscode/mcp.json`, switch to the Copilot harness. (#3875)
+- `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude. (#3875)
 - Replace the deprecated `vscode` target with `copilot`; lockfiles that recorded `vscode` still install. (#3875)
 - Replace singular `target:` with `targets:`; the warning prints the exact value that deploys the same files. (#3801, #3875)
 - If `apm.yml` sets `default_host:`, shorthand dependencies now resolve against it; write `github.com/owner/repo` for GitHub packages. (#3865)
