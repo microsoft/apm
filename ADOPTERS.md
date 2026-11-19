@@ -10,8 +10,10 @@ See the [CNCF definition of an adopter](https://github.com/cncf/toc/blob/main/FA
 
 | Organization | Type | Adoption Level | Description |
 | ------------ | ---- | -------------- | ----------- |
+| ENCAMINA | Consultancy, End-User Organization, Project | Production | Uses APM to govern skills, instructions, agents, and MCP distributions and configurations across initiatives managed in both Azure DevOps and GitHub. |
 | EPAM | Consultancy, Contributor, End-User Organization | Production | Uses, actively contributes to, and consults on APM. |
 | Grupo Universal | End-User Organization | Production | Uses APM to package and distribute agent skills, prompts and MCP configurations across internal agent DevOps projects. |
+| PRODYNA SE | Consultancy, Contributor, End-User Organization | Production | Uses, contributes to, and consults on APM. |
 | Sopra Steria | End-User Organization | Production | Uses APM. |
 | Supermodular | Consultancy, Contributor, End-User Organization | Production | Uses APM internally and at customers to package and distribute agent skills and agents. Contributed `apm auth` for git host credentials. |
 | WTW | End-User Organization | Production | Uses APM. |
