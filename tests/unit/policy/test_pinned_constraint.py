@@ -181,6 +181,15 @@ def test_classify_literal_tag_v_prefixed_returns_pinned_none():
     assert classify_unbounded_reason(_dep("v1.5.3")) is None
 
 
+@pytest.mark.parametrize(
+    "spec",
+    ["v01.2.3", "v1.02.3", "v1.2.3-01", "v1.2.3-rc..1", "v\u0661.2.3", "pkg@01.2.3"],
+)
+def test_classify_non_semver_literal_tag_returns_bare_branch(spec):
+    # Leading zeros and non-ASCII digits are not exact SemVer releases (#3795).
+    assert classify_unbounded_reason(_dep(spec)) is UnboundedReason.BARE_BRANCH
+
+
 def test_classify_sha_returns_pinned_none():
     sha = "a" * 40
     assert classify_unbounded_reason(_dep(sha)) is None
