@@ -119,26 +119,26 @@ def test_project_self_entry_replays_ungated_under_deny(
 
 
 @pytest.mark.parametrize(
-    ("recorded", "current", "stale"),
+    ("recorded", "current", "mixed", "stale"),
     [
-        (None, (None,), False),
-        (None, ("deployed",), False),
-        ("deployed", (None,), False),
-        (None, ("gated_pending_approval",), True),
-        ("deployed", ("denied",), True),
-        ("gated_pending_approval", ("deployed",), True),
-        ("denied", ("denied",), False),
-        # A native-capable package agrees when either verdict matches.
-        ("deployed", ("gated_pending_approval", "deployed"), False),
-        ("deployed", ("denied", "denied"), True),
+        (None, None, False, False),
+        (None, "deployed", False, False),
+        ("deployed", None, False, False),
+        (None, "gated_pending_approval", False, True),
+        ("deployed", "denied", False, True),
+        ("gated_pending_approval", "deployed", False, True),
+        ("denied", "denied", False, False),
+        # One aggregate status cannot show which of a mixed package's types changed.
+        ("denied", "denied", True, True),
+        ("deployed", "deployed", True, False),
     ],
 )
 def test_recorded_exec_status_staleness(
-    recorded: str | None, current: tuple[str | None, ...], stale: bool
+    recorded: str | None, current: str | None, mixed: bool, stale: bool
 ) -> None:
     from apm_cli.install.exec_gate import recorded_exec_status_is_stale
 
-    assert recorded_exec_status_is_stale(recorded, current) is stale
+    assert recorded_exec_status_is_stale(recorded, current, mixed=mixed) is stale
 
 
 def _locked_hook_package(modules: Path, *, codex_native: bool = False) -> SimpleNamespace:
