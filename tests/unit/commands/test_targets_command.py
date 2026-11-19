@@ -441,3 +441,21 @@ class TestTargetsSubcommandDelegation:
         finally:
             # Clean up so other tests are not affected
             targets.commands.pop("_test_sub", None)
+
+
+class TestTargetsHonourManifest:
+    def test_manifest_targets_are_active_without_signals(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """apm.yml ``targets:`` wins over detection, as it does for install (#3792)."""
+        (tmp_path / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\ntargets: [copilot, claude]\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(targets, ["--json"])
+
+        assert result.exit_code == 0, result.output
+        rows = {row["target"]: row["status"] for row in json.loads(result.stdout)}
+        assert rows["copilot"] == "active"
+        assert rows["claude"] == "active"
