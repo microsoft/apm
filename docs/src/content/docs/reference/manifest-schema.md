@@ -698,7 +698,7 @@ pattern makes `apm marketplace add` or `apm marketplace update` reject the
 entire marketplace, so consumers never resolve against a partially accepted
 catalog.
 
-Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Later installs, including `--frozen`, replay those coordinates without contacting the marketplace while `name`, `marketplace` and `version` are unchanged; `apm update` resolves again. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
+Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Later installs, including `--frozen`, replay those coordinates without contacting the marketplace while `name`, `marketplace` and `version` are unchanged; `apm update` resolves again. The exception is a package whose MCP or LSP servers the lock records but which has no `apm_modules/` copy: install reads the marketplace for it, because only the marketplace holds those inline server definitions. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
 
 Registry dependency (whole package or virtual sub-path):
 
