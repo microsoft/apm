@@ -68,6 +68,12 @@ Read it for:
   [`apm approve`](../approve-executables/).
 - **Changed sources**: a different host or repository for the same name.
 
+`apm update` also re-checks executables against current approvals. If your
+organization turns the approval gate on, packages installed before it go through the
+gate on the next update. If you remove the approval for one type, such as hooks, from a
+package, the update retires that type. The lockfile lists the approved types in
+`exec_allowed_types`.
+
 ## After a lock bump, run `apm install`
 
 A pull request that changes `apm.lock.yaml` does not change the files on
