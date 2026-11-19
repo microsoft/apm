@@ -161,7 +161,7 @@ def _executables_need_reconcile(
     """
     if lockfile is None:
         return False
-    from apm_cli.core.scope import get_deploy_root, get_source_root
+    from apm_cli.core.scope import get_deploy_root, get_manifest_path
     from apm_cli.install.exec_gate import lock_exec_decisions_stale
 
     def _policy() -> Any:
@@ -181,7 +181,7 @@ def _executables_need_reconcile(
     return lock_exec_decisions_stale(
         lockfile,
         modules_dir,
-        get_source_root(scope),
+        get_manifest_path(scope),
         policy_provider=_policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
     )

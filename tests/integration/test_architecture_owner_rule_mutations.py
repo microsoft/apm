@@ -825,6 +825,44 @@ def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, 
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/template.py",
+            "manifest_path = get_manifest_path(scope)",
+            "manifest_path = project_manifest_path(Path.home())",
+        ),
+        (
+            "src/apm_cli/security/executables.py",
+            "    project_data: dict[str, Any] | None = None\n    if manifest_path.is_file():",
+            "    project_data: dict[str, Any] | None = None\n"
+            '    manifest_path = manifest_path.parent / "apm.yml"\n'
+            "    if manifest_path.is_file():",
+        ),
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "def _filter_bundle_executables(",
+            "def _bypass_trust(root):\n"
+            "    return exec_trust_context_for_project(root, policy=None)\n\n\n"
+            "def _filter_bundle_executables(",
+        ),
+    ],
+)
+def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, new: str) -> None:
+    """Trust reads the scope's manifest; an unregistered caller fails closed (#3954)."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

@@ -293,7 +293,7 @@ class McpAdmission:
         admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
-            from .executables import exec_trust_context_for_project
+            from .executables import exec_trust_context_for_project, project_manifest_path
 
             policy = None
             if not no_policy:
@@ -311,14 +311,20 @@ class McpAdmission:
                     if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
                         admission.policy_unavailable = str(outcome)
             return exec_trust_context_for_project(
-                project_root, policy=policy, logger=logger, include_user=include_user
+                project_manifest_path(project_root),
+                policy=policy,
+                logger=logger,
+                include_user=include_user,
             )
 
         def pins() -> ExecTrustContext:
-            from .executables import exec_trust_context_for_project
+            from .executables import exec_trust_context_for_project, project_manifest_path
 
             return exec_trust_context_for_project(
-                project_root, policy=None, logger=None, include_user=include_user
+                project_manifest_path(project_root),
+                policy=None,
+                logger=None,
+                include_user=include_user,
             )
 
         admission = cls(resolve, one_off=one_off, pins=pins)

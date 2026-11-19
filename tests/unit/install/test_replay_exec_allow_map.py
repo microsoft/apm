@@ -168,7 +168,7 @@ def test_update_probe_flags_a_deny_no_install_reconciled(
 
     modules = tmp_path / "apm_modules"
     lock = _locked_hook_package(modules, codex_native=codex_native)
-    assert lock_exec_decisions_stale(lock, modules, project, policy_provider=lambda: None)
+    assert lock_exec_decisions_stale(lock, modules, project / "apm.yml", policy_provider=lambda: None)
 
 
 def test_update_probe_short_circuits_when_the_decision_holds(project: Path, tmp_path: Path) -> None:
@@ -180,7 +180,7 @@ def test_update_probe_short_circuits_when_the_decision_holds(project: Path, tmp_
     )
     modules = tmp_path / "apm_modules"
     lock = _locked_hook_package(modules)
-    assert not lock_exec_decisions_stale(lock, modules, project, policy_provider=lambda: None)
+    assert not lock_exec_decisions_stale(lock, modules, project / "apm.yml", policy_provider=lambda: None)
 
 
 def test_update_probe_runs_the_gate_when_policy_is_unavailable(
@@ -198,4 +198,4 @@ def test_update_probe_runs_the_gate_when_policy_is_unavailable(
     def unavailable():
         raise ExecPolicyUnavailable("cache_miss_fetch_fail")
 
-    assert lock_exec_decisions_stale(lock, modules, project, policy_provider=unavailable)
+    assert lock_exec_decisions_stale(lock, modules, project / "apm.yml", policy_provider=unavailable)

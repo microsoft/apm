@@ -10,6 +10,7 @@ the server name. Without a gate the server deploys as before.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -95,3 +96,48 @@ def test_org_deny_all_keeps_package_mcp_server_out(tmp_path: Path, apm_binary_pa
     # #3925: --frozen with org policy active replays the same gate and evidence.
     chain.ok("install", "--frozen")
     assert "tools-server" not in chain.servers("claude")
+
+
+def test_user_scope_gate_parks_executables_and_frozen_agrees(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3954: ``executables: {}`` in APM_HOME/apm.yml gates ``install -g`` too."""
+    chain = _chain(tmp_path, apm_binary_path)
+    home = chain.isolated.home
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    hooky = chain.project / "pkgs" / "hooky"
+    (hooky / ".apm" / "hooks").mkdir(parents=True)
+    (hooky / "apm.yml").write_text("name: hooky\nversion: 1.0.0\n", encoding="utf-8")
+    hook = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "echo hi-hooky"}]}
+            ]
+        }
+    }
+    (hooky / ".apm" / "hooks" / "hooky.json").write_text(json.dumps(hook), encoding="utf-8")
+    manifest = {
+        "name": "home",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {"apm": [str(chain.project / "pkgs" / "tools"), str(hooky)]},
+        "executables": {},
+    }
+    apm_home = home / ".apm"
+    (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    chain.ok("install", "-g", "--no-policy")
+
+    claude_json = home / ".claude.json"
+    servers = (
+        json.loads(claude_json.read_text("utf-8")).get("mcpServers", {})
+        if claude_json.exists()
+        else {}
+    )
+    assert "tools-server" not in servers
+    settings = home / ".claude" / "settings.json"
+    assert not settings.exists() or "hi-hooky" not in settings.read_text("utf-8")
+    lock = yaml.safe_load((apm_home / "apm.lock.yaml").read_text("utf-8"))
+    assert "tools-server" in lock["mcp_omissions"]
+
+    chain.ok("install", "-g", "--frozen", "--no-policy")

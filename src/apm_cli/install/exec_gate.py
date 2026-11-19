@@ -359,7 +359,7 @@ def recorded_exec_status_is_stale(recorded: str | None, current: tuple[str | Non
 def lock_exec_decisions_stale(
     lockfile: Any,
     modules_dir: Path,
-    source_root: Path,
+    manifest_path: Path,
     *,
     policy_provider: Callable[[], Any],
     fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
@@ -381,7 +381,7 @@ def lock_exec_decisions_stale(
         if not trust:
             trust.append(
                 exec_trust_context_for_project(
-                    source_root,
+                    manifest_path,
                     policy=policy_provider(),
                     fallback_allow_executables=fallback_allow_executables,
                     migrate_user_legacy=False,
@@ -587,6 +587,7 @@ class ReplayExecAllowMap:
         from apm_cli.security.executables import (
             exec_trust_context_for_project,
             materialize_exec_map,
+            project_manifest_path,
         )
 
         if self._policy_provider is not None:
@@ -597,7 +598,7 @@ class ReplayExecAllowMap:
             policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
         # Audit is read-only: never migrate legacy user consent here.
         self._trust_ctx_value = exec_trust_context_for_project(
-            self._project_root, policy=policy, migrate_user_legacy=False
+            project_manifest_path(self._project_root), policy=policy, migrate_user_legacy=False
         )
         self._map = materialize_exec_map(self._trust_ctx_value)
         self._resolved = True

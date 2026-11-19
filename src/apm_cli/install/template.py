@@ -63,11 +63,21 @@ def effective_allow_map(ctx) -> dict | None:
     if getattr(ctx, "exec_trust_ctx", None) is not None:
         return getattr(ctx, "exec_allow_map", None)
 
+    from apm_cli.core.scope import get_manifest_path, is_user_scope
+    from apm_cli.security.executables import project_manifest_path
+
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    scope = getattr(ctx, "scope", None)
+    if is_user_scope(scope):
+        # -g: the user manifest lives in APM_HOME, not the home directory (#3954).
+        manifest_path = get_manifest_path(scope)
+    else:
+        manifest_path = project_manifest_path(
+            getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+        )
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
-        project_root,
+        manifest_path,
         policy=policy,
         fallback_allow_executables=project_allow,
         logger=getattr(ctx, "logger", None),

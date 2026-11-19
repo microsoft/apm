@@ -1090,7 +1090,7 @@ def build_effective_exec_map(
 
 
 def exec_trust_context_for_project(
-    project_root: Path,
+    manifest_path: Path,
     *,
     policy: Any | None,
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
@@ -1098,11 +1098,15 @@ def exec_trust_context_for_project(
     migrate_user_legacy: bool = True,
     include_user: bool = True,
 ) -> ExecTrustContext:
-    """Resolve project, user, and policy executable trust through one owner."""
+    """Resolve project, user, and policy executable trust through one owner.
+
+    *manifest_path* is the scope's ``apm.yml`` itself, never a directory the
+    caller picked: under ``-g`` it is ``APM_HOME/apm.yml``, which the home
+    directory (the user-scope source and deploy root) does not hold (#3954).
+    """
     from apm_cli.models.manifest_io import load_manifest
 
     project_data: dict[str, Any] | None = None
-    manifest_path = project_root / "apm.yml"
     if manifest_path.is_file():
         data = load_manifest(manifest_path)
         if isinstance(data, dict):
@@ -1124,6 +1128,13 @@ def exec_trust_context_for_project(
     return ctx
 
 
+def project_manifest_path(project_root: Path) -> Path:
+    """Return the project-scope manifest that holds *project_root*'s trust layer."""
+    from apm_cli.constants import APM_YML_FILENAME
+
+    return Path(project_root) / APM_YML_FILENAME
+
+
 def effective_exec_map_for_project(
     project_root: Path,
     *,
@@ -1135,7 +1146,7 @@ def effective_exec_map_for_project(
     """Materialize the canonical trust context for one project."""
     return materialize_exec_map(
         exec_trust_context_for_project(
-            project_root,
+            project_manifest_path(project_root),
             policy=policy,
             fallback_allow_executables=fallback_allow_executables,
             logger=logger,
