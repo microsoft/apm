@@ -21,11 +21,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PreparedMcpIntegration:
-    """Selected comparison view, filtered declarations, and pre-write omission evidence."""
+    """Selected comparison view, filtered declarations, and omission candidates."""
 
     dependencies: list["MCPDependency"]
     current_view: "CurrentMcpConfigView | None"
-    omissions: dict[str, dict[str, str]] | None
+    omission_view: "CurrentMcpConfigView | None"
+
+    def omissions(self, lockfile: "LockFile") -> dict[str, dict[str, str]] | None:
+        """Evidence against the lock this run produced: a kept baseline supersedes it."""
+        if self.omission_view is None:
+            return None
+        return self.omission_view.omission_evidence(lockfile)
 
 
 def prepare_mcp_integration(
@@ -49,11 +55,11 @@ def prepare_mcp_integration(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.executables import (
         filter_mcp_by_allow_executables,
+        is_executable_gated_mcp,
         resolve_project_exec_allow_map,
     )
 
     current_view = None
-    omissions = None
     if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
         lockfile = LockFile.read(lock_path) if lock_path.exists() else None
         current_view = CurrentMcpConfigView.derive(
@@ -67,7 +73,6 @@ def prepare_mcp_integration(
             active_package_keys=active_package_keys,
             include_dependency_mcp=should_install,
         )
-        omissions = current_view.omission_evidence(lockfile or LockFile())
     if should_install and current_view is not None:
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)
@@ -75,7 +80,7 @@ def prepare_mcp_integration(
             logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
         mcp_deps = list(current_view.dependencies)
     allow_map = None
-    if any(dep.resolved_by is not None and dep.is_self_defined for dep in mcp_deps):
+    if any(is_executable_gated_mcp(dep) for dep in mcp_deps):
         allow_map = resolve_project_exec_allow_map(
             project_root or apm_package.package_path or Path.cwd(),
             apm_package,
@@ -83,10 +88,13 @@ def prepare_mcp_integration(
             no_policy=no_policy,
             logger=logger,
         )
+    approved = filter_mcp_by_allow_executables(mcp_deps, allow_map, logger)
+    if current_view is not None:
+        current_view = current_view.with_unapproved_executables(approved)
     return PreparedMcpIntegration(
-        filter_mcp_by_allow_executables(mcp_deps, allow_map, logger),
+        approved,
         current_view if should_install else None,
-        omissions,
+        current_view,
     )
 
 
@@ -681,11 +689,10 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
-    if prepared.omissions is not None and lock_path.exists():
+    if prepared.omission_view is not None and lock_path.exists():
         lockfile = LockFile.read(lock_path)
-        if lockfile is not None and prepared.omissions != lockfile.mcp_omissions:
-            replace(lockfile, mcp_omissions=prepared.omissions).write(
-                lock_path, existing_lockfile=lockfile
-            )
+        omissions = prepared.omissions(lockfile) if lockfile is not None else None
+        if lockfile is not None and omissions != lockfile.mcp_omissions:
+            replace(lockfile, mcp_omissions=omissions).write(lock_path, existing_lockfile=lockfile)
 
     return mcp_count, mcp_apm_config
