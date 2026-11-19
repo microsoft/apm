@@ -132,7 +132,7 @@ Controls which packages repositories can depend on.
 
 ### `allow`
 
-List of allowed dependency patterns. If non-empty, only matching dependencies are permitted.
+List of allowed dependency patterns. If set (not `null`), only matching dependencies are permitted; `[]` permits none.
 
 ```yaml
 dependencies:
@@ -190,7 +190,7 @@ dependencies:
 
 ### `require_pinned_constraint`
 
-Default: `false`. When `true`, every direct APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (`v1.5.3`, or `pkg-a-v1.5.3` / `pkg-a--v1.5.3` for a package named `pkg-a`), an exact package release tag (`shadcn@4.12.0`, `@upstash/context7-mcp@4.4.4`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+Default: `false`. When `true`, every direct APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (`v1.5.3`, or `pkg-a-v1.5.3` / `pkg-a--v1.5.3` for a package named `pkg-a`), an exact package release tag (`shadcn@4.12.0`, `@upstash/context7-mcp@4.4.4`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check. Versions with leading zeros or non-ASCII digits (`v01.2.3`, `v1.2.3-01`) are not SemVer and fail as bare branches.
 
 The check judges the constraint as declared in `apm.yml`, not the tag a range resolves to; fresh installs, locked reinstalls, updates, and `apm audit` agree. A dependency redirected by a [`replace:` rule](../../consumer/manage-dependencies/#replace-a-source-candidate) is judged by the ref the rule selects.
 
@@ -330,7 +330,7 @@ Whether the `scripts` section is allowed in `apm.yml`:
 
 ### `content_types.allow`
 
-Parsed allow-list for package content types. This field is not enforced in APM 0.16.0:
+Parsed allow-list for package content types. This field is not enforced yet:
 
 ```yaml
 manifest:
@@ -459,7 +459,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `deployed-files-present` | All files listed in lockfile `deployed_files` exist on disk |
 | `no-orphaned-packages` | No lockfile packages are absent from the manifest |
 | `skill-subset-consistency` | `skills:` selections in `apm.yml` match `skill_subset` in the lockfile |
-| `config-consistency` | MCP server configs match lockfile baseline |
+| `config-consistency` | MCP server configs match lockfile baseline; servers the executables gate left out pass, and a server the lockfile admits but `apm.yml` does not approve fails |
 | `content-integrity` | Deployed files contain no critical hidden Unicode characters and their SHA-256 hashes match the lockfile |
 | `includes-consent` | Advisory check that `includes:` selections in the manifest match what was deployed |
 
@@ -539,6 +539,7 @@ A child policy can only tighten constraints — never relax them:
 | Field | Merge rule |
 |-------|-----------|
 | `enforcement` | Escalates: `off` < `warn` < `block` |
+| `fetch_failure` | Escalates: `warn` < `block` |
 | `cache.ttl` | `min(parent, child)` |
 | Allow lists | Intersection — child narrows parent's allowed set |
 | Deny lists | Union — child adds to parent's denied set |
@@ -672,8 +673,8 @@ to the project's own subgroup (the nearest one is the `policy.hash` leaf); a
 flat `<group>/<project>` remote probes only `<group>/apm-policy`. Set
 `GITLAB_HOST` or `APM_GITLAB_HOSTS` to recognize a self-managed host, and use
 `APM_GITLAB_POLICY_REPO` to select another project name. Plain git remotes
-fall through with no policy applied. Repositories with no detectable git remote
-emit an explicit "could not determine org" line and skip discovery.
+fall through with no policy applied. With `--verbose`, repositories with no detectable git remote
+print a "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
 
@@ -856,7 +857,7 @@ $ echo $?
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under the platform user cache at `apm/policy_v1/<project-key>/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
+Resolved effective policy is cached under the platform user cache at `apm/policy_v1/<project-key>/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` on `apm audit` and `apm policy status` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
 
 ### 9.5. Network failure semantics
 
@@ -877,7 +878,7 @@ Three additional outcomes describe "discovery succeeded but produced no enforcea
 
 These outcomes honour the same knob as fetch failures on both `apm install` and `apm audit --ci`:
 
-- **`warn` (default):** `[!]` warning on stderr explaining the cause; install / audit proceeds.
+- **`warn` (default):** `apm audit --ci` prints a `[!]` warning on stderr explaining the cause; `apm install` warns on `empty` and shows `absent` / `no_git_remote` only with `--verbose`. Both proceed.
 - **`block`:** `[x]` error on stderr; install raises `PolicyViolationError`, `apm audit --ci` exits 1.
 
 `--policy org` falls through these three outcomes. Any other explicit `--policy <source>` fails closed when it yields no policy (see above); a valid but `empty` policy loads and passes.
@@ -996,13 +997,13 @@ Each row maps a `PolicyFetchResult.outcome` to its exit impact, severity, the me
 | `found` | `0` (or `1` if checks fail under `block`) | info / block | `Policy: <source> (cached, fetched Nm ago) -- enforcement=<level>` | None; enforcement applied. Under `block`, fix violations or use `--no-policy` for one-off bypass. |
 | `absent` | `0` | info (`--verbose` only) | `No org policy found for <host_org>` | None required. To publish one, see section 11. If your org keeps policy in a private `.github-private`, grant the credential `Contents: read` on it: GitHub answers 404 for a repository it cannot read. On github.com, `*.ghe.com` and the `GITHUB_HOST` host, `--verbose`, `apm policy status` and the `fetch_failure_default: block` error show this as a hint. |
 | `cached_stale` | `0` (enforcement still applies) | warn | `Policy: <source> (cached, fetched Nm ago) -- enforcement=<level>` plus refresh-error warning | Restore network reachability or run with `--no-cache` once connectivity returns. |
-| `cache_miss_fetch_fail` | `0` | warn | `Could not fetch org policy (<error>) -- policy enforcement skipped for this invocation` | Retry, check VPN/firewall/`gh auth status`/`GITHUB_APM_PAT`. Fail-open by design (CEO-ratified); CI will still fail for the same violation. |
-| `garbage_response` | `0` | warn | `Could not fetch org policy (invalid YAML body from <source>) -- policy enforcement skipped for this invocation` | Likely a captive portal or auth wall returning HTML. Restore direct connectivity, then re-run. |
-| `malformed` | `0` (no enforcement) | warn | `Policy at <source> is malformed -- contact your org admin to fix the policy file` | Contact org admin to fix the YAML. Validate locally with `apm audit --ci --policy <local-path>`. |
+| `cache_miss_fetch_fail` | `0` | warn | `Could not fetch org policy from <source> (<error>); proceeding without policy enforcement.` | Retry, check VPN/firewall/`gh auth status`/`GITHUB_APM_PAT`. Fail-open by design (CEO-ratified); CI will still fail for the same violation. |
+| `garbage_response` | `0` | warn | `Policy response from <source> is not valid YAML (<error>); proceeding without policy enforcement.` | Likely a captive portal or auth wall returning HTML. Restore direct connectivity, then re-run. |
+| `malformed` | `0` (no enforcement) | warn | `Policy at <source> is malformed: <error>. Contact your org admin to fix the policy file.` | Contact org admin to fix the YAML. Validate locally with `apm audit --ci --policy <local-path>`. |
 | `manifest-parse` | `1` (always) | error | `Cannot parse apm.yml: <error>` | Fix the YAML syntax error in `apm.yml`. This is a local audit check (not a fetch outcome) -- malformed manifests always fail the audit unconditionally. |
 | `disabled` | `0` | warn | `Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.` | Single-invocation only. Drop the flag / env var to re-enable. |
-| `no_git_remote` | `0` | warn | `Could not determine org from git remote; policy auto-discovery skipped` | Run inside a checkout with a GitHub remote, or set the remote with `git remote add origin <url>`. |
-| `empty` | `0` | warn | `Org policy is present but empty; no enforcement applied` | Org admin should populate the policy file (see section 11) or remove it. |
+| `no_git_remote` | `0` | info (`--verbose` only) | `Could not determine org from git remote; policy auto-discovery skipped` | Run inside a checkout with a GitHub remote, or set the remote with `git remote add origin <url>`. |
+| `empty` | `0` | warn | `Org policy at <source> is present but empty; no enforcement applied` | Org admin should populate the policy file (see section 11) or remove it. |
 | `hash_mismatch` | `1` (always) | error | `Policy hash mismatch: pinned hash does not match fetched policy. Update apm.yml policy.hash or contact your org admin.` | Inspect the diff between expected and actual digest in the error output. If the org legitimately rotated the policy, recompute and update `policy.hash` in `apm.yml`. Otherwise, treat as a potential supply-chain compromise and contact your org admin. |
 
 #### Violation classes
@@ -1014,7 +1015,7 @@ Install prints one `Policy violation: <subject> -- <reason>` line per offending 
 | Class | Origin | Primary message | Remediation |
 |-------|--------|-----------------|-------------|
 | `denylist` | `dependencies.deny` match | `Policy violation: <dep> -- denied by pattern: <pattern>` | Remove the dep from `apm.yml`, request an org-policy update, or `--no-policy` for one-off local debugging. |
-| `allowlist` | Dep not in non-empty `dependencies.allow` | `Policy violation: <dep> -- not in allowed sources` | Add the dep to the org allowlist or switch to an approved package. |
+| `allowlist` | Dep not in a set `dependencies.allow` (`[]` allows nothing) | `Policy violation: <dep> -- not in allowed sources` | Add the dep to the org allowlist or switch to an approved package. |
 | `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <dep> -- required by org policy but not declared` (pin mismatch: `Policy violation: <dep> -- expected ref '<X>', got '<Y>'`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
 | `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <server> -- transport '<t>' not in allowed [<list>]` (or `<server> -- effective transport unknown (<reason>); ...`) | Switch the server to an allowed transport, pick one with `transport:` in `apm.yml` when the server offers several, make sure the MCP registry is reachable, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: compilation-target -- Target(s) ['<t>'] not in allowed list ['<allowed>']: ...` (or `Enforced target '<t>' not present in [...]: ...`) | Re-run with `--target <allowed>`, or update `targets:` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |

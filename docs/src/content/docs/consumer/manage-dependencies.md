@@ -56,7 +56,7 @@ parser. The supported forms:
 
 | Form | Example | When to use |
 |---|---|---|
-| GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
+| GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. If `apm.yml` sets `default_host:`, shorthand resolves against that host; write `github.com/owner/repo` for GitHub. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
 | Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. Do not also declare `owner/repo` itself: install rejects a repository declared together with its own subdirectory package. |
@@ -82,6 +82,10 @@ manual inspection; follow the
 [migration recovery steps](../../troubleshooting/migration/#mixed-case-github-package-paths).
 Repository path casing remains identity-significant for unknown git hosts
 because a self-hosted backend may be case-sensitive.
+
+Identity includes the host and any non-default port (`host:8443/owner/repo`).
+The same `owner/repo` from two hosts fails before download, naming both
+declarations; set `alias:` on one or remove one.
 
 Object form in YAML — three mutually exclusive keys select the variant
 (`git`, `path`, or `marketplace`):
@@ -489,6 +493,10 @@ dependencies:
 ```
 
 ## Remove a dependency
+
+`apm uninstall <pkg>` removes the `apm.yml` entry, its lock row and deployed
+files in one step; `plugin@marketplace` also matches object-form
+`{name, marketplace}` entries, offline. To remove by hand:
 
 1. Delete the entry from `apm.yml`.
 2. Run `apm prune`.

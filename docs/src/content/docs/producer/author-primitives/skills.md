@@ -110,6 +110,7 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 | `antigravity`     | `.agents/skills/<name>/SKILL.md` (explicit)  |
 | `hermes`          | `.agents/skills/<name>/SKILL.md` (explicit)  |
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
+| `grok-bot`        | `agent-data/workflows/<name>/SKILL.md` (explicit) |
 
 For user-scope locations, see the [Targets matrix](../../../reference/targets-matrix/).
 

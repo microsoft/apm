@@ -282,8 +282,8 @@ steps:
 | Code | Gate              | Meaning and fix                                                                                  |
 |------|-------------------|--------------------------------------------------------------------------------------------------|
 | 0    | -                 | Pack succeeded; ship the artifacts.                                                              |
-| 1    | runtime           | Build or network error. Inspect the JSON report; rerun.                                          |
-| 2    | schema            | `apm.yml` is invalid. Fix the manifest before tagging.                                           |
+| 1    | runtime           | Build, network, or `apm.yml` error, or a lockfile written by a newer APM. Inspect the JSON report; fix and rerun. |
+| 2    | usage             | Unknown option or conflicting flags. Fix the `apm pack` invocation.                              |
 | 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](../versioning-strategies/). |
 | 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack, or remote Claude package metadata was unfetchable. A missing `apm.yml` is accepted only when `SKILL.md` verifies a manifestless skill at the same resolved path. For drift, run `apm pack` locally, commit the diff, then re-tag. For metadata unavailability, restore the remote source or CI credentials and rerun; committing a regenerated file cannot certify unavailable metadata. |
 | 5    | `--strict-metadata`| Remote Claude package metadata could not be fetched, so `apm pack` refused to write. Retry with network access, or omit `--strict-metadata` when the default warning is acceptable. |

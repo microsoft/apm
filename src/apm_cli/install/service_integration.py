@@ -132,6 +132,7 @@ def run_service_integrations(
             diagnostics=diagnostics,
             allow_pending=False,
             active_package_keys=active_package_keys,
+            user_scope=ctx.scope is InstallScope.USER,
             project_root=ctx.project_root,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             no_policy=ctx.no_policy,

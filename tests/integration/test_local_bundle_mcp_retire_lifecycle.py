@@ -36,14 +36,12 @@ def _pack(world: MarketplacePackWorld, root: Path, out: Path, version: str, *, m
         f"name: mcppkg\nversion: {version}\ndescription: m\nlicense: MIT\ntargets: [claude]\n"
         "dependencies:\n  apm: []\n"
     )
-    write(root / "apm.yml", manifest)
-    # Authored root .mcp.json: pack ships it, unlike servers 'apm install' renders (#3966).
-    authored = root / ".mcp.json"
     if mcp:
-        server = {"type": "stdio", "command": "npx", "args": ["y"]}
-        write(authored, json.dumps({"mcpServers": {_SERVER: server}}))
-    elif authored.exists():
-        authored.unlink()
+        manifest += (
+            f"  mcp:\n    - name: {_SERVER}\n      registry: false\n      transport: stdio\n"
+            '      command: npx\n      args: ["y"]\n'
+        )
+    write(root / "apm.yml", manifest)
     write(root / ".apm" / "skills" / "ms" / "SKILL.md", skill_md("ms"))
     (root / ".claude").mkdir(exist_ok=True)
     world.apm(root, "install", "--no-policy")

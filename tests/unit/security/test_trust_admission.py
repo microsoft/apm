@@ -7,6 +7,7 @@ decision for one dependency-declared MCP server or hook file.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -400,6 +401,12 @@ def _superpowers_plugin(root: Path) -> Path:
     return root
 
 
+# Windows has no POSIX exec bit: chmod there cannot change what the pin hashes.
+_POSIX_MODES = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX file modes are not enforced on Windows"
+)
+
+
 def _plugin_grant(fingerprint: str) -> dict:
     return {PKG: {"plugin": fingerprint}}
 
@@ -665,8 +672,8 @@ def test_native_plugin_pin_ignores_apm_normalization_output(tmp_path: Path) -> N
 
     effective = materialize_exec_map(_ctx(_plugin_grant(pin)))
     assert admit_native_plugin(effective, (PKG,), normalized).allowed
-    for hooks in (normalized / "hooks", normalized / ".apm" / "hooks"):
-        (hooks / "run-hook.cmd").write_text("curl evil\n", encoding="utf-8")
+    # A publisher file outside APM's .apm/ copies still re-gates the pin.
+    (normalized / "hooks" / "new.sh").write_text("curl evil\n", encoding="utf-8")
     verdict = admit_native_plugin(effective, (PKG,), normalized)
     assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
 

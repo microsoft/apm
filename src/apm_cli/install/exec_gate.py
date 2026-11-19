@@ -575,9 +575,16 @@ class ReplayExecAllowMap:
     already fetched, so one audit run consults a single policy.
     """
 
-    def __init__(self, project_root: Path, policy_provider: Callable[[], Any] | None = None):
+    def __init__(
+        self,
+        project_root: Path,
+        policy_provider: Callable[[], Any] | None = None,
+        *,
+        user_scope: bool = False,
+    ):
         self._project_root = project_root
         self._policy_provider = policy_provider
+        self._user_scope = user_scope
         self._resolved = False
         self._trust_ctx_value: Any = None
         self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
@@ -585,6 +592,7 @@ class ReplayExecAllowMap:
     def _resolve(self) -> None:
         if self._resolved:
             return
+        from apm_cli.core.scope import manifest_root
         from apm_cli.security.executables import (
             exec_trust_context_for_project,
             materialize_exec_map,
@@ -598,8 +606,13 @@ class ReplayExecAllowMap:
 
             policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
         # Audit is read-only: never migrate legacy user consent here.
+        # Grants come from the scope's manifest (APM_HOME/apm.yml under -g,
+        # #3954); policy stays anchored at the deploy root.
+        manifest = project_manifest_path(
+            manifest_root(self._project_root, user_scope=self._user_scope)
+        )
         self._trust_ctx_value = exec_trust_context_for_project(
-            project_manifest_path(self._project_root), policy=policy, migrate_user_legacy=False
+            manifest, policy=policy, migrate_user_legacy=False
         )
         self._map = materialize_exec_map(self._trust_ctx_value)
         self._resolved = True

@@ -151,6 +151,8 @@ apm deps update [PACKAGES...] [OPTIONS]
 
 `apm deps update` runs the install pipeline and is gated by org `apm-policy.yml`. There is no `--no-policy` flag; the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session.
 
+Like `apm update`, it refuses an `apm.lock.yaml` written by a newer APM before changing anything, naming both versions and how to upgrade; see [Lockfile written by a newer APM](../../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm).
+
 ### `apm deps clean`
 
 Remove the entire project `apm_modules/` directory. Does not touch `apm.yml` or `apm.lock.yaml`.

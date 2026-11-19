@@ -78,6 +78,11 @@ jobs:
 `microsoft/apm-action@v1` runs `apm install` by default, so by the time
 `apm audit --ci` runs, the lockfile and deployed files are present.
 Use that default when CI needs to materialize deployed outputs.
+For a fail-closed install step, run `apm install --frozen`: it refuses
+when `apm.lock.yaml` is missing or out of sync with `apm.yml`, and
+replays locked marketplace dependencies from the lock. A package that
+contributes MCP or LSP servers still reads the marketplace when its copy under
+`apm_modules/` is missing, as on a fresh CI checkout.
 Missing gitignored outputs do not fail `deployed-files-present`, so those
 repos can also use audit-only CI. Without committed deployed bytes, that
 pattern has reduced integrity and drift coverage.

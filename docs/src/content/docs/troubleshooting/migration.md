@@ -74,6 +74,8 @@ Decision matrix:
 
 [i] Migrating in place preserves resolved versions where compatible. Deleting and regenerating re-resolves from `apm.yml` and may bump transitive dependencies. Review the diff before committing.
 
+A lockfile whose `apm_version` is newer than the running APM is refused too; see [Lockfile written by a newer APM](../install-failures/#lockfile-written-by-a-newer-apm).
+
 Schema details: [Lockfile spec](../../reference/lockfile-spec/).
 
 ### Mixed-case GitHub package paths
@@ -173,6 +175,13 @@ Existing target output is untouched. The new target's directory is created fresh
 
 Discovery: `apm targets` lists every supported target on the current binary.
 
+### Upgrading to 0.37
+
+- Replace singular `target:` with the `targets:` value its warning prints, delete `compilation.target`, and replace the deprecated `vscode` target with `copilot`. See [Common errors](../common-errors/).
+- Copilot project MCP servers move to root `.mcp.json`, which Claude Code also reads (it ignores Copilot `tools` allow-lists). `apm install` moves the entries APM wrote to `.github/mcp.json` or `.vscode/mcp.json` and keeps entries you edited; review static `env:` values, then commit.
+- With `default_host:` set, shorthand dependencies resolve against it; write `github.com/owner/repo` for GitHub packages.
+- If several manifests narrow one dependency with different `skills:` or `targets:` and an older APM recorded a pairing that differs from what 0.37 resolves, `apm install --frozen` fails until you run `apm install` once and commit `apm.lock.yaml`.
+
 ## 6. Default registry adoption (Git → registry routing)
 
 Adopting a default registry changes how **existing** shorthand dependencies resolve. Entries like `microsoft/apm-sample-package#^1.0.0` that previously cloned from GitHub route to the configured registry instead. APM does not print a migration banner — failures show up as registry errors (`no versions`, `401`) on the next `apm install`.
@@ -210,7 +219,7 @@ If your project has a hand-edited `.mcp.json` (or `.vscode/mcp.json`) declaring 
 1. Move each server into `dependencies.mcp` in `apm.yml`. APM resolves servers from the MCP registry (or as self-defined entries) and wires them per target on install.
 2. Run `apm install`. APM rewrites the target-specific MCP config.
 3. Diff the generated MCP config against your previous hand-rolled version and reconcile any custom env vars or args using the marketplace package's documented inputs.
-4. Delete the legacy hand-rolled config once the APM-managed version is verified.
+4. Delete the legacy hand-rolled config once the APM-managed version is verified. Exception: remove a hand-written root `.mcp.json` entry that shares a server name before step 2; APM preserves a differing entry it did not write and reports a conflict.
 
 For publishing your own marketplace entries, see [Publish to a marketplace](../../producer/publish-to-a-marketplace/).
 

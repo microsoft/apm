@@ -73,7 +73,7 @@ lifecycle:     <LifecycleConfig>         # OPTIONAL; lifecycle scripts
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
 ```
 
-Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. A top-level key MUST NOT appear twice; the CLI refuses such a manifest (for example two `dependencies:` blocks left by a merge) before changing any file, naming the key and both lines. Unknown top-level keys MUST be preserved by writers. The CLI keeps keys matching `x-[a-z][a-z0-9-]*` and warns, without failing, on any other unknown top-level key. See [Extension keys](#312-extension-keys).
+Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. A top-level key MUST NOT appear twice; the CLI refuses such a manifest (for example two `dependencies:` blocks left by a merge) before changing any file, naming the key and both lines. YAML anchors and aliases (`&name`, `*name`) are refused the same way, naming the file and line ([req-mf-020](../../specs/openapm-v01/#req-mf-020)). Unknown top-level keys MUST be preserved by writers. The CLI keeps keys matching `x-[a-z][a-z0-9-]*` and warns, without failing, on any other unknown top-level key. See [Extension keys](#312-extension-keys).
 
 The standard `$schema` key selects the manifest contract; omission selects
 APM's current working draft. The corrected OpenAPM v0.1 candidate uses
@@ -629,7 +629,7 @@ Remote dependency (git URL plus sub-path):
 
 `ref:` accepts either a literal git ref (`main`, `v2.0`, a 40-char commit SHA) or a **semver range** (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). When `ref:` is a semver range, APM resolves it against the remote's tags at install time, matching against `v{version}`, `{name}--v{version}` and `{name}-v{version}` patterns (with `{version}` as a bare-tag fallback) and selecting the highest tag that satisfies the range.
 
-The lockfile records the original `constraint`, the `resolved_tag`, the resolved `version`, the `resolved_commit`, and a `resolved_at` timestamp so subsequent installs replay the same tag deterministically -- only `apm install --update` or a manifest change re-resolves. When no remote tag satisfies the range, APM surfaces `NoMatchingTagError` with the inspected patterns.
+The lockfile records the original `constraint`, the `resolved_tag`, the resolved `version`, the `resolved_commit`, and a `resolved_at` timestamp so subsequent installs replay the same tag deterministically -- only `apm update` or a manifest change re-resolves. When no remote tag satisfies the range, APM surfaces `NoMatchingTagError` with the inspected patterns.
 
 Local path dependency (development only):
 
@@ -698,7 +698,7 @@ pattern makes `apm marketplace add` or `apm marketplace update` reject the
 entire marketplace, so consumers never resolve against a partially accepted
 catalog.
 
-Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
+Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Later installs, including `--frozen`, replay those coordinates without contacting the marketplace while `name`, `marketplace` and `version` are unchanged; `apm update` resolves again. The exception is a package whose MCP or LSP servers the lock records but which has no `apm_modules/` copy: install reads the marketplace for it, because only the marketplace holds those inline server definitions. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
 
 Registry dependency (whole package or virtual sub-path):
 

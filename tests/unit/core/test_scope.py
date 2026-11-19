@@ -485,3 +485,34 @@ class TestActiveTargetsUserScope:
             result = active_targets_user_scope()
         names = {t.name for t in result}
         assert "opencode" in names
+
+
+def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, monkeypatch) -> None:
+    """Grants come from $APM_HOME/apm.yml; org policy is still discovered from the deploy root."""
+    from types import SimpleNamespace
+
+    from apm_cli.security import executables
+
+    home, apm_home = tmp_path / "home", tmp_path / "elsewhere/apm-home"
+    home.mkdir()
+    apm_home.mkdir(parents=True)
+    (apm_home / "apm.yml").write_text(
+        "name: u\nversion: 1.0.0\nexecutables:\n  allow:\n    owner/pkg:\n      hooks: true\n"
+    )
+    (home / "apm.yml").write_text(
+        "name: d\nversion: 1.0.0\nexecutables:\n  allow:\n    owner/decoy:\n      hooks: true\n"
+    )
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    discovered: list = []
+    monkeypatch.setattr(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        lambda root: discovered.append(root) or SimpleNamespace(policy=None),
+    )
+    allow = executables.resolve_project_exec_allow_map(
+        home,
+        SimpleNamespace(allow_executables=None),
+        user_scope=True,
+    )
+    assert discovered == [home]
+    assert allow is not None and allow["owner/pkg"]["hooks"] is True
+    assert "owner/decoy" not in allow

@@ -645,7 +645,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     replayed_count = 0
     from apm_cli.install.exec_gate import ReplayExecAllowMap
 
-    gated_allow_map = ReplayExecAllowMap(project_root, config.policy_provider)
+    gated_allow_map = ReplayExecAllowMap(
+        project_root, config.policy_provider, user_scope=config.user_scope
+    )
     local_parent_index = build_local_parent_index(lock)
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError

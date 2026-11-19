@@ -288,7 +288,7 @@ gets its own project-root form for a package under `apm_modules/`:
 | Target | Written form |
 | --- | --- |
 | Claude and Copilot (`.mcp.json`) | `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<package>/...` |
-| Cursor (`.cursor/mcp.json`), VS Code (`.vscode/mcp.json`) | `${workspaceFolder}/apm_modules/<package>/...` |
+| Cursor (`.cursor/mcp.json`) | `${workspaceFolder}/apm_modules/<package>/...` |
 | Other targets, and every target with `--global` | Absolute package path |
 
 In `.mcp.json`, the default `.` resolves from the directory you start Claude
@@ -380,6 +380,11 @@ it, switch to the Copilot harness, which reads `.mcp.json`. See
 [Copilot CLI MCP servers](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers)
 and [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
+`intellij` is an IDE, not a target: `apm init`, `apm install` and
+`apm install -g --mcp` refuse to record it in `apm.yml`. Use `copilot` for
+GitHub Copilot in JetBrains IDEs; once `apm.yml` exists, `--target intellij`
+still writes the JetBrains MCP config.
+
 On the first `apm install` (including `--frozen`) of a project whose lockfile
 was written by APM 0.36 or earlier, APM moves the entries it wrote to
 `.github/mcp.json` (old `copilot`) or `.vscode/mcp.json` (old `vscode`) into
@@ -412,10 +417,10 @@ User-authored servers and unrelated JSON or TOML settings remain unchanged.
 
 A malformed `targets:` field (both `target:` and `targets:` set,
 `targets: []`, or an unknown target name) fails closed before machine discovery:
-no MCP files are written and an `[x]` error names the field to fix. A greenfield
+no MCP files are written and an error names the field to fix. A greenfield
 project with no `targets:`, no `--target` flag, no saved target, AND no detected
 signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also fails closed
-with the same `[x]` voice -- consistent with how `apm install` treats the same
+(`Error: No harness detected`) -- consistent with how `apm install` treats the same
 input. The command exits non-zero before adding a direct `--mcp` entry to
 `apm.yml` or deploying package files. Pin a target with `--target`, declare one
 in `apm.yml`, or save one with `apm config set target <value>`. A native MCP

@@ -560,6 +560,75 @@ class TestApmManagedMcpExcludedFromPack:
         )
         assert build_plugin_manifest(tmp_path, apm, "codex")["mcpServers"] == "./.mcp.json"
 
+    def test_another_runtimes_claim_does_not_hide_an_authored_root_server(
+        self, tmp_path: Path
+    ) -> None:
+        """A Cursor-only claim names .cursor/mcp.json, not the authored root entry."""
+        apm = self._project(
+            tmp_path,
+            {"docs": {"url": "https://authored.example.test/mcp"}},
+            "lockfile_version: '1'\nmcp_servers: [docs]\nmcp_target_servers:\n  cursor: [docs]\n",
+        )
+
+        claude = build_plugin_manifest(tmp_path, apm, "claude")
+        codex = build_plugin_manifest(tmp_path, apm, "codex")
+
+        assert claude["mcpServers"] == {"docs": {"url": "https://authored.example.test/mcp"}}
+        assert codex["mcpServers"] == "./.mcp.json"
+
+    def test_unplaced_aggregate_claim_still_hides_the_root_entry(self, tmp_path: Path) -> None:
+        """Without placement evidence a lock-recorded name stays managed (conservative)."""
+        apm = self._project(
+            tmp_path,
+            {"docs": {"url": "https://rendered.example.test/mcp"}},
+            "lockfile_version: '1'\nmcp_servers: [docs]\n",
+        )
+
+        assert "mcpServers" not in build_plugin_manifest(tmp_path, apm, "claude")
+        assert "mcpServers" not in build_plugin_manifest(tmp_path, apm, "codex")
+
+    def test_root_manifest_declarations_ship_identically_before_and_after_install(
+        self, tmp_path: Path
+    ) -> None:
+        """apm.yml self-defined servers are authored: projected from apm.yml, credentials out."""
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: p\nversion: 1.0.0\ndescription: d\nauthor: Ann\n"
+            "dependencies:\n  mcp:\n"
+            "    - name: devsrv\n      registry: false\n      transport: http\n"
+            "      url: https://internal.example.test/mcp\n"
+            "      headers:\n        Authorization: 'Bearer ${MY_TOKEN}'\n"
+            "    - name: local\n      registry: false\n      transport: stdio\n"
+            "      command: npx\n      args: [srv]\n      env:\n        API_KEY: secret-value\n",
+        )
+        before = build_plugin_manifest(tmp_path, apm, "claude")
+        # apm install renders the same servers (credentials baked in) and records them.
+        rendered = {
+            "devsrv": {
+                "type": "http",
+                "url": "https://internal.example.test/mcp",
+                "headers": {"Authorization": "Bearer live-token"},
+            },
+            "local": {"command": "npx", "args": ["srv"], "env": {"API_KEY": "secret-value"}},
+        }
+        _write(tmp_path / ".mcp.json", json.dumps({"mcpServers": rendered}))
+        _write(
+            tmp_path / "apm.lock.yaml",
+            "lockfile_version: '1'\nmcp_servers: [devsrv, local]\n"
+            "mcp_target_servers:\n  claude: [devsrv, local]\n",
+        )
+        after = build_plugin_manifest(tmp_path, apm, "claude")
+
+        assert before == after
+        assert after["mcpServers"] == {
+            "devsrv": {"type": "http", "url": "https://internal.example.test/mcp"},
+            "local": {"type": "stdio", "command": "npx", "args": ["srv"]},
+        }
+        raw = json.dumps(after)
+        for leaked in ("Authorization", "live-token", "secret-value", "MY_TOKEN"):
+            assert leaked not in raw
+
     def test_unreadable_lock_withholds_root_mcp(self, tmp_path: Path) -> None:
         apm = self._project(tmp_path, {"authored": {"command": "node"}}, "lockfile_version: [\n")
         logger = MagicMock()

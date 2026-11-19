@@ -10,7 +10,8 @@ turns the entry into a dependency -- ``apm install NAME@MARKETPLACE``, an
 and ``apm update`` -- must refuse it before any write or Git request to that
 repository (a ``GIT_TRACE`` log is the tripwire). A host-qualified
 ``repo: github.com/acme/tools`` entry and an in-marketplace ``git-subdir``
-entry still install.
+entry still install, as do in-marketplace ``repository:``/``url:`` synonyms
+and a bare entry when ``GITHUB_HOST`` is the marketplace host (#3945).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import dump_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
@@ -45,7 +46,9 @@ _SUBDIR = "plugins/x"
 _BARE_BY_TYPE = {"github": _BARE, "git-subdir": "shared-subdir-tool", "url": "shared-url-tool"}
 _QUALIFIED_BY_TYPE = {"github": _QUALIFIED, "git-subdir": "public-subdir-tool"}
 _IN_MARKETPLACE = "internal-subdir-tool"
+_IN_MARKETPLACE_SYNONYMS = ("internal-repository-tool", "internal-url-subdir-tool")
 _ATTACKER_REMOTE = "https://github.com/acme/tools"
+_ENTERPRISE_REMOTE = "https://corp.ghe.com/acme/tools"
 _TARGET = "copilot"
 _FLAGS = ("--target", _TARGET, "--parallel-downloads", "0")
 _REFUSAL = "refused (dependency-confusion risk #1326)"
@@ -76,6 +79,14 @@ class _World:
                 "name": _IN_MARKETPLACE,
                 "source": {"type": "git-subdir", "repo": "corp/marketplace", "subdir": "plugins/y"},
             },
+            {
+                "name": _IN_MARKETPLACE_SYNONYMS[0],
+                "source": {"type": "github", "repository": "corp/marketplace", "path": "plugins/y"},
+            },
+            {
+                "name": _IN_MARKETPLACE_SYNONYMS[1],
+                "source": {"type": "git-subdir", "url": "corp/marketplace", "subdir": "plugins/y"},
+            },
         ]
         (self.catalog.worktree / "marketplace.json").write_text(
             json.dumps({"name": _MARKETPLACE, "owner": {"name": "Corp"}, "plugins": plugins}),
@@ -100,6 +111,17 @@ class _World:
             cwd=cwd or self.root,
             env=self.env,
         )
+
+    def locked_host(self, plugin: str) -> str:
+        """Return the ``host`` recorded in ``apm.lock.yaml`` for marketplace *plugin*."""
+        lock = load_yaml(self.root / "apm.lock.yaml") or {}
+        rows = [
+            row
+            for row in lock.get("dependencies", [])
+            if row.get("marketplace_plugin_name") == plugin
+        ]
+        assert len(rows) == 1, rows
+        return rows[0].get("host", "")
 
     def contacted_package(self) -> bool:
         """True when any Git process logged in ``trace`` named the staged repository."""
@@ -138,8 +160,16 @@ def _world(tmp_path: Path, binary: Path, *, bare_repo: str = "acme/tools") -> _W
     repositories.tag(package, "v1.0.0", repositories.commit(package, message="stage"))
     catalog = repositories.create("corp-marketplace")
     _write_skill(catalog.worktree / "plugins" / "y", "internal")
+    enterprise = repositories.create("corp-acme-tools")
+    _write_skill(enterprise.worktree, "trusted")
+    _write_skill(enterprise.worktree / _SUBDIR, "trusted")
+    repositories.commit(enterprise, message="enterprise package")
     env = repositories.url_rewrite_subprocess_env_many(
-        ((package, _ATTACKER_REMOTE), (catalog, _CATALOG_HTTPS))
+        (
+            (package, _ATTACKER_REMOTE),
+            (catalog, _CATALOG_HTTPS),
+            (enterprise, _ENTERPRISE_REMOTE),
+        )
     )
     trace = isolated.work_root / "git-trace.log"
     env["GIT_TRACE"] = str(trace)
@@ -220,6 +250,8 @@ def test_bare_cross_repo_marketplace_entry_is_refused_before_any_write(
         (_QUALIFIED_BY_TYPE["github"], "pwned"),
         (_QUALIFIED_BY_TYPE["git-subdir"], "pwned"),
         (_IN_MARKETPLACE, "internal"),
+        (_IN_MARKETPLACE_SYNONYMS[0], "internal"),
+        (_IN_MARKETPLACE_SYNONYMS[1], "internal"),
     ],
 )
 def test_host_qualified_or_in_marketplace_entry_still_installs(
@@ -238,6 +270,60 @@ def test_host_qualified_or_in_marketplace_entry_still_installs(
     assert list(world.root.rglob(f"{skill}/SKILL.md"))
     # Positive control for the refusal test's tripwire: a real fetch is logged.
     assert world.contacted_package() is (skill == "pwned")
+    if skill == "internal":
+        # In-marketplace entries resolve to the enterprise host (#1285, #3945).
+        assert world.locked_host(plugin) == "corp.ghe.com"
+
+
+@pytest.mark.parametrize("source_type", ["git-subdir", "github"])
+def test_bare_entry_is_admitted_when_github_host_is_the_marketplace_host(
+    tmp_path: Path, apm_binary_path: Path, source_type: str
+) -> None:
+    """With ``GITHUB_HOST`` set to the marketplace host, bare means that host (#3945)."""
+    world = _world(tmp_path, apm_binary_path)
+    world.env["GITHUB_HOST"] = "corp.ghe.com"
+    entry = {"name": _BARE_BY_TYPE[source_type], "marketplace": _MARKETPLACE}
+    world.write_manifest(world.root, [entry])
+    world.trace.unlink(missing_ok=True)
+
+    result = world.run("install", *_FLAGS)
+
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert result.returncode == 0, output
+    assert _REFUSAL not in output
+    assert list(world.root.rglob("trusted/SKILL.md"))
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "a Git request reached the github.com lookalike"
+    assert world.locked_host(entry["name"]) == "corp.ghe.com"
+
+    # The lock pins the enterprise host: replaying without GITHUB_HOST stays there.
+    del world.env["GITHUB_HOST"]
+    world.trace.unlink(missing_ok=True)
+    again = world.run("install", *_FLAGS)
+
+    output = " ".join(f"{again.stdout}\n{again.stderr}".split())
+    assert again.returncode == 0, output
+    assert world.locked_host(entry["name"]) == "corp.ghe.com"
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package(), "lock replay reached the github.com lookalike"
+
+
+def test_bare_entry_is_still_refused_when_github_host_is_another_host(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``GITHUB_HOST`` naming a different host does not admit the bare entry (#3945)."""
+    world = _world(tmp_path, apm_binary_path)
+    world.env["GITHUB_HOST"] = "other.ghe.com"
+    command = _arrange(world, "cli", _BARE_BY_TYPE["git-subdir"])
+    world.trace.unlink(missing_ok=True)
+
+    result = world.run(*command)
+
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert result.returncode != 0, output
+    assert _REFUSAL in output, output
+    assert not list(world.root.rglob("pwned"))
+    assert not world.contacted_package()
 
 
 def test_apm_update_re_admits_an_entry_locked_before_its_catalog_turned_ambiguous(
