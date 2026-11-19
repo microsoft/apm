@@ -98,3 +98,23 @@ def test_bundle_mcp_is_recorded_baseline_and_survives_unrelated_installs(
     assert world.lock(consumer)["mcp_config_provenance"] == {_SERVER: "bundle:mcppkg"}
     world.apm(consumer, "audit", "--ci", "--no-policy")
     world.apm(consumer, "install", "--frozen", "--no-policy")
+
+
+def test_user_scope_bundle_mcp_is_recorded_in_the_user_lock(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``install -g <bundle>`` records its servers where ``-g --frozen`` reads them."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = _mcp_package(world.isolated.work_root / "mcppkg", "mcppkg")
+    bundle = _pack(world, producer, tmp_path / "out", "1.0.0")
+    home, apm_home = world.isolated.home, world.isolated.config_root
+    write(apm_home / "apm.yml", "name: user\nversion: 1.0.0\ntargets: [claude]\n")
+    (home / ".claude").mkdir(exist_ok=True)
+    cwd = world.isolated.work_root
+
+    world.apm(cwd, "install", "-g", str(bundle), "--target", "claude", "--no-policy")
+    assert not (home / "apm.lock.yaml").exists()
+    assert world.lock(apm_home)["mcp_config_provenance"] == {_SERVER: "bundle:mcppkg"}
+
+    world.apm(cwd, "install", "-g", "--frozen", "--target", "claude", "--no-policy")
+    assert world.lock(apm_home)["mcp_config_provenance"] == {_SERVER: "bundle:mcppkg"}
