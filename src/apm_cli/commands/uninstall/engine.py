@@ -2,6 +2,7 @@
 
 import builtins
 import contextlib
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,6 +18,7 @@ from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
     DependencySelection,
     DependencySelectionStatus,
+    manifest_declarations_of,
     select_manifest_dependency,
     select_marketplace_declaration,
 )
@@ -68,6 +70,53 @@ def _removal_target(dep_entry: object, lockfile: LockFile | None) -> object:
 def _removal_targets(packages: list, lockfile: LockFile | None) -> list:
     """Map removed manifest declarations to their lock and disk targets."""
     return [_removal_target(package, lockfile) for package in packages]
+
+
+def _marketplace_declaration_label(dep_entry: object) -> str | None:
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return None
+    if not dependency.is_marketplace:
+        return None
+    return f"{dependency.marketplace_plugin_name}@{dependency.marketplace_name}"
+
+
+def _refuse_shared_marketplace_coordinates(
+    packages_to_remove: list, current_deps: list, lockfile: LockFile | None, logger
+) -> list[str]:
+    """Refuse removing one of two declarations that own the same locked package.
+
+    An object-form ``{name, marketplace}`` entry and another declaration (for
+    example the same package's Git URL) can resolve to one locked coordinate.
+    Removing only one would delete the checkout, files and lock row the
+    survivor still needs, so uninstall fails closed and names both (#3928).
+    """
+    if lockfile is None or not packages_to_remove:
+        return []
+    removed = manifest_declarations_of(current_deps, packages_to_remove)
+    removed_ids = {id(entry) for entry in removed}
+    removed_by_key = {_removed_lock_key(entry, lockfile): entry for entry in removed}
+    refused: list[str] = []
+    for survivor in current_deps:
+        if id(survivor) in removed_ids:
+            continue
+        removed_entry = removed_by_key.get(_removed_lock_key(survivor, lockfile))
+        if removed_entry is None:
+            continue
+        removed_label = _marketplace_declaration_label(removed_entry)
+        survivor_label = _marketplace_declaration_label(survivor)
+        if removed_label is None and survivor_label is None:
+            continue
+        removed_label = removed_label or _dependency_public_label(removed_entry)
+        survivor_label = survivor_label or _dependency_public_label(survivor)
+        logger.error(
+            f"{removed_label} and {survivor_label} are the same installed package, and "
+            f"{survivor_label} would stay declared in apm.yml. Remove both together: "
+            f"apm uninstall {shlex.quote(removed_label)} {shlex.quote(survivor_label)}"
+        )
+        refused.append(removed_label)
+    return refused
 
 
 def _removed_lock_key(dep_entry: object, lockfile: LockFile | None) -> str:
@@ -791,6 +840,9 @@ def _validate_uninstall_packages(
                     "Run 'apm deps list' and retry with an installed package identifier."
                 )
 
+    packages_not_found.extend(
+        _refuse_shared_marketplace_coordinates(packages_to_remove, current_deps, lockfile, logger)
+    )
     return packages_to_remove, packages_not_found
 
 
@@ -801,6 +853,7 @@ def _dry_run_uninstall(
     apm_yml_path=None,
     *,
     surviving_dependencies=None,
+    lockfile=None,
 ):
     """Show what would be removed without making changes.
 
@@ -812,10 +865,10 @@ def _dry_run_uninstall(
     reachability rescue (see ``_compute_actual_orphans``) is exercised
     for every real ``--dry-run`` invocation.
     """
-    from ...deps.lockfile import LockFile, get_lockfile_path
+    if lockfile is None:
+        from ...deps.lockfile import get_lockfile_path
 
-    lockfile_path = get_lockfile_path(Path("."))
-    lockfile = LockFile.read(lockfile_path)
+        lockfile = LockFile.read(get_lockfile_path(Path(".")))
     logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)

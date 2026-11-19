@@ -347,6 +347,7 @@ def _dry_run_with_selected_profile(
     apm_yml_path,
     *,
     surviving_dependencies: list,
+    lockfile=None,
 ) -> None:
     """Preview full removals and selected-profile-only removals."""
     if packages_to_remove:
@@ -356,6 +357,7 @@ def _dry_run_with_selected_profile(
             logger,
             apm_yml_path,
             surviving_dependencies=surviving_dependencies,
+            lockfile=lockfile,
         )
     _report_selected_profile_packages(retained_packages, logger, dry_run=True)
 
@@ -680,6 +682,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger,
                 apm_yml_path,
                 surviving_dependencies=surviving_deps,
+                lockfile=lockfile,
             )
             return
 

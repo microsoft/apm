@@ -163,3 +163,64 @@ def test_object_form_removal_targets_the_locked_coordinate() -> None:
     assert target.get_unique_key() == locked.get_unique_key()
     assert _removal_target(declared, LockFile()) is declared
     assert _removal_target("acme/pkg", lockfile) == "acme/pkg"
+
+
+def _object_form_lock() -> tuple[LockFile, LockedDependency]:
+    locked = LockedDependency(
+        repo_url="team/catalog",
+        host="git.example.com",
+        virtual_path="plugins/example-plugin",
+        is_virtual=True,
+        resolved_commit="a" * 40,
+        discovered_via="company",
+        marketplace_plugin_name="example-plugin",
+    )
+    return LockFile(dependencies={locked.get_unique_key(): locked}), locked
+
+
+def test_removing_one_of_two_declarations_of_one_package_fails_closed() -> None:
+    """An object-form entry and a Git entry for the same package go together or not at all."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.engine import _refuse_shared_marketplace_coordinates
+
+    lockfile, locked = _object_form_lock()
+    declared = {"name": "example-plugin", "marketplace": "company"}
+    git_form = locked.get_unique_key()
+    manifest = [declared, git_form]
+    logger = MagicMock()
+
+    refused = _refuse_shared_marketplace_coordinates([declared], manifest, lockfile, logger)
+    assert refused == ["example-plugin@company"]
+    message = logger.error.call_args.args[0]
+    assert git_form in message and "apm uninstall example-plugin@company" in message
+
+    logger.reset_mock()
+    both = _refuse_shared_marketplace_coordinates([declared, git_form], manifest, lockfile, logger)
+    assert both == []
+    logger.error.assert_not_called()
+
+
+def test_dry_run_previews_object_form_checkout_from_the_scoped_lockfile(
+    tmp_path, monkeypatch
+) -> None:
+    """The preview uses the caller's lockfile, not ./apm.lock.yaml (global scope)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.engine import _dry_run_uninstall
+
+    lockfile, locked = _object_form_lock()
+    modules = tmp_path / "home" / "apm_modules"
+    checkout = locked.to_dependency_ref().get_install_path(modules)
+    checkout.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)  # no apm.lock.yaml here
+    logger = MagicMock()
+
+    _dry_run_uninstall(
+        [{"name": "example-plugin", "marketplace": "company"}],
+        modules,
+        logger,
+        lockfile=lockfile,
+    )
+    lines = [call.args[0] for call in logger.progress.call_args_list]
+    assert any("from apm_modules/" in line for line in lines)

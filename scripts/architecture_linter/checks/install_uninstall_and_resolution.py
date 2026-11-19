@@ -128,6 +128,8 @@ _OWNED_SELECTION_DEFS = frozenset(
 # through _removal_target so object-form entries resolve to their locked row.
 _UNINSTALL_ROUTES = (
     ("_validate_uninstall_packages", "_select_marketplace_declarations", 1),
+    ("_validate_uninstall_packages", "_refuse_shared_marketplace_coordinates", 1),
+    ("_refuse_shared_marketplace_coordinates", "_removed_lock_key", 2),
     ("_select_marketplace_declarations", "select_marketplace_declaration", 1),
     ("_removal_target", "lockfile.get_dependency", 1),
     ("_removal_targets", "_removal_target", 1),

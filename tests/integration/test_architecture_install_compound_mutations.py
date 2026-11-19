@@ -850,6 +850,15 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "uninstall-object-form-shared-coordinate",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    packages_not_found.extend(\n        _refuse_shared_marketplace_coordinates(",
+            "    packages_not_found.extend(\n        list(",
+        ),
+    ),
+    CompoundMutation(
         "uninstall-object-form-lock-key",
         UNINSTALL_RULE,
         "src/apm_cli/commands/uninstall/cli.py",
