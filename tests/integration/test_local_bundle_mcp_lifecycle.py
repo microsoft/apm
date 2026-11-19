@@ -34,12 +34,14 @@ def _mcp_package(root: Path, name: str, version: str = "1.0.0", *, mcp: bool = T
         f"name: {name}\nversion: {version}\ndescription: m\nlicense: MIT\ntargets: [claude]\n"
         "dependencies:\n  apm: []\n"
     )
-    if mcp:
-        manifest += (
-            f"  mcp:\n    - name: {_SERVER}\n      registry: false\n      transport: stdio\n"
-            '      command: npx\n      args: ["y"]\n'
-        )
     write(root / "apm.yml", manifest)
+    # Authored root .mcp.json: pack ships it, unlike servers 'apm install' renders (#3966).
+    authored = root / ".mcp.json"
+    if mcp:
+        server = {"type": "stdio", "command": "npx", "args": ["y"]}
+        write(authored, json.dumps({"mcpServers": {_SERVER: server}}))
+    elif authored.exists():
+        authored.unlink()
     write(root / ".apm" / "skills" / "ms" / "SKILL.md", skill_md("ms"))
     (root / ".claude").mkdir(exist_ok=True)
     return root
