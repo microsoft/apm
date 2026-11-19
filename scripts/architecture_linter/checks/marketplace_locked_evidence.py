@@ -15,7 +15,22 @@ _ROUTES = (
     ("src/apm_cli/drift.py", "detect_ref_change", "marketplace_ref_mismatch"),
     ("src/apm_cli/drift.py", "marketplace_ref_mismatch", "satisfies_range"),
     ("src/apm_cli/drift.py", "marketplace_ref_mismatch", "is_full_revision_pin"),
+    ("src/apm_cli/drift.py", "locked_marketplace_row", "lockfile.get_dependency"),
+    ("src/apm_cli/drift.py", "locked_marketplace_row", "marketplace_ref_mismatch"),
+    ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_marketplace_row"),
+    ("src/apm_cli/drift.py", "locked_marketplace_replay", "_owns_locked_servers"),
+    ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_replay"),
+    ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_row"),
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "build_tag_regex"),
+)
+# Lock-first replay (#3911): the replay decision precedes any catalog call.
+_ORDERED = (
+    (
+        "src/apm_cli/deps/apm_resolver.py",
+        "_resolve_marketplace_dep",
+        "locked_marketplace_replay",
+        "resolve_marketplace_plugin",
+    ),
 )
 
 
@@ -37,6 +52,26 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             findings.append(
                 violation(RULE_ID, path, f"{function} must call canonical owner {callee}")
             )
+    for path, function, first, then in _ORDERED:
+        facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        definitions = [
+            definition for definition in facts.definitions if definition.name == function
+        ]
+        lines = {
+            callee: [
+                call.line
+                for call in facts.calls
+                if call.qualname == callee
+                and len(definitions) == 1
+                and definitions[0].line <= call.line <= definitions[0].end_line
+            ]
+            for callee in (first, then)
+        }
+        if not lines[first] or (lines[then] and min(lines[then]) < min(lines[first])):
+            findings.append(violation(RULE_ID, path, f"{function} must call {first} before {then}"))
     return tuple(findings)
 
 

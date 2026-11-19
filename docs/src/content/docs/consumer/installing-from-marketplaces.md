@@ -230,10 +230,20 @@ APM selects the highest matching package tag using the publisher's
 `source.tag_pattern`. No match is an error; it does not fall back to catalog
 tags or treat the range as a raw ref.
 
+**Locked entries replay the lockfile.** Once `apm.lock.yaml` records a
+marketplace entry, `apm install` and `apm install --frozen` reinstall its locked
+commit without reading the catalog or needing the marketplace registration, so
+catalog edits do not change what installs. Only new entries, entries whose
+`name`, `marketplace` or `version` changed, and `apm update` resolve through
+the catalog. `--frozen` fails for an entry the lockfile does not record.
+
 Marketplace entries can also provide inline LSP or MCP servers when their
 downloaded source has no package manifest. APM validates these
 [catalog-only marketplace packages](../../reference/package-types/#catalog-only-marketplace-package)
-before deployment.
+before deployment. The lockfile does not record those inline definitions, so
+when a package with locked servers has no copy in `apm_modules/` (a fresh
+checkout or cold CI runner), install, including `--frozen`, reads the catalog
+for it. Lockfile-only replay for these packages is planned for 0.38 (#2903).
 
 Marketplace publishers can route an entry through a configured APM package
 registry with the entry's `registry` and semver `version` fields. Enable the

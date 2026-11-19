@@ -28,6 +28,20 @@ def test_marketplace_locked_evidence_routes_through_owners() -> None:
         ("drift.py", "marketplace_ref_mismatch(dep_ref, locked_dep)", "None"),
         ("drift.py", "satisfies_range(version, spec)", "True"),
         ("marketplace/resolver.py", "build_tag_regex(", "re.compile("),
+        (
+            "drift.py",
+            "or marketplace_ref_mismatch(dep_ref, locked_dep) is not None",
+            "or False",
+        ),
+        ("drift.py", "_owns_locked_servers(lockfile, locked_dep)", "False"),
+        ("deps/apm_resolver.py", "locked_marketplace_replay(\n", "_skip_replay(\n"),
+        ("deps/apm_resolver.py", "locked_marketplace_row(dep_ref", "_no_row(dep_ref"),
+        (
+            "deps/apm_resolver.py",
+            "        replayed = locked_marketplace_replay(",
+            "        resolve_marketplace_plugin(dep_ref)\n"
+            "        replayed = locked_marketplace_replay(",
+        ),
     ],
 )
 def test_marketplace_locked_evidence_guard_rejects_bypasses(

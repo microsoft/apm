@@ -376,6 +376,15 @@ placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
 
+Once the lockfile records an entry, `apm install` and `apm install --frozen`
+replay its locked commit without reading the catalog or needing the
+marketplace registration; catalog edits do not move it. New entries, entries
+whose `name`, `marketplace` or `version` changed, and `apm update` resolve
+through the catalog, and `--frozen` fails for an unlocked entry. Exception
+until 0.38 (#2903): the lockfile does not record catalog-inline MCP/LSP
+servers, so a package with locked servers and no `apm_modules/` copy reads
+the catalog, also under `--frozen`.
+
 The `marketplace` value names a marketplace registered with
 `apm marketplace add` or declared in the user manifest's `marketplaces:`
 list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by

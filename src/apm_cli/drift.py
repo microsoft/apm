@@ -152,6 +152,79 @@ def marketplace_ref_mismatch(
     return None
 
 
+def locked_marketplace_row(
+    dep_ref: DependencyReference, lockfile: LockFile | None
+) -> LockedDependency | None:
+    """Return the lock row an unchanged marketplace declaration still matches.
+
+    The row must be the lock's single association for the declaration's
+    ``{name, marketplace}``, carry no replacement binding, and satisfy
+    :func:`marketplace_ref_mismatch`. Never performs catalog I/O.
+    """
+    if lockfile is None or getattr(dep_ref, "is_marketplace", False) is not True:
+        return None
+    locked_dep = lockfile.get_dependency(dep_ref.get_unique_key())
+    if (
+        locked_dep is None
+        or locked_dep.replacement is not None
+        or marketplace_ref_mismatch(dep_ref, locked_dep) is not None
+    ):
+        return None
+    return locked_dep
+
+
+def _owns_locked_servers(lockfile: LockFile, locked_dep: LockedDependency) -> bool:
+    """True when the lock records MCP or LSP servers contributed by *locked_dep*."""
+    owners = {token for token in (locked_dep.name, locked_dep.get_unique_key()) if token}
+    for provenance in (lockfile.mcp_config_provenance, lockfile.lsp_config_provenance):
+        for recorded in (provenance or {}).values():
+            tokens = recorded if isinstance(recorded, list) else [recorded]
+            if owners.intersection(tokens):
+                return True
+    return False
+
+
+def locked_marketplace_replay(
+    dep_ref: DependencyReference,
+    lockfile: LockFile | None,
+    *,
+    update_refs: bool = False,
+    modules_dir: Path | None = None,
+) -> DependencyReference | None:
+    """Return the locked coordinates an unchanged marketplace declaration replays.
+
+    Single owner of "replay vs re-resolve" for object-form marketplace
+    declarations (#3911). When :func:`locked_marketplace_row` finds a matching
+    row, install replays it without catalog, alias or registration I/O; the
+    row's commit and hashes then pin the download. New, changed, ambiguous,
+    replacement-bound or under-evidenced entries return ``None`` and resolve
+    through the marketplace, and so does every entry under ``apm update`` /
+    ``--refresh`` (*update_refs*).
+
+    One exception keeps today's behavior: catalog entries may define MCP or
+    LSP servers inline, and the lock cannot rebuild that catalog metadata. A
+    row whose package owns locked servers therefore replays only while its
+    materialized copy under *modules_dir* exists.
+    """
+    if update_refs:
+        return None
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if locked_dep is None:
+        return None
+    replayed = _dataclass_replace(
+        locked_dep.to_dependency_ref(),
+        alias=dep_ref.alias,
+        skill_subset=dep_ref.skill_subset,
+        target_subset=dep_ref.target_subset,
+        subset_pairings=dep_ref.subset_pairings,
+    )
+    if _owns_locked_servers(lockfile, locked_dep) and (
+        modules_dir is None or not replayed.get_install_path(modules_dir).is_dir()
+    ):
+        return None
+    return replayed
+
+
 def _routes_to_locked_proxy(dep_ref: DependencyReference, locked_dep: Any) -> bool:
     """Ask the proxy routing owner whether *dep_ref* reaches *locked_dep*'s proxy."""
     from apm_cli.deps.artifactory_orchestrator import ArtifactoryRouter
