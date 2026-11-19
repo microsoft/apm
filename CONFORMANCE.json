@@ -857,7 +857,7 @@
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_enable_requires_content_bound_approval"
       ],
       "waivers": [
-        "Content-bound enablement depends on #3902 and is implemented by the Claude user-scope route (#3290)."
+        "Content-bound enablement is implemented by the Claude user-scope route (#3290); this profile does not adopt proposed amendment 0.1.64."
       ]
     },
     {
@@ -871,7 +871,7 @@
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_unqualified_target_gets_explicit_split_install"
       ],
       "waivers": [
-        "The explicit split fallback for Codex, which fails A3, is implemented in #3920."
+        "The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011."
       ]
     },
     {

@@ -83,8 +83,8 @@ def test_enable_requires_content_bound_approval():
         "MUST NOT declare it in a disabled state",
     )
     waive(
-        "Content-bound enablement depends on #3902 and is implemented by the "
-        "Claude user-scope route (#3290)."
+        "Content-bound enablement is implemented by the Claude user-scope route "
+        "(#3290); this profile does not adopt proposed amendment 0.1.64."
     )
 
 
@@ -93,16 +93,19 @@ def test_unqualified_target_gets_explicit_split_install():
     assert_spec_contains(
         "It MUST NOT split-install a plugin silently",
         "names the target, the scope, and the criterion that is\nunmet or unknown",
-        "Split (fails A3)",
+        "Split (fails A3",
     )
-    waive("The explicit split fallback for Codex, which fails A3, is implemented in #3920.")
+    waive(
+        "The explicit split fallback for Codex, which fails A3, is implemented in "
+        "#3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011."
+    )
 
 
 @pytest.mark.req("req-na-007")
 def test_generated_marketplace_name_is_unique_per_project_and_scope():
     assert_spec_contains(
         "stable across clones of the same project at project scope",
-        "different between different projects, and different between project scope\nand user scope",
+        "different between project scope and user scope",
     )
     waive(
         "Per-scope marketplace naming is implemented by the Claude user-scope "
@@ -110,11 +113,16 @@ def test_generated_marketplace_name_is_unique_per_project_and_scope():
     )
 
 
-def _reconcile(case: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def _reconcile(case: dict[str, Any]) -> tuple[Any, list[str]]:
     """Reference model of the req-na-004 rule, used only to check the oracle."""
+    if "settings_before_raw" in case:
+        return case["settings_before_raw"], ["settings-unparseable"]
     name = case["marketplace"]["name"]
     binding = {"source": {"source": "directory", "path": case["marketplace"]["path"]}}
     before = case["settings_before"]
+    moved_from = case.get("previous_marketplace")
+    if moved_from is not None and moved_from["path"] != case["marketplace"]["path"]:
+        return copy.deepcopy(before), ["binding-moved"]
     settings = copy.deepcopy(before)
     marketplaces = settings.setdefault("extraKnownMarketplaces", {})
     enabled = settings.setdefault("enabledPlugins", {})
@@ -147,5 +155,6 @@ def test_req_na_004_oracle_matches_the_reconciliation_rule():
     assert [c["id"] for c in inputs] == list(expected)
     for case in inputs:
         settings, diagnostics = _reconcile(case)
-        assert settings == expected[case["id"]]["settings_after"], case["id"]
+        want = expected[case["id"]]
+        assert settings == want.get("settings_after", want.get("settings_after_raw")), case["id"]
         assert diagnostics == expected[case["id"]]["diagnostics"], case["id"]

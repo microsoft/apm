@@ -221,10 +221,10 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 - Lock-derived settings ownership is implemented by the Claude user-scope route (#3290), which runs against the native-activation/req-na-004.json oracle.
 
 ### req-na-005
-- Content-bound enablement depends on #3902 and is implemented by the Claude user-scope route (#3290).
+- Content-bound enablement is implemented by the Claude user-scope route (#3290); this profile does not adopt proposed amendment 0.1.64.
 
 ### req-na-006
-- The explicit split fallback for Codex, which fails A3, is implemented in #3920.
+- The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011.
 
 ### req-na-007
 - Per-scope marketplace naming is implemented by the Claude user-scope route (#3290) and the project-scope route (#3921).
