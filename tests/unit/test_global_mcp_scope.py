@@ -603,7 +603,7 @@ if __name__ == "__main__":
 def test_user_scope_runtime_list_comes_from_the_adapters() -> None:
     """The supported list is derived from adapters, so intellij appears via its label (S11)."""
     from apm_cli.factory import ClientFactory
-    from apm_cli.integration.mcp_integrator_install import user_scope_runtime_labels
+    from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
 
     labels = user_scope_runtime_labels()
     assert "JetBrains Copilot" in labels

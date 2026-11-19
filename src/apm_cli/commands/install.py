@@ -726,7 +726,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     if is_user_scope(scope):
         from ..core.target_detection import EffectiveTargetDecision
-        from ..integration.mcp_integrator_install import (
+        from ..integration.mcp_user_scope_runtimes import (
             discover_user_scope_mcp_runtimes,
             filter_excluded_mcp_runtimes,
             partition_user_scope_runtimes,

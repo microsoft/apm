@@ -1453,13 +1453,13 @@ class TestExcludeReadsLikeTarget:
     """``--exclude`` folds case, honours the vscode alias and never ignores silently (C4)."""
 
     def test_case_and_alias_select_copilot(self, capsys) -> None:
-        from apm_cli.integration.mcp_integrator_install import filter_excluded_mcp_runtimes
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
         for value in ("COPILOT", "VSCode", "vscode"):
             assert "copilot" not in filter_excluded_mcp_runtimes(["copilot", "claude"], value)
 
     def test_unknown_value_warns(self, capsys) -> None:
-        from apm_cli.integration.mcp_integrator_install import filter_excluded_mcp_runtimes
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
         assert filter_excluded_mcp_runtimes(["claude"], "bogus") == ["claude"]
         captured = capsys.readouterr()
