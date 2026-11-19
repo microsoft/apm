@@ -345,11 +345,12 @@ def verify_claude_native_cache(*, modules_dir: Path, locked: Any, source_root: P
     deployed = plugins_root(get_deploy_root(InstallScope.USER)) / record.name
     for label, path in (("source", source_root), ("deployed copy", deployed)):
         try:
-            matches = path.is_dir() and fingerprint_native_claude_source(path) == record.fingerprint
+            observed = fingerprint_native_claude_source(path) if path.is_dir() else "missing"
         except ClaudeNativePluginError:
-            matches = False
-        if not matches:
+            observed = "unreadable"
+        if observed != record.fingerprint:
             raise AgentPluginDeploymentBoundaryError(
                 f"Native Claude plugin '{record.name}' {label} differs from apm.lock.yaml "
-                f"({path}). Run 'apm install --global' to restore it."
+                f"({path}): expected {record.fingerprint}, observed {observed}. "
+                "Run 'apm install --global' to restore it."
             )

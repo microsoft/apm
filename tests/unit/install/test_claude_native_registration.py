@@ -1,8 +1,7 @@
 """Settings-only native Claude declaration owned by apm.lock.yaml (#3191, #3181).
 
-Covers OpenAPM req-na-002 (deployed root and digest), req-na-003 (only the two
-documented keys), req-na-004 (lock-derived ownership, oracle cases) and
-req-na-007 (per-APM-home marketplace name, binding conflicts refused).
+Lifecycle detail beyond the req-na conformance tests in
+tests/spec_conformance/test_native_activation_profile_reqs.py.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ from apm_cli.claude_plugins.admission import (
 )
 from apm_cli.claude_plugins.registrar import (
     LEGACY_LEDGER_RELATIVE,
+    marketplace_binding,
     marketplace_name,
     native_ownership,
     reconcile_claude_plugins,
@@ -28,124 +28,12 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile, LockfileFormatError
 from apm_cli.native_plugins.record import NativePluginRecord
 from apm_cli.native_plugins.settings import (
-    BINDING_CONFLICT,
-    PREVIOUS_LOCK_MISSING,
     NativeSettingsError,
     SettingsDeclaration,
-    apply_declaration,
     write_declaration,
 )
 
-_DIR = "/home/dev/.agents/plugins"
 _NAME = "apm-u-3f9c"
-_OWN = {_NAME: {"source": {"source": "directory", "path": _DIR}}}
-_CONTOSO = {"contoso": {"source": {"source": "github", "repo": "contoso/agent-marketplace"}}}
-
-
-@pytest.mark.parametrize(
-    ("previous", "following", "before", "after", "diagnostics"),
-    [
-        pytest.param(
-            ["alpha", "beta"],
-            ["alpha", "gamma"],
-            {
-                "model": "opus",
-                "extraKnownMarketplaces": {**_OWN, **_CONTOSO},
-                "enabledPlugins": {
-                    f"alpha@{_NAME}": True,
-                    f"beta@{_NAME}": True,
-                    "helper@contoso": True,
-                },
-            },
-            {
-                "model": "opus",
-                "extraKnownMarketplaces": {**_OWN, **_CONTOSO},
-                "enabledPlugins": {
-                    f"alpha@{_NAME}": True,
-                    "helper@contoso": True,
-                    f"gamma@{_NAME}": True,
-                },
-            },
-            [],
-            id="add-and-remove",
-        ),
-        pytest.param(
-            ["alpha"],
-            ["alpha"],
-            {"extraKnownMarketplaces": _OWN, "enabledPlugins": {f"alpha@{_NAME}": False}},
-            {"extraKnownMarketplaces": _OWN, "enabledPlugins": {f"alpha@{_NAME}": False}},
-            [],
-            id="explicit-false-kept",
-        ),
-        pytest.param(
-            ["alpha"],
-            [],
-            {
-                "extraKnownMarketplaces": {**_OWN, **_CONTOSO},
-                "enabledPlugins": {f"alpha@{_NAME}": False, "helper@contoso": True},
-            },
-            {
-                "extraKnownMarketplaces": _CONTOSO,
-                "enabledPlugins": {f"alpha@{_NAME}": False, "helper@contoso": True},
-            },
-            [],
-            id="false-kept-on-removal",
-        ),
-        pytest.param(
-            None,
-            ["alpha"],
-            {},
-            {"extraKnownMarketplaces": _OWN, "enabledPlugins": {f"alpha@{_NAME}": True}},
-            [],
-            id="first-activation",
-        ),
-        pytest.param(
-            None,
-            ["alpha"],
-            {"extraKnownMarketplaces": _OWN, "enabledPlugins": {f"beta@{_NAME}": True}},
-            {
-                "extraKnownMarketplaces": _OWN,
-                "enabledPlugins": {f"beta@{_NAME}": True, f"alpha@{_NAME}": True},
-            },
-            [PREVIOUS_LOCK_MISSING],
-            id="previous-lock-missing",
-        ),
-        pytest.param(
-            ["alpha"],
-            ["alpha"],
-            {
-                "extraKnownMarketplaces": {
-                    _NAME: {"source": {"source": "directory", "path": "/home/dev/other/plugins"}}
-                },
-                "enabledPlugins": {f"alpha@{_NAME}": True},
-            },
-            {
-                "extraKnownMarketplaces": {
-                    _NAME: {"source": {"source": "directory", "path": "/home/dev/other/plugins"}}
-                },
-                "enabledPlugins": {f"alpha@{_NAME}": True},
-            },
-            [BINDING_CONFLICT],
-            id="binding-conflict",
-        ),
-    ],
-)
-def test_settings_reconciliation_matches_the_req_na_004_oracle(
-    previous, following, before, after, diagnostics
-) -> None:
-    document = json.loads(json.dumps(before))
-    change = apply_declaration(
-        document,
-        SettingsDeclaration(
-            _NAME,
-            Path(_DIR),
-            frozenset(following),
-            None if previous is None else frozenset(previous),
-        ),
-        Path("settings.json"),
-    )
-    assert document == after
-    assert change.diagnostics == diagnostics
 
 
 def test_unparseable_settings_fail_closed_without_a_write(tmp_path: Path) -> None:
@@ -211,7 +99,10 @@ class _Home:
             repo_url=repo, resolved_commit=commit * 40, package_type="marketplace_plugin"
         )
         dependency.native_plugin = NativePluginRecord(
-            name, fingerprint_native_claude_source(root), ("claude",)
+            name,
+            fingerprint_native_claude_source(root),
+            ("claude",),
+            *marketplace_binding(self.modules.parent, self.home),
         )
         self.lock.dependencies[repo] = dependency
 
@@ -294,7 +185,7 @@ def test_removal_retires_only_what_the_previous_lock_produced(home) -> None:
     assert not (home.plugins / "alpha").exists()
     # A deployed root that changed since APM wrote it is kept, but undeclared.
     assert edited.read_text() == "edited by the user"
-    assert home.declared() == {}
+    assert home.declared() == {"extraKnownMarketplaces": {}, "enabledPlugins": {}}
 
 
 def test_binding_conflict_refuses_and_rolls_back_new_roots(home) -> None:

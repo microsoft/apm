@@ -106,7 +106,13 @@ def apply_declaration(
     name = declaration.marketplace
     current = marketplaces.get(name)
     binding = (name, str(declaration.directory))
-    if declaration.previous_binding is not None and declaration.previous_binding != binding:
+    moved = declaration.previous_binding is not None and declaration.previous_binding != binding
+    # Another name already points at this profile root: a renamed binding.
+    renamed = any(
+        other != name and value == declaration.marketplace_value
+        for other, value in marketplaces.items()
+    )
+    if moved or renamed:
         change.diagnostics.append(BINDING_MOVED)
         return change
     if current is not None and current != declaration.marketplace_value:

@@ -77,6 +77,19 @@ _UNSUPPORTED_ROOTS = (
 )
 
 
+def _refuse_escaping_component_paths(root: Path, manifest: dict[str, Any]) -> None:
+    """A manifest path outside the plugin directory leaves no plugin root (req-na-002)."""
+    resolved = root.resolve()
+    for field in ("commands", "agents", "skills", "hooks"):
+        value = manifest.get(field)
+        for entry in value if isinstance(value, list) else [value]:
+            if isinstance(entry, str) and not (root / entry).resolve().is_relative_to(resolved):
+                raise ClaudeNativePluginError(
+                    f"Native Claude plugin manifest field '{field}' points outside the plugin "
+                    f"({entry}). Fix the manifest or exclude Claude from this dependency's targets."
+                )
+
+
 def plan_native_claude_plugin(
     package_info: PackageInfo,
     *,
@@ -146,6 +159,7 @@ def plan_native_claude_plugin(
             + ", ".join(sorted(unknown) + unsupported)
             + ". This route supports intact commands, skills, agents and approved hooks only."
         )
+    _refuse_escaping_component_paths(root, manifest)
     has_hooks = "hooks" in manifest or (root / "hooks").exists()
     parked = None
     if has_hooks and not hooks_approved:

@@ -192,7 +192,7 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
     assert after["enabledPlugins"][mine] is True
     run("uninstall", "--global", f"{dependency}/plugins/beta")
     final = scenario.declared()
-    assert "extraKnownMarketplaces" not in final
+    assert final["extraKnownMarketplaces"] == {}
     # APM never removes a key it did not produce, nor the user's explicit false.
     assert final["enabledPlugins"] == {mine: True, keys["beta"]: False}
     assert final["theme"] == "dark"

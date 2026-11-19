@@ -1106,6 +1106,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
 | `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `extensions`              | Optional mapping of top-level keys matching `x-[a-z][a-z0-9-]*` from the dependency manifest, in declaration order. Omitted when empty. Values are not interpreted (see [req-ext-003](#req-ext-003)). Manifest-origin metadata, distinct from per-entry `x-<name>` keys. |
+| `native_plugin`           | Optional mapping, present only when the consumer natively activated this entry's plugin under [Section 8.5.11](#8511-native-plugin-activation-profile): `name` (declared plugin name), `root` (deployed plugin root relative to the deploy root, `.agents/plugins/<name>`), `fingerprint` (the [req-na-002](#req-na-002) root digest, `sha256:<hex>`), `harnesses` (sorted target names it is declared to), and `marketplace` (`{name, path}`: the binding its activation entries were declared under, the previous binding of [req-na-004](#req-na-004)). Install, including `--frozen`, writes it only after the lockfile gates pass and then reconciles settings from it; a restore redeploys only bytes whose digest equals `fingerprint`; audit recomputes the digest on the materialized source and on the deployed root without writing. (Amendment 0.1.65.) |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
@@ -3801,7 +3802,8 @@ applies whatever the plugin format. The consumer MUST verify, without
 following symbolic links, that each deployed path resolves inside the
 profile root. A plugin whose manifest references a path that resolves
 outside its directory has no plugin root and MUST NOT be natively
-activated. It MUST record in the lock entry
+activated. It MUST record in the lock entry (the `native_plugin` field of
+[Section 5.2](#52-per-entry-fields))
 the deployed plugin root and one root digest covering the path, bytes, and
 executable bit of every file in that root, and MUST treat a deployed root
 whose recomputed digest differs from the recorded one as drift under [Section 5.5](#55-drift-and-integrity-model); its drift
@@ -3810,9 +3812,8 @@ The root digest is a hash envelope of the form `sha256:<hex-lowercase>`
 defined by [req-lk-016](#req-lk-016). It is the SHA-256 of the
 concatenation, over every regular file in the plugin root except any file
 whose relative path has a component equal to `.git`, at any depth, and
-except the consumer's own normalization output (a root `apm.yml` and a root
-`.apm/` directory, which a consumer may generate when it materializes a
-package), taken in ascending byte-wise order of the file's POSIX relative
+except a root `apm.yml` file and every file under a root `.apm/` directory,
+whether or not the consumer generated them, taken in ascending byte-wise order of the file's POSIX relative
 path encoded as UTF-8, with no Unicode normalization, of: that relative
 path, one NUL (0x00) byte, one byte `x` (0x78) when the file is
 owner-executable or `-` (0x2D) otherwise, and the 32-byte raw SHA-256 digest
@@ -3875,7 +3876,8 @@ MUST report that in an actionable diagnostic, MUST NOT remove any existing
 activation entry, and MAY add what the next lockfile requires; a first
 activation with no such entry needs no diagnostic. When the binding has
 moved (the expected marketplace name or profile-root path differs from the
-binding the previous lockfile's entries were produced under), or an entry
+binding the previous lockfile's entries were produced under, recorded as
+`native_plugin.marketplace` per [Section 5.2](#52-per-entry-fields)), or an entry
 under the consumer's marketplace name points at a different source, the
 consumer MUST report the conflict in an actionable diagnostic, MUST NOT
 write, delete, or overwrite any activation entry under either name, and
