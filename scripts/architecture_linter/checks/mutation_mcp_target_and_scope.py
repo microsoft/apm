@@ -58,6 +58,8 @@ _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 
 
 _MCP_SCOPE_OWNER = "src/apm_cli/integration/mcp_config_view.py"
+# LSP owns its own ``bundle:`` provenance namespace.
+_LSP_BUNDLE_OWNER = "src/apm_cli/install/lsp/integration.py"
 _EXECUTABLES_OWNER = "src/apm_cli/security/executables.py"
 # Uninstall only intersects with managed servers and never admits one.
 _MCP_RAW_VIEW_CONSUMER = "src/apm_cli/commands/uninstall/engine.py"
@@ -387,6 +389,26 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
             paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
             pattern=r"^\s*def pending_servers\(|_absent_apm_package_mcp_configs",
             message="Deferred MCP origin evidence belongs to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    if not _span_has_fixed(facts, derive_span, "_bundle_owned_baseline(lockfile"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "derive must keep recorded local-bundle MCP servers as baseline",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _LSP_BUNDLE_OWNER)
+            ),
+            pattern=r"""f?["']bundle:(?:["']|\{)""",
+            message="Local-bundle MCP owner tokens belong to CurrentMcpConfigView",
             exempt=False,
         )
     )

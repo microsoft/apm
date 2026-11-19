@@ -99,6 +99,9 @@ staging.
 
 `apm.yml` is never touched. Re-running the same command re-deploys (use
 `--force` to overwrite locally-edited files).
+Bundle MCP servers are recorded in `apm.lock.yaml` as owned by the bundle, so
+installing or uninstalling other packages keeps them, and `apm audit --ci` and
+`apm install --frozen` accept them.
 If executable trust blocks bundle hooks, MCP, LSP, or canvas content, copy the
 exact `name#version@sha256:<digest>` key printed by `apm install` into
 `executables.allow`; changed bundle bytes require a new key. Approved hooks
