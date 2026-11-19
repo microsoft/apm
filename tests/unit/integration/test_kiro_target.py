@@ -1208,3 +1208,68 @@ def test_kiro_agents_reject_legacy_and_malformed_selectors(tmp_path: Path, tool:
     assert not (tmp_path / ".kiro" / "agents" / "legacy.md").exists()
     warnings = diagnostics.by_category().get("warning", [])
     assert any("will not be deployed" in w.message for w in warnings)
+
+
+@pytest.mark.parametrize(
+    ("tools_yaml", "deploys"),
+    [
+        ("'@git'", True),
+        ("web_fetch", True),
+        ("grep", False),
+        ("{a: 1}", False),
+        ("42", False),
+    ],
+)
+def test_kiro_agents_scalar_and_non_list_tools_forms(
+    tmp_path: Path, tools_yaml: str, deploys: bool
+) -> None:
+    """Scalar tools values use the same vocabulary; malformed values skip only the agent."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "single.agent.md").write_text(
+        f"---\ntools: {tools_yaml}\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        diagnostics=diagnostics,
+    )
+
+    assert not diagnostics.by_category().get(CATEGORY_ERROR, [])
+    assert (tmp_path / ".kiro" / "agents" / "single.md").exists() is deploys
+    assert result.files_integrated == int(deploys)
+    if not deploys:
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert any("will not be deployed" in w.message for w in warnings)
+
+
+def test_kiro_agents_rejection_names_the_full_approved_set(tmp_path: Path) -> None:
+    """req-tg-009: the diagnostic identifies the unsupported value and the approved set."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "bad.agent.md").write_text(
+        "---\ntools:\n- execute_arbitrary_code\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        diagnostics=diagnostics,
+    )
+
+    (warning,) = diagnostics.by_category()[CATEGORY_WARNING]
+    assert "execute_arbitrary_code" in warning.message
+    for tool in KIRO_AGENT_ALLOWED_TOOLS:
+        assert tool in warning.message
+    assert "@server/tool" in warning.message

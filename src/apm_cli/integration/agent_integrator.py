@@ -80,9 +80,15 @@ _KIRO_MCP_SELECTOR_RE = re.compile(
     r"@(?!(?:builtin|mcp)/)[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,127})?"
 )
 _KIRO_TOOLS_HINT = (
-    "Use a Kiro category tag (read, write, shell, web, subagent), a built-in "
-    "tool ID (e.g. read_file, grep_search, web_fetch), @server or "
-    "@server/tool, @builtin, @mcp, or *."
+    "Approved Kiro tool selectors: category tags ("
+    + ", ".join(sorted(KIRO_AGENT_TOOL_TAGS))
+    + "); built-in tool IDs ("
+    + ", ".join(sorted(KIRO_AGENT_TOOL_IDS))
+    + "); compatibility values ("
+    + ", ".join(sorted(KIRO_AGENT_TOOL_COMPAT_VALUES))
+    + "); @server or @server/tool; "
+    + ", ".join(sorted(KIRO_AGENT_TOOL_SPECIAL_VALUES))
+    + "."
 )
 
 
