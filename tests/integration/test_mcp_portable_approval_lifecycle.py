@@ -380,7 +380,9 @@ def test_native_plugin_is_approved_by_one_pin_over_its_whole_root(
     grant = yaml.safe_load((chain.project / "apm.yml").read_text(encoding="utf-8"))["executables"][
         "allow"
     ]["./pkgs/np"]
-    assert list(grant) == ["plugin"] and len(grant["plugin"]) == len("sha256:") + 64
+    assert len(grant["plugin"]) == len("sha256:") + 64
+    # Item pins ride along for a split install of the same package.
+    assert set(grant["hooks"]) == {"hooks/hooks.json", "hooks/hooks-cursor.json"}
     chain.ok("install", "--no-policy")
     assert _registered(chain), "the dispatcher's sibling and the Cursor variant are approved"
     assert "plugin . whole plugin" in _text(chain.ok("approve", "--list"))

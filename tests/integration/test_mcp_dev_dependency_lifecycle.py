@@ -213,6 +213,15 @@ def _install_args(case: _TargetCase) -> tuple[str, ...]:
     )
 
 
+# The nested dependency's approval identity, as `apm approve --pending` prints it.
+_DEP_IDENTITY = "gitlab.example.invalid/contracts/aggregator/packages/dep"
+
+
+def _approve_dependency(runner: ApmLifecycleRunner, scenario: _Scenario, scenario_id: str) -> None:
+    """Persist consent for the transitive server; audit never reads the one-off flag."""
+    _run_ok(runner, scenario, ("approve", _DEP_IDENTITY), scenario_id)
+
+
 def _run_ok(
     runner: ApmLifecycleRunner,
     scenario: _Scenario,
@@ -401,6 +410,7 @@ def test_dependency_dev_mcp_isolated_across_installed_lifecycle(
         _assert_current_state(scenario, reinstall_state)
         _assert_byte_idempotent(first, reinstall_state, case.config_path)
 
+        _approve_dependency(runner, scenario, f"{case.runtime}-approve")
         before_audit = _snapshot(scenario)
         audited = _run_ok(
             runner,
@@ -481,6 +491,7 @@ def test_stale_dependency_dev_mcp_repair_and_frozen_no_write(
         _assert_current_state(scenario, updated, include_user_entry=True)
         _assert_byte_idempotent(repaired, updated, case.config_path)
 
+        _approve_dependency(runner, scenario, "repair-approve")
         before_audit = _snapshot(scenario)
         audit = _run_ok(
             runner,

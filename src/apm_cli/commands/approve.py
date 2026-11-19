@@ -569,12 +569,16 @@ def _echo_pins(decl: ExecutableDeclaration, pins: list, states: dict | None = No
     """List what a package runs, one line per pinned item (ASCII only)."""
     from ..security.trust_fingerprint import short_fingerprint
 
+    plugin = [pin for pin in pins if pin.exec_type == "plugin"]
+    # A native plugin is reviewed as one unit; its split-install item pins
+    # are recorded alongside but not listed.
+    pins = plugin or pins
     width = max((len(pin.item) for pin in pins), default=0)
     for pin in pins:
         digest = short_fingerprint(pin.fingerprint) if pin.fingerprint else "--------"
         state = f"  [{states[(pin.exec_type, pin.item)]}]" if states else ""
         _rich_echo(f"      {pin.exec_type:<6} {pin.item:<{width}}  {pin.summary}  {digest}{state}")
-    if any(pin.exec_type == "plugin" for pin in pins):
+    if plugin:
         return
     for exec_type, count, noun in (
         ("bin", decl.bin_count, "executable(s)"),

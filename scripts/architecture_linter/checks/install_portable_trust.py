@@ -57,10 +57,11 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "hooks_package_admissible(allow_executables, tuple(candidate_keys))",
         "return hook_file_filter(allow_executables, keys, Path(package_info.install_path))",
         "verdict = admit_native_plugin(allow_executables, candidate_keys, install)",
+        "if native_install(package_info) and plugin_pin(",
     ),
     "src/apm_cli/install/deployment_plan.py": (
         "hook_file_admitted=hook_filter,",
-        '"hooks": hooks and hook_filter is None,',
+        '"hooks": hooks if plugin_verdict is not None else hooks and hook_filter is None,',
     ),
     "src/apm_cli/integration/hook_reintegration.py": ("hook_file_admitted=hook_file_admission(",),
     "src/apm_cli/commands/approve.py": (
@@ -68,7 +69,7 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "return package_type_verdicts(",
     ),
     "src/apm_cli/install/native_plugin_admission.py": (
-        "if hook_file_admission(package_name, package_info, allow_executables) is not None:",
+        "plugin_admission(package_name, package_info, allow_executables) is None",
         "native=True,",
     ),
 }

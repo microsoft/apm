@@ -16,6 +16,7 @@ what was deployed or parked, never consent.
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,9 @@ REASON_DENIED = "denied"
 REASON_DEFINITION_CHANGED = "definition-changed"
 REASON_UNTRUSTED_TRANSITIVE = "untrusted-transitive"
 REASON_UNAPPROVED = "unapproved-executables"
+# A native plugin's executable surface points into APM-owned paths that the
+# plugin pin does not cover (root ``.apm/`` or ``apm.yml``).
+REASON_APM_REFERENCE = "apm-owned-reference"
 
 LAYER_PROJECT_ITEM = "project-allow"
 LAYER_USER_ITEM = "user-allow"
@@ -89,6 +93,8 @@ class Admission:
     reason: str | None
     layer: str
     one_off: bool = False
+    # Human-readable cause when the reason alone does not name it.
+    detail: str | None = None
 
 
 def _names(package_keys: tuple[str, ...]) -> set[str]:
@@ -429,14 +435,51 @@ _PLUGIN_MANIFESTS = ("plugin.json", ".claude-plugin/plugin.json", ".codex-plugin
 _MANIFEST_EXEC_KEYS = {"hooks": EXEC_TYPE_HOOKS, "mcpServers": EXEC_TYPE_MCP, "lspServers": "lsp"}
 
 
+def native_root_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
+    """Exec trust types implied by NATIVE-layout components at a plugin root.
+
+    ``scan_package_executables`` only understands APM's ``.apm/`` layout. A
+    native plugin keeps hooks, LSP, extensions and prompt payloads at the
+    ROOT, and the harness loads them live. The mapping follows the Agent
+    Plugins loader's own constant, so an unmapped component fails closed as
+    hooks. Prompt payloads (agents/commands/instructions) map to the hooks
+    gate rather than silently to nothing.
+    """
+    from apm_cli.agent_plugins.loader import _IGNORED_PORTABLE_COMPONENT_PATHS
+
+    from .executables import EXEC_TYPE_CANVAS, EXEC_TYPE_LSP
+
+    if plugin_root is None:
+        return ()
+    root = Path(plugin_root)
+    mapping = {
+        "extensions": EXEC_TYPE_CANVAS,
+        "lsp.json": EXEC_TYPE_LSP,
+        "hooks": EXEC_TYPE_HOOKS,
+        "agents": EXEC_TYPE_HOOKS,
+        "commands": EXEC_TYPE_HOOKS,
+        "instructions": EXEC_TYPE_HOOKS,
+    }
+    seen: dict[str, None] = {}
+    for name in _IGNORED_PORTABLE_COMPONENT_PATHS:
+        try:
+            if not (root / name).exists():
+                continue
+        except OSError:
+            continue
+        seen.setdefault(mapping.get(name, EXEC_TYPE_HOOKS), None)
+    return tuple(seen)
+
+
 def native_plugin_exec_types(plugin_root: Path) -> tuple[str, ...]:
-    """Executable types a natively loaded plugin declares (hooks, MCP, LSP, bin, canvas)."""
+    """Executable types a natively loaded plugin declares (the native gate's union)."""
     import json
 
     from .executables import scan_package_executables
 
     root = Path(plugin_root)
     found: dict[str, None] = dict.fromkeys(scan_package_executables(root, "", "").exec_types)
+    found.update(dict.fromkeys(native_root_exec_types(root)))
     markers = {
         "hooks": EXEC_TYPE_HOOKS,
         ".mcp.json": EXEC_TYPE_MCP,
@@ -461,6 +504,40 @@ def native_plugin_exec_types(plugin_root: Path) -> tuple[str, ...]:
                 if data.get(key):
                     found[exec_type] = None
     return tuple(found)
+
+
+# Executable surfaces of a native plugin whose text may reference other files.
+_NATIVE_SURFACES = ("hooks", "bin", ".mcp.json", ".lsp.json", "lsp.json", *_PLUGIN_MANIFESTS)
+_APM_OWNED_REFERENCE = re.compile(r"(?<![\w.-])(\.apm/[^\s\"']*|apm\.yml)(?![\w.-])")
+
+
+def apm_owned_reference(plugin_root: Path) -> str | None:
+    """Name the first reference from an executable surface into ``.apm/`` or ``apm.yml``.
+
+    Those root paths are APM normalization output and sit outside the plugin
+    pin, so a plugin that runs anything from them cannot be pinned.
+    """
+    root = Path(plugin_root)
+    for name in _NATIVE_SURFACES:
+        base = root / name
+        try:
+            if base.is_file():
+                files = [base]
+            elif base.is_dir():
+                files = sorted(p for p in base.rglob("*") if p.is_file())
+            else:
+                continue
+        except OSError:
+            continue
+        for path in files:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            match = _APM_OWNED_REFERENCE.search(text)
+            if match:
+                return f"{path.relative_to(root).as_posix()} references '{match.group(1)}'"
+    return None
 
 
 def plugin_pin(
@@ -488,26 +565,32 @@ def admit_native_plugin(
     of *plugin_root* (the ``apm_modules`` source). *allow_executables* is an
     ``EffectiveExecMap``, an :class:`ExecTrustContext`, or ``None`` (gate off).
 
-    - no declared executables              -> admitted, no pin needed
     - gate off                             -> admitted
+    - no declared executables and no pin   -> admitted, no pin needed
     - org / user / project deny            -> parked ``denied``
+    - executable surface references root
+      ``.apm/`` or ``apm.yml``             -> parked ``apm-owned-reference``
     - plugin pin matches                   -> admitted
     - plugin pin differs (any byte/mode)   -> parked ``definition-changed``
     - no pin, every declared type granted  -> admitted (legacy, warned)
     - otherwise                            -> parked ``unapproved-executables``
     """
-    exec_types = native_plugin_exec_types(plugin_root)
-    if not exec_types:
-        return Admission(True, None, LAYER_NOT_GATED)
     ctx = _trust_context(allow_executables)
     if ctx is None or not ctx.gate_enabled:
         return Admission(True, None, LAYER_GATE_DISABLED)
-    for exec_type in exec_types:
+    exec_types = native_plugin_exec_types(plugin_root)
+    pinned = plugin_pin(ctx, package_keys)
+    if not exec_types and pinned is None:
+        return Admission(True, None, LAYER_NOT_GATED)
+    # A pin is checked against deny and content even if no type is detected.
+    for exec_type in exec_types or (EXEC_TYPE_HOOKS,):
         for key in package_keys:
             decision = resolve_exec_decision(ctx, key, exec_type)
             if decision.trust_state == TRUST_DENIED:
                 return Admission(False, REASON_DENIED, decision.deciding_layer)
-    pinned = plugin_pin(ctx, package_keys)
+    reference = apm_owned_reference(Path(plugin_root))
+    if reference is not None:
+        return Admission(False, REASON_APM_REFERENCE, LAYER_DEFAULT_DENY, detail=reference)
     if pinned is not None:
         layer, pin = pinned
         try:
@@ -518,13 +601,19 @@ def admit_native_plugin(
             return Admission(True, None, layer)
         return Admission(False, REASON_DEFINITION_CHANGED, layer)
     decisions = [_type_decision(ctx, package_keys, exec_type) for exec_type in exec_types]
-    if all(decision.allowed for decision in decisions):
+    if decisions and all(decision.allowed for decision in decisions):
         return Admission(True, None, decisions[0].deciding_layer)
     return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY)
 
 
-def parked_plugin_message(package: str, reason: str) -> str:
+def parked_plugin_message(package: str, reason: str, detail: str | None = None) -> str:
     """Return the warning for a native plugin the trust owner parked."""
+    if reason == REASON_APM_REFERENCE:
+        return (
+            f"Parked native plugin {package}: {detail or 'an executable references .apm/'}; "
+            "APM-owned paths are outside the plugin pin and cannot be approved\n"
+            "    Ask the publisher to keep executables outside .apm/ and apm.yml"
+        )
     why = {
         REASON_DEFINITION_CHANGED: "content changed since approval",
         REASON_DENIED: "denied by policy",
@@ -690,7 +779,7 @@ def package_type_verdicts(
     """
     from .executables import LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW
 
-    if install_path is not None and plugin_pin(ctx, package_keys) is not None:
+    if native and install_path is not None and plugin_pin(ctx, package_keys) is not None:
         verdict = admit_native_plugin(ctx, package_keys, install_path)
         state = (
             TRUST_DEPLOYED
@@ -937,7 +1026,10 @@ def package_pins(
 
     root = install_path.resolve()
     if native:
-        return [native_plugin_pin(root)]
+        # The plugin pin admits the native install; item pins cover a split
+        # install of the same package (best effort: an unpinnable item parks).
+        split = package_pins(root, transitive=transitive, registry_resolver=registry_resolver)
+        return [native_plugin_pin(root), *(pin for pin in split if pin.fingerprint is not None)]
     pins: list[PinnedItem] = []
     for hook_file in HookIntegrator().find_hook_files(root):
         try:
@@ -1050,11 +1142,10 @@ def record_pins(
     entry: dict[str, Any] = dict(previous)
     narrowed: list[str] = []
     plugin = next((pin for pin in pins if pin.exec_type == PLUGIN_GRANT_KEY), None)
+    entry.pop(PLUGIN_GRANT_KEY, None)
     if plugin is not None and plugin.fingerprint is not None:
-        # One pin over the whole plugin covers every executable type it ships.
-        narrowed = [t for t in ITEM_EXEC_TYPES if previous.get(t) is True]
-        allow[identity] = {PLUGIN_GRANT_KEY: plugin.fingerprint}
-        return narrowed
+        # One pin over the whole plugin admits its native install.
+        entry[PLUGIN_GRANT_KEY] = plugin.fingerprint
     for exec_type in exec_types:
         if exec_type in ITEM_EXEC_TYPES:
             items = {

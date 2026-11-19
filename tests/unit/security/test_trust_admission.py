@@ -481,15 +481,79 @@ def test_plugin_grant_must_be_a_full_fingerprint_under_allow() -> None:
         _ctx(deny={PKG: {"plugin": "sha256:" + "a" * 64}})
 
 
-def test_record_pins_replaces_type_grants_with_one_plugin_item(tmp_path: Path) -> None:
+def test_record_pins_adds_one_plugin_item_beside_split_item_pins(tmp_path: Path) -> None:
     plugin = _superpowers_plugin(tmp_path / "superpowers")
     pins = package_pins(plugin, transitive=False, native=True)
-    assert [(pin.exec_type, pin.item) for pin in pins] == [("plugin", ".")]
+    assert (pins[0].exec_type, pins[0].item) == ("plugin", ".")
+    assert len(pins[0].fingerprint) == len("sha256:") + 64
     allow = {PKG: {"hooks": True}}
     narrowed = record_pins(allow, PKG, ("hooks",), pins)
     assert narrowed == ["hooks"]
-    assert allow == {PKG: {"plugin": pins[0].fingerprint}}
-    assert len(pins[0].fingerprint) == len("sha256:") + 64
+    assert allow[PKG]["plugin"] == pins[0].fingerprint
+    assert set(allow[PKG]["hooks"]) == {"hooks/hooks.json", "hooks/hooks-cursor.json"}
+
+
+def test_plugin_pin_never_admits_a_split_install(tmp_path: Path) -> None:
+    """Only the native path reads the plugin pin; a split install needs item pins."""
+    from apm_cli.security.trust import package_type_verdicts
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    ctx = _ctx(_plugin_grant(native_plugin_fingerprint(plugin)))
+    split = package_type_verdicts(ctx, (PKG,), plugin, ("hooks",))
+    native = package_type_verdicts(ctx, (PKG,), plugin, ("hooks",), native=True)
+    assert (split["hooks"].allowed, native["hooks"].allowed) == (False, True)
+
+
+def test_native_plugin_referencing_apm_owned_paths_is_parked(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin, parked_plugin_message
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = _superpowers_plugin(tmp_path / "superpowers")
+    (plugin / "hooks" / "run-hook.cmd").write_text(
+        'exec "${CLAUDE_PLUGIN_ROOT}/.apm/run.sh"\n', encoding="utf-8"
+    )
+    effective = materialize_exec_map(_ctx(_plugin_grant(native_plugin_fingerprint(plugin))))
+    verdict = admit_native_plugin(effective, (PKG,), plugin)
+    assert (verdict.allowed, verdict.reason) == (False, "apm-owned-reference")
+    assert verdict.detail == "hooks/run-hook.cmd references '.apm/run.sh'"
+    message = parked_plugin_message(PKG, verdict.reason, verdict.detail)
+    assert "hooks/run-hook.cmd references '.apm/run.sh" in message
+
+
+def test_pinned_prompt_only_plugin_still_checks_deny_and_content(tmp_path: Path) -> None:
+    from apm_cli.security.trust import admit_native_plugin
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    plugin = tmp_path / "agents-only"
+    (plugin / "agents").mkdir(parents=True)
+    (plugin / "agents" / "a.md").write_text("# a\n", encoding="utf-8")
+    effective = materialize_exec_map(_ctx(_plugin_grant(native_plugin_fingerprint(plugin))))
+    assert admit_native_plugin(effective, (PKG,), plugin).allowed
+    (plugin / "agents" / "a.md").write_text("# changed\n", encoding="utf-8")
+    assert admit_native_plugin(effective, (PKG,), plugin).reason == "definition-changed"
+    policy = ApmPolicy(executables=ExecutablesPolicy(deny=(PKG,)))
+    denied = materialize_exec_map(_ctx(_plugin_grant("sha256:" + "0" * 64), policy=policy))
+    assert admit_native_plugin(denied, (PKG,), plugin).reason == "denied"
+
+
+def test_native_plugin_hash_equals_bundle_hash_of_the_deployed_file_set(tmp_path: Path) -> None:
+    """req-na-002: the deployed copy of native_plugin_files() hashes to the pin."""
+    from apm_cli.utils.content_hash import (
+        compute_native_bundle_hash,
+        compute_native_plugin_hash,
+        native_plugin_files,
+    )
+
+    source = _superpowers_plugin(tmp_path / "source")
+    (source / "hooks" / "run-hook.cmd").chmod(0o755)
+    (source / "apm.yml").write_text("name: s\n", encoding="utf-8")
+    shutil.copytree(source / "hooks", source / ".apm" / "hooks")
+    deployed = tmp_path / "deployed"
+    for relative in native_plugin_files(source):
+        (deployed / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source / relative, deployed / relative)
+    assert compute_native_plugin_hash(source) == compute_native_bundle_hash(deployed)
 
 
 def test_type_verdicts_report_pins_as_allowed_and_legacy_as_any_content(tmp_path: Path) -> None:

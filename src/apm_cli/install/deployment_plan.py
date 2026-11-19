@@ -43,16 +43,17 @@ def _warn_parked_plugin(package_name, package_info, allow_executables, diagnosti
 
     verdict = plugin_admission(package_name, package_info, allow_executables)
     if verdict is None or verdict.allowed:
-        return
+        return verdict
     from apm_cli.security.executables import _strip_version
     from apm_cli.security.trust import parked_plugin_message
 
     package = _strip_version(resolve_package_key(package_info, package_name))
-    message = parked_plugin_message(package, str(verdict.reason))
+    message = parked_plugin_message(package, str(verdict.reason), verdict.detail)
     if diagnostics is not None:
         diagnostics.warn(message)
     elif logger is not None:
         logger.warning(message)
+    return verdict
 
 
 def prepare_package_deployment(  # noqa: PLR0913
@@ -91,7 +92,9 @@ def prepare_package_deployment(  # noqa: PLR0913
     from .exec_gate import hook_file_admission
 
     hook_filter = hook_file_admission(package_name, package_info, allow_executables)
-    _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger)
+    plugin_verdict = _warn_parked_plugin(
+        package_name, package_info, allow_executables, diagnostics, logger
+    )
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
@@ -106,7 +109,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         approvals={
             # A native plugin loads every hook file live: per-file pins never
             # admit it; a whole-plugin pin (or a type-level grant) does.
-            "hooks": hooks and hook_filter is None,
+            "hooks": hooks if plugin_verdict is not None else hooks and hook_filter is None,
             "mcp": mcp,
             "bin": bin_approved and not skip_bin,
             "canvas": canvas,

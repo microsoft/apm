@@ -58,8 +58,11 @@ def check_executable_approval(
 
     from apm_cli.security.trust import hooks_package_admissible, plugin_pin
 
-    # A whole-plugin pin decides every executable type of the package at once.
-    if plugin_pin(getattr(allow_executables, "trust_context", None), tuple(candidate_keys)):
+    # A whole-plugin pin decides every executable type of a NATIVE install at
+    # once; a split install of the same package ignores it.
+    if native_install(package_info) and plugin_pin(
+        getattr(allow_executables, "trust_context", None), tuple(candidate_keys)
+    ):
         return _plugin_pinned_approval(
             package_name, package_info, allow_executables, tuple(candidate_keys), pkg_key, ctx
         )
@@ -176,13 +179,30 @@ def _plugin_pinned_approval(
     return (verdict.allowed,) * 5
 
 
+def native_install(package_info: Any) -> bool:
+    """Whether install loads this package intact as a native plugin.
+
+    The same predicates the native paths use: an admitted Copilot Agent
+    Plugin, or a Codex compatibility bundle (which never splits).
+    """
+    from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+
+    package = getattr(package_info, "package", None)
+    if isinstance(getattr(package, "codex_plugin", None), CodexCompatibilityPlugin):
+        return True
+    return admits_native_plugin(package_info)
+
+
 def plugin_admission(
     package_name: str,
     package_info: Any,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
 ):
-    """Whole-plugin verdict when the package carries a plugin pin, else ``None``."""
+    """Whole-plugin verdict for a native install with a plugin pin, else ``None``."""
     if package_name == "_local" or allow_executables is None:
+        return None
+    if not native_install(package_info):
         return None
     from apm_cli.security.trust import admit_native_plugin, plugin_pin
 
