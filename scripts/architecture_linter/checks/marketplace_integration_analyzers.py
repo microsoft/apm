@@ -1,6 +1,6 @@
 """Thin rule catalog for marketplace/integration architecture checks.
 
-Owns no check-function bodies of its own: composes the five cohesive
+Owns no check-function bodies of its own: composes the cohesive
 check-family modules (tag/version, catalog/contract, component/admission,
 package/registration, bundle/audit) in their original registration order.
 """
@@ -28,6 +28,9 @@ from scripts.architecture_linter.checks.marketplace_component_and_admission impo
 from scripts.architecture_linter.checks.marketplace_locked_evidence import (
     RULES as _LOCKED_EVIDENCE_RULES,
 )
+from scripts.architecture_linter.checks.marketplace_pack_plugin_manifests import (
+    RULES as _PACK_PLUGIN_MANIFEST_RULES,
+)
 from scripts.architecture_linter.checks.marketplace_package_and_registration import (
     COLLECTORS as _PACKAGE_REGISTRATION_COLLECTORS,
 )
@@ -48,6 +51,7 @@ RULES = (
     + _PACKAGE_REGISTRATION_RULES
     + _BUNDLE_AUDIT_RULES
     + _LOCKED_EVIDENCE_RULES
+    + _PACK_PLUGIN_MANIFEST_RULES
 )
 COLLECTORS = (
     _TAG_VERSION_COLLECTORS
