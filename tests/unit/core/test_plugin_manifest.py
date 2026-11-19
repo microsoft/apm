@@ -160,18 +160,22 @@ class TestBuildPluginManifest:
             "mcpServers": "./.mcp.json",
         }
 
-    def test_codex_manifest_round_trips_through_apm_codex_reader(self, tmp_path: Path) -> None:
-        from apm_cli.codex_plugins.manifest import load_codex_compatibility_manifest
+    def test_codex_manifest_round_trips_through_plugin_normalization(self, tmp_path: Path) -> None:
+        """A packed Codex manifest is split-installed like any plugin (#3920)."""
+        from apm_cli.models.validation import PackageType, validate_apm_package
 
         apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
         _write(tmp_path / "skills" / "hello" / "SKILL.md", "---\nname: hello\n---\n")
         _write(tmp_path / ".mcp.json", json.dumps({"mcpServers": {"srv": {"command": "node"}}}))
         write_plugin_manifest(tmp_path, build_plugin_manifest(tmp_path, apm, "codex"), "codex")
+        apm.unlink()
 
-        loaded = load_codex_compatibility_manifest(tmp_path)
+        result = validate_apm_package(tmp_path)
 
-        assert (loaded.name, loaded.version) == ("my-plugin", "1.0.0")
-        assert loaded.mcp_server_names == ("srv",)
+        assert result.is_valid, result.errors
+        assert result.package_type is PackageType.MARKETPLACE_PLUGIN
+        assert (result.package.name, result.package.version) == ("my-plugin", "1.0.0")
+        assert [dep.name for dep in result.package.get_mcp_dependencies()] == ["srv"]
 
     @pytest.mark.parametrize(
         ("name", "unsafe"),
@@ -184,12 +188,11 @@ class TestBuildPluginManifest:
             ("../x", True),
         ],
     )
-    def test_codex_name_warning_matches_reader_rejection(
+    def test_codex_name_warning_matches_safe_name_rule(
         self, tmp_path: Path, name: str, unsafe: bool
     ) -> None:
-        """Pack warns exactly when APM's Codex reader would refuse the name (#3077)."""
-        from apm_cli.codex_plugins.client import CodexNativeError
-        from apm_cli.codex_plugins.manifest import load_codex_compatibility_manifest
+        """Pack warns exactly when the name breaks the Codex plugin name rule (#3077)."""
+        from apm_cli.core.plugin_manifest import is_safe_codex_plugin_name
 
         apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
         apm.write_text(apm.read_text().replace("name: my-plugin", f"name: '{name}'"))
@@ -200,13 +203,8 @@ class TestBuildPluginManifest:
         warned = any(
             f"Codex plugin name {name!r}" in call.args[0] for call in logger.warning.call_args_list
         )
-        try:
-            load_codex_compatibility_manifest(tmp_path)
-            raised = False
-        except CodexNativeError:
-            raised = True
         assert warned is unsafe
-        assert raised is unsafe
+        assert is_safe_codex_plugin_name(name) is not unsafe
 
     def test_every_ecosystem_has_a_shape_and_unknown_raises(self, tmp_path: Path) -> None:
         apm = _minimal_apm_yml(tmp_path, author="Jane Doe")

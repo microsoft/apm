@@ -604,16 +604,12 @@ def _fallback_manifest_path(
 
 def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Path) -> bool:
     """Return whether a local source directory is a Claude plugin without apm.yml."""
-    from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
-
     if dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value:
         return False
     if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
         return False
-    package_type, selected_manifest = detect_package_type(package_dir)
-    return package_type is PackageType.MARKETPLACE_PLUGIN and not (
-        is_codex_compatibility_manifest(package_dir, selected_manifest)
-    )
+    package_type, _selected_manifest = detect_package_type(package_dir)
+    return package_type is PackageType.MARKETPLACE_PLUGIN
 
 
 def _package_manifest_path(
@@ -673,27 +669,15 @@ def _allows_missing_manifest(
     package_dir: Path,
     logger: _McpViewLogger | None = None,
     *,
-    modules_root: Path | None = None,
-    native_ownership_cache: dict[Path, frozenset[str]] | None = None,
     strict: bool = False,
 ) -> bool:
     """Return whether the package contract permits an absent apm.yml."""
-    from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
-
     if not strict:
         if dependency.package_type == PackageType.SKILL_BUNDLE.value:
             return True
         if not package_dir.exists():
             if dependency.source == "local":
                 return False
-            if dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value:
-                from apm_cli.codex_plugins.registrar import owns_codex_dependency
-
-                return modules_root is not None and owns_codex_dependency(
-                    modules_root,
-                    dependency.get_unique_key(),
-                    ownership_cache=native_ownership_cache,
-                )
             accepted_types = {
                 PackageType.APM_PACKAGE.value: "APM package",
                 PackageType.CLAUDE_SKILL.value: "Claude skill",
@@ -716,7 +700,7 @@ def _allows_missing_manifest(
     # declared at the repository root or in a virtual subdirectory. The lock
     # type and installed shape must agree before the manifest is waived.
 
-    package_type, selected_manifest = detect_package_type(package_dir)
+    package_type, _selected_manifest = detect_package_type(package_dir)
     if package_type is PackageType.SKILL_BUNDLE:
         return dependency.package_type == PackageType.SKILL_BUNDLE.value
     if package_type is PackageType.HOOK_PACKAGE:
@@ -726,8 +710,6 @@ def _allows_missing_manifest(
         )
     if package_type is PackageType.AGENT_PLUGIN:
         return dependency.package_type == PackageType.AGENT_PLUGIN.value
-    if is_codex_compatibility_manifest(package_dir, selected_manifest):
-        return dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
     return (
         package_type is PackageType.CLAUDE_SKILL
         and dependency.package_type == PackageType.CLAUDE_SKILL.value
@@ -782,7 +764,6 @@ def _collect_locked_dependencies(
     direct_index = _DirectDependencyIndex(lockfile)
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
-    native_ownership_cache: dict[Path, frozenset[str]] = {}
     for package_key, dependency in lockfile.dependencies.items():
         if package_key == "." or (
             active_package_keys is not None and package_key not in active_package_keys
@@ -874,8 +855,6 @@ def _collect_locked_dependencies(
                 dependency,
                 manifest_path.parent,
                 logger,
-                modules_root=modules_root,
-                native_ownership_cache=native_ownership_cache,
                 strict=allow_pending is not None,
             ):
                 continue

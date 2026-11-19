@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from apm_cli.codex_plugins.admission import CodexNativeDeployment
     from apm_cli.core.deployment_state import CompletedReintegration
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
@@ -224,7 +223,6 @@ class InstallContext:
     # once per install so the deployment boundary and the registrar agree.
     copilot_registration: Any = None  # Optional[NativeRegistrationCapability]
     _copilot_registration_token: Any = field(default=None, repr=False, compare=False)
-    codex_native_plugins: dict[str, CodexNativeDeployment] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # policy_gate
@@ -250,6 +248,8 @@ class InstallContext:
     # Cowork integration state
     # ------------------------------------------------------------------
     cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)
+    # Plugin names split-installed for Codex, reported once per run (#3920).
+    codex_split_plugins: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------
     # Failed-install residue report (#3525)

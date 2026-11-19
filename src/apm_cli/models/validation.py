@@ -442,11 +442,7 @@ def validate_apm_package(
 
     # Handle Marketplace Plugins (no apm.yml) - synthesize apm.yml from plugin.json
     if result.package_type == PackageType.MARKETPLACE_PLUGIN:
-        from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
-
-        if is_codex_compatibility_manifest(package_path, plugin_json_path):
-            result = _validate_codex_plugin(package_path, result, source_path=source_path)
-        elif read_only:
+        if read_only:
             result.add_error("Plugin requires normalization; prepare a local APM package manually.")
         else:
             result = _validate_marketplace_plugin(
@@ -837,33 +833,6 @@ def _validate_hybrid_package(
     return result
 
 
-def _validate_codex_plugin(
-    package_path: Path,
-    result: ValidationResult,
-    *,
-    source_path: Path | None = None,
-) -> ValidationResult:
-    """Project native identity without a synthetic manifest or loose MCP extraction."""
-    from apm_cli.codex_plugins.manifest import load_codex_compatibility_manifest
-
-    from .apm_package import APMPackage
-
-    try:
-        plugin = load_codex_compatibility_manifest(package_path)
-    except (OSError, ValueError) as error:
-        result.add_error(f"Invalid Codex compatibility plugin: {error}")
-        return result
-    result.package_type = PackageType.MARKETPLACE_PLUGIN
-    result.package = APMPackage(
-        name=plugin.name,
-        version=plugin.version,
-        package_path=package_path,
-        source_path=source_path or package_path,
-        codex_plugin=plugin,
-    )
-    return result
-
-
 def _validate_marketplace_plugin(
     package_path: Path,
     plugin_json_path: Path | None,
@@ -886,13 +855,8 @@ def _validate_marketplace_plugin(
     Returns:
         ValidationResult: Updated validation result with MARKETPLACE_PLUGIN type
     """
-    from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
-
     from ..deps.plugin_parser import normalize_plugin_directory
     from .apm_package import APMPackage
-
-    if is_codex_compatibility_manifest(package_path, plugin_json_path):
-        return _validate_codex_plugin(package_path, result, source_path=source_path)
 
     try:
         # Normalize the plugin directory; plugin.json is optional metadata

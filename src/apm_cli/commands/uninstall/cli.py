@@ -8,7 +8,6 @@ from typing import Any
 
 import click
 
-from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile_generator import require_current_cli
@@ -270,18 +269,11 @@ def _abort_if_retained_target_cleanup_paths(
 
 def _report_package_removal_failure(
     logger: CommandLogger,
-    error: OSError | PathTraversalError | LocalSurvivorRefreshError | CodexNativeError,
+    error: OSError | PathTraversalError | LocalSurvivorRefreshError,
     *,
     user_scope: bool,
 ) -> None:
     """Explain recoverable metadata without promising filesystem rollback."""
-    if isinstance(error, CodexNativeError):
-        logger.error(
-            f"Codex native removal incomplete: {error} "
-            "APM package files, declarations, and lockfile ownership were retained. "
-            "Resolve the native error and retry the same uninstall command."
-        )
-        return
     recovery = "apm install --global" if user_scope else "apm install"
     failure = (
         "shared-slot refresh failed"
@@ -692,14 +684,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # rather than claiming that already-deleted files were rolled back.
         refreshed_survivor_keys = builtins.set()
         try:
-            from ...codex_plugins.registrar import remove_codex_plugins
-
-            remove_codex_plugins(
-                modules_dir=modules_dir,
-                dependency_keys=removed_keys | builtins.set(projected_orphans),
-                cwd=manifest_path.parent,
-                scope=scope,
+            from ...codex_plugins.legacy_registrations import (
+                report_legacy_retirement,
+                retire_legacy_codex_registrations,
             )
+
+            report_legacy_retirement(retire_legacy_codex_registrations(modules_dir, scope), logger)
             removed_from_modules = _remove_packages_from_disk(
                 packages_to_remove,
                 modules_dir,
@@ -715,7 +705,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             refreshed_survivor_keys |= _shrink_surviving_selections(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
-        except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
+        except (OSError, PathTraversalError, LocalSurvivorRefreshError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
             sys.exit(1)
         removed_from_modules += orphan_removed

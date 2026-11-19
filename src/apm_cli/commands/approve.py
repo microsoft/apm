@@ -899,10 +899,8 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
 
 
 def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
-    """A plugin a harness loads intact: an Agent Plugin or a Codex bundle."""
-    if package_type == "agent_plugin":
-        return True
-    return (package_dir / ".codex-plugin" / "plugin.json").is_file()
+    """A plugin a harness loads intact: an Agent Plugin."""
+    return package_type == "agent_plugin"
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:

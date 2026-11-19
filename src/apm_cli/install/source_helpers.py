@@ -91,11 +91,7 @@ def materialized_manifest_snapshot(
     """
     from apm_cli.models.apm_package import APMPackage, PackageType
 
-    if (
-        package.agent_plugin is not None
-        or package.codex_plugin is not None
-        or package_type == PackageType.MARKETPLACE_PLUGIN
-    ):
+    if package.agent_plugin is not None or package_type == PackageType.MARKETPLACE_PLUGIN:
         return package
     manifest = install_path / "apm.yml"
     if not manifest.exists():

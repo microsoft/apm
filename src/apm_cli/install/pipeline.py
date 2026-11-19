@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING
 from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
 from ..agent_plugins.errors import AgentPluginError
-from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
@@ -962,7 +961,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return record_install_outcome(ctx, _run_phase("finalize", _finalize_phase, ctx))
 
-    except (AgentPluginError, CodexNativeError):
+    except AgentPluginError:
         # Preserve schema-routing and native-boundary diagnostics verbatim.
         raise
     except AuthenticationError:

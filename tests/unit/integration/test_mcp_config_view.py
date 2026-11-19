@@ -468,27 +468,9 @@ def _derive(
     )
 
 
-@pytest.mark.parametrize(
-    "record_key,package_type,expected_problem",
-    [
-        ("matching", "marketplace_plugin", False),
-        ("foreign", "marketplace_plugin", True),
-        ("absent", "marketplace_plugin", True),
-        ("matching", "hook_package", True),
-    ],
-)
-def test_cold_codex_cache_uses_owned_identity_without_waiving_legacy(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    record_key: str,
-    package_type: str,
-    expected_problem: bool,
-) -> None:
-    from dataclasses import replace
-
-    from apm_cli.codex_plugins import registrar
-    from apm_cli.codex_plugins.registrar import _Record, _write_records, ledger_path_for
-    from apm_cli.codex_plugins.snapshot import NativeSnapshot
+def test_cold_plugin_cache_is_a_problem_even_with_a_legacy_codex_journal(tmp_path: Path) -> None:
+    """A retired app-server journal never waives a missing plugin manifest (#3920)."""
+    from apm_cli.codex_plugins.legacy_registrations import legacy_ledger_path
 
     root = _write_manifest(tmp_path, name="consumer", mcp=[_self_defined("loose", "inert")])
     dependency = LockedDependency(
@@ -497,39 +479,19 @@ def test_cold_codex_cache_uses_owned_identity_without_waiving_legacy(
         repo_url="owner/example",
         resolved_ref="main",
         resolved_commit="a" * 40,
-        package_type=package_type,
+        package_type="marketplace_plugin",
     )
     modules = tmp_path / "apm_modules"
-    second = replace(dependency, repo_url="owner/second")
-    key = dependency.get_unique_key()
-    journal = ledger_path_for(modules)
-    if record_key != "absent":
-        snapshot = NativeSnapshot(journal.parent / "snapshots/owned", "a" * 40, "b" * 40)
-        record = _Record("example", "sha256:" + "c" * 64, snapshot, tmp_path / ".codex/config.toml")
-        records = (
-            {key: record, second.get_unique_key(): record}
-            if record_key == "matching"
-            else {"foreign": record}
-        )
-        _write_records(journal, records)
-    reads: list[Path] = []
-    read_records = registrar._read_records
-
-    def read_journal(path: Path) -> dict[str, _Record]:
-        reads.append(path)
-        return read_records(path)
-
-    monkeypatch.setattr(registrar, "_read_records", read_journal)
-    lockfile = _lock(dependency, second)
-    view = _derive(root, lockfile, modules)
-    assert bool(view.problems) is expected_problem
+    journal = legacy_ledger_path(modules)
+    journal.parent.mkdir(parents=True)
+    journal.write_text(
+        json.dumps({"version": 1, "plugins": {dependency.get_unique_key(): {"name": "example"}}}),
+        encoding="utf-8",
+    )
+    view = _derive(root, _lock(dependency), modules)
+    assert view.problems
     assert list(view.configs) == ["loose"]
     assert not modules.exists()
-    assert len(reads) == (1 if package_type == "marketplace_plugin" else 0)
-    if not expected_problem:
-        _write_records(journal, {})
-        assert _derive(root, lockfile, modules).problems
-        assert len(reads) == 2
 
 
 class _RecordingLogger:
@@ -1453,12 +1415,16 @@ def test_cold_cache_exemption_emits_verbose_trace(
     assert expected_kind in cold_cache_details[0]
 
 
-@pytest.mark.parametrize("native_kind", ["agent_plugin", "marketplace_plugin"])
+@pytest.mark.parametrize("native_kind", ["agent_plugin", "codex_plugin"])
 @pytest.mark.parametrize("locked_type", ["agent_plugin", "apm_package", "marketplace_plugin"])
 def test_manifestless_native_plugin_requires_matching_locked_type(
     tmp_path: Path, locked_type: str, native_kind: str
 ) -> None:
-    """The current MCP view waives only a valid, matching native package."""
+    """The current MCP view waives only a valid, matching native package.
+
+    A Codex plugin is split-installed (#3920), so an installed copy without
+    its synthesized apm.yml is never waived.
+    """
     root = _write_manifest(tmp_path, name="root")
     modules = tmp_path / "apm_modules"
     locked = LockedDependency(
@@ -1577,8 +1543,8 @@ def test_local_package_own_manifest_wins_over_modules_copy(tmp_path: Path) -> No
     assert view.problems == ()
 
 
-def test_local_codex_compatibility_plugin_is_not_redirected(tmp_path: Path) -> None:
-    """Codex compatibility plugins keep their native, manifest-waived contract."""
+def test_local_codex_plugin_mcp_uses_synthesized_manifest(tmp_path: Path) -> None:
+    """A local Codex plugin is split-installed like a Claude plugin (#3920)."""
     root = _write_manifest(tmp_path, name="consumer")
     source = tmp_path / "plug"
     (source / ".codex-plugin").mkdir(parents=True)
@@ -1589,8 +1555,8 @@ def test_local_codex_compatibility_plugin_is_not_redirected(tmp_path: Path) -> N
 
     view = _derive(root, _local_plugin_lock("./plug"), tmp_path / "apm_modules")
 
-    assert view.configs == {}
     assert view.problems == ()
+    assert view.configs["demo"]["url"] == "https://example.com/mcp"
 
 
 def test_local_plugin_with_authored_manifest_keeps_reading_it(tmp_path: Path) -> None:

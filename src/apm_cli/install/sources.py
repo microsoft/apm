@@ -352,13 +352,12 @@ class CachedDependencySource(DependencySource):
     def _cached_source_pin(self, cached_commit: str | None) -> str:
         """Return the full commit these bytes vouch for, else ``cached`` (#3388).
 
-        A true cache hit also needs a matching ``.apm-pin`` marker, so native
-        source-pin validation fails closed on short, branch or stale identities.
+        A true cache hit also needs a matching ``.apm-pin`` marker, so the
+        recorded identity fails closed on short, branch or stale identities.
         """
-        from apm_cli.codex_plugins.registrar import is_codex_source_pin
-        from apm_cli.install.cache_pin import CachePinError, verify_marker
+        from apm_cli.install.cache_pin import CachePinError, is_full_source_pin, verify_marker
 
-        if cached_commit is None or not is_codex_source_pin(cached_commit):
+        if cached_commit is None or not is_full_source_pin(cached_commit):
             return "cached"
         if not self.fetched_this_run:
             try:
@@ -442,8 +441,6 @@ class CachedDependencySource(DependencySource):
             deltas["unpinned"] = 1
 
         native_validation = None
-        from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
-
         try:
             native_detection = route_agent_plugin_package(install_path)
         except AgentPluginError as exc:
@@ -457,11 +454,6 @@ class CachedDependencySource(DependencySource):
             if not native_validation.is_valid or native_validation.package is None:
                 details = "; ".join(native_validation.errors) or "validator returned no package"
                 raise DirectDependencyError(f"Cached Agent Plugin is invalid: {details}")
-        elif is_codex_compatibility_manifest(install_path, detect_package_type(install_path)[1]):
-            native_validation = validate_apm_package(install_path, source_path=install_path)
-            if not native_validation.is_valid or native_validation.package is None:
-                details = "; ".join(native_validation.errors) or "validator returned no package"
-                raise DirectDependencyError(f"Cached Codex plugin is invalid: {details}")
 
         # Skip integration entirely if no targets. The template leaves this
         # dependency absent from the integration outcome so cleanup and
@@ -529,7 +521,7 @@ class CachedDependencySource(DependencySource):
         # priority rules (PR #1158 -- branch-ref drift fix).
         cached_commit = self._resolve_cached_commit()
 
-        # Codex admission reads the fallback commit as its source pin.
+        # The fallback commit is the cached bytes' verified source pin.
         resolved_or_cached_ref = (
             resolved_ref
             if resolved_ref

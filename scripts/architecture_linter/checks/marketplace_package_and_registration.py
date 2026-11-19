@@ -459,110 +459,47 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
-_RID_CODEX = "marketplace-integrations-codex-native-lifecycle"
+_RID_CODEX = "marketplace-integrations-codex-split-install"
 _CODEX_PREFIX = "src/apm_cli/codex_plugins/"
 
 
-def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Keep opaque native admission, public writes, and lifecycle ownership together."""
+def _check_codex_split_install(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Codex is split-installed and never spawned; legacy retirement has one owner."""
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
     for name, owner in (
-        ("synchronize_codex_plugins", _CODEX_PREFIX + "registrar.py"),
-        ("plan_native_codex_plugin", _CODEX_PREFIX + "admission.py"),
-        ("compute_native_bundle_hash", "src/apm_cli/utils/content_hash.py"),
-        ("owns_codex_dependency", _CODEX_PREFIX + "registrar.py"),
-        ("verify_codex_source_identity", _CODEX_PREFIX + "registrar.py"),
-        ("is_codex_source_pin", _CODEX_PREFIX + "registrar.py"),
+        ("note_codex_split_install", "src/apm_cli/install/target_warnings.py"),
+        ("split_install_message", "src/apm_cli/install/phases/codex_plugins.py"),
+        ("retire_legacy_codex_registrations", _CODEX_PREFIX + "legacy_registrations.py"),
+        ("retire_plugin_registrations", "src/apm_cli/adapters/client/codex.py"),
     ):
         count = _count_across(
             provider,
             inv,
             _RID_CODEX,
             _src_python(provider),
-            re.compile(rf"^def {name}\("),
+            re.compile(rf"^\s*def {name}\("),
         )
         if count != 1:
             findings.append(violation(_RID_CODEX, owner, f"{name} must have exactly one owner"))
     required = {
-        _CODEX_PREFIX + "client.py": (
-            '"expectedVersion": version',
-            'MINIMUM_CODEX_VERSION = "0.163.0"',
-        ),
-        _CODEX_PREFIX + "admission.py": (
-            "record_native_exec_status(",
-            "skill_subset_filter_tokens(skill_subset)",
-            "if any(not approvals.get(kind, False) for kind in types):",
-            "CodexNativeDeployment(",
-            "scratch_root is None",
-            "plugin.source_hash",
-            "compute_native_bundle_hash(root)",
-            "manifest.mcp_server_names",
-            'result["codex_source_identity"] = plugin.source_identity()',
-        ),
-        _CODEX_PREFIX + "registrar.py": (
-            "_preflight(",
-            "_write_records(ledger, records)",
-            "client.upgrade(rpc, marketplace)",
-            'actual_plugin != {"enabled": False}',
-            "prepare_snapshot(",
-            "compute_native_bundle_hash(",
-            "verify_codex_source_identity(modules_dir, records=records, **item.plugin.source_identity())",
-            "record.source_commit == source_commit",
-            "source_commit=item.plugin.source_commit",
-            "record = replace(record, source_commit=item.plugin.source_commit)",
-        ),
-        _CODEX_PREFIX + "snapshot.py": (
-            "plan.paths",
-            "compute_native_bundle_hash(",
-            "git_no_hooks_args()",
-        ),
-        "src/apm_cli/install/deployment_plan.py": (
-            "plan_native_codex_plugin(",
-            "native_plugin_root=",
-        ),
-        "src/apm_cli/install/services.py": (
-            "finalize_codex_native(",
-            "read_only=scratch_root is not None",
+        "src/apm_cli/install/target_warnings.py": (
+            "note_codex_split_install(package_info, targets, ctx)",
+            "PackageType.MARKETPLACE_PLUGIN",
         ),
         "src/apm_cli/install/phases/codex_plugins.py": (
-            "candidates_from_lockfile(saved,",
-            "LockFile.read(get_lockfile_path(ctx.apm_dir))",
-            "synchronize_codex_plugins(",
-            "ctx.dry_run or ctx.lockfile_only",
-            "set(ctx.codex_native_plugins).issubset(retained)",
-            "ctx.package_deployed_files.get(key)",
+            "split_install_message(ctx.codex_split_plugins, ctx.scope)",
+            "retire_legacy_codex_registrations(ctx.apm_modules_dir, ctx.scope)",
+            "criterion A3",
         ),
-        "src/apm_cli/install/sources.py": (
-            "is_codex_source_pin(cached_commit)",
-            "verify_marker(self.install_path, cached_commit)",
-            "is_codex_compatibility_manifest(install_path, detect_package_type(install_path)[1])",
-            "native_validation = validate_apm_package(install_path, source_path=install_path)",
+        "src/apm_cli/commands/uninstall/cli.py": (
+            "retire_legacy_codex_registrations(modules_dir, scope)",
         ),
-        "src/apm_cli/integration/mcp_config_view.py": (
-            "is_codex_compatibility_manifest(package_dir, selected_manifest)",
-            "dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value",
-            "owns_codex_dependency(",
-            "ownership_cache=native_ownership_cache",
+        _CODEX_PREFIX + "legacy_registrations.py": (
+            "adapter.retire_plugin_registrations(registrations)",
+            "safe_rmtree(path, snapshot_root)",
         ),
-        "src/apm_cli/utils/content_hash.py": (
-            "_package_files(package_path, native=True)",
-            "path.stat().st_mode & stat.S_IXUSR",
-        ),
-        "src/apm_cli/deps/package_validator.py": (
-            'getattr(package, "codex_plugin", None) is not None',
-        ),
-        "src/apm_cli/install/drift.py": (
-            "is_codex_compatibility_manifest(install_path, selected_manifest)",
-            "if native_detection is not None or codex_native:",
-            "agent_plugin_detection=native_detection,\n            read_only=True",
-            "codex_records = verify_codex_source_identity(",
-            "records=codex_records",
-        ),
-        "src/apm_cli/commands/uninstall/cli.py": ("remove_codex_plugins(",),
-        "src/apm_cli/policy/ci_checks.py": (
-            "except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:",
-        ),
+        "src/apm_cli/adapters/client/codex.py": ('plain(entry) != {"enabled": False}',),
     }
     for path, fragments in required.items():
         findings.extend(
@@ -572,7 +509,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
                 _RID_CODEX,
                 path,
                 fragments,
-                "Codex native lifecycle must retain canonical admission, ownership and public API gates",
+                "Codex split install and legacy retirement must keep their canonical owners",
             )
         )
     findings.extend(
@@ -580,11 +517,9 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_CODEX,
-            tuple(path for path in _src_python(provider) if path != _CODEX_PREFIX + "client.py"),
-            re.compile(
-                r"""["'](?:plugin/(?:read|uninstall)|marketplace/(?:upgrade|remove)|config/batchWrite)["']"""
-            ),
-            "Codex native protocol operations belong only to codex_plugins/client.py",
+            _src_python(provider),
+            re.compile(r"""["']app-server["']|which\(\s*["']codex["']\s*\)"""),
+            "APM must never locate or spawn the codex binary (#3920)",
             exempt=False,
         )
     )
@@ -594,8 +529,8 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
             inv,
             _RID_CODEX,
             _subdir_python(provider, _CODEX_PREFIX),
-            re.compile(r"plugins/cache|plugin_registry\.json|forceRefetch"),
-            "Codex lifecycle must not address private native state or perform global refetch",
+            re.compile(r"plugins/cache|plugin_registry\.json|subprocess"),
+            "Codex retirement must not address private native state or run a process",
             exempt=False,
         )
     )
@@ -642,8 +577,8 @@ RULES: tuple[Rule, ...] = (
         id=_RID_CODEX,
         group=GROUP,
         guard_ids=(_RID_CODEX,),
-        description="Codex native lifecycle consumes canonical admission and uses only owned public operations.",
-        check=_check_codex_lifecycle,
+        description="Codex is split-installed, never spawned, and legacy registrations retire once.",
+        check=_check_codex_split_install,
     ),
     Rule(
         id=_RID_COPILOT,

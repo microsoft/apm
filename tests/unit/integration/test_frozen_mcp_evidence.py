@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -228,27 +227,6 @@ def test_pending_source_cannot_hide_present_shared_server_drift(tmp_path: Path) 
     assert current.pending_packages == frozenset({"owner/plugin"})
     assert not current.pending_servers(lock)
     assert current.diff(lock.mcp_configs).changed == frozenset({"tool"})
-
-
-def test_manifestless_native_plugin_keeps_its_mcp_ownership(tmp_path: Path) -> None:
-    """Inspect a valid native shape without launching a native runtime or translating MCP."""
-    root, lock = _baseline(tmp_path)
-    directory = tmp_path / "apm_modules/owner/plugin"
-    metadata = directory / ".codex-plugin/plugin.json"
-    metadata.parent.mkdir(parents=True)
-    metadata.write_text(
-        json.dumps({"name": "declared-name", "version": "1.0.0", "mcpServers": "./.mcp.json"}),
-        encoding="utf-8",
-    )
-    native_mcp = directory / ".mcp.json"
-    native_mcp.write_text(json.dumps({"mcpServers": {"tool": _CONFIG}}), encoding="utf-8")
-    before = {path: path.read_bytes() for path in (metadata, native_mcp)}
-    current = _view(root, lock, allow_pending=False)
-    assert current.problems == ()
-    assert current.configs == {}
-    assert not current.pending_packages
-    assert not (directory / "apm.yml").exists()
-    assert {path: path.read_bytes() for path in before} == before
 
 
 def test_empty_locked_mcp_state_still_verifies_hydrated_declarations(tmp_path: Path) -> None:

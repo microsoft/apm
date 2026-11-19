@@ -181,20 +181,15 @@
       "guards": ["marketplace-integrations-native-registration"]
     },
     {
-      "id": "codex-native-plugin-lifecycle",
-      "decision": "Qualified Codex compatibility-bundle admission, public native lifecycle, APM transport ownership and immutable source-pin integrity",
-      "owner": "codex_plugins/registrar.py (synchronize_codex_plugins, verify_codex_source_identity), admission.py, client.py; utils/content_hash.py owns the opt-in native fingerprint",
+      "id": "codex-split-install",
+      "decision": "Codex receives every plugin as a split install with one A3 diagnostic, APM never spawns codex, and registrations from the removed app-server route retire once",
+      "owner": "install/target_warnings.py (note_codex_split_install), install/phases/codex_plugins.py (split_install_message, run), codex_plugins/legacy_registrations.py (retire_legacy_codex_registrations), adapters/client/codex.py (retire_plugin_registrations)",
       "selectors": [
-        "src/apm_cli/codex_plugins/admission.py",
-        "src/apm_cli/codex_plugins/client.py",
-        "src/apm_cli/codex_plugins/manifest.py",
-        "src/apm_cli/codex_plugins/registrar.py",
-        "src/apm_cli/codex_plugins/snapshot.py",
+        "src/apm_cli/codex_plugins/legacy_registrations.py",
         "src/apm_cli/install/phases/codex_plugins.py",
-        "src/apm_cli/utils/content_hash.py",
-        "src/apm_cli/deps/package_validator.py"
+        "src/apm_cli/install/target_warnings.py"
       ],
-      "guards": ["marketplace-integrations-codex-native-lifecycle"]
+      "guards": ["marketplace-integrations-codex-split-install"]
     },
     {
       "id": "copilot-marketplace-ownership",
@@ -210,7 +205,7 @@
     {
       "id": "pack-plugin-manifests",
       "decision": "Pack-time targets-to-ecosystem plugin.json paths and per-ecosystem manifest shape (claude, copilot, codex)",
-      "owner": "core/plugin_manifest.py (PLUGIN_ECOSYSTEM_PATHS, build_plugin_manifest, write_plugin_manifest_with_outcome); codex_plugins/manifest.py derives CODEX_COMPAT_MANIFEST from it",
+      "owner": "core/plugin_manifest.py (PLUGIN_ECOSYSTEM_PATHS, build_plugin_manifest, write_plugin_manifest_with_outcome); utils/helpers.py find_plugin_json derives the Codex manifest path from it",
       "selectors": [
         "src/apm_cli/core/plugin_manifest.py",
         "src/apm_cli/core/build_orchestrator.py"

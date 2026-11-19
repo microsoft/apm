@@ -420,7 +420,6 @@ def _build_package_info(
         AgentPluginError,
     )
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
-    from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
     from apm_cli.models.apm_package import (
         APMPackage,
         GitReferenceType,
@@ -445,11 +444,9 @@ def _build_package_info(
     except AgentPluginError as exc:
         raise AgentPluginDeploymentBoundaryError(str(exc)) from exc
 
-    codex_native = False
     if native_detection is None:
-        detected_type, selected_manifest = detect_package_type(install_path)
-        codex_native = is_codex_compatibility_manifest(install_path, selected_manifest)
-    if native_detection is not None or codex_native:
+        detected_type, _selected_manifest = detect_package_type(install_path)
+    if native_detection is not None:
         validation = validate_apm_package(
             install_path,
             agent_plugin_detection=native_detection,
@@ -580,7 +577,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     deployment_modules_dir, deployment_frame = replay_deployment_frame(
         scratch_root, project_root, user_scope=config.user_scope
     )
-    codex_records = None
 
     live_targets = resolve_audit_targets(
         project_root,
@@ -741,18 +737,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             live_modules=live_modules_dir,
                             scratch_root=scratch_root,
                         )
-                        if identity := result.get("codex_source_identity"):
-                            from apm_cli.codex_plugins.registrar import verify_codex_source_identity
-
-                            candidate = lock_dep.to_dependency_ref().get_install_path(
-                                live_modules_dir
-                            )
-                            codex_records = verify_codex_source_identity(
-                                live_modules_dir,
-                                candidate=candidate if candidate.exists() else install_path,
-                                records=codex_records,
-                                **identity,
-                            )
                     replayed_count += 1
     finally:
         if snapshot_started:
