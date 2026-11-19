@@ -53,9 +53,10 @@ The lens defines the coverage discipline -- follow it exactly.
    assigns this shared file to exactly one task). That task adds ONE
    line under `## [Unreleased]` per
    `.github/instructions/changelog.instructions.md`:
-   effect first, 25 words or fewer, ending with `(#PR)`; breaking
-   changes go under `### Breaking changes and upgrade notes` with a
-   one-line migration. If a line for this change already exists,
+   effect first, 25 words or fewer, ending with `(#PR)`, in ONE
+   section. Breaking or must-act changes go only under `### Breaking
+   changes and upgrade notes` with a one-line migration. Never write
+   `### Highlights`. If a line for this change already exists,
    edit it instead of adding another. Internal-only tasks (tests, CI,
    refactors) get no line.
 5. Run the lint contract until silent before returning:

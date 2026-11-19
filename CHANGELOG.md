@@ -7,61 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Highlights
-
-- `copilot` writes project MCP servers to the root `.mcp.json` that VS Code and Copilot CLI read. (#3875)
-- Diamond dependencies deploy each skill only to the harnesses its own declaration selected. (#3769)
-- Org policy `mcp.transport.allow` checks the transport APM actually writes. (#3788)
-- Azure DevOps installs report credential outcomes back to your Git credential helper. (#3765, #3818)
-
 ### Breaking changes and upgrade notes
 
-- **BREAKING:** Copilot project MCP servers move from `.github/mcp.json` and `.vscode/mcp.json` to root `.mcp.json`; run `apm install`, review static `env:` values, and commit the result. (#3875)
-- `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude; users of VS Code's deprecated Local mode should switch to the Copilot harness. (#3875)
-- Replace the deprecated `vscode` target with `copilot`; lockfiles that recorded `vscode` still install. (#3875)
-- Replace singular `target:` with `targets:`; the warning prints the exact value that deploys the same files. (#3801, #3875)
-- If `apm.yml` sets `default_host:`, shorthand dependencies now resolve against it; write `github.com/owner/repo` for GitHub packages. (#3865)
-- Lockfiles with diamond `skills:`/`targets:` selections fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
-- With `mcp.transport.allow` set, registry servers on a disallowed or unresolvable transport are blocked; pick `transport:` or update the policy. (#3788)
+- **BREAKING:** `copilot` moves project MCP servers to root `.mcp.json`, shared with Claude Code, which ignores Copilot `tools` allow-lists; run `apm install`, review static `env:` values, and commit. (#3875)
+- The `vscode` target is deprecated as an alias of `copilot`, and VS Code's Local mode no longer gets MCP servers; use the `copilot` target and the Copilot harness. Lockfiles that recorded `vscode` still install. (#3875)
+- Singular `target:` and the ignored `compilation.target` are deprecated and warn once per run; switch to the `targets:` value the warning prints. (#3801, #3875)
+- The `auto-integrate` config key is deprecated; it never had an effect, so remove it. (#3865)
+- `default_host:` in `apm.yml` now applies to shorthand dependencies in install, uninstall and audit (OpenAPM req-mf-019); write `github.com/owner/repo` for GitHub packages. (#3865)
+- Diamond dependencies deploy each skill only to the harnesses its own declaration selected; older lockfiles fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
+- `mcp.transport.allow` checks the transport install actually writes, in install, update and `apm audit --ci`; disallowed or unresolvable registry servers are now blocked, so set `transport:` or update the policy. (#3788)
 
 ### Added
 
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 
-### Deprecated
-
-- The `vscode` target, now an alias of `copilot` in every target field and flag. (#3875)
-- Singular `target:` and the ignored `compilation.target` in `apm.yml`; both warn once per run and will be removed. (#3801, #3875)
-- The `auto-integrate` config key, which never had an effect. (#3865)
-
 ### Changed
 
-- `copilot` shares the root `.mcp.json` with Claude Code; your own servers are kept and `~/.copilot/mcp-config.json` is unchanged. (#3875)
-- `default_host:` in `apm.yml` applies to shorthand dependencies in install, uninstall and audit, with that host's repository rules; invalid values are rejected (OpenAPM req-mf-019). (#3865)
-- Diamond dependencies pair each skill with its own targets, recorded in the optional `subset_pairings` lockfile field. (#3769)
 - Azure DevOps installs tell your Git credential helper about success or HTTP 401, so Git Credential Manager can replace an expired credential; `ADO_APM_PAT` and `az` tokens are never reported. (#3765, #3818)
-- `mcp.transport.allow` checks registry MCP servers on what install writes, consistently in install, update and `apm audit --ci`, which now also checks dev MCP servers. (#3788)
-- OpenAPM v0.1 amendments: `vscode` as a `copilot` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure` merge, and per-file ownership of shared `.mcp.json` entries. (#3851, #3865, #3875, #3888)
-- OpenAPM v0.1 adopts amendments 0.1.61, 0.1.62 and 0.1.63; the `vscode` alias and singular `target:` deprecation windows start 2026-11-19. (#3905)
+- OpenAPM v0.1 adopts amendments 0.1.61-0.1.63 (`vscode` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure`, per-file `.mcp.json` ownership); deprecation windows start 2026-11-19. (#3851, #3865, #3875, #3888, #3905)
 
 ### Fixed
 
-- `apm install` works again when APM is installed without dev extras; it no longer fails with "No module named 'packaging'". (#3909)
+- Upgrading to root `.mcp.json` after `--only apm`, a failed install or `--frozen` no longer strands or disowns APM's MCP entries. (#3899, #3909)
 - Instructions `apm install <bundle>` stages for Codex, Gemini or OpenCode are hash-checked, so edits before `apm compile` report `hash-drift`. (#3898)
 - `apm install <bundle>` registers a plugin bundle's hooks like a source install once its exact key is approved, and installing another package no longer removes local-bundle files. (#3897)
 - `apm approve <pkg>` on a dependency redirected by `replace:` now grants its selected source, so the next `apm install` deploys its hooks. -- by @MohammedAlkindi (#3742)
 - The same `owner/repo` from two hosts (such as `acme/tool` and `gitlab.example.com/acme/tool`) now fails before download, naming both declarations; set `alias:` on one or remove one. (#3895)
 - `apm audit --ci` no longer fails `config-consistency` for MCP servers that install left out on purpose (not yet approved by the executables gate, or untrusted transitive servers). (#3893)
-- Upgrading to root `.mcp.json` after `--only apm`, a failed install or `--frozen` no longer strands or disowns APM's MCP entries. (#3899)
-- Policy blocks name each offending dependency or MCP server and what to remove, add or pin. (#3865)
-- `apm install <pkg> --dry-run` without `apm.yml` no longer creates one. (#3865)
-- Hints name `apm update` instead of `apm install --update`, and `apm update` works under `PROXY_REGISTRY_ONLY=1` with VCS-locked lockfiles. (#3865)
-- `apm update` accepts `--legacy-skill-paths` and `APM_LEGACY_SKILL_PATHS`. (#3865)
+- `apm update`: hints name it instead of `apm install --update`, it accepts `--legacy-skill-paths`, and it works under `PROXY_REGISTRY_ONLY=1` with VCS-locked lockfiles. (#3865)
 - `apm audit PACKAGE` accepts the same forms as `apm uninstall` and exits 1 when nothing matches; `apm audit --ci` shows `[x]` for failed checks. (#3865)
-- `apm compile --target` for a target with no compile output no longer writes `CLAUDE.md` or `AGENTS.md`. (#3865)
-- `apm publish --package` keeps the host in the package identity, so packages from different hosts no longer collide. (#3865)
-- `apm pack` bundles in the default Claude plugin format embed an integrity-checked `apm.lock.yaml` even without a project lockfile, and bundles with an unknown `pack.target` install. (#3865)
-- CLI messages point to real commands and docs anchors. (#3865)
+- `apm install <pkg> --dry-run` no longer creates `apm.yml`, and `apm compile --target` for a target with no compile output no longer writes `CLAUDE.md` or `AGENTS.md`. (#3865)
+- `apm pack` bundles embed an integrity-checked `apm.lock.yaml` and install despite an unknown `pack.target`; `apm publish --package` keeps the host in the package identity. (#3865)
+- Policy blocks name each offending dependency or MCP server and the fix, and CLI messages point to real commands and docs anchors. (#3865)
 - `intellij` is no longer recorded as a target by `apm init`, `apm install` or `apm install -g --mcp`; use `copilot` for JetBrains. Existing projects still get JetBrains MCP config. (#3873, #3882)
 - Dependency `apm.yml` errors name the dependency and file, and target errors print one status prefix. (#3873)
 - Re-running `apm init` rewrites legacy `target: agents` to `targets: [copilot]`, and asks for `--target` when a legacy value has no equivalent. (#3867)

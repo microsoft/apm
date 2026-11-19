@@ -74,16 +74,16 @@ dependencies:
     .agents/skills/autopilot-pr-merge-worker/apm.yml: sha256:e421410ed6fe9e77256036f998036bdad5b8706e1d185d8a0414d285f9f9cfa9
     .agents/skills/autopilot-pr-merge-worker/assets/ci-recovery-checklist.md: sha256:99a56f316d6f8c859703e281d4c8177771e47d642dc098da0d8441813336d59b
     .agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json: sha256:6e0a06fa98f3e0544f5ebd6039da28f9cbdfeccd807565365b761265f8515a5c
-    .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md: sha256:de9c176c42a78c78d4f272f1a21d8f3d8cabed09d5dfdcb13802a4e557d0ec4b
+    .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md: sha256:0fa203cd3d38d6728556970bb750e62b10ee8f399bbff70ed1a58aa2caaa82d3
     .agents/skills/autopilot-pr-merge-worker/assets/copilot-classification-prompt.md: sha256:911f8b2e2203d3847d08dbc52e34393b457c4d4b2486ea43847d609d092012ce
     .agents/skills/autopilot-pr-merge-worker/assets/fold-vs-defer-rubric.md: sha256:7d9deefac69ea044ee3d2fc0cdb92767e66711dafb79f1000dabd8f372d19cf4
     .agents/skills/autopilot-pr-merge-worker/assets/pr-comment-templates.md: sha256:9306b9342e6fcce0ec68c72663461972267228c44f69b893e0f1848cd5ce7aed
-    .agents/skills/autopilot-pr-merge-worker/assets/worker-prompt.md: sha256:3eb962297c86a03fa4cdbda46335cb0d91b9fa54401d07dd586f07ba2c57a513
+    .agents/skills/autopilot-pr-merge-worker/assets/worker-prompt.md: sha256:80700a84005636a5b5966ee487d1b854cbd3c391f392a47300eb1b11cd2e5ccf
     .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md: sha256:156f5eaaf1494b1aa23b9ac65e73bd06b5e44312c3cff0ded3b1ac0442ebfff3
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:ca26b98dd92e6db3341da11d9234818375aea7db2caef42511e97cfacef15aab
+  content_hash: sha256:c7c92a0a381f789475f93d89bfb428312411dd947afd1c4574abf465b6185584
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-review-scheduler
   name: autopilot-pr-review-scheduler
@@ -189,7 +189,7 @@ dependencies:
     .agents/skills/autopilot-issue-delivery-worker/assets/plan-schema.json: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
     .agents/skills/autopilot-issue-delivery-worker/assets/solution-pipeline-prompt.md: sha256:9f846bbf36c4738735e3fc82234de61c135c4e69d17a3166234f94e2066cb32b
     .agents/skills/autopilot-issue-delivery-worker/assets/strategic-alignment-prompt.md: sha256:1c48fa9103d47f3673938acda1988d8c55adc5bb888a74cda8d7a60e69c004f9
-    .agents/skills/autopilot-issue-delivery-worker/assets/task-implement-prompt.md: sha256:15bd84f10d4395b2f08a081c02585ccb52941559097f4023846e8b03ac769325
+    .agents/skills/autopilot-issue-delivery-worker/assets/task-implement-prompt.md: sha256:a336fc8bc436a852b52d2913488713bb07597f71df23dc6b5d7481c1ca018c50
     .agents/skills/autopilot-issue-delivery-worker/assets/triage-digest-template.md: sha256:c404d45be5629bf197b1d6ed30fa1224d0b4bc3dd352019e6b27c0bda4fe6d78
     .agents/skills/autopilot-issue-delivery-worker/assets/triage-prompt.md: sha256:890bfb20d18bb93f83ece7f2b9ea7ccfcbf2bc5aa3e030e61fa92dddeb3654a8
     .agents/skills/autopilot-issue-delivery-worker/assets/verdict-schema.json: sha256:1ee856daff1912d38d76c7f01509c69654327355db7a7b1a2f31c8d61059f694
@@ -199,7 +199,7 @@ dependencies:
   local_path: ../autopilot-issue-delivery-worker
   declaring_parent: ./packages/autopilot/autopilot-issue-delivery-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-delivery-worker
-  content_hash: sha256:4a8be9e204902a4e77ae6d4a9c85006fa17aed9870b28d18ff602609037842ad
+  content_hash: sha256:e7be3dff12cbca96420c18a13ed887816d7fe0a1a800c13e8dafac0d6b83b93d
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-issue-triage-worker
   name: autopilot-issue-triage-worker
@@ -324,7 +324,7 @@ dependencies:
   - .agents/skills/pr-description-skill/evals/triggers.json
   - .agents/skills/pr-description-skill/scripts/run_evals.py
   deployed_file_hashes:
-    .agents/skills/pr-description-skill/SKILL.md: sha256:d55416b9837d0693cbc15b5be9fd8908d50b8dea9b730f15675665614c83ef0c
+    .agents/skills/pr-description-skill/SKILL.md: sha256:aca4d746c7c21be939ee0d84eeb180bdbcfd21c9b99b8ad31a4f9106cbaac7ae
     .agents/skills/pr-description-skill/apm.yml: sha256:b1b14312551ef99f23742f4a57a1351abc69dde2af084b864246c80edb8df9b2
     .agents/skills/pr-description-skill/assets/mermaid-conventions.md: sha256:3d9c7adf95d40db00833ec087d699a7d04b3d799e9b9d07271cf2ae7d51524ca
     .agents/skills/pr-description-skill/assets/pr-body-template.md: sha256:f8349ee0ffecb420863fc3d771efcceb4bcf8a53c17d4a197a87976999d2468e
@@ -349,7 +349,7 @@ dependencies:
   local_path: ../../pr-description-skill
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/pr-description-skill
-  content_hash: sha256:c8ea427b18329d36c360a92351b9adc3f8ff712211b942a58d0558fcc1b17653
+  content_hash: sha256:52c9cd1c9fda56b6ee87022150658be68d2c8b89b36764a35a8b2896bfd03efd
   declared_license: Apache-2.0
 deployments:
 - kind: project-relative
@@ -693,7 +693,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-delivery-worker
   active_owner: local:packages/autopilot/autopilot-issue-delivery-worker
-  content_hash: sha256:15bd84f10d4395b2f08a081c02585ccb52941559097f4023846e8b03ac769325
+  content_hash: sha256:a336fc8bc436a852b52d2913488713bb07597f71df23dc6b5d7481c1ca018c50
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-worker/assets/triage-digest-template.md
@@ -900,7 +900,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:de9c176c42a78c78d4f272f1a21d8f3d8cabed09d5dfdcb13802a4e557d0ec4b
+  content_hash: sha256:0fa203cd3d38d6728556970bb750e62b10ee8f399bbff70ed1a58aa2caaa82d3
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/assets/copilot-classification-prompt.md
@@ -936,7 +936,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:3eb962297c86a03fa4cdbda46335cb0d91b9fa54401d07dd586f07ba2c57a513
+  content_hash: sha256:80700a84005636a5b5966ee487d1b854cbd3c391f392a47300eb1b11cd2e5ccf
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md
@@ -1260,7 +1260,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:870a05c824e4d3fcbda8da97e6f954bcb73ba6840ec740950b5ce09d90697adb
+  content_hash: sha256:82967d6a19e2317069ff98a86d31f4cc3e05a713b2ee253eea057cff47251a8c
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/assets/entry-sanitizer.md
@@ -1269,7 +1269,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8e4a227a4180d08bedf283fe7e000d5aa6d6918fe4477b7fbd90712df8e79ceb
+  content_hash: sha256:a1216ba5abd1c18b641ff145b95b464ed3c80a8b20bfc6bc5d581bd1d602d1eb
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/assets/pr-body-template.md
@@ -1278,7 +1278,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:7c23c983e7de4f7f7992e2f71003d2ed7afb75f7cc68938f3913449c9390a325
+  content_hash: sha256:c61634b3e133a1da5aa9ccd6101c42abfaac6b15f444d32ecb197e853a8dd8b3
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/assets/semver-rubric.md
@@ -2493,7 +2493,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:d55416b9837d0693cbc15b5be9fd8908d50b8dea9b730f15675665614c83ef0c
+  content_hash: sha256:aca4d746c7c21be939ee0d84eeb180bdbcfd21c9b99b8ad31a4f9106cbaac7ae
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/apm.yml
@@ -2916,7 +2916,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:a0fa294eeec21142941b7217e8fca3b04ba91d3a9c0e3158d6942f7445158978
+  content_hash: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
 - kind: project-relative
   target: copilot
   value: .github/instructions/cicd.instructions.md
@@ -3183,9 +3183,9 @@ local_deployed_file_hashes:
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
   .agents/skills/auth/SKILL.md: sha256:64f08ad849c95cf7d949499bd2939d7bfc52a8e773b4e990b632ae5a38de4dac
   .agents/skills/cli-logging-ux/SKILL.md: sha256:b04d5282a9f21b33c75ac98c41c7eab7e562eafea8c89bbb5732d9956958fe7c
-  .agents/skills/cut-release/SKILL.md: sha256:870a05c824e4d3fcbda8da97e6f954bcb73ba6840ec740950b5ce09d90697adb
-  .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:8e4a227a4180d08bedf283fe7e000d5aa6d6918fe4477b7fbd90712df8e79ceb
-  .agents/skills/cut-release/assets/pr-body-template.md: sha256:7c23c983e7de4f7f7992e2f71003d2ed7afb75f7cc68938f3913449c9390a325
+  .agents/skills/cut-release/SKILL.md: sha256:82967d6a19e2317069ff98a86d31f4cc3e05a713b2ee253eea057cff47251a8c
+  .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:a1216ba5abd1c18b641ff145b95b464ed3c80a8b20bfc6bc5d581bd1d602d1eb
+  .agents/skills/cut-release/assets/pr-body-template.md: sha256:c61634b3e133a1da5aa9ccd6101c42abfaac6b15f444d32ecb197e853a8dd8b3
   .agents/skills/cut-release/assets/semver-rubric.md: sha256:61b9a2001cbbb41360de509c4b56eb3859333cbf9ea74a896fb9e03a1d3a5244
   .agents/skills/cut-release/evals/evals.json: sha256:bfe097eed3f636215556e3ed3068a0dec684ef06c8eb8349f1e4daf8aac4753d
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
@@ -3415,7 +3415,7 @@ local_deployed_file_hashes:
   .github/agents/supply-chain-security-expert.agent.md: sha256:cd79bc0c60ab0d8ea375420b3932c6616314629d4e668d468f4dc4af51d252fe
   .github/agents/test-coverage-expert.agent.md: sha256:369758becf9cd94d153f137226e6508118f56ef0a880b25aae41d00bc139d8fa
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
-  .github/instructions/changelog.instructions.md: sha256:a0fa294eeec21142941b7217e8fca3b04ba91d3a9c0e3158d6942f7445158978
+  .github/instructions/changelog.instructions.md: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
   .github/instructions/cicd.instructions.md: sha256:62b6cde27b243cc42c94cc74b56a8a8b2258ed552d1e2326201874a3f1b485b3
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696

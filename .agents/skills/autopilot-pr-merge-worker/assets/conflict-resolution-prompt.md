@@ -72,7 +72,7 @@ regression-trap test, `--force-with-lease` only (never bare
      keep BOTH entries; place yours in the section your PR targets
      (Unreleased / next semver bucket); never drop main's entry.
      If both sides now describe the same change, merge them into
-     one line per
+     one line in one section per
      `.github/instructions/changelog.instructions.md`.
    - For code conflicts, prefer extracting both behaviors over
      dropping either. If both branches add a method with the same
