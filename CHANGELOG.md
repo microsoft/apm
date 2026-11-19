@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` no longer warns about `.github-private` when your org has no policy. (#3783)
 - `PROXY_REGISTRY_ONLY=1` range errors explain the supported routes instead of claiming the proxy has no listing. (#3777)
 - Versions and tags with leading zeros or non-ASCII digits (`v01.2.3`, `v1.2.3-01`) are no longer SemVer: resolution skips them and `require_pinned_constraint` reports them as bare branches. (#3894)
-- An older APM now refuses to change, replay, audit or pack a lockfile written by a newer APM, naming both versions and how to upgrade. (#3916)
+- Starting with this release, APM refuses to change, replay, audit or pack a lockfile written by a newer APM, naming both versions and how to upgrade. (#3916)
 - `apm install --refresh`, `apm update` and `apm marketplace update` revalidate marketplace catalogs and fail rather than use stale cached data; plain installs keep the cache. (#3910)
 
 ## [0.36.1] - 2026-11-18
