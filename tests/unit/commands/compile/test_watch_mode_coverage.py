@@ -265,3 +265,56 @@ class TestWatchModeFullLoop:
             assert any("claude" in call.lower() for call in progress_calls)
         finally:
             os.chdir(old_cwd)
+
+
+def _stage_edited_bundle_instruction(root) -> str:
+    """Write a lockfile whose staged instruction hash no longer matches (#3718)."""
+    from apm_cli.deps.lockfile import LockFile
+
+    staged = "apm_modules/bundler/.apm/instructions/glob.instructions.md"
+    (root / staged).parent.mkdir(parents=True)
+    (root / staged).write_text("edited\n", encoding="utf-8")
+    LockFile(
+        local_staged_files=[staged],
+        local_staged_file_hashes={staged: "sha256:" + "a" * 64},
+    ).write(root / "apm.lock.yaml")
+    return staged
+
+
+class TestWatchModeStagedHashDrift:
+    """Watch compilation reports edited bundle staging like one-shot compile (#3718)."""
+
+    def test_initial_and_recompile_warn_on_staged_hash_drift(self, tmp_path) -> None:
+        from apm_cli.commands.compile.watcher import APMFileHandler, _watch_mode
+
+        (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
+        staged = _stage_edited_bundle_instruction(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            logger_mock = _make_logger()
+            mock_result = SimpleNamespace(success=True, output_path="AGENTS.md", errors=[])
+            with (
+                patch("apm_cli.commands.compile.watcher.CommandLogger", return_value=logger_mock),
+                patch(
+                    "apm_cli.commands.compile.watcher.CompilationConfig.from_apm_yml",
+                    return_value=MagicMock(),
+                ),
+                patch("apm_cli.commands.compile.watcher.AgentsCompiler") as mock_compiler_cls,
+                patch("apm_cli.commands.compile.watcher.time") as mock_time,
+                patch("watchdog.observers.Observer", return_value=_make_observer()),
+            ):
+                mock_compiler_cls.return_value.compile.return_value = mock_result
+                mock_time.sleep.side_effect = KeyboardInterrupt
+                mock_time.time.return_value = 0.0
+                _watch_mode(output="AGENTS.md", chatmode=None, no_links=False, dry_run=True)
+                handler_logger = _make_logger()
+                APMFileHandler("AGENTS.md", None, False, True, handler_logger)._recompile(
+                    ".apm/x.md"
+                )
+        finally:
+            os.chdir(old_cwd)
+
+        for logger in (logger_mock, handler_logger):
+            warnings = " ".join(str(call.args[0]) for call in logger.warning.call_args_list)
+            assert f"hash-drift: staged file {staged} changed since install" in warnings

@@ -1264,11 +1264,15 @@ class LockFile:
 
         Hashes come from the deployed-file owner (``compute_file_hash``). A
         path without a recorded hash (pre-#3718 lockfiles), outside a staging
-        root, resolving outside ``apm_modules``, missing, or symlinked makes no
-        drift claim: compile reads none.
+        root, resolving outside ``apm_modules``, missing, or behind a symlinked
+        component makes no drift claim: compile reads none.
         """
         from ..utils.content_hash import compute_file_hash
-        from ..utils.path_security import PathTraversalError, ensure_path_within
+        from ..utils.path_security import (
+            PathTraversalError,
+            ensure_path_within,
+            has_symlink_component,
+        )
 
         drift: list[tuple[str, str, str]] = []
         modules_root = project_root / "apm_modules"
@@ -1281,7 +1285,8 @@ class LockFile:
                 ensure_path_within(file_path, modules_root)
             except PathTraversalError:
                 continue
-            if file_path.is_symlink() or not file_path.is_file():
+            # Compile discovery never follows links, so a linked component is not input.
+            if has_symlink_component(project_root, file_path) or not file_path.is_file():
                 continue
             actual = compute_file_hash(file_path)
             if actual != expected:

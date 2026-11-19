@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...compilation import AgentsCompiler, CompilationConfig
@@ -204,6 +205,9 @@ class APMFileHandler:
             dry_run=self.dry_run,
             target=effective_target,
         )
+        from .cli import _report_staged_hash_drift
+
+        _report_staged_hash_drift(self.logger, Path("."))
         result = AgentsCompiler(".").compile(config, logger=self.logger)
         retained_outputs = _report_retained_watch_outputs(
             self.logger,
@@ -251,8 +255,6 @@ def _watch_mode(
     logger = CommandLogger("compile-watch", verbose=verbose, dry_run=dry_run)
 
     try:
-        from pathlib import Path
-
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
 
@@ -323,6 +325,9 @@ def _watch_mode(
                 dry_run=dry_run,
                 target=effective_target,
             )
+            from .cli import _report_staged_hash_drift
+
+            _report_staged_hash_drift(logger, Path("."))
             result = AgentsCompiler(".").compile(config)
         retained_outputs = _report_retained_watch_outputs(logger, result, dry_run=dry_run)
 

@@ -164,3 +164,16 @@ def test_staged_hash_drift_skips_staging_resolving_outside_modules(tmp_path: Pat
     )
     lock = LockFile(local_staged_files=[_STAGED], local_staged_file_hashes={_STAGED: _HASH})
     assert lock.staged_hash_drift(tmp_path) == []
+
+
+def test_staged_hash_drift_skips_linked_ancestors_inside_modules(tmp_path: Path) -> None:
+    """Compile discovery never follows a linked component, so drift makes no claim on it."""
+    real = tmp_path / "apm_modules" / "real"
+    real.mkdir(parents=True)
+    (real / "glob.instructions.md").write_text("edited\n", encoding="ascii")
+    (tmp_path / "apm_modules" / "bundler" / ".apm").mkdir(parents=True)
+    (tmp_path / "apm_modules" / "bundler" / ".apm" / "instructions").symlink_to(
+        real, target_is_directory=True
+    )
+    lock = LockFile(local_staged_files=[_STAGED], local_staged_file_hashes={_STAGED: _HASH})
+    assert lock.staged_hash_drift(tmp_path) == []

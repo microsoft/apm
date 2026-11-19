@@ -26,6 +26,7 @@ DISCOVERY = "src/apm_cli/primitives/discovery.py"
 PRUNE = "src/apm_cli/commands/prune.py"
 AUDIT = "src/apm_cli/policy/ci_checks.py"
 COMPILE = "src/apm_cli/commands/compile/cli.py"
+WATCHER = "src/apm_cli/commands/compile/watcher.py"
 PHASES = "src/apm_cli/install/phases/lockfile.py"
 _STAGED_HASH_WRITERS = frozenset({LOCKFILE, LEDGER})
 _STAGED_HASH_WRITE = re.compile(
@@ -116,6 +117,16 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "warn on staged drift through the lockfile owner",
         ),
         ("_report_staged_hash_drift(logger, _src)", "check staged drift before compiling"),
+    ),
+    WATCHER: (
+        (
+            '_report_staged_hash_drift(self.logger, Path("."))',
+            "check staged drift before each watch recompile",
+        ),
+        (
+            '_report_staged_hash_drift(logger, Path("."))',
+            "check staged drift before the initial watch compile",
+        ),
     ),
 }
 

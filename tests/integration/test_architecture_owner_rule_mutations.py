@@ -285,6 +285,12 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
             "lock.local_staged_file_hashes = {}; staged_drift = lock.staged_hash_drift(project_root)",
             id="audit-writes-staged-hashes-outside-owner",
         ),
+        pytest.param(
+            "src/apm_cli/commands/compile/watcher.py",
+            '        _report_staged_hash_drift(self.logger, Path("."))\n',
+            "",
+            id="watch-recompile-skips-staged-drift",
+        ),
     ],
 )
 def test_staged_compile_input_drift_routes_through_lockfile_owner(
