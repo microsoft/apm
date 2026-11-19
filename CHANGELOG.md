@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Uninstall, prune, `install --mcp`, bundle and LSP lockfile writes now record the running APM, so older APMs refuse them; `apm_version: null` warns. (#3977)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
 - `apm install` removes hooks a package deployed earlier once `apm deny` or a removed approval gates them, and names a denied package as denied. (#3944)
 - `apm uninstall plugin@marketplace` removes object-form `{name, marketplace}` entries from `apm.yml`, offline, with their lock row and files. (closes #3928, #3933)
