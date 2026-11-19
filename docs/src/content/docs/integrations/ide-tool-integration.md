@@ -137,10 +137,10 @@ steering frontmatter (`inclusion: fileMatch`); unscoped instructions become
 `inclusion: always`. Agents are deployed to `.kiro/agents/<relative-stem>.md`
 for Kiro IDE/CLI v3; identity derives from the relative path. Only
 `description`, `model`, and `tools` are emitted -- `name` and unknown
-frontmatter fields are stripped. Tools are permission-bearing: APM fails
-closed if any value outside the Kiro-approved capability set is present
-(`read`, `write`, `shell`, `web`, `subagent`, `knowledge`, `context`,
-`todo_list`, `@mcp`, `@builtin`, `*`). Skills are copied verbatim to
+frontmatter fields are stripped. Tools are permission-bearing: an agent
+whose `tools` holds anything other than a Kiro tool selector (category tag,
+built-in tool ID, `@server`, `@server/tool`, `@builtin`, `@mcp`, `*`) is
+skipped with a warning; other agents still deploy. Skills are copied verbatim to
 `.kiro/skills/`, hooks become one JSON file per hook action in `.kiro/hooks/`,
 and MCP servers are written to `.kiro/settings/mcp.json` or
 `~/.kiro/settings/mcp.json` for `--global`.

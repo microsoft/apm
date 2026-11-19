@@ -275,13 +275,16 @@ Kiro IDE and CLI V3 target layout.
   - agents: `.kiro/agents/<relative-stem>.md` -- identity derives from the
     relative path. Only `description`, `model`, and `tools` frontmatter are
     emitted; `name` and unknown fields are stripped. Tools are
-    permission-bearing: APM fails closed (no partial write) if any tool
-    value is outside the approved set (`read`, `write`, `shell`, `web`,
-    `subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
-    `*`). Kiro may warn and fall back if the specified `model` is
+    permission-bearing: APM fails closed for that agent (no partial write,
+    a warning names the value) if any tool value is not a Kiro tool
+    selector: category tags `read`, `write`, `shell`, `web`, `subagent`;
+    built-in tool IDs such as `read_file`, `grep_search`, `web_fetch`,
+    `execute_bash`, `invoke_sub_agent`; `@server` or `@server/tool`;
+    `@builtin`, `@mcp`, `*`. Other agents in the install still deploy.
+    Kiro may warn and fall back if the specified `model` is
     unavailable; APM passes model values through without validation.
-    Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
-    (accessed 2026-08-03).
+    Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)
+    (accessed 2026-11-19).
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
   - prompts: `.kiro/prompts/<name>.md` (project) or `~/.kiro/prompts/<name>.md` (user).

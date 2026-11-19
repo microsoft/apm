@@ -747,33 +747,39 @@ If you target multiple agent runtimes from one source file, keep the
 frontmatter to the intersection of their schemas (or maintain
 target-specific copies). For Kiro, only `description`, `model`, and `tools`
 are forwarded; `name` and unknown fields are silently stripped; tools are
-permission-bearing and APM fails closed if any unsupported value is present
-(supported: `read`, `write`, `shell`, `web`, `subagent`, `knowledge`,
-`context`, `todo_list`, `@mcp`, `@builtin`, `*`).
+permission-bearing and APM skips the agent if any value is not a Kiro tool
+selector (see "Kiro target: tools constraint" below).
 
 #### Kiro target: tools constraint
 
 Kiro (`target: kiro`, deploys to `.kiro/agents/<relative-stem>.md`) treats
-`tools` as permission-bearing capability tags. APM fails closed -- the agent
-is NOT deployed -- if any `tools` value is outside the approved set:
+`tools` as permission-bearing. APM fails closed for that agent -- it is NOT
+deployed and a warning names the value -- if any `tools` value is not a Kiro
+tool selector. Other agents in the same install still deploy and are locked.
 
 ```yaml
 # OK
 tools:
-  - read
-  - write
-  - shell
+  - read              # category tag
+  - web_fetch         # built-in tool ID
+  - "@git"            # all tools from MCP server 'git'
+  - "@git/git_status" # one tool from MCP server 'git'
 
-# Fails closed -- apm install emits an error, file is NOT written:
+# Fails closed for this agent -- apm install warns, file is NOT written:
 # tools:
 #   - execute_arbitrary_code
-#   - read
+#   - grep            # CLI 2.x name; use grep_search
 ```
 
-The approved tags are: `read`, `write`, `shell`, `web`, `subagent`,
-`knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`, `*`.
-Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
-(accessed 2026-08-03).
+Accepted selectors: category tags `read`, `write`, `shell`, `web`,
+`subagent`; built-in tool IDs (`read_file`, `list_directory`, `file_search`,
+`grep_search`, `code`, `fs_write`, `fs_append`, `str_replace`, `delete_file`,
+`execute_bash`, `execute_pwsh`, `remote_web_search`, `web_fetch`,
+`invoke_sub_agent`, `disclose_context`, `introspect`, `knowledge`, and the
+IDE process, hook, and powers tools); `@server`, `@server/tool`, `@builtin`,
+`@mcp`, `*`. `context` and `todo_list` stay accepted for compatibility.
+Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)
+(accessed 2026-11-19).
 
 ### 6. Skill (folder-based, `SKILL.md`)
 

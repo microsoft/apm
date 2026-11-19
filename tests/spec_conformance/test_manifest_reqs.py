@@ -1324,7 +1324,7 @@ def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None
         PackageInfo,
         ResolvedReference,
     )
-    from apm_cli.utils.diagnostics import CATEGORY_ERROR, DiagnosticCollector
+    from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
     project_root = tmp_path
     (project_root / ".kiro").mkdir()
@@ -1375,9 +1375,9 @@ def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None
     assert result.files_integrated == 0
     assert result.files_adopted == 0
     assert target_path not in result.target_paths
-    errors = [d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR]
-    assert errors, "Expected an error diagnostic for incompatible tools"
-    assert "execute_arbitrary_code" in errors[0].message
+    warnings = [d for d in diagnostics._diagnostics if d.category == CATEGORY_WARNING]
+    assert warnings, "Expected an actionable diagnostic for incompatible tools"
+    assert "execute_arbitrary_code" in warnings[0].message
 
     assert_spec_contains(
         "MUST fail closed: if any source-declared tool falls",
@@ -1941,4 +1941,67 @@ def test_authorized_source_plan_requirement_covers_reintegration_and_symlinks() 
         "files and MUST NOT traverse symlinked directories.",
         "MUST materialize primitive files only from that\nsame set; each primitive-integrator "
         "materialization path MUST consume the\ncanonical set rather than derive a second classifier.",
+    )
+
+
+@pytest.mark.req("req-tg-009")
+def test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings(tmp_path: Path) -> None:
+    """req-tg-009: one non-conformant agent MUST NOT block a conformant sibling.
+
+    The rejected agent writes zero bytes and is named in a diagnostic; the
+    conformant sibling from the same dependency deploys and is recorded in
+    the lockfile, and the install completes successfully.
+    """
+    import os
+    import sys
+
+    from apm_cli.deps.lockfile import LockFile
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    environment["APM_NON_INTERACTIVE"] = "1"
+
+    package = isolated.package_root / "kiro-agents"
+    agents = package / ".apm" / "agents"
+    agents.mkdir(parents=True)
+    (package / "apm.yml").write_text("name: kiro-agents\nversion: 1.0.0\n", encoding="utf-8")
+    (agents / "rejected.agent.md").write_text(
+        "---\ndescription: Rejected\ntools:\n- read\n- execute_arbitrary_code\n---\n\n# Rejected\n",
+        encoding="utf-8",
+    )
+    (agents / "conformant.agent.md").write_text(
+        "---\ndescription: Conformant\ntools:\n- read\n- web_fetch\n- '@git'\n---\n\n# Ok\n",
+        encoding="utf-8",
+    )
+
+    project = isolated.work_root
+    (project / ".kiro").mkdir(parents=True, exist_ok=True)
+    (project / "apm.yml").write_text(
+        "name: consumer\nversion: 1.0.0\ntargets: [kiro]\n", encoding="utf-8"
+    )
+
+    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+    result = runner.run(
+        ("install", str(package), "--no-policy"),
+        cwd=project,
+        env=environment,
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+
+    assert result.returncode == 0, output
+    assert "execute_arbitrary_code" in output
+    assert not (project / ".kiro" / "agents" / "rejected.md").exists()
+    assert (project / ".kiro" / "agents" / "conformant.md").is_file()
+
+    lockfile = LockFile.read(project / "apm.lock.yaml")
+    assert lockfile is not None
+    deployed = {path for dep in lockfile.dependencies.values() for path in dep.deployed_files}
+    assert ".kiro/agents/conformant.md" in deployed
+    assert ".kiro/agents/rejected.md" not in deployed
+
+    assert_spec_contains(
+        "failure for one agent MUST NOT prevent\ndeployment of other, vocabulary-conformant "
+        "agent primitives from the same\ndependency or install operation",
     )

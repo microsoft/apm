@@ -528,9 +528,11 @@ def test_kiro_agents_fail_closed_incompatible_tools(tmp_path: Path) -> None:
     assert result.files_integrated == 0
     assert not (tmp_path / ".kiro" / "agents" / "badtools.md").exists()
     # Error diagnostic must name the unsupported tool
-    errors = diagnostics.by_category().get("error", [])
-    assert errors, "Expected an error diagnostic for incompatible tools"
-    assert "execute_arbitrary_code" in errors[0].message
+    # Non-fatal per agent (req-tg-009): a warning, never an install-failing error.
+    assert not diagnostics.by_category().get(CATEGORY_ERROR, [])
+    warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+    assert warnings, "Expected a warning diagnostic for incompatible tools"
+    assert "execute_arbitrary_code" in warnings[0].message
 
 
 def test_kiro_agents_no_partial_write_on_incompatible_tools(tmp_path: Path) -> None:
@@ -759,9 +761,9 @@ def test_kiro_agents_preflight_before_adopt_bypass(tmp_path: Path) -> None:
     assert result.files_integrated == 0
     assert result.files_adopted == 0
     assert preset_target not in result.target_paths
-    errors = diagnostics.by_category().get(CATEGORY_ERROR, [])
-    assert errors, "Expected diagnostics.error for incompatible tools even in adopt path"
-    assert "BANNED_TOOL" in errors[0].message
+    warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+    assert warnings, "Expected a warning for incompatible tools even in adopt path"
+    assert "BANNED_TOOL" in warnings[0].message
 
 
 def test_kiro_agents_no_agents_dir_created_for_all_invalid(tmp_path: Path) -> None:
@@ -863,9 +865,9 @@ def test_kiro_agents_stale_managed_file_removed_when_tools_become_incompatible(
     assert result.files_skipped == 1
     # The stale path must NOT appear in target_paths; the caller can remove it.
     assert stale_path not in result.target_paths
-    errors = diagnostics.by_category().get(CATEGORY_ERROR, [])
-    assert errors, "Incompatible tools must produce an error diagnostic"
-    assert "EVIL_TOOL" in errors[0].message
+    warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+    assert warnings, "Incompatible tools must produce a warning diagnostic"
+    assert "EVIL_TOOL" in warnings[0].message
 
     # Reconcile: simulate what the install service does -- remove stale managed files
     # that no longer appear in target_paths.
@@ -1133,3 +1135,76 @@ def test_kiro_prompt_resolves_body_links_and_preserves_copilot_source(
     copilot = (tmp_path / ".github/prompts/review.prompt.md").read_text()
     assert copilot.startswith("---\ndescription: Review\n---\n")
     assert kiro_prompt_source.read_text() == content
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "web_fetch",
+        "remote_web_search",
+        "grep_search",
+        "file_search",
+        "read_file",
+        "execute_bash",
+        "invoke_sub_agent",
+        "code",
+        "introspect",
+        "@git",
+        "@rust-analyzer/check_code",
+    ],
+)
+def test_kiro_agents_current_kiro_tool_identifiers_deploy(tmp_path: Path, tool: str) -> None:
+    """Regression for #2671: current Kiro tool selectors must deploy the agent.
+
+    Values come from https://kiro.dev/docs/custom-agents/configuration-reference/
+    (tools field) and https://kiro.dev/docs/tools/ (tool catalog).
+    """
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "gatherer.agent.md").write_text(
+        f"---\ndescription: Gatherer\ntools:\n- read\n- '{tool}'\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        diagnostics=diagnostics,
+    )
+
+    assert not diagnostics.by_category().get("error", [])
+    assert result.files_integrated == 1
+    assert (tmp_path / ".kiro" / "agents" / "gatherer.md").exists()
+
+
+@pytest.mark.parametrize(
+    "tool",
+    ["grep", "use_aws", "@builtin/read_file", "@mcp/tool", "@", "@git/", "@git/a/b", "@bad name"],
+)
+def test_kiro_agents_reject_legacy_and_malformed_selectors(tmp_path: Path, tool: str) -> None:
+    """CLI 2.x-only names and malformed @server selectors stay fail-closed."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "legacy.agent.md").write_text(
+        f"---\ntools:\n- '{tool}'\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        diagnostics=diagnostics,
+    )
+
+    assert result.files_integrated == 0
+    assert not (tmp_path / ".kiro" / "agents" / "legacy.md").exists()
+    warnings = diagnostics.by_category().get("warning", [])
+    assert any("will not be deployed" in w.message for w in warnings)
