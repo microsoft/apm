@@ -1,5 +1,6 @@
 """Base adapter interface for MCP clients."""
 
+import functools
 import json
 import os
 import re
@@ -352,6 +353,49 @@ class MCPClientAdapter(ABC):
     # adapters resolve to literal values at install time via env_overrides
     # -> os.environ -> optional interactive prompt. See issue #1152.
     _supports_runtime_env_substitution: bool = False
+
+    # Native project-root reference a project-scope config uses for an authored
+    # ``${CLAUDE_PLUGIN_ROOT}`` inside the project (#3825). ``None`` writes the
+    # absolute package path: the harness documents no portable form.
+    plugin_root_project_reference: ClassVar[str | None] = None
+
+    def __init_subclass__(cls, **kwargs):
+        """Finalize the project-root reference after every subclass formatter."""
+        super().__init_subclass__(**kwargs)
+        formatter = cls.__dict__.get("_format_server_config")
+        if formatter is None or getattr(formatter, "_finalizes_plugin_root", False):
+            return
+
+        @functools.wraps(formatter)
+        def _format_with_plugin_root(self, *args, **kwargs):
+            from ...deps.plugin_root_render import finalize_project_root
+
+            return finalize_project_root(
+                formatter(self, *args, **kwargs), self._plugin_root_reference()
+            )
+
+        _format_with_plugin_root._finalizes_plugin_root = True
+        cls._format_server_config = _format_with_plugin_root
+
+    def _plugin_root_reference(self) -> str | None:
+        """Return this scope's project-root reference; user scope stays absolute."""
+        return None if self.user_scope else self.plugin_root_project_reference
+
+    def _self_defined_stdio(self, server_info: dict) -> dict | None:
+        """Return the self-defined stdio launcher with its plugin root rendered.
+
+        The only reader of ``_raw_stdio`` in adapters, so every target expands
+        an authored ``${CLAUDE_PLUGIN_ROOT}`` through one rule.
+        """
+        from ...deps.plugin_root_render import PLUGIN_ROOT_INFO_KEY, render_plugin_root
+
+        raw = server_info.get("_raw_stdio")
+        return render_plugin_root(
+            raw,
+            plugin_root=server_info.get(PLUGIN_ROOT_INFO_KEY),
+            project_root=self.project_root,
+            project_relative=self._plugin_root_reference() is not None,
+        )
 
     def __init__(
         self,

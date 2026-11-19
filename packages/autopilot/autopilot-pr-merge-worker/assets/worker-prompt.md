@@ -439,8 +439,9 @@ For each FOLD item:
 - If the item is "CHANGELOG entry", edit `CHANGELOG.md` per
   `.github/instructions/changelog.instructions.md`: ONE line under
   `## [Unreleased]`, user-visible effect first, 25 words or fewer,
-  ending with `(#PR)`; breaking changes go under `### Breaking
-  changes and upgrade notes` with a one-line migration. If a line
+  ending with `(#PR)`, in ONE section. Breaking or must-act changes
+  go only under `### Breaking changes and upgrade notes` with a
+  one-line migration. Never write `### Highlights`. If a line
   already describes this change, edit it instead of adding
   another. Internal-only PRs (tests, CI, refactors) get no line.
 - If the item is "doc drift caused by this change", update the

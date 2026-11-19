@@ -261,8 +261,9 @@ file-valued `lspServers` entry in `plugin.json`, or auto-discovers
 `com.microsoft.apm/lsp.json`, `lsp.json`, or `.lsp.json`. The servers are
 then wired into the install pipeline. Plugin LSP files may use either a flat
 server map or a `{ "lspServers": { ... } }` envelope. The
-`${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
-the absolute plugin path for legacy Claude Code plugin compatibility.
+`${CLAUDE_PLUGIN_ROOT}` placeholder stays as written in `apm.lock.yaml`. The
+Claude project config writes it as `${CLAUDE_PROJECT_DIR}/apm_modules/<package>`;
+other targets, and `--global`, get the absolute package path.
 These are source files shipped by a dependency package, distinct from the
 `.claude-plugin/plugin.json` that APM generates for Claude discovery.
 Plugins authored for Copilot CLI may use `fileExtensions` instead of

@@ -13,6 +13,7 @@ import click
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...deps.lockfile_generator import require_current_cli
 from ...hook_contract import HookContractError
 from ...install.locking import serialized_lifecycle
 from ...models.apm_package import APMPackage
@@ -560,7 +561,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
 
     manifest_path = get_manifest_path(scope)
-    apm_dir = get_apm_dir(scope)
+    apm_dir = require_current_cli(get_apm_dir(scope), command="apm uninstall")
     deploy_root = get_deploy_root(scope)
     modules_dir = get_modules_dir(scope)
     manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME

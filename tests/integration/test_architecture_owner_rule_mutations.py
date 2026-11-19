@@ -811,6 +811,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Advisory evidence starts claiming implementation authority.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-generator-gate",
+        rule_id="contracts-tooling-lockfile-generator-gate",
+        path="src/apm_cli/commands/pack.py",
+        old='check_current_cli(project_root, command="apm pack")',
+        new="pass",
+        intent="apm pack stops refusing a lockfile written by a newer APM.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-read",
         rule_id="contracts-tooling-lockfile-read",
         path="src/apm_cli/deps/lockfile.py",
@@ -1053,6 +1061,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Explicit false and null become omission instead of manifest intent.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-plugin-root-render",
+        rule_id="mutation_writes.plugin_root_render",
+        path="src/apm_cli/adapters/client/copilot.py",
+        old="raw = self._self_defined_stdio(server_info)",
+        new='raw = server_info.get("_raw_stdio")',
+        intent="An adapter reads raw stdio directly, writing ${CLAUDE_PLUGIN_ROOT} unrendered.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-user-hook-home-reference",
         rule_id="mutation_writes.user_hook_home_reference",
         path="src/apm_cli/integration/hook_integrator.py",
@@ -1195,6 +1211,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    legacy = lockfile.replacements is None\n",
         new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-locked-copy-validity",
+        rule_id="install-deployment-locked-copy-validity",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="else locked_copy_proof(locked_dep, install_path)",
+        new="else _should_skip_redownload(locked_dep, install_path) or None",
+        intent="Integrate re-derives apm_modules copy validity outside drift.locked_copy_proof.",
     ),
     MutationCase(
         guard_id="install-deployment-lsp-capability-gate",
@@ -1396,6 +1420,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local copying bypasses the canonical single-file admission authority.",
     ),
     MutationCase(
+        guard_id="install-deployment-skill-adoption-baseline",
+        rule_id="install-deployment-skill-adoption-baseline",
+        path="src/apm_cli/integration/skill_adoption.py",
+        old="    if ctx.existing_lockfile is None or ctx.downloader is None:\n        return None",
+        new="    if not ctx.update_refs or ctx.existing_lockfile is None:\n        return None",
+        intent="Plain install after an apm.yml ref change loses the locked-source baseline.",
+    ),
+    MutationCase(
         guard_id="install-deployment-skill-layout",
         rule_id="install-deployment-skill-layout",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -1466,6 +1498,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="config = load_marketplace_from_apm_yml(path)",
         new="config = load_yaml_str(path.read_text())",
         intent="Live authoring catalog parses apm.yml outside the canonical parser.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-catalog-freshness",
+        rule_id="marketplace-integrations-catalog-freshness",
+        path="src/apm_cli/commands/marketplace/__init__.py",
+        old="manifest = fetch_marketplace(source, require_fresh=True)",
+        new="manifest = fetch_marketplace(source, force_refresh=True)",
+        intent="Named marketplace update falls back to stale cache instead of revalidating.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-catalog-manifest",

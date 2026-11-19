@@ -98,6 +98,12 @@ Use `apm install --refresh` when you need both current upstream refs and a
 content re-download. It re-resolves mutable refs and bypasses cached package
 content; `apm update` may reuse content already cached at the fresh SHA.
 
+Both `apm update` and `apm install --refresh` also revalidate the marketplace
+catalogs behind `name` + `marketplace` dependencies (and `plugin@marketplace`
+arguments), so a plugin the publisher removed or re-pinned is seen at once.
+If a catalog cannot be verified, the command fails and changes nothing; a plain
+`apm install` keeps using the cached catalog (refreshed hourly).
+
 Use `apm lock --update` when you need the same upstream ref refresh but want to
 rewrite only `apm.lock.yaml`, without deploying or deleting harness files.
 

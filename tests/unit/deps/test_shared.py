@@ -271,7 +271,7 @@ class TestValidateAndLoadPackage:
                 }
             },
         }
-        loaded_commands: list[Path] = []
+        loaded_roots: list[Path] = []
         for target in targets:
             target.mkdir(parents=True)
             (target / "README.md").write_text("portable catalog package")
@@ -279,16 +279,13 @@ class TestValidateAndLoadPackage:
             dep_ref.marketplace_manifest = manifest
             assert materialize_marketplace_manifest(dep_ref, target)
             package = APMPackage.from_apm_yml(target / "apm.yml")
-            command = package.get_mcp_dependencies()[0].command
-            assert command is not None
-            loaded_commands.append(Path(command))
+            server = package.get_mcp_dependencies()[0]
+            assert server.command == "${CLAUDE_PLUGIN_ROOT}/bin/server"
+            loaded_roots.append(Path(server.plugin_root))
 
         assert (targets[0] / "apm.yml").read_bytes() == (targets[1] / "apm.yml").read_bytes()
         assert compute_package_hash(targets[0]) == compute_package_hash(targets[1])
-        assert loaded_commands == [
-            targets[0].resolve() / "bin" / "server",
-            targets[1].resolve() / "bin" / "server",
-        ]
+        assert loaded_roots == [targets[0].resolve(), targets[1].resolve()]
 
     def test_cleanup_failure_cannot_leave_generated_manifest(self, tmp_path: Path) -> None:
         target = tmp_path / "plugin"

@@ -29,7 +29,7 @@ from tomlkit.exceptions import TOMLKitError
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import (
     LockFile,
-    LockfileSymlinkError,
+    LockfileRefusal,
     get_lockfile_path,
     installed_apm_version,
 )
@@ -384,6 +384,10 @@ def _clean_claude_config(
         return 0
 
 
+# MCPDependency fields that may carry an authored ``${CLAUDE_PLUGIN_ROOT}``.
+_PLUGIN_ROOT_FIELDS = ("command", "args", "env", "url", "headers", "cwd", "extra")
+
+
 class MCPIntegrator:
     """MCP lifecycle orchestrator  -- dependency resolution, installation, and cleanup.
 
@@ -455,16 +459,40 @@ class MCPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_self_defined_info(dep) -> dict:
+    def _build_self_defined_info(dep, *, plugin_root: str | None = None) -> dict:
         """Build a synthetic server_info dict from a self-defined MCPDependency.
 
         Mimics the structure returned by the MCP registry so that existing
         adapter code can consume self-defined deps without changes.
+
+        An authored ``${CLAUDE_PLUGIN_ROOT}`` stays in ``_raw_stdio`` with the
+        package root under ``PLUGIN_ROOT_INFO_KEY``, so each adapter renders its
+        own portable form. *plugin_root* binds a stored declaration that carries
+        no materialized root to the current one.
         """
+        import dataclasses
+
+        from apm_cli.deps.plugin_root_render import (
+            PLUGIN_ROOT_INFO_KEY,
+            RECORDED_RENDER_INFO_KEY,
+            plugin_root_of,
+            render_plugin_root,
+            with_absolute_plugin_root,
+        )
+
+        root = plugin_root or plugin_root_of(dep)
+
+        def absolute(value):
+            return render_plugin_root(
+                value, plugin_root=root, project_root=None, project_relative=False
+            )
+
         info: dict = {
             "name": dep.name,
             "is_self_defined": True,
         }
+        if root:
+            info[PLUGIN_ROOT_INFO_KEY] = root
 
         # For stdio self-defined deps, store raw command/args so adapters
         # can bypass registry-specific formatting (npm, docker, etc.).
@@ -483,12 +511,12 @@ class MCPIntegrator:
             # Build as a remote endpoint
             remote = {
                 "transport": canonical_remote_transport({"transport": dep.transport}),
-                "url": dep.url or "",
+                "url": absolute(dep.url or ""),
             }
             if dep.headers:
                 remote["headers"] = [
                     {"name": k, "value": ManifestHeaderValue(v) if isinstance(v, str) else v}
-                    for k, v in dep.headers.items()
+                    for k, v in absolute(dep.headers).items()
                 ]
             info["remotes"] = [remote]
         else:
@@ -525,9 +553,15 @@ class MCPIntegrator:
 
         # Pass through harness-specific extra keys for adapters to merge
         if dep.extra:
-            info["_extra"] = dict(dep.extra)
+            info["_extra"] = absolute(dict(dep.extra))
 
         assert_no_staging_paths(info, f"MCP client configuration for '{dep.name}'")
+        recorded_root = getattr(dep, "recorded_plugin_root", None)
+        if isinstance(recorded_root, str) and recorded_root:
+            recorded = with_absolute_plugin_root(dep, _PLUGIN_ROOT_FIELDS, root=recorded_root)
+            info[RECORDED_RENDER_INFO_KEY] = MCPIntegrator._build_self_defined_info(
+                dataclasses.replace(recorded, plugin_root=None, recorded_plugin_root=None)
+            )
         return info
 
     @staticmethod
@@ -556,6 +590,9 @@ class MCPIntegrator:
         if not info:
             return
 
+        from apm_cli.deps.plugin_root_render import with_absolute_plugin_root
+
+        dep = with_absolute_plugin_root(dep, ("headers", "args", "env", "extra"))
         dep.apply_opencode_enabled(info)
 
         MCPIntegrator._canonicalize_remote_transports(info)
@@ -1255,7 +1292,7 @@ class MCPIntegrator:
                 lock_path,
                 exc_info=True,
             )
-            if creating and not isinstance(exc, LockfileSymlinkError):
+            if creating and not isinstance(exc, LockfileRefusal):
                 # Failing to UPDATE leaves a usable lockfile behind, but failing
                 # to CREATE one reproduces #2373 exactly -- install reports
                 # success and the next audit says "run 'apm install'". Debug
@@ -1271,7 +1308,7 @@ class MCPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
-                if isinstance(exc, LockfileSymlinkError):
+                if isinstance(exc, LockfileRefusal):
                     raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "MCP lockfile update failed. Check apm.lock.yaml permissions, then retry."

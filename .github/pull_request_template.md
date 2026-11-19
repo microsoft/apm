@@ -36,8 +36,9 @@ Does this PR complete the issue, or what remains?
 
 ## Changelog
 
-- [ ] One line under `## [Unreleased]` in `CHANGELOG.md`: user-visible
-      effect first, 25 words or fewer, ending with `(#PR)`; see
+- [ ] One line in one section under `## [Unreleased]` in `CHANGELOG.md`:
+      user-visible effect first, 25 words or fewer, ending with `(#PR)`;
+      breaking changes only under upgrade notes; no Highlights; see
       `.github/instructions/changelog.instructions.md`.
 - [ ] N/A -- internal-only change (CI, tests, refactor).
 

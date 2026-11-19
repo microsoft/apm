@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, LockfileSymlinkError, get_lockfile_path
+from apm_cli.deps.lockfile import LockFile, LockfileRefusal, get_lockfile_path
 from apm_cli.integration._shared import (
     deduplicate_deps,
     resolve_locked_apm_yml_sources,
@@ -120,6 +120,9 @@ class _LSPTargetSpec:
     # Shown once when APM creates the servers key, for a harness where that
     # key has a side effect beyond the servers APM writes.
     servers_key_created_note: str | None = None
+    # Native project-root reference for an authored ${CLAUDE_PLUGIN_ROOT} at
+    # project scope (#3825); None writes the absolute package path.
+    plugin_root_project_reference: str | None = None
 
     def user_root(self) -> Path:
         """Return the runtime's user root through the harness user-root owner."""
@@ -194,6 +197,10 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
             ("skills", "apm-lsp", ".claude-plugin"),
             ("skills", "apm-lsp"),
         ),
+        # code.claude.com/docs/en/plugins-reference "Where each variable
+        # resolves": plugin LSP command, args, env and workspaceFolder
+        # substitute ${CLAUDE_PROJECT_DIR}.
+        plugin_root_project_reference="${CLAUDE_PROJECT_DIR}",
     ),
     "copilot": _LSPTargetSpec(
         runtime="copilot",
@@ -399,6 +406,41 @@ class LSPIntegrator:
             except _SkipServer as skip:
                 warn(f"Skipped LSP server '{name}' for {spec.runtime}: {skip}")
         return out
+
+    @staticmethod
+    def _render_plugin_roots(
+        servers: dict[str, dict],
+        lsp_deps: list,
+        spec: _LSPTargetSpec,
+        *,
+        project_root: Path,
+        user_scope: bool,
+    ) -> dict[str, dict]:
+        """Expand authored ``${CLAUDE_PLUGIN_ROOT}`` for one target and scope."""
+        from apm_cli.deps.plugin_root_render import (
+            finalize_project_root,
+            plugin_root_of,
+            render_plugin_root,
+        )
+
+        roots: dict[str, str] = {}
+        for dep in lsp_deps:
+            root = plugin_root_of(dep)
+            if root and hasattr(dep, "name"):
+                roots.setdefault(dep.name, root)
+        reference = None if user_scope else spec.plugin_root_project_reference
+        return {
+            name: finalize_project_root(
+                render_plugin_root(
+                    entry,
+                    plugin_root=roots.get(name),
+                    project_root=project_root,
+                    project_relative=reference is not None,
+                ),
+                reference,
+            )
+            for name, entry in servers.items()
+        }
 
     @staticmethod
     def expressible_server_names(lsp_deps: list, runtime: str) -> builtins.set:
@@ -971,7 +1013,7 @@ class LSPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
-                if isinstance(exc, LockfileSymlinkError):
+                if isinstance(exc, LockfileRefusal):
                     raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "LSP lockfile update failed. Check apm.lock.yaml permissions, then retry."
@@ -1021,6 +1063,13 @@ class LSPIntegrator:
             )
             if not servers:
                 continue
+            servers = LSPIntegrator._render_plugin_roots(
+                servers,
+                lsp_deps,
+                spec,
+                project_root=project_root_path,
+                user_scope=user_scope,
+            )
             try:
                 managed_names = managed_server_names
                 if managed_target_servers is not None:

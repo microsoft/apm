@@ -248,7 +248,7 @@ class TestShadowDetectionInResolver:
         assert resolved.name == "sec-check"
 
         # Shadow detection was called with correct args
-        mock_detect.assert_called_once_with("sec-check", "acme", auth_resolver=None)
+        mock_detect.assert_called_once_with("sec-check", "acme", auth_resolver=None, skipped=[])
 
         # Warning emitted for the shadow
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -294,3 +294,21 @@ class TestProvenanceSetOnMarketplaceDeps:
         d = dep.to_dict()
         assert d["discovered_via"] == "acme-tools"
         assert d["marketplace_plugin_name"] == "sec-check"
+
+
+def test_uncached_catalogs_skipped_during_explicit_refresh_are_reported():
+    """An explicit refresh reports, rather than hides, unchecked catalogs (#3279)."""
+    from apm_cli.marketplace.errors import MarketplaceNotCachedError
+
+    sources = [_make_source("primary"), _make_source("cached"), _make_source("gitcat")]
+
+    def _fetch(source, **kwargs):
+        if source.name == "gitcat":
+            raise MarketplaceNotCachedError(source.name)
+        return _make_manifest(source.name, ["foo"])
+
+    skipped: list[str] = []
+    with patch(_PATCH_REGISTRY, return_value=sources), patch(_PATCH_FETCH, side_effect=_fetch):
+        shadows = detect_shadows("foo", "primary", skipped=skipped)
+    assert shadows == [ShadowMatch(marketplace_name="cached", plugin_name="foo")]
+    assert skipped == ["gitcat"]

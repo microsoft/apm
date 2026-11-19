@@ -392,7 +392,8 @@ def test_normalization_persists_portable_plugin_root_paths(tmp_path: Path) -> No
     assert ".apm-resolution-staging" not in manifest
     assert "${CLAUDE_PLUGIN_ROOT}/server" in manifest
     server = result.get_all_mcp_dependencies()[0]
-    assert server.command == f"{package.resolve()}/server"
+    assert server.command == "${CLAUDE_PLUGIN_ROOT}/server"
+    assert server.plugin_root == str(package.resolve())
 
 
 def test_fresh_hash_accepts_only_the_parser_receipt_delta(tmp_path: Path) -> None:

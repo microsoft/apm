@@ -172,6 +172,13 @@ def written_native_hash(
     )
 
 
+def _requested_plugin_root(requested_info: dict | None) -> str | None:
+    """Bind a stored declaration's ``${CLAUDE_PLUGIN_ROOT}`` to the current package root."""
+    from apm_cli.deps.plugin_root_render import PLUGIN_ROOT_INFO_KEY
+
+    return (requested_info or {}).get(PLUGIN_ROOT_INFO_KEY)
+
+
 def retain_native_receipt(
     native_hashes: dict[str, dict[str, str]] | None,
     runtime: str,
@@ -219,6 +226,10 @@ def compare_native_mcp_connection(
     ``--frozen`` heal, so the caller refreshes the receipt without a write.
     """
     from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.deps.plugin_root_render import (
+        RECORDED_RENDER_INFO_KEY,
+        portable_rewrite_equivalent,
+    )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -242,6 +253,16 @@ def compare_native_mcp_connection(
             if registry_request
             else client.render_server_config(requested_info)
         )
+    recorded_info = (requested_info or {}).get(RECORDED_RENDER_INFO_KEY)
+    if (
+        managed
+        and isinstance(recorded_info, dict)
+        and isinstance(native, dict)
+        and client.matches_managed_server_config(native, client.render_server_config(recorded_info))
+    ):
+        # --frozen over a pre-#3825 lock: the entry is exactly what that lock
+        # recorded, so keep its bytes rather than write the lock-sourced root.
+        return NativeMcpConnectionState.MATCHING_MANAGED
     comparison = native
     matches_baseline = False
     retired_shape = False
@@ -279,7 +300,9 @@ def compare_native_mcp_connection(
                 else {}
             )
             if dependency.is_self_defined:
-                baseline_info = MCPIntegrator._build_self_defined_info(dependency)
+                baseline_info = MCPIntegrator._build_self_defined_info(
+                    dependency, plugin_root=_requested_plugin_root(requested_info)
+                )
                 render_env = {}
                 expected = client.render_server_config(baseline_info)
                 legacy_baseline = expected
@@ -288,11 +311,32 @@ def compare_native_mcp_connection(
                         native, baseline=expected, requested=requested
                     )
                 matches_baseline = client.matches_managed_server_config(comparison, expected)
+                if (
+                    matches_baseline
+                    and stale_receipts is not None
+                    and native_hash is not None
+                    and isinstance(native, dict)
+                    and client.matches_managed_server_config(native, expected)
+                    and mcp_native_hash(client.managed_server_config(native)) != native_hash
+                ):
+                    # A --frozen heal rewrote the entry but kept the lock receipt.
+                    stale_receipts.add(name)
                 if not matches_baseline and native_hash is not None and isinstance(native, dict):
                     # The entry is exactly what APM recorded writing; its render
                     # moved since (a re-pointed skill launcher), so update it.
                     matches_baseline = (
                         mcp_native_hash(client.managed_server_config(native)) == native_hash
+                    )
+                    if matches_baseline:
+                        comparison = native
+                if not matches_baseline and isinstance(native, dict):
+                    # A pre-#3825 baseline recorded at another clone's root, and
+                    # the entry is this project's portable render of it (written
+                    # by a --frozen install that could not refresh the receipt).
+                    matches_baseline = portable_rewrite_equivalent(
+                        expected,
+                        client.managed_server_config(native),
+                        client._plugin_root_reference(),
                     )
                     if matches_baseline:
                         comparison = native
@@ -421,7 +465,9 @@ def managed_unsupported_connection(
         if isinstance(stored_config, dict):
             dependency = MCPDependency.from_dict(stored_config)
             if dependency.is_self_defined:
-                info = MCPIntegrator._build_self_defined_info(dependency)
+                info = MCPIntegrator._build_self_defined_info(
+                    dependency, plugin_root=_requested_plugin_root(requested_info)
+                )
         legacy = client.legacy_managed_renders(info) if info is not None else ()
     except (TypeError, ValueError):
         return None

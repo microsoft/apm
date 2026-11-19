@@ -444,9 +444,9 @@ Malformed patterns and ranges with no match fail instead of becoming raw refs.
 
 `apm install` resolves and locks the highest matching tag. Re-running it
 replays the locked version without changes. After the producer adds tags and
-republishes the marketplace metadata, run `apm marketplace update <name>`;
-`apm outdated` then reports the new resolved ref and `apm update --yes`
-applies it.
+republishes the marketplace metadata, `apm update --yes` revalidates the
+catalog and applies the new resolved ref. Run `apm marketplace update <name>`
+first if you want `apm outdated` to report it.
 
 ### Pin a semver range
 

@@ -101,6 +101,9 @@ def prune(ctx, dry_run):
         apm prune           # Remove orphaned packages
         apm prune --dry-run # Show what would be removed
     """
+    from ..deps.lockfile_generator import require_current_cli
+
+    require_current_cli(Path.cwd(), command="apm prune")
     apm_modules_dir = Path(APM_MODULES_DIR)
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())

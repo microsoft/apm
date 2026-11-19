@@ -1286,7 +1286,7 @@ class TestFrozenInstallNeverWritesLockfile:
         from apm_cli.install.service import InstallService
 
         def _lock(deployed):
-            lock = LockFile(lockfile_version="1", apm_version="0.0.0-test")
+            lock = LockFile(lockfile_version="1", apm_version="0.0.0")
             lock.add_dependency(
                 LockedDependency(
                     repo_url="https://github.com/o/r",
