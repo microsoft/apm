@@ -263,12 +263,17 @@ version: 1.2.3
 description: Greeting workflow
 author: Acme
 targets: [claude, copilot, codex]
+
+# root apm.yml (marketplace my-project) also needs:
+#   marketplace.outputs: {codex: {}}
+#   marketplace.packages: [{name: hello, source: ./packages/hello, category: Productivity}]
 ```
 
 ```bash
 (cd packages/hello && apm pack)   # writes packages/hello/.codex-plugin/plugin.json
 apm pack                          # writes .agents/plugins/marketplace.json
 git add packages/hello/.codex-plugin/plugin.json .agents/plugins/marketplace.json
+git commit -m "Publish hello 1.2.3"   # push so consumers get both files
 codex plugin marketplace add .
 codex plugin add hello@my-project        # marketplace name from apm.yml; installs 1.2.3
 ```

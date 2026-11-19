@@ -73,6 +73,13 @@ PLUGIN_ECOSYSTEM_PATHS: dict[str, str] = {
 }
 """Output path (relative to project root) for each ecosystem's ``plugin.json``."""
 
+_CODEX_PLUGIN_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def is_safe_codex_plugin_name(name: object) -> bool:
+    """Return True when *name* is a plugin name APM's Codex route accepts."""
+    return isinstance(name, str) and _CODEX_PLUGIN_NAME_RE.fullmatch(name) is not None
+
 
 @dataclass(frozen=True)
 class PluginManifestWriteResult:
@@ -411,8 +418,6 @@ def _is_regular(path: Path, *, directory: bool) -> bool:
 
 def _apply_codex_components(project_root: Path, manifest: dict, *, logger: Any = None) -> None:
     """Shape *manifest* as the documented ``.codex-plugin/plugin.json``."""
-    from ..codex_plugins.manifest import is_safe_codex_plugin_name
-
     manifest.pop("mcpServers", None)
     if _is_regular(project_root / "skills", directory=True):
         manifest["skills"] = "./skills/"

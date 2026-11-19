@@ -480,9 +480,14 @@ marketplace:
         (tmp_path / ".mcp.json").write_text('{"mcpServers": {"srv": {"command": "node"}}}')
         manifest = tmp_path / ".codex-plugin" / "plugin.json"
 
+        def tree() -> dict:
+            return {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+        before = tree()
         dry = runner.invoke(pack_cmd, ["--dry-run"])
         assert dry.exit_code == 0, dry.output
-        assert not manifest.exists()
+        assert tree() == before
+        assert not (tmp_path / ".codex-plugin").exists()
 
         result = runner.invoke(pack_cmd, [])
         assert result.exit_code == 0, result.output

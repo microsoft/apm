@@ -34,6 +34,7 @@ _OWNER_DEFINITIONS = (
 _HOST_MANIFEST_LITERAL = re.compile(
     r"[\"'](?:\.claude-plugin|\.codex-plugin|\.github/plugin)(?:/plugin\.json)?[\"']"
 )
+_CODEX_NAME_RULE_LITERAL = re.compile(re.escape("[A-Za-z0-9][A-Za-z0-9._-]*"))
 
 
 def _check(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -62,6 +63,17 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
             tuple(surface),
             _HOST_MANIFEST_LITERAL,
             "pack-time host plugin.json paths must route through PLUGIN_ECOSYSTEM_PATHS",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            RULE_ID,
+            tuple(surface),
+            _CODEX_NAME_RULE_LITERAL,
+            "Codex plugin name rule must route through is_safe_codex_plugin_name",
             exempt=False,
         )
     )

@@ -24,6 +24,7 @@ from apm_cli.codex_plugins.client import (
     NativeUserConfig,
 )
 from apm_cli.codex_plugins.snapshot import NativeSnapshot, prepare_snapshot, repair_generation
+from apm_cli.core.plugin_manifest import is_safe_codex_plugin_name
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.plugin_parser import _bounded_read_json
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -111,7 +112,7 @@ class _Record:
         if (
             not isinstance(data, dict)
             or not isinstance(data.get("name"), str)
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", data["name"]) is None
+            or not is_safe_codex_plugin_name(data["name"])
             or not isinstance(data.get("source_hash"), str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", data["source_hash"]) is None
             or not isinstance(data.get("config_path"), str)

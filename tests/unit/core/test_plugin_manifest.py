@@ -173,13 +173,40 @@ class TestBuildPluginManifest:
         assert (loaded.name, loaded.version) == ("my-plugin", "1.0.0")
         assert loaded.mcp_server_names == ("srv",)
 
-    def test_codex_warns_on_name_the_codex_reader_rejects(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("name", "unsafe"),
+        [
+            ("my-plugin", False),
+            ("a.b_c-1", False),
+            ("@acme/my plugin", True),
+            ("-lead", True),
+            ("has space", True),
+            ("../x", True),
+        ],
+    )
+    def test_codex_name_warning_matches_reader_rejection(
+        self, tmp_path: Path, name: str, unsafe: bool
+    ) -> None:
+        """Pack warns exactly when APM's Codex reader would refuse the name (#3077)."""
+        from apm_cli.codex_plugins.client import CodexNativeError
+        from apm_cli.codex_plugins.manifest import load_codex_compatibility_manifest
+
         apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
-        apm.write_text(apm.read_text().replace("name: my-plugin", "name: '@acme/my plugin'"))
+        apm.write_text(apm.read_text().replace("name: my-plugin", f"name: '{name}'"))
         logger = MagicMock()
-        build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
-        messages = [call.args[0] for call in logger.warning.call_args_list]
-        assert any("Codex plugin name '@acme/my plugin'" in message for message in messages)
+        write_plugin_manifest(
+            tmp_path, build_plugin_manifest(tmp_path, apm, "codex", logger=logger), "codex"
+        )
+        warned = any(
+            f"Codex plugin name {name!r}" in call.args[0] for call in logger.warning.call_args_list
+        )
+        try:
+            load_codex_compatibility_manifest(tmp_path)
+            raised = False
+        except CodexNativeError:
+            raised = True
+        assert warned is unsafe
+        assert raised is unsafe
 
     def test_every_ecosystem_has_a_shape_and_unknown_raises(self, tmp_path: Path) -> None:
         apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
