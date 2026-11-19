@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Dependencies that differ only by port (`host:8443/owner/repo`) are now distinct packages instead of silently merging into one lockfile entry. (#3932)
 - Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)
 - A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
 - `apm install --frozen` passes on its first run after a lock bump: `apm_modules` copies that no longer match `apm.lock.yaml` are re-downloaded first. (#3900)
