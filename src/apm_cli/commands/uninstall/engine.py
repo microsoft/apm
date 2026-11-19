@@ -15,8 +15,10 @@ from ...install.orphans import collect_orphan_candidates as _collect_orphan_cand
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
+    DependencySelection,
     DependencySelectionStatus,
     select_manifest_dependency,
+    select_marketplace_declaration,
 )
 from ...models.dependency.selection import (
     parse_dependency_entry as _parse_dependency_entry,
@@ -43,6 +45,38 @@ def _is_marketplace_ref(package: str) -> bool:
     from ...marketplace.resolver import parse_marketplace_ref
 
     return parse_marketplace_ref(package) is not None
+
+
+def _removal_target(dep_entry: object, lockfile: LockFile | None) -> object:
+    """Return what removing a manifest declaration acts on: lock row, checkout, edges.
+
+    An object-form ``{name, marketplace}`` declaration is identified as
+    ``_marketplace/<alias>/<plugin>``; its lock row, ``apm_modules`` checkout
+    and transitive edges belong to the concrete coordinate the lockfile
+    associates with that declaration (#3928). Other entries are unchanged.
+    """
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return dep_entry
+    if lockfile is None or not dependency.is_marketplace:
+        return dep_entry
+    locked = lockfile.get_dependency(dependency.get_unique_key())
+    return locked.to_dependency_ref() if locked is not None else dep_entry
+
+
+def _removal_targets(packages: list, lockfile: LockFile | None) -> list:
+    """Map removed manifest declarations to their lock and disk targets."""
+    return [_removal_target(package, lockfile) for package in packages]
+
+
+def _removed_lock_key(dep_entry: object, lockfile: LockFile | None) -> str:
+    """Return the lock key a removed manifest declaration owns."""
+    target = _removal_target(dep_entry, lockfile)
+    try:
+        return _parse_dependency_entry(target).get_unique_key()
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return target if isinstance(target, str) else str(target)
 
 
 def _dependency_public_label(dep_entry: object) -> str:
@@ -445,6 +479,24 @@ def _compute_actual_orphans(
     return candidate_orphans - reachability.reachable, repairs
 
 
+def _select_marketplace_declarations(
+    marketplace_refs: set[str], current_deps: list
+) -> dict[str, DependencySelection]:
+    """Map each ``plugin@marketplace`` ref that names an object-form declaration."""
+    from ...marketplace.resolver import parse_marketplace_ref
+
+    selections: dict[str, DependencySelection] = {}
+    for package in marketplace_refs:
+        parsed = parse_marketplace_ref(package)
+        if parsed is None:
+            continue
+        plugin_name, marketplace_name, _ref = parsed
+        selection = select_marketplace_declaration(plugin_name, marketplace_name, current_deps)
+        if selection.status is not DependencySelectionStatus.NOT_FOUND:
+            selections[package] = selection
+    return selections
+
+
 def _resolve_marketplace_packages(
     packages: list[str],
     lockfile: "LockFile | None",
@@ -622,12 +674,15 @@ def _validate_uninstall_packages(
         *packages_to_remove* contains matched dep entries and
         *packages_not_found* contains unresolved or unmatched package strings.
     """
-    # Pre-resolve any marketplace refs before the main validation loop
+    # Pre-resolve any marketplace refs before the main validation loop. A ref
+    # that names an object-form ``{name, marketplace}`` declaration is selected
+    # from apm.yml directly, with no lock or registry lookup (#3928).
     mkt_refs_set = {p for p in packages if _is_marketplace_ref(p)}
+    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)
     mkt_resolved: dict[str, str | None] = {}
-    if mkt_refs_set:
+    if unresolved := mkt_refs_set - declared_selections.keys():
         mkt_resolved = _resolve_marketplace_packages(
-            list(mkt_refs_set),
+            sorted(unresolved),
             lockfile,
             logger,
             auth_resolver=auth_resolver,
@@ -650,7 +705,10 @@ def _validate_uninstall_packages(
         # so paths fall through to DependencyReference parsing on
         # every platform.
         is_local = DependencyReference.is_local_path(package)
-        if "/" not in package and not is_local:
+        selection: DependencySelection | None = declared_selections.get(package)
+        if selection is not None:
+            canonical_for_match = display_label = package
+        elif "/" not in package and not is_local:
             if package in mkt_refs_set:
                 canonical = mkt_resolved.get(package)
                 if canonical is None:
@@ -672,7 +730,8 @@ def _validate_uninstall_packages(
             canonical_for_match = package
             display_label = package
 
-        selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
+        if selection is None:
+            selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
             # Selection returns the original manifest object, including unhashable mappings.
@@ -753,12 +812,16 @@ def _dry_run_uninstall(
     reachability rescue (see ``_compute_actual_orphans``) is exercised
     for every real ``--dry-run`` invocation.
     """
+    from ...deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile_path = get_lockfile_path(Path("."))
+    lockfile = LockFile.read(lockfile_path)
     logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)
         logger.progress(f"  - {package_label} from apm.yml")
         try:
-            dep_ref = _parse_dependency_entry(pkg)
+            dep_ref = _parse_dependency_entry(_removal_target(pkg, lockfile))
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (ValueError, TypeError, AttributeError, KeyError):
             pkg_str = pkg if isinstance(pkg, str) else str(pkg)
@@ -777,12 +840,10 @@ def _dry_run_uninstall(
             else:
                 logger.progress(f"  - {package_label} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path
-
-    lockfile_path = get_lockfile_path(Path("."))
-    lockfile = LockFile.read(lockfile_path)
     if lockfile:
-        candidates, removed_parents = _collect_orphan_candidates(lockfile, packages_to_remove)
+        candidates, removed_parents = _collect_orphan_candidates(
+            lockfile, _removal_targets(packages_to_remove, lockfile)
+        )
         actual_orphans, _resolved_by_repairs = _compute_actual_orphans(
             lockfile,
             candidates,
@@ -810,6 +871,7 @@ def _remove_packages_from_disk(
     *,
     staged_refreshes=None,
     refreshed_survivor_keys=None,
+    lockfile=None,
 ):
     """Remove direct packages, stopping on failure before ownership is released."""
     removed = 0
@@ -824,7 +886,7 @@ def _remove_packages_from_disk(
         for package in packages_to_remove:
             package_label = _dependency_public_label(package)
             try:
-                dep_ref = _parse_dependency_entry(package)
+                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))
                 package_path = dep_ref.get_install_path(apm_modules_dir)
             except PathTraversalError as e:
                 logger.error(f"Refusing to remove {package_label}: {e}")
@@ -1014,7 +1076,9 @@ def _project_transitive_orphans(
     if not lockfile or not apm_modules_dir.exists():
         return builtins.frozenset(), {}
 
-    orphans, removed_repo_urls = _collect_orphan_candidates(lockfile, packages_to_remove)
+    orphans, removed_repo_urls = _collect_orphan_candidates(
+        lockfile, _removal_targets(packages_to_remove, lockfile)
+    )
     if not orphans:
         return builtins.frozenset(), {}
 

@@ -832,6 +832,33 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "uninstall-object-form-selection-owner",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)",
+            "    declared_selections = {}",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-removal-target",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))",
+            "                dep_ref = _parse_dependency_entry(package)",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-lock-key",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "                key = _removed_lock_key(pkg, lockfile)",
+            "                key = _parse_dependency_entry(pkg).get_unique_key()",
+        ),
+    ),
+    CompoundMutation(
         "uninstall-duplicate-owner",
         UNINSTALL_RULE,
         "src/apm_cli/commands/uninstall/cli.py",

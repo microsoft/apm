@@ -122,3 +122,44 @@ def test_one_package_declared_twice_is_one_match() -> None:
 
 def test_declarations_of_distinct_local_packages_stay_separate() -> None:
     assert manifest_declarations_of(["../one/pkg", "../two/pkg"], ["../two/pkg"]) == ["../two/pkg"]
+
+
+def test_marketplace_ref_selects_object_form_declaration_case_insensitively() -> None:
+    """``plugin@alias`` names an object-form entry without lock or registry (#3928)."""
+    from apm_cli.models.dependency.selection import select_marketplace_declaration
+
+    declared = {"name": "example-plugin", "marketplace": "company"}
+    manifest = ["acme/other", declared]
+
+    selection = select_marketplace_declaration("Example-Plugin", "COMPANY", manifest)
+    assert selection.status is DependencySelectionStatus.MATCHED
+    assert selection.manifest_entry is declared
+
+    other_alias = select_marketplace_declaration("example-plugin", "elsewhere", manifest)
+    assert other_alias.status is DependencySelectionStatus.NOT_FOUND
+    string_form = select_marketplace_declaration("other", "acme", manifest)
+    assert string_form.status is DependencySelectionStatus.NOT_FOUND
+
+
+def test_object_form_removal_targets_the_locked_coordinate() -> None:
+    """Lock row, checkout and edges of an object-form entry use its locked coordinate."""
+    from apm_cli.commands.uninstall.engine import _removal_target, _removed_lock_key
+
+    locked = LockedDependency(
+        repo_url="team/catalog",
+        host="git.example.com",
+        virtual_path="plugins/example-plugin",
+        is_virtual=True,
+        resolved_commit="a" * 40,
+        discovered_via="company",
+        marketplace_plugin_name="example-plugin",
+    )
+    lockfile = LockFile(dependencies={locked.get_unique_key(): locked})
+    declared = {"name": "example-plugin", "marketplace": "company"}
+
+    assert _removed_lock_key(declared, lockfile) == locked.get_unique_key()
+    target = _removal_target(declared, lockfile)
+    assert isinstance(target, DependencyReference)
+    assert target.get_unique_key() == locked.get_unique_key()
+    assert _removal_target(declared, LockFile()) is declared
+    assert _removal_target("acme/pkg", lockfile) == "acme/pkg"
