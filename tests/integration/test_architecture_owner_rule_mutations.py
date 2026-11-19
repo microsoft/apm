@@ -996,6 +996,42 @@ def test_raw_manifest_target_readers_pass_the_manifest_path() -> None:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/audit_replay.py",
+            "        if locked_copy_is_stale(dep, path):",
+            "        if False:",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "        if not locked_copy_holds_commit(lock_dep, candidate):",
+            "        if not verify_marker(candidate, lock_dep.resolved_commit):",
+        ),
+        (
+            "src/apm_cli/install/orphans.py",
+            "def build_expected_install_paths(",
+            "def _second_proof(dep, path):\n"
+            "    return _should_skip_redownload(dep, path)\n\n\n"
+            "def build_expected_install_paths(",
+        ),
+    ],
+)
+def test_audit_and_install_share_one_copy_validity_owner(path: str, old: str, new: str) -> None:
+    """Warm audit and replay prove copies through drift.locked_copy_proof only (#3964)."""
+    rule_id = "install-deployment-locked-copy-validity"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

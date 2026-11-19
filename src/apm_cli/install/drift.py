@@ -225,12 +225,14 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
             f"expected {candidate}; run 'apm install' to populate the cache"
         )
     if lock_dep.resolved_commit:
-        from apm_cli.install.cache_pin import CachePinError, verify_marker
+        from apm_cli.drift import locked_copy_holds_commit
 
-        try:
-            verify_marker(candidate, lock_dep.resolved_commit)
-        except CachePinError as exc:
-            raise CacheMissError(f"{exc}; run 'apm install' to refresh apm_modules cache") from exc
+        # One copy-validity owner for install and audit (#3964).
+        if not locked_copy_holds_commit(lock_dep, candidate):
+            raise CacheMissError(
+                f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
+                "run 'apm install' to refresh apm_modules cache"
+            )
 
 
 def _materialize_install_path(
