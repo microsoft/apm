@@ -42,6 +42,7 @@ def test_lockfile_drives_deployment_of_the_approved_plugin_root():
     assert_spec_contains(
         "MUST derive the set of\nactivated plugins at a scope only from the lockfile",
         "one root digest covering the path, bytes, and\nexecutable bit of every file in that root",
+        "except the consumer's own normalization output",
         "`<profile root>/.claude-plugin/marketplace.json`",
         "MUST\nNOT declare the resolved dependency root to a target as a marketplace",
     )

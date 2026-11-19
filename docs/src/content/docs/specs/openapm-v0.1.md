@@ -3808,14 +3808,18 @@ whose recomputed digest differs from the recorded one as drift under [Section 5.
 diagnostic MUST name the plugin and the expected and observed root digests.
 The root digest is a hash envelope of the form `sha256:<hex-lowercase>`
 defined by [req-lk-016](#req-lk-016). It is the SHA-256 of the
-concatenation, over every regular file in the plugin root except any file whose relative
-path has a component equal to `.git`, at any depth, taken in ascending
-byte-wise order of the file's POSIX relative path encoded as UTF-8, with no
-Unicode normalization, of: that relative path, one NUL (0x00) byte, one byte `x` (0x78)
-when the file is owner-executable or `-` (0x2D) otherwise, and the 32-byte
-raw SHA-256 digest of the file's bytes. File bytes are not line-ending
-normalized, unlike [req-lk-012](#req-lk-012). Files so excluded MUST NOT be
-deployed under the profile root. A symbolic link anywhere in the
+concatenation, over every regular file in the plugin root except any file
+whose relative path has a component equal to `.git`, at any depth, and
+except the consumer's own normalization output (a root `apm.yml` and a root
+`.apm/` directory, which a consumer may generate when it materializes a
+package), taken in ascending byte-wise order of the file's POSIX relative
+path encoded as UTF-8, with no Unicode normalization, of: that relative
+path, one NUL (0x00) byte, one byte `x` (0x78) when the file is
+owner-executable or `-` (0x2D) otherwise, and the 32-byte raw SHA-256 digest
+of the file's bytes. File bytes are not line-ending normalized, unlike
+[req-lk-012](#req-lk-012). Files so excluded MUST NOT be deployed under the
+profile root, and a plugin whose manifest references an excluded path MUST
+NOT be natively activated. A symbolic link anywhere in the
 plugin root makes that root ineligible for native activation. A plugin
 that is ineligible under this requirement MUST be handled as
 [req-na-006](#req-na-006) handles a target that does not qualify: it is
