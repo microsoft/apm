@@ -117,6 +117,10 @@ source of truth. The bundled `plugin.json` always takes its `version` from
 warns and names the file so you can update it, but never edits it. See
 [Package anatomy](../../concepts/package-anatomy/) for the full schema.
 
+When `targets:` names `claude`, `copilot`, or `codex`, `apm pack` also writes
+that host's manifest in the project, such as `.codex-plugin/plugin.json` for
+Codex; see [Plugin manifests](../../reference/cli/pack/#plugin-manifests).
+
 ### Hook resources in Claude plugin bundles
 
 The legacy Claude plugin format (`--format plugin` or `--claude-plugin`)
@@ -371,6 +375,9 @@ SHA-256 recorded in `apm.lock.yaml` and `apm pack` fails with
 raises a sibling error that also points at `apm install` (the exact
 wording differs between the legacy APM format and the plugin formats). Run
 `apm install` to restore the attested content, then pack again.
+
+**Lockfile from a newer APM.** `apm pack` refuses an `apm.lock.yaml` written
+by a newer APM, naming both versions and how to upgrade. Upgrade APM, then pack.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the
 full file list (and any path remappings) without writing anything.

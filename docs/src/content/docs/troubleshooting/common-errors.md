@@ -5,9 +5,7 @@ sidebar:
   order: 1
 ---
 
-Found a confusing error? Search this page first. Each entry shows the error string APM prints, the underlying cause, and the shortest fix. Deeper guides are linked under "See also".
-
-Errors are grouped by the surface that produces them: install, compile, audit, run, and auth/network.
+Each entry shows the error string APM prints, its cause, and the shortest fix, grouped by surface: install, compile, audit, run, and auth/network.
 
 ## Install
 
@@ -194,6 +192,77 @@ Cause: two `apm install` processes raced on the same cache shard and the loser's
 Fix: re-run `apm install`. If it reproduces, ensure only one install runs at a time per `APM_CACHE_DIR`. In CI, give each job its own cache directory.
 
 See also: [Install failures](../install-failures/)
+
+### `Refusing to run '<command>' on apm.lock.yaml: it was written by APM <version>`
+
+```
+Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.37.0, newer than this APM 0.36.1. An older APM can drop or misread what a newer one recorded. Nothing was changed.
+```
+
+Cause and fix: a newer APM wrote the lockfile. There is no override; upgrade APM and retry. See [Lockfile written by a newer APM](../install-failures/#lockfile-written-by-a-newer-apm).
+
+### `marketplace '<name>' now points at <origin>, but apm.lock.yaml recorded ...`
+
+```
+marketplace 'company' now points at <new-origin>, but apm.lock.yaml recorded 'example-plugin' from <locked-origin>. Nothing was changed. To keep the locked catalog, run: apm marketplace add <locked-origin> --name company ...
+```
+
+Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded, so `apm update` refuses to switch marketplaces silently.
+
+Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists.
+
+### `<a> and <b> are different packages that would both install to apm_modules/<path>`
+
+```
+github.com/acme/tool and gitlab.example.com/acme/tool are different packages that would both install to apm_modules/acme/tool. Remove one of them, or set 'alias:' on one so it installs to its own directory.
+```
+
+Cause: the same `owner/repo` is declared from two hosts (or two dependencies share an `alias:`). A transitive declaration is labelled `(required by <pkg>)`. APM stops before downloading either.
+
+Fix: remove one declaration, or set `alias:` on one.
+
+### `refused (dependency-confusion risk #1326): bare repo: ... on enterprise marketplace`
+
+```
+refused (dependency-confusion risk #1326): bare `repo: acme/tool` on enterprise marketplace 'corp.ghe.com' is ambiguous. Host-qualify the plugin `repo` field in marketplace.json to one of:
+  - 'corp.ghe.com/acme/tool' (enterprise dep on this marketplace)
+  - 'github.com/acme/tool' (declared cross-host dep on public github.com)
+```
+
+Cause: a plugin on a `*.ghe.com` marketplace declares a bare cross-repo `repo:`, which would otherwise resolve to public `github.com`. APM refuses it on every path (CLI argument, `apm.yml` entry, transitive dependency, `apm update`) before any request.
+
+Fix: the marketplace maintainer host-qualifies `repo:` in `marketplace.json` as the message shows.
+
+### `Could not verify that marketplace '<name>' is current`
+
+```
+Could not verify that marketplace 'acme' is current: <reason>. The cached catalog was kept and nothing was changed. Retry when the catalog is reachable; a plain 'apm install' still uses the cached catalog.
+```
+
+Cause: `apm install --refresh`, `apm update`, and `apm marketplace update` revalidate each marketplace they read and fail rather than use cached data.
+
+Fix: restore network access or credentials for the marketplace and retry.
+
+### `--frozen: dependency selections differ from apm.lock.yaml.`
+
+```
+[x] --frozen: dependency selections differ from apm.lock.yaml.
+  - selection for <owner>/<repo> changed: the skills and targets its declaring manifests request differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml
+```
+
+Cause: several manifests narrow one dependency with different `skills:` or `targets:`, and `apm.lock.yaml` records another pairing (lockfiles from APM before 0.37 record the cross-product). `--frozen` refuses before deploying anything.
+
+Fix: run `apm install` without `--frozen` once and commit `apm.lock.yaml`.
+
+### `MCP server '<name>' conflicts with the existing <runtime> connection`
+
+```
+[x] MCP server 'synthdb' conflicts with the existing claude connection in <project>/.mcp.json. Preserved that connection. Field args[0] holds a value where APM writes a package path, and APM cannot confirm it wrote it. Restore the package path APM writes (args[0]: ${CLAUDE_PROJECT_DIR:-.}/apm_modules/...) or rename or remove the connection yourself, then retry.
+```
+
+Cause: an entry in `.mcp.json` (or another native MCP config) with the same name was not written by APM, or was edited after APM wrote it. `--force` does not take ownership of it.
+
+Fix: restore the exact value the message names (keep the `:-.` default), or rename or remove the connection, then re-run the same install. Rotate credentials only when the hint names `apm.yml` environment references.
 
 ## Compile
 

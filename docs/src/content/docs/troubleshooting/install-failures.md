@@ -221,7 +221,7 @@ To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
 apm update
 ```
 
-This is the only command that will move pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
+`apm update` (or `apm install --refresh`) moves pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
 
 ### Detecting drift in CI
 
@@ -263,7 +263,7 @@ Bypass the cache and re-resolve refs for a single run:
 apm install --refresh
 ```
 
-This re-fetches every dependency from upstream and rewrites cache entries.
+This re-fetches every dependency from upstream and rewrites cache entries. It also revalidates each marketplace it reads and fails, rather than using cached marketplace data, when one is unreachable; a plain `apm install` keeps using the cache.
 
 Disable the cache entirely (read and write) for one invocation:
 
