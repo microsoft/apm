@@ -213,6 +213,13 @@ except ImportError as e:
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
 
 
+def _scoped_lockfile(scope):
+    """Read the lockfile the scope's marketplace entries were locked in (#3959)."""
+    from ..core.scope import InstallScope, get_apm_dir
+
+    return LockFile.read(get_lockfile_path(get_apm_dir(scope or InstallScope.PROJECT)))
+
+
 def _resolve_package_references(
     packages,
     current_deps,
@@ -229,6 +236,7 @@ def _resolve_package_references(
     updated_packages_out=None,
     protocol_pref=None,
     allow_protocol_fallback: bool | None = None,
+    existing_lockfile=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -265,6 +273,7 @@ def _resolve_package_references(
         marketplace_dep_ref = None
         if "/" not in package and not DependencyReference.is_local_path(package):
             try:
+                from ..marketplace.catalog_origin import require_locked_catalog_origin
                 from ..marketplace.dependency_confusion import admit_marketplace_resolution
                 from ..marketplace.resolver import (
                     parse_marketplace_ref,
@@ -287,6 +296,8 @@ def _resolve_package_references(
                         logger.verbose_detail(
                             f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
                         )
+                    # #3959: a rebound alias fails closed before any catalog I/O.
+                    require_locked_catalog_origin(marketplace_name, plugin_name, existing_lockfile)
                     resolution = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
@@ -578,6 +589,7 @@ def _validate_and_add_packages_to_apm_yml(
             updated_packages_out=updated_packages,
             protocol_pref=protocol_pref,
             allow_protocol_fallback=allow_protocol_fallback,
+            existing_lockfile=_scoped_lockfile(scope),
         )
         dependencies_changed |= settle_cross_section_declarations(
             cross_section, current_deps, other_deps, dry_run=dry_run, logger=logger
