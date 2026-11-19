@@ -92,6 +92,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A multi-package `apm install` where one package fails to resolve or download now integrates nothing, so no untracked files are left behind. (closes #3874, #3989)
 - Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#3989)
 - `apm install -g --target antigravity` deploys skills to `~/.gemini/config/skills/`, read by the Antigravity App, CLI and IDE, and removes APM's old `~/.gemini/antigravity-cli/skills/` copies. (closes #3940, #PRC)
+- `target: agents` warns once per run, and `apm update -g` names the user manifest it read. (#3967, #PRC)
+- `apm uninstall` reports MCP entries it heals out of retired files; `.github/mcp.json` is emptied, never deleted. (#3967, #PRC)
+- `--exclude` accepts runtime names in any case and aliases like `--target` does, and warns on unknown names. (#3967, #PRC)
+- `apm deps list` shows an aliased package on a non-default port under its own `host:port` identity. (#3967, #PRC)
+- `apm install -g --help` lists the user-scope runtimes from the runtime adapters, so it cannot drift. (#3967, #PRC)
+- `apm view plugin@marketplace` no longer suggests installing an entry `apm install` would refuse. (#3967, #PRC)
+- Every command prints the newer-lockfile refusal with the same `[x]` prefix and names the user-scope lockfile by its path. (#3967, #PRC)
+- `apm install --dry-run` shows apm.yml declaration errors install would refuse (such as two hosts sharing one `apm_modules` directory) without `--verbose`. (#3967, #PRC)
+- `apm install --dry-run` previews which MCP servers move from `.github/mcp.json` or `.vscode/mcp.json` to `.mcp.json`. (#3967, #PRC)
+- `apm approve owner/repo` on a package installed with a port names the `host:port/owner/repo` key to approve. (#3967, #PRC)
+- `apm runtime setup codex` writes `wire_api = "chat"` for Codex v0.116 and later, which GitHub Models needs. (#3967, #PRC)
+- The policy docs no longer call `apm-policy.yml` an experimental feature. (#3948, #PRC)
 
 ### Security
 

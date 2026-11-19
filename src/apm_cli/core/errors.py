@@ -60,6 +60,7 @@ class EmptyTargetsListError(TargetResolutionError):
 # Renderer helpers
 # ---------------------------------------------------------------------------
 
+
 def _signal_list() -> str:
     """The harness markers detection scans, derived from its one owner (C5d)."""
     from apm_cli.core.target_detection import SIGNAL_WHITELIST
@@ -67,7 +68,6 @@ def _signal_list() -> str:
     return ", ".join(
         f"{path}/" if kind == "dir" else path for _target, kind, path in SIGNAL_WHITELIST
     )
-
 
 
 def render_no_harness_error(project_root: Path | None = None) -> str:

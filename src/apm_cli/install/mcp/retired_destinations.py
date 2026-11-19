@@ -222,9 +222,7 @@ def preview_retired_mcp_moves(lockfile: Any, project_root: Path) -> dict[str, li
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
-    target_servers = {
-        runtime: set(names) for runtime, names in lockfile.mcp_target_servers.items()
-    }
+    target_servers = {runtime: set(names) for runtime, names in lockfile.mcp_target_servers.items()}
     claims = split_mcp_claims(
         target_servers,
         DeploymentLedgerCodec.mcp_native_hashes(lockfile),
