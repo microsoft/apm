@@ -29,7 +29,7 @@ from apm_cli.core.deployment_state import (
     MaterializationStatus,
     NativePayloadValidation,
 )
-from apm_cli.core.scope import InstallScope
+from apm_cli.core.scope import InstallScope, manifest_root
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
 from apm_cli.hook_contract import walk_hook_commands
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
@@ -1989,7 +1989,8 @@ class HookIntegrator(BaseIntegrator):
         )
         allow_map = None
         if survivor_plan:
-            allow_map = resolve_project_exec_allow_map(project_root, apm_package)
+            root = manifest_root(project_root, user_scope=user_scope)
+            allow_map = resolve_project_exec_allow_map(root, apm_package)
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(

@@ -135,7 +135,7 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
     file there must equal some file :func:`native_plugin_files` covers;
     anything else is content the plugin pin would not bind. The one exception
     is the parser-owned skill-source receipt normalization writes beside the
-    copies: APM metadata, never executable and never deployed (#3290).
+    copies: APM metadata, never executable and never loaded by a harness.
     """
     from apm_cli.deps.plugin_parser import _PLUGIN_SKILL_SOURCES_FILE
 
