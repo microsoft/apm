@@ -482,6 +482,22 @@ class TestCustomPortParsing:
         assert restored.dependencies["github.com:8443/acme/tool"].port == 8443
         assert restored.dependencies["acme/tool"].port is None
 
+    def test_legacy_v3_lock_with_port_blind_parent_still_loads(self):
+        """#3927: a lock written before ports entered the key names its parent port-blind."""
+        from src.apm_cli.deps.lockfile import LockFile
+
+        legacy = (
+            "lockfile_version: '3'\nreplacements: []\ndependencies:\n"
+            "  - {repo_url: acme/base, host: github.com, port: 8443,"
+            " resolved_commit: " + "a" * 40 + ", depth: 1}\n"
+            "  - {repo_url: acme/child, host: github.com, resolved_by: acme/base,"
+            " resolved_commit: " + "b" * 40 + ", depth: 2}\n"
+        )
+        lock = LockFile.from_yaml(legacy)
+        assert lock.dependencies["acme/child"].resolved_by == "github.com:8443/acme/base"
+        rewritten = LockFile.from_yaml(lock.to_yaml())
+        assert rewritten.dependencies["acme/child"].resolved_by == "github.com:8443/acme/base"
+
     def test_lockfile_rejects_garbage_port_string(self):
         restored = LockedDependency.from_dict({"repo_url": "owner/repo", "port": "not-a-number"})
         assert restored.port is None
