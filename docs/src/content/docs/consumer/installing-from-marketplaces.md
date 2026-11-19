@@ -265,6 +265,14 @@ A catalog on port `8443` does not change a package's default HTTPS
 port, even when both URLs share the same hostname and repository path.
 An explicit SSH source stays SSH. Lookup and installation use the same package
 identity; bare cross-repository entries retain their normal dependency defaults.
+On an enterprise (`*.ghe.com`) marketplace, a `type: github` plugin source
+with a bare cross-repository `repo:` would fall back to public `github.com`, so
+APM refuses that entry as a dependency-confusion risk (#1326) before contacting
+the package repository or writing any file, whether it comes from the command
+line, `apm.yml`, a transitive dependency, or `apm update`. Ask the publisher to
+host-qualify the `repo:` field. `apm install` replays entries already in
+`apm.lock.yaml` without re-reading the catalog, so run `apm update` to re-check
+entries an older APM locked.
 Invalid URLs, unsafe subdirectory paths, and malformed `sha` values fail
 before manifest, lockfile, or deployment writes.
 
@@ -289,10 +297,27 @@ APM selects the highest matching package tag using the publisher's
 `source.tag_pattern`. No match is an error; it does not fall back to catalog
 tags or treat the range as a raw ref.
 
+**Locked entries replay the lockfile.** Once `apm.lock.yaml` records a
+marketplace entry, `apm install` and `apm install --frozen` reinstall its locked
+commit without reading the catalog or needing the marketplace registration, so
+catalog edits do not change what installs. Only new entries, entries whose
+`name`, `marketplace` or `version` changed, and `apm update` resolve through
+the catalog. `--frozen` fails for an entry the lockfile does not record.
+Entries the catalog routes through a package registry are the exception: the
+lockfile does not record that registry binding, so they still resolve through
+the catalog.
+
 Marketplace entries can also provide inline LSP or MCP servers when their
 downloaded source has no package manifest. APM validates these
 [catalog-only marketplace packages](../../reference/package-types/#catalog-only-marketplace-package)
-before deployment.
+before deployment. The lockfile does not record those inline definitions, so
+when a package with locked servers has no copy in `apm_modules/` (a fresh
+checkout or cold CI runner), install, including `--frozen`, reads the catalog
+for it. If the lockfile records none of its servers (for example after
+`apm install --only=apm`, or when a root `mcp:` entry overrides the server),
+a cold copy cannot be rebuilt and fails its content-hash check; run
+`apm update` for that package. Lockfile-only replay for these packages is
+planned for 0.38 (#2903).
 
 Marketplace publishers can route an entry through a configured APM package
 registry with the entry's `registry` and semver `version` fields. Enable the
@@ -333,9 +358,23 @@ repository read access covers all of them.
 local-path source in `apm.lock.yaml`; lockfiles produced this way are
 machine-specific -- do not commit them into a shared repo. Remote
 package entries in the same local marketplace remain remote, host-qualified
-dependencies. Remote `marketplace.json` installs record `source_url` and
-`source_digest` provenance. See
+dependencies. Installs from a remote catalog (hosted `marketplace.json` or
+Git) record the catalog's origin as `source_url` plus a `source_digest`; local
+catalogs record neither. See
 [lockfile reference](../../reference/lockfile-spec/).
+
+**Aliases are machine-local.** A name like `company` only means something on
+the machine that registered it. If `company` later points at a different
+catalog, `apm install` keeps replaying the locked catalog, and `apm update` (or
+any other re-resolution of an object-form `marketplace: company` entry) fails
+instead of switching, naming the locked and current origins.
+Alias names match case-insensitively. Re-register the locked origin with
+`apm marketplace add <locked-origin> --name company` to keep it. To switch on
+purpose, remove the entry from `apm.yml`, run `apm install`, add it back and
+run `apm install` again. The check compares origins only, so moving the catalog
+to another `--path` in the same repository is not detected. Registering a
+second name for an already registered catalog (same origin and `--path`)
+succeeds with a `[!]` warning.
 
 ## Declare marketplaces in your user manifest
 

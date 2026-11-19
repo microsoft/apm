@@ -10,8 +10,8 @@
     },
     {
       "id": "marketplace-locked-selection",
-      "decision": "Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency)",
-      "owner": "drift.py (marketplace_ref_mismatch, revision_pin_mismatch); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence",
+      "decision": "Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency), and lock-first replay vs re-resolve of marketplace declarations",
+      "owner": "drift.py (marketplace_ref_mismatch, revision_pin_mismatch, locked_marketplace_row, locked_marketplace_replay); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence; deps/apm_resolver.py (_resolve_marketplace_dep) asks locked_marketplace_replay before any catalog I/O",
       "selectors": [
         "src/apm_cli/policy/ci_checks.py",
         "src/apm_cli/install/phases/lockfile.py"
@@ -19,6 +19,17 @@
       "guards": [
         "marketplace-integrations-locked-evidence",
         "transport-platform-revision-pin-lock-consistency"
+      ]
+    },
+    {
+      "id": "marketplace-catalog-origin",
+      "decision": "Which catalog a marketplace alias names: canonical origin recorded as lock source_url/source_digest for every remote catalog kind, fail-closed alias rebind against the lock, and duplicate-origin registration warning",
+      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, registrations_sharing_origin) compares lock and registrations; consumers: deps/apm_resolver.py _resolve_marketplace_dep, marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
+      "selectors": [
+        "src/apm_cli/marketplace/catalog_origin.py"
+      ],
+      "guards": [
+        "marketplace-integrations-catalog-origin"
       ]
     },
     {
@@ -37,6 +48,15 @@
         "src/apm_cli/marketplace/registration.py"
       ],
       "guards": ["marketplace-integrations-source-admission"]
+    },
+    {
+      "id": "marketplace-dependency-confusion-admission",
+      "decision": "Whether a resolved marketplace entry may be installed despite the #1326 bare cross-repo dependency-confusion sentinel",
+      "owner": "marketplace/dependency_confusion.py (admit_marketplace_resolution); required consumers are enforced by guard marketplace-integrations-dependency-confusion",
+      "selectors": [
+        "src/apm_cli/marketplace/dependency_confusion.py"
+      ],
+      "guards": ["marketplace-integrations-dependency-confusion"]
     },
     {
       "id": "marketplace-entry-ref-verification",

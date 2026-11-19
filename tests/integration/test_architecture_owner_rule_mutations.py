@@ -1516,6 +1516,19 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Catalog-only marketplace manifest materialization loses its owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-catalog-origin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old=(
+            "require_locked_catalog_origin(\n"
+            "            dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, "
+            "self._existing_lockfile\n"
+            "        )"
+        ),
+        new="None",
+        intent="A rebound marketplace alias resolves without comparing the locked catalog origin.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-claude-ownership",
         rule_id="marketplace-integrations-claude-ownership",
         path="src/apm_cli/native_plugins/settings.py",
@@ -1538,6 +1551,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def synchronize_copilot_plugins(",
         new="def synchronize_copilot_plugins_X(",
         intent="Copilot marketplace ownership loses its single synchronization owner.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-dependency-confusion",
+        rule_id="marketplace-integrations-dependency-confusion",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="        admit_marketplace_resolution(resolution)\n",
+        new="",
+        intent="apm.yml and transitive marketplace entries skip the #1326 admission.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-legacy-skill-membership",

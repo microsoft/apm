@@ -320,6 +320,8 @@ On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not vi
 
 **Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
 
+**Marketplace entries replay their lock row.** A `{name, marketplace}` dependency names no repository in `apm.yml`; once locked, install takes its `repo_url`, `host` and `resolved_commit` from `apm.lock.yaml` without asking the catalog. A lock diff can therefore change where it comes from while `apm.yml` stays unchanged, so review those rows too. Org policy still checks the replayed source, and `apm update` resolves the catalog again.
+
 See the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity) for field details.
 
 ## Inventory export (SBOM)

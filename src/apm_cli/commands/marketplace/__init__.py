@@ -554,6 +554,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             path=detected_path,
         )
         _warn_if_replacing_catalog(logger, final_source, explicit_path is not None)
+        _warn_if_duplicate_origin(logger, final_source)
         add_marketplace(final_source)
 
         logger.success(
@@ -628,6 +629,18 @@ def _warn_if_replacing_catalog(
                 symbol="warning",
             )
         return
+
+
+def _warn_if_duplicate_origin(logger: CommandLogger, source: MarketplaceSource) -> None:
+    """Warn when another alias already registers the same catalog (#3912)."""
+    from ...marketplace.catalog_origin import (
+        duplicate_origin_warning,
+        registrations_sharing_origin,
+    )
+    from ...marketplace.registry import get_registered_marketplaces
+
+    for existing in registrations_sharing_origin(source, get_registered_marketplaces()):
+        logger.warning(duplicate_origin_warning(source, existing), symbol="warning")
 
 
 def _display_source_kind(kind: str, is_direct_url: bool) -> str:

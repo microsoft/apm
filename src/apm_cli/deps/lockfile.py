@@ -12,7 +12,7 @@ import re
 from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -1077,6 +1077,21 @@ class LockedDependency:
             selected.reference = self.resolved_ref or selected.reference
         return selected
 
+    def to_edge_reference(self, edge: DependencyReference) -> DependencyReference:
+        """Project this row's coordinates under a declaring edge's own selection.
+
+        A marketplace edge stands for the locked coordinate it resolved to;
+        its alias and skill/target selection stay the edge's, never the row's
+        merged record.
+        """
+        return replace(
+            self.to_dependency_ref(),
+            alias=edge.alias,
+            skill_subset=edge.skill_subset,
+            target_subset=edge.target_subset,
+            subset_pairings=edge.subset_pairings,
+        )
+
     def selection(self) -> SkillTargetSelection:
         """Decode this entry's skills x targets selection through the owner.
 
@@ -1228,6 +1243,20 @@ class LockFile:
         multiple rows share the same marketplace provenance.
         """
         return self.marketplace_index().get((marketplace_name, plugin_name))
+
+    def marketplace_rows(self, marketplace_name: str, plugin_name: str) -> list[LockedDependency]:
+        """Return every row recorded for an alias/plugin pair, ambiguous ones included.
+
+        Matching is case-insensitive, like the registry and catalog lookups the
+        alias resolves through, so a recased alias cannot hide a locked row.
+        """
+        alias, plugin = marketplace_name.casefold(), plugin_name.casefold()
+        return [
+            dep
+            for dep in self.dependencies.values()
+            if (dep.discovered_via or "").casefold() == alias
+            and (dep.marketplace_plugin_name or "").casefold() == plugin
+        ]
 
     def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
         """Rename one locally deployed path and carry its content hash."""

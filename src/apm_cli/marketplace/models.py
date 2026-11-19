@@ -6,6 +6,8 @@ All dataclasses are frozen for thread-safety.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from copy import deepcopy
@@ -564,6 +566,20 @@ def _parse_plugin_entry(
         ),
         None,
     )
+
+
+def catalog_digest(data: dict[str, Any]) -> str:
+    """Return the ``sha256:`` digest of a parsed catalog's canonical JSON.
+
+    ``client._parse_catalog`` records it as ``source_digest`` for Git-hosted
+    catalogs, whose fetch path has no raw response bytes. Keys are sorted and
+    whitespace is removed, so the same catalog content always yields the same
+    digest.
+    """
+    payload = json.dumps(
+        data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+    )
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def parse_marketplace_json(
