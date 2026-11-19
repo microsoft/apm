@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -22,6 +22,7 @@ from apm_cli.deps.path_anchoring import (
     build_local_parent_index,
     resolve_local_dep_dir,
 )
+from apm_cli.deps.plugin_root_render import plugin_root_of
 from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
@@ -72,6 +73,11 @@ class CurrentMcpConfigView:
     # package's display name) this is an entry the user can remove; servers
     # whose chain is ambiguous or unknown are absent.
     brought_in_by: Mapping[str, str] = field(default_factory=dict)
+    # Server name -> materialized package root of an authored
+    # ``${CLAUDE_PLUGIN_ROOT}``. ``configs`` keep the placeholder (#3825); this
+    # only lets ``diff`` accept a lock recorded before that, already expanded.
+    plugin_roots: Mapping[str, str] = field(default_factory=dict)
+    project_root: Path | None = None
 
     @classmethod
     def derive(
@@ -143,6 +149,12 @@ class CurrentMcpConfigView:
                 for name, key in brought_in_by.items()
                 if key is not None and name not in root_names
             },
+            plugin_roots={
+                dependency.name: root
+                for dependency in dependencies
+                if (root := plugin_root_of(dependency)) is not None
+            },
+            project_root=project_root,
         )
 
     def omission_evidence(self, lockfile: LockFile) -> dict[str, dict[str, str]]:
@@ -210,9 +222,42 @@ class CurrentMcpConfigView:
                 pending.add(server)
         return frozenset(pending)
 
+    def _legacy_equivalent(self, name: str, current: Any, stored: Any) -> bool:
+        """Whether *stored* is *current* recorded with its plugin root expanded."""
+        from apm_cli.deps.plugin_root_render import legacy_absolute_equivalent
+
+        return legacy_absolute_equivalent(
+            current,
+            stored,
+            plugin_root=self.plugin_roots.get(name),
+            project_root=self.project_root,
+        )
+
     def diff(self, stored_configs: Mapping[str, Mapping[str, Any]]) -> McpConfigDiff:
         """Compare this current view with a stored lockfile baseline."""
-        return McpConfigDiff.between(self.configs, stored_configs)
+        return McpConfigDiff.between(
+            self.configs, stored_configs, equivalent=self._legacy_equivalent
+        )
+
+    def normalize_stored_configs(
+        self, stored_configs: Mapping[str, Mapping[str, Any]]
+    ) -> dict[str, Any]:
+        """Read a pre-#3825 baseline in the placeholder form of the same declaration.
+
+        Native ownership checks then render the stored baseline per target the
+        way the current declaration renders, so an entry APM rewrote in its
+        portable form stays provably APM-managed.
+        """
+        normalized = dict(stored_configs)
+        for name, current in self.configs.items():
+            stored = stored_configs.get(name)
+            if (
+                stored is not None
+                and stored != current
+                and self._legacy_equivalent(name, current, stored)
+            ):
+                normalized[name] = dict(current)
+        return normalized
 
 
 @dataclass(frozen=True)
@@ -228,13 +273,23 @@ class McpConfigDiff:
         cls,
         current: Mapping[str, Mapping[str, Any]],
         stored: Mapping[str, Mapping[str, Any]],
+        *,
+        equivalent: Callable[[str, Any, Any], bool] | None = None,
     ) -> McpConfigDiff:
-        """Partition changed, source-only, and lock-only server names."""
+        """Partition changed, source-only, and lock-only server names.
+
+        *equivalent* may accept a differing stored value as the same declaration.
+        """
         current_names = frozenset(current)
         stored_names = frozenset(stored)
         shared = current_names & stored_names
         return cls(
-            changed=frozenset(name for name in shared if current[name] != stored[name]),
+            changed=frozenset(
+                name
+                for name in shared
+                if current[name] != stored[name]
+                and not (equivalent is not None and equivalent(name, current[name], stored[name]))
+            ),
             source_only=current_names - stored_names,
             lock_only=stored_names - current_names,
         )

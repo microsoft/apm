@@ -9,10 +9,14 @@ apm.lock.yaml and the locked sources do:
   (the Renovate flow, #3883) adopts committed skill output that is
   byte-identical to what the currently locked version renders, then installs
   the new version. A hand-edited committed file still fails closed.
+* Claude plugin ``${CLAUDE_PLUGIN_ROOT}`` MCP/LSP state recorded portably
+  (#3825): a teammate's clone at another path replays ``apm install
+  --frozen`` and ``apm audit --ci`` without rewriting committed files.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -22,7 +26,13 @@ from pathlib import Path
 import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.integration._lockfile_chain_kit import output, skill, write
+from tests.integration._lockfile_chain_kit import output, skill
+from tests.integration._path_corner_world_kit import (
+    CornerWorld,
+    remote_url,
+    tree_bytes,
+    write,
+)
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -222,3 +232,91 @@ def test_ref_bump_on_fresh_clone_adopts_locked_output_and_fails_closed_on_edits(
     assert _REFUSAL in refusal
     assert edited.read_text(encoding="ascii") == "Local edits.\n"
     assert (edited_clone / "apm.lock.yaml").read_bytes() == lock_before
+
+
+_ROOT = "${CLAUDE_PLUGIN_ROOT}"
+_COMMITTED = (".git", "apm_modules")
+
+
+def _claude_plugin(root: Path, name: str) -> Path:
+    write(
+        root / ".claude-plugin/plugin.json",
+        json.dumps({"name": name, "version": "1.0.0", "description": "plugin root fixture"}),
+    )
+    write(
+        root / ".mcp.json",
+        json.dumps(
+            {
+                "mcpServers": {
+                    f"{name}-db": {
+                        "command": "node",
+                        "args": [f"{_ROOT}/scripts/server.js"],
+                        "env": {"DATA": f"{_ROOT}/data"},
+                    }
+                }
+            }
+        ),
+    )
+    write(
+        root / ".lsp.json",
+        json.dumps(
+            {
+                "lspServers": {
+                    f"{name}-ls": {
+                        "command": f"{_ROOT}/scripts/server.js",
+                        "args": ["--stdio"],
+                        "extensionToLanguage": {f".{name}": name},
+                    }
+                }
+            }
+        ),
+    )
+    write(root / "scripts/server.js", "// inert fixture\n")
+    return root
+
+
+def test_plugin_root_mcp_and_lsp_replay_frozen_in_a_moved_clone(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = CornerWorld.create(tmp_path, apm_binary_path)
+    world.publish("synth", _claude_plugin(world.isolated.package_root / "synth", "synth"))
+    _claude_plugin(world.isolated.work_root / "local-synth", "loco")
+    project = world.project(
+        "first clone",
+        targets=("claude",),
+        deps=(remote_url("synth"), {"path": "../local-synth"}),
+    )
+    (project / ".claude").mkdir()
+    world.apm(project, "install", "--no-policy")
+
+    lock = world.lock(project)
+    assert lock["mcp_configs"]["synth-db"]["args"] == [f"{_ROOT}/scripts/server.js"]
+    assert lock["mcp_configs"]["loco-db"]["env"] == {"DATA": f"{_ROOT}/data"}
+    assert lock["lsp_configs"]["synth-ls"]["command"] == f"{_ROOT}/scripts/server.js"
+    servers = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert servers["synth-db"]["args"] == [
+        "${CLAUDE_PROJECT_DIR:-.}/apm_modules/acme/synth/scripts/server.js"
+    ]
+    assert servers["loco-db"]["env"] == {
+        "DATA": "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/local-synth/data"
+    }
+    lsp_plugin = project / ".claude/skills/apm-lsp/.claude-plugin/plugin.json"
+    lsp = json.loads(lsp_plugin.read_text(encoding="utf-8"))["lspServers"]
+    assert lsp["synth-ls"]["command"] == (
+        "${CLAUDE_PROJECT_DIR}/apm_modules/acme/synth/scripts/server.js"
+    )
+    committed = tree_bytes(project, exclude=_COMMITTED)
+    assert str(project) not in "".join(
+        text.decode("utf-8", "replace") for text in committed.values()
+    )
+
+    moved = world.isolated.work_root / "teammate clone"
+    shutil.copytree(project, moved, symlinks=True)
+    shutil.rmtree(moved / "apm_modules")
+
+    world.apm(moved, "install", "--frozen", "--no-policy")
+    world.apm(moved, "audit", "--ci", "--no-policy")
+    assert tree_bytes(moved, exclude=_COMMITTED) == committed
+
+    world.apm(moved, "install", "--no-policy")
+    assert tree_bytes(moved, exclude=_COMMITTED) == committed

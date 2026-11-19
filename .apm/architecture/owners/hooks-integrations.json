@@ -70,6 +70,13 @@
       "guards": ["hooks-integrations-mcp-declaration-scope", "hooks-integrations-mcp-omission-evidence"]
     },
     {
+      "id": "mcp-lsp-plugin-root-render",
+      "decision": "Portable ${CLAUDE_PLUGIN_ROOT} in MCP/LSP declarations: recorded and compared in authored form, legacy absolute lock equivalence, and per-target project-root render",
+      "owner": "deps/plugin_root_render.py (bind_plugin_roots, render_plugin_root, finalize_project_root, legacy_absolute_equivalent)",
+      "selectors": ["src/apm_cli/deps/plugin_root_render.py"],
+      "guards": ["hooks-integrations-plugin-root-render"]
+    },
+    {
       "id": "mcp-package-launcher",
       "decision": "MCP package launcher selection, argv shape (container and non-container), and config-key derivation; MCP JSON config parse-for-update (never rewrite an unparsable file) and atomic write",
       "owner": "adapters/client/base.py (MCPClientAdapter, including determine_config_key)",

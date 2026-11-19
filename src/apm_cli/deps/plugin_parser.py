@@ -526,13 +526,9 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
             raise ValueError("Present root plugin.json must declare a non-empty name")
         manifest["name"] = plugin_path.name
 
-    # Keep the generated manifest portable. APMPackage expands the placeholder
-    # when it loads the manifest, using the package's current published root.
-    return synthesize_apm_yml_from_plugin(
-        plugin_path,
-        manifest,
-        substitute_plugin_root=False,
-    )
+    # The generated manifest keeps ${CLAUDE_PLUGIN_ROOT}; each target render
+    # expands it (deps/plugin_root_render.py), so recorded state is portable.
+    return synthesize_apm_yml_from_plugin(plugin_path, manifest)
 
 
 def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, Any]) -> None:
@@ -578,7 +574,6 @@ def synthesize_apm_yml_from_plugin(
     output_path: Path | None = None,
     map_artifacts: bool = True,
     merge_existing: bool = True,
-    substitute_plugin_root: bool = True,
     warn_on_invalid_servers: bool = True,
 ) -> Path:
     """Synthesize apm.yml from plugin metadata.
@@ -600,7 +595,6 @@ def synthesize_apm_yml_from_plugin(
         output_path: Optional staged manifest destination.
         map_artifacts: Whether to copy plugin artifacts into ``.apm``.
         merge_existing: Whether to preserve an existing package manifest.
-        substitute_plugin_root: Whether to resolve plugin-root placeholders.
         warn_on_invalid_servers: Whether skipped server entries emit warnings.
 
     Returns:
@@ -620,7 +614,6 @@ def synthesize_apm_yml_from_plugin(
     mcp_servers = _extract_mcp_servers(
         plugin_path,
         manifest,
-        substitute_plugin_root=substitute_plugin_root,
         warn_on_invalid=warn_on_invalid_servers,
     )
     if mcp_servers:
@@ -633,11 +626,7 @@ def synthesize_apm_yml_from_plugin(
             manifest["_mcp_deps"] = mcp_deps
 
     # Extract LSP servers from plugin and convert to dependency format
-    lsp_servers = _extract_lsp_servers(
-        plugin_path,
-        manifest,
-        substitute_plugin_root=substitute_plugin_root,
-    )
+    lsp_servers = _extract_lsp_servers(plugin_path, manifest)
     if lsp_servers:
         lsp_deps = lsp_servers_to_apm_deps(
             lsp_servers,
@@ -697,7 +686,6 @@ def _extract_mcp_servers(
     plugin_path: Path,
     manifest: dict[str, Any],
     *,
-    substitute_plugin_root: bool = True,
     warn_on_invalid: bool = True,
 ) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
@@ -715,13 +703,11 @@ def _extract_mcp_servers(
 
     Security: symlinks are skipped, JSON parse errors are logged as warnings.
 
-    ``${CLAUDE_PLUGIN_ROOT}`` in string values is replaced with the absolute
-    plugin path.
+    ``${CLAUDE_PLUGIN_ROOT}`` is kept as authored; target renders expand it.
 
     Args:
         plugin_path: Root of the plugin directory.
         manifest: Parsed plugin.json dict.
-        substitute_plugin_root: Whether to resolve plugin-root placeholders.
         warn_on_invalid: Whether an MCP file with no usable server warns.
 
     Returns:
@@ -757,11 +743,6 @@ def _extract_mcp_servers(
                 servers = _read_mcp_json(candidate, logger, plugin_path=plugin_path, **read_options)
                 if servers:
                     break
-
-    # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers and substitute_plugin_root:
-        abs_root = str(plugin_path.resolve())
-        servers = _substitute_plugin_root(servers, abs_root, logger)
 
     return servers
 
@@ -834,16 +815,6 @@ def _read_mcp_json(
             logger,
         )
     return servers
-
-
-def _substitute_plugin_root(
-    servers: dict[str, Any], abs_root: str, logger: logging.Logger
-) -> dict[str, Any]:
-    """Replace ``${CLAUDE_PLUGIN_ROOT}`` in server config string values."""
-    result = resolve_plugin_root_placeholders(servers, Path(abs_root))
-    if result != servers:
-        logger.info("Substituted ${CLAUDE_PLUGIN_ROOT} with %s", abs_root)
-    return result
 
 
 def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
@@ -969,8 +940,6 @@ def _mcp_servers_to_apm_deps(
 def _extract_lsp_servers(
     plugin_path: Path,
     manifest: dict[str, Any],
-    *,
-    substitute_plugin_root: bool = True,
 ) -> dict[str, Any]:
     """Extract LSP server definitions from a plugin manifest.
 
@@ -983,8 +952,7 @@ def _extract_lsp_servers(
 
     Security: symlinks are skipped, JSON parse errors are logged as warnings.
 
-    ``${CLAUDE_PLUGIN_ROOT}`` in string values is replaced with the absolute
-    plugin path.
+    ``${CLAUDE_PLUGIN_ROOT}`` is kept as authored; target renders expand it.
 
     Args:
         plugin_path: Root of the plugin directory.
@@ -1013,11 +981,6 @@ def _extract_lsp_servers(
                 servers = _read_lsp_json(candidate, logger)
                 if servers:
                     break
-
-    # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers and substitute_plugin_root:
-        abs_root = str(plugin_path.resolve())
-        servers = _substitute_plugin_root(servers, abs_root, logger)
 
     return servers
 
