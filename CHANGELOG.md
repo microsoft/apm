@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 - `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
+- `targets:` on `dependencies.mcp` entries limits which targets get each server, is never written into native config, and target-scoped installs keep servers declared elsewhere. (closes #2606, #PRB)
 
 ### Changed
 
@@ -85,6 +86,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After `apm deny`, `--frozen` names the executables gate, `apm approve` clears the deny and says so, and `apm deny --user` works outside a project. (closes #3957, #3988)
 - `apm targets` lists the targets `apm.yml` declares as active, as install resolves them. (closes #3792, #3988)
 - Messages name `targets:`, `executables.allow` and "marketplace", and generated `apm.yml` headers and target errors no longer list the deprecated `vscode`. (#3988)
+- Local-bundle MCP servers pass `apm audit --ci` and `apm install --frozen`, and survive installing or uninstalling other packages. (closes #3955, #PRB)
+- `apm audit --ci` no longer fails on a correct lock when `apm_modules` holds stale copies; it replays the locked packages as install does. (closes #3964, #PRB)
+- `apm pack` on a plugin-only package prints the `target:`, `vscode` and `compilation.target` deprecation warnings like every other command. (closes #3965, #PRB)
+- A multi-package `apm install` where one package fails to resolve or download now integrates nothing, so no untracked files are left behind. (closes #3874, #PRB)
+- Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#PRB)
 
 ### Security
 

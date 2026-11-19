@@ -9,7 +9,6 @@ installs and locks it normally.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -49,15 +48,11 @@ def test_failed_direct_dependency_integrates_nothing(tmp_path, apm_binary_path) 
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
     project = isolated.work_root / "consumer"
     project.mkdir(parents=True)
-    dump_yaml(
-        {"name": "consumer", "version": "1.0.0", "targets": ["claude"]}, project / "apm.yml"
-    )
+    dump_yaml({"name": "consumer", "version": "1.0.0", "targets": ["claude"]}, project / "apm.yml")
     (project / ".claude").mkdir()
     install = ("install", "--no-policy", "--parallel-downloads", "0")
 
-    failed = runner.run(
-        (*install, "test/good#v1", "test/notapkg#v1"), cwd=project, env=env
-    )
+    failed = runner.run((*install, "test/good#v1", "test/notapkg#v1"), cwd=project, env=env)
 
     assert failed.returncode != 0, output(failed)
     assert not (project / ".claude/skills/good").exists(), output(failed)

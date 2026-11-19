@@ -574,8 +574,12 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
     # Apply barrier (#3874): a failed direct dependency stops the install before
     # integration, so a failed run never deploys untracked files.
     pipeline_lines = _lines(provider.file_facts("src/apm_cli/install/pipeline.py"))
-    barrier = [n for n, line in enumerate(pipeline_lines) if "_fail_before_integration(ctx, " in line]
-    integrate = [n for n, line in enumerate(pipeline_lines) if "_run_integration_phase(ctx)" in line]
+    barrier = [
+        n for n, line in enumerate(pipeline_lines) if "_fail_before_integration(ctx, " in line
+    ]
+    integrate = [
+        n for n, line in enumerate(pipeline_lines) if "_run_integration_phase(ctx)" in line
+    ]
     if len(barrier) != 1 or not integrate or barrier[0] > min(integrate):
         findings.append(
             _summary(
