@@ -1204,14 +1204,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm pack stops refusing a lockfile written by a newer APM.",
     ),
     MutationCase(
-        guard_id="contracts-tooling-lockfile-generator-gate",
-        rule_id="contracts-tooling-lockfile-generator-gate",
-        path="src/apm_cli/commands/prune.py",
-        old='require_current_cli(Path.cwd(), command="apm prune")',
-        new='check_current_cli(Path.cwd(), command="apm prune")',
-        intent="apm prune renders its refusal with click's Error: prefix instead of [x].",
-    ),
-    MutationCase(
         guard_id="contracts-tooling-lockfile-generator-stamp",
         rule_id="contracts-tooling-lockfile-generator-stamp",
         path="src/apm_cli/deps/lockfile.py",
@@ -4509,6 +4501,37 @@ def test_mcp_dependency_target_selection_guard_rejects_mutations(
 def test_exec_decision_guard_rejects_second_readers(path: str, old: str, new: str) -> None:
     """#3990/#3991: one owner decides exec status and allowed types; one compares them."""
     rule_id = "install-deployment-executable-trust-context"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/lock.py",
+            'require_current_cli(project_root, command="apm lock")',
+            'check_current_cli(project_root, command="apm lock")',
+            id="command-renders-its-own-refusal",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile_generator.py",
+            "        raise refusal_exit(exc) from exc",
+            "        raise RuntimeError(str(exc)) from exc",
+            id="gate-skips-the-shared-renderer",
+        ),
+    ],
+)
+def test_lockfile_refusal_guard_keeps_one_renderer(path: str, old: str, new: str) -> None:
+    """#3967: every command renders the newer-lockfile refusal through one owner."""
+    rule_id = "contracts-tooling-lockfile-generator-gate"
     source = _source(path)
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)
