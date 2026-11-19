@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Starting with this release, APM refuses to change, replay, audit or pack a lockfile written by a newer APM, naming both versions and how to upgrade. (#3916)
 - `apm install --refresh`, `apm update` and `apm marketplace update` revalidate marketplace catalogs and fail rather than use stale cached data; plain installs keep the cache. (#3910)
 - `apm self-update` on Windows no longer fails in `Expand-Archive` when run from PowerShell 7; the installer also falls back to .NET zip extraction. (#3931)
+- `apm install <bundle>` warns, naming both versions, when the bundle's lockfile was written by a newer APM; the install continues. (#3978)
 
 ## [0.36.1] - 2026-11-18
 
