@@ -390,12 +390,16 @@ class LockfileBuilder:
         A run whose targets exclude Claude did not evaluate Claude admission, so
         an existing record is carried forward instead of retiring the plugin.
         """
+        from apm_cli.claude_plugins.registrar import marketplace_binding
         from apm_cli.native_plugins.record import NativePluginRecord
 
-        for dep_key, plugin in (getattr(self.ctx, "claude_native_plugins", None) or {}).items():
+        plugins = getattr(self.ctx, "claude_native_plugins", None) or {}
+        if plugins:
+            name, path = marketplace_binding(self.ctx.apm_modules_dir.parent, self.ctx.project_root)
+        for dep_key, plugin in plugins.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
-                    plugin.name, plugin.bundle_hash, ("claude",)
+                    plugin.name, plugin.bundle_hash, ("claude",), name, path
                 )
         existing = getattr(self.ctx, "existing_lockfile", None)
         if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):

@@ -30,6 +30,7 @@ from apm_cli.native_plugins.layout import (
 from apm_cli.native_plugins.record import NativePluginRecord, lock_native_plugins
 from apm_cli.native_plugins.settings import (
     BINDING_CONFLICT,
+    BINDING_MOVED,
     ENABLED_KEY,
     MARKETPLACES_KEY,
     PREVIOUS_LOCK_MISSING,
@@ -63,6 +64,11 @@ def marketplace_name(apm_home: Path) -> str:
     """Deterministic user-scope marketplace name, unique per APM home (req-na-007)."""
     digest = hashlib.sha256(str(Path(apm_home).resolve()).encode("utf-8")).hexdigest()
     return f"apm-u-{digest[:8]}"
+
+
+def marketplace_binding(apm_home: Path, deploy_root: Path) -> tuple[str, str]:
+    """``(marketplace name, absolute profile root)`` for one user-scope APM home."""
+    return marketplace_name(apm_home), str(plugins_root(deploy_root))
 
 
 def claude_settings_path() -> Path:
@@ -195,10 +201,20 @@ def reconcile_claude_plugins(
     root = plugins_root(deploy_root or get_deploy_root(InstallScope.USER))
     settings_path = claude_settings_path()
     marketplace = marketplace_name(modules_dir.parent)
+    binding = (marketplace, str(root))
     created: list[str] = []
     prior = dict(previous or {})
     prior_names = {own.record.name for own in prior.values()}
+    prior_bindings = {own.record.binding for own in prior.values()}
     try:
+        if prior_bindings and prior_bindings != {binding}:
+            raise NativeSettingsError(
+                "The previous apm.lock.yaml declared native Claude plugins under "
+                + ", ".join(f"{name} at {path}" for name, path in sorted(prior_bindings))
+                + f"; this APM home now uses {marketplace} at {root}. APM changed nothing. "
+                "Remove the old entries from Claude settings and ~/.agents/plugins, delete "
+                "apm.lock.yaml, then run 'apm install --global' again."
+            )
         _migrate_legacy_registration(modules_dir, settings_path, logger)
         following = native_ownership(lockfile) if lockfile is not None else {}
         if not following and not prior_names:
@@ -221,8 +237,11 @@ def reconcile_claude_plugins(
                 root,
                 frozenset(declared),
                 None if previous is None else frozenset(prior_names),
+                next(iter(prior_bindings)) if prior_bindings else None,
             ),
         )
+        if BINDING_MOVED in change.diagnostics:
+            raise NativeSettingsError(f"{settings_path}: the marketplace binding moved.")
         if BINDING_CONFLICT in change.diagnostics:
             raise NativeSettingsError(
                 f"{settings_path} already declares {MARKETPLACES_KEY}.{marketplace} with "
@@ -264,13 +283,15 @@ def _declared_plugins(
     """Verify every plugin the next lock activates; refuse collisions."""
     prior_names = {own.record.name for own in prior.values()}
     declared: dict[str, tuple[str, NativeOwnership, Path]] = {}
+    folded: dict[str, str] = {}
     for key, own in sorted(following.items()):
         name = own.record.name
-        if name in declared:
+        if name.casefold() in folded:
             raise ClaudeNativePluginError(
-                f"Native Claude plugin name collision: '{name}' is declared by both "
-                f"{declared[name][0]} and {key}. Exclude Claude from one of them."
+                f"Native Claude plugin name collision: '{name}' ({key}) and "
+                f"'{folded[name.casefold()]}' differ only by case. Exclude Claude from one."
             )
+        folded[name.casefold()] = name
         source = _verify_next(key, own, lockfile, modules_dir, prepared, prior)
         existing = root / name
         if (

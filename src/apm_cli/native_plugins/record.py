@@ -30,6 +30,10 @@ class NativePluginRecord:
     name: str
     fingerprint: str
     harnesses: tuple[str, ...]
+    marketplace: str
+    """Settings marketplace name the plugin was declared under (req-na-007)."""
+    marketplace_path: str
+    """Directory that marketplace pointed at: the binding retries must match."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or _NAME.fullmatch(self.name) is None:
@@ -41,6 +45,10 @@ class NativePluginRecord:
             raise NativePluginRecordError("native plugin harnesses must be sorted and unique")
         if not set(harnesses) <= KNOWN_HARNESSES:
             raise NativePluginRecordError(f"unknown native plugin harness in {harnesses}")
+        if not isinstance(self.marketplace, str) or _NAME.fullmatch(self.marketplace) is None:
+            raise NativePluginRecordError("invalid native plugin marketplace name")
+        if not isinstance(self.marketplace_path, str) or not self.marketplace_path:
+            raise NativePluginRecordError("native plugin marketplace path is required")
 
     @property
     def root(self) -> str:
@@ -53,18 +61,29 @@ class NativePluginRecord:
             "root": self.root,
             "fingerprint": self.fingerprint,
             "harnesses": list(self.harnesses),
+            "marketplace": {"name": self.marketplace, "path": self.marketplace_path},
         }
+
+    @property
+    def binding(self) -> tuple[str, str]:
+        return (self.marketplace, self.marketplace_path)
 
     @classmethod
     def from_lock_data(cls, data: Any) -> NativePluginRecord:
-        if not isinstance(data, dict) or set(data) != {"name", "root", "fingerprint", "harnesses"}:
+        keys = {"name", "root", "fingerprint", "harnesses", "marketplace"}
+        if not isinstance(data, dict) or set(data) != keys:
             raise NativePluginRecordError(
-                "native_plugin must map name, root, fingerprint, harnesses"
+                "native_plugin must map name, root, fingerprint, harnesses, marketplace"
             )
         harnesses = data["harnesses"]
         if not isinstance(harnesses, list) or not all(isinstance(h, str) for h in harnesses):
             raise NativePluginRecordError("native_plugin harnesses must be a list of names")
-        record = cls(data["name"], data["fingerprint"], tuple(harnesses))
+        binding = data["marketplace"]
+        if not isinstance(binding, dict) or set(binding) != {"name", "path"}:
+            raise NativePluginRecordError("native_plugin marketplace must map name and path")
+        record = cls(
+            data["name"], data["fingerprint"], tuple(harnesses), binding["name"], binding["path"]
+        )
         if data["root"] != record.root:
             raise NativePluginRecordError(f"native_plugin root must be {record.root}")
         return record

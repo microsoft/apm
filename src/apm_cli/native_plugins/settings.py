@@ -31,6 +31,7 @@ class NativeSettingsError(ValueError):
 
 
 BINDING_CONFLICT = "binding-conflict"
+BINDING_MOVED = "binding-moved"
 PREVIOUS_LOCK_MISSING = "previous-lock-missing"
 
 
@@ -43,6 +44,8 @@ class SettingsDeclaration:
     plugins: frozenset[str]
     owned_plugins: frozenset[str] | None
     """Plugins the previous lockfile activated; ``None`` when there was no previous lock."""
+    previous_binding: tuple[str, str] | None = None
+    """``(name, path)`` the previous lock's entries were declared under, if any."""
 
     @property
     def marketplace_value(self) -> dict[str, Any]:
@@ -92,15 +95,20 @@ def apply_declaration(
 ) -> SettingsChange:
     """Update *document* in place: add what is needed, retire only what APM produced.
 
-    A same-name marketplace with another source is a binding conflict: nothing
-    changes. Without a previous lock nothing is removed, and existing entries
-    under APM's name are reported rather than adopted or deleted.
+    A binding that moved or was renamed since the previous lock, or a same-name
+    marketplace with another source, changes nothing. Without a previous lock
+    nothing is removed, and existing entries under APM's name are reported
+    rather than adopted or deleted.
     """
     marketplaces = _section(document, MARKETPLACES_KEY, path)
     enabled = _section(document, ENABLED_KEY, path)
     change = SettingsChange()
     name = declaration.marketplace
     current = marketplaces.get(name)
+    binding = (name, str(declaration.directory))
+    if declaration.previous_binding is not None and declaration.previous_binding != binding:
+        change.diagnostics.append(BINDING_MOVED)
+        return change
     if current is not None and current != declaration.marketplace_value:
         change.diagnostics.append(BINDING_CONFLICT)
         return change
@@ -125,10 +133,9 @@ def apply_declaration(
             del enabled[key]
             change.removed.append(f"{ENABLED_KEY}.{key}")
     for key, section in ((MARKETPLACES_KEY, marketplaces), (ENABLED_KEY, enabled)):
-        if section:
+        # An emptied section the user already had stays, as an empty object.
+        if section or key in document:
             document[key] = section
-        else:
-            document.pop(key, None)
     return change
 
 
