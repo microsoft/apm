@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
+from apm_cli.drift import locked_marketplace_row
 from apm_cli.install.package_selection import (
     selected_dependency_identity,
     selected_subtree_dependencies,
@@ -21,6 +22,16 @@ from apm_cli.security.executables import filter_lsp_by_allow_executables
 
 if TYPE_CHECKING:
     from apm_cli.install.command_context import InstallContext
+
+
+def _resolved_key(dependency: DependencyReference, lockfile: LockFile | None) -> str:
+    """Return the key the resolver records for one manifest declaration.
+
+    A locked object-form ``{name, marketplace}`` declaration replays to its
+    lock row's coordinate (#3960), so the graph holds it under that key.
+    """
+    locked = locked_marketplace_row(dependency, lockfile)
+    return (locked or dependency).get_unique_key()
 
 
 @dataclass(frozen=True)
@@ -164,7 +175,7 @@ class ProspectiveInstallPlan:
         dependencies += tuple(
             dependency
             for dependency in self.selected_apm_dependencies
-            if dependency.get_unique_key() not in resolved_keys
+            if _resolved_key(dependency, lockfile) not in resolved_keys
         )
         errors = list(graph.resolution_errors)
         if graph.circular_dependencies:

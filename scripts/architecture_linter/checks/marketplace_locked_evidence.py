@@ -19,6 +19,7 @@ _ROUTES = (
     ("src/apm_cli/drift.py", "locked_marketplace_row", "lockfile.get_dependency"),
     ("src/apm_cli/drift.py", "locked_marketplace_row", "marketplace_ref_mismatch"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_marketplace_row"),
+    ("src/apm_cli/install/dry_run_plan.py", "_resolved_key", "locked_marketplace_row"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "locked_dep.to_edge_reference"),
     ("src/apm_cli/drift.py", "locked_marketplace_replay", "_owns_locked_servers"),
     ("src/apm_cli/drift.py", "_owns_locked_servers", "package_lsp_owner"),
