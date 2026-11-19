@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- After `apm deny` or a removed approval, `apm install` removes the hooks and hook scripts that package deployed earlier, and `apm audit --ci` agrees; the skip message now says the package is denied. (#PR_NUMBER)
+- `apm install` removes hooks a package deployed earlier once `apm deny` or a removed approval gates them, and names a denied package as denied. (#PR_NUMBER)
 - Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)
 - A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
 - `apm install --frozen` passes on its first run after a lock bump: `apm_modules` copies that no longer match `apm.lock.yaml` are re-downloaded first. (#3900)
