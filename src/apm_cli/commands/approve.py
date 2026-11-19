@@ -255,6 +255,8 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     if changed > 0:
         _save_store(manifest, user_scope, allow, deny)
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
+        # Deployed hooks keep firing until install retires them (#3924).
+        _rich_info("Run 'apm install' to remove executables already deployed.", symbol="info")
 
 
 def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
