@@ -247,3 +247,44 @@ def test_missing_generator_does_not_warn_on_read(tmp_path, running, monkeypatch)
     monkeypatch.setattr(console, "_rich_warning", lambda message, **_: warnings.append(message))
     LockFile.read(_lock(tmp_path, ""))
     assert warnings == []
+
+
+@pytest.mark.parametrize("passed", [False, True], ids=["loaded", "passed"])
+def test_semantic_noop_write_keeps_the_file_bytes(tmp_path, stamping, passed):
+    """A proven no-op never rewrites the lock, so comments and formatting survive."""
+    path = _older_lock(tmp_path, LockFile(apm_version="0.1.0", mcp_servers=["same"]))
+    original = "# reviewed by ops\n" + path.read_text(encoding="utf-8")
+    path.write_text(original, encoding="utf-8")
+    lock = LockFile.read(path)
+    lock.write(path, **({"existing_lockfile": LockFile.read(path)} if passed else {}))
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_removing_the_last_untranslated_claim_stamps_the_writer(tmp_path, stamping):
+    """Only a lock still carrying a pre-0.37 claim keeps the old stamp."""
+    path = _older_lock(
+        tmp_path,
+        LockFile(
+            apm_version="0.36.0", mcp_servers=["foo"], mcp_target_servers={"copilot": ["foo"]}
+        ),
+    )
+    lock = LockFile.read(path)
+    lock.mcp_servers = []
+    lock.mcp_target_servers = {}
+    lock.write(path)
+    assert stamping(path) == "0.40.0"
+
+
+@pytest.mark.parametrize("header", ["apm_version: null\n", "apm_version: 99.0.0\n", ""])
+def test_bundle_and_project_readers_warn_alike(tmp_path, running, monkeypatch, header):
+    """The bundle reader keeps the absent/null distinction the project reader has."""
+    from apm_cli.bundle.local_bundle import _read_bundle_lockfile
+
+    warned: list[object] = []
+    monkeypatch.setattr(
+        lockfile_generator, "warn_if_newer", lambda _p, recorded, **_k: warned.append(recorded)
+    )
+    _lock(tmp_path, header)
+    LockFile.read(tmp_path / "apm.lock.yaml")
+    _read_bundle_lockfile(tmp_path)
+    assert warned[0] == warned[1]

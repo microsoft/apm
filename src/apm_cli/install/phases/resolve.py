@@ -579,8 +579,6 @@ def _resolve_dependencies(
                     # At user scope, relative local paths have no meaningful
                     # root (cwd is arbitrary, $HOME is not a project).  Only
                     # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
                     with callback_lock:
                         callback_failures.add(dep_ref.get_unique_key())
                     _tui = getattr(ctx, "tui", None)
@@ -617,9 +615,7 @@ def _resolve_dependencies(
                             None,
                         )
                     return replacement_path
-                # A path that is not a package fails like a download, so the
-                # apply barrier stops before integrating its siblings (#3874).
-                with callback_lock:
+                with callback_lock:  # not a package: the barrier stops (#3874)
                     callback_failures.add(dep_ref.get_unique_key())
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:

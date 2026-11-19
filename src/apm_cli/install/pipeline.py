@@ -65,6 +65,12 @@ from .errors import (
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
+from .outcome import (
+    direct_dependency_failed,
+    raise_direct_dependency_failure,
+    result_from_install_context,
+    stop_before_integration,
+)
 from .source_helpers import (
     lockfile_refresh_command,
     proxy_only_lock_entries,
@@ -346,12 +352,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                 )
         else:
             _trace(f"Preflight: {host_display} -- accepted")
-
-
-def _direct_dependency_failed(ctx: InstallContext) -> bool:
-    """Whether a direct dependency failed to resolve or download (#3874)."""
-    direct_keys = {dep.get_unique_key() for dep in ctx.all_apm_deps}
-    return bool(set(ctx.callback_failures) & direct_keys)
 
 
 @transactional_pipeline
@@ -811,39 +811,16 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ctx.managed_files = managed_files
         ctx.installed_packages = installed_packages
 
-        # Apply barrier (#3874): every requested package resolves and downloads
-        # before any is integrated, so a failed direct dependency never leaves
-        # untracked files deployed by the packages that succeeded.
-        if _direct_dependency_failed(ctx):
-            from .outcome import result_from_install_context
-
-            ctx.diagnostics = diagnostics
-            barrier_result = result_from_install_context(ctx)
-            if barrier_result.disposition is InstallDisposition.FAILED:
-                return barrier_result
-            # A failure reported only to the console (a local path that is
-            # not a package) still stops the apply before integration.
-            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
-                ctx.diagnostics.render_summary()
-            raise DirectDependencyError(
-                "One or more direct dependencies failed validation. Run with --verbose for details."
-            )
+        # Apply barrier (#3874): a failed direct dependency integrates nothing.
+        if direct_dependency_failed(ctx):
+            return stop_before_integration(ctx, diagnostics)
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         materialization_session = _run_integration_phase(ctx)
 
-        # Fail-loud: if any direct dependency failed validation or
-        # download, render the diagnostic summary and raise so the
-        # caller exits non-zero immediately.  Transitive failures
-        # are allowed to proceed (log + continue).
+        # A direct dependency failing integration fails the install; transitive ones continue.
         if ctx.direct_dep_failed:
-            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
-                ctx.diagnostics.render_summary()
-            raise DirectDependencyError(
-                "One or more direct dependencies failed validation. Run with --verbose for details."
-            )
-
-        from .outcome import result_from_install_context
+            raise_direct_dependency_failure(ctx)
 
         precommit_result = result_from_install_context(ctx)
         if precommit_result.disposition is InstallDisposition.FAILED:
