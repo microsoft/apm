@@ -942,6 +942,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm pack stops refusing a lockfile written by a newer APM.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-generator-stamp",
+        rule_id="contracts-tooling-lockfile-generator-stamp",
+        path="src/apm_cli/deps/lockfile.py",
+        old="            self.apm_version = installed_apm_version()\n",
+        new="            pass\n",
+        intent="Lockfile writes stop recording the running APM, so older CLIs accept them.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-read",
         rule_id="contracts-tooling-lockfile-read",
         path="src/apm_cli/deps/lockfile.py",
