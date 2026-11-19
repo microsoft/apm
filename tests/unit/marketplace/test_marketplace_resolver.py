@@ -2001,19 +2001,44 @@ class TestCrossRepoMisconfigRisk:
         assert result.canonical == expected
         assert DependencyReference.parse(result.canonical).host == "corp.ghe.com"
 
+    @pytest.mark.parametrize(
+        "plugin_source",
+        [
+            {"type": "url", "url": "myorg/my-marketplace-evil/plugins/x"},
+            {"type": "github", "repo": "myorg/my-marketplace-evil", "path": "plugins/x"},
+            {"type": "github", "repository": "myorg/my-marketplace-evil"},
+            {"type": "git-subdir", "url": "myorg/my-marketplace-evil", "subdir": "plugins/x"},
+            {"type": "git-subdir", "repo": "otherorg/my-marketplace", "subdir": "plugins/x"},
+            {"type": "url", "url": "myorg/my-marketplace.evil/plugins/x"},
+        ],
+        ids=[
+            "url-slug-prefix",
+            "repo-lookalike",
+            "repository-lookalike",
+            "git-subdir-url-lookalike",
+            "other-owner-same-name",
+            "url-dotted-suffix",
+        ],
+    )
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_url_sharing_only_a_slug_prefix_is_not_in_marketplace(
-        self, mock_get, mock_fetch, ghe_marketplace_source
+    def test_lookalike_or_other_cross_repo_locator_is_still_refused(
+        self, mock_get, mock_fetch, ghe_marketplace_source, monkeypatch, plugin_source
     ):
-        """The ``url:`` path-prefix match needs a ``/`` boundary after the catalog slug."""
-        plugin = MarketplacePlugin(
-            name="x", source={"type": "url", "url": "myorg/my-marketplace-evil/plugins/x"}
-        )
+        """#3945 refusal preservation: a locator that does not name the catalog repo
+        itself is not in-marketplace, so admission refuses it before any request.
+        The ``url:`` path-prefix match needs a ``/`` boundary after the catalog slug."""
+        from apm_cli.marketplace.dependency_confusion import admit_marketplace_resolution
+
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        plugin = MarketplacePlugin(name="x", source=plugin_source)
         mock_get.return_value = ghe_marketplace_source
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
-        assert resolve_marketplace_plugin("x", "my-marketplace").cross_repo_misconfig_risk
+        resolution = resolve_marketplace_plugin("x", "my-marketplace")
+        assert resolution.cross_repo_misconfig_risk is not None
+        with pytest.raises(DependencyConfusionError):
+            admit_marketplace_resolution(resolution)
 
     @pytest.mark.parametrize(
         "plugin_source",
