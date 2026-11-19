@@ -77,9 +77,12 @@ class CrossRepoMisconfigRisk:
     should have been ``corp.ghe.com/owner/repo`` -- and the resolver cannot
     distinguish them.
 
-    Consumer contract (#1326): the install command consults this sentinel
-    BEFORE any outbound validation HTTP call and refuses the package
-    fail-closed when it is non-``None``. The earlier #1305 design surfaced
+    Consumer contract (#1326, #3913):
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`
+    refuses the package fail-closed when this sentinel is non-``None``, on
+    every install path (CLI argument, ``apm.yml`` entry, transitive
+    dependency, ``apm update``) and BEFORE any outbound request to the
+    package. The earlier #1305 design surfaced
     only an advisory hint on validation failure, which left the success
     path (attacker pre-stages the bare namespace on public github.com)
     silently exploitable. Cross-host explicit qualification by the
@@ -105,9 +108,10 @@ class MarketplacePluginResolution:
     :meth:`~apm_cli.models.dependency.reference.DependencyReference.parse`
     on :attr:`canonical` to avoid mis-parsing nested paths as GitLab project segments.
     :attr:`cross_repo_misconfig_risk` is non-``None`` only for the
-    cross-repo bare-on-enterprise pattern (#1305 / #1326); the install
-    command consumes it as a pre-validation fail-closed signal so a
-    dependency-confusion attempt cannot reach an outbound HTTP probe.
+    cross-repo bare-on-enterprise pattern (#1305 / #1326); install paths
+    pass every resolution through
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`
+    so a dependency-confusion attempt cannot reach an outbound HTTP probe.
     """
 
     canonical: str
@@ -1083,9 +1087,8 @@ def resolve_marketplace_plugin(
     # marketplace cannot be safely backfilled here -- the bare syntax also
     # legitimately means "a github.com open-source dep from this enterprise
     # marketplace" -- so the canonical stays bare and downstream auth routes at
-    # github.com. Attach a sentinel so the install command can emit an
-    # actionable hint ONLY when the package subsequently fails validation; the
-    # legitimate cross-host path validates fine and never sees the hint.
+    # github.com. Attach a sentinel; admit_marketplace_resolution refuses it on
+    # every install path (#1326, #3913).
     cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(
         plugin, source, canonical, dep_ref
     )
@@ -1113,7 +1116,9 @@ def resolve_marketplace_plugin(
     resolved_tag_name: str | None = None
     resolved_version: str | None = None
     resolved_at: str | None = None
-    if version_spec:
+    # A risky resolution is refused by admit_marketplace_resolution; skip the
+    # tag lookup so no request reaches the ambiguous package remote (#1326).
+    if version_spec and cross_repo_misconfig_risk is None:
         from .version_resolver import is_version_constraint
 
         base = canonical.split("#", 1)[0]

@@ -1545,6 +1545,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Copilot marketplace ownership loses its single synchronization owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-dependency-confusion",
+        rule_id="marketplace-integrations-dependency-confusion",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="        admit_marketplace_resolution(resolution)\n",
+        new="",
+        intent="apm.yml and transitive marketplace entries skip the #1326 admission.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-legacy-skill-membership",
         rule_id="marketplace-integrations-legacy-skill-membership",
         path="src/apm_cli/deps/plugin_parser.py",

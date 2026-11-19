@@ -265,6 +265,7 @@ def _resolve_package_references(
         marketplace_dep_ref = None
         if "/" not in package and not DependencyReference.is_local_path(package):
             try:
+                from ..marketplace.dependency_confusion import admit_marketplace_resolution
                 from ..marketplace.resolver import (
                     parse_marketplace_ref,
                     resolve_marketplace_plugin,
@@ -296,31 +297,8 @@ def _resolve_package_references(
                     canonical_str, _resolved_plugin = resolution
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
-                    # #1326: dependency-confusion fail-closed gate.
-                    # Bare ``owner/repo`` on *.ghe.com falls back to
-                    # github.com -- refuse before outbound validation so
-                    # no probe reaches a potentially attacker-controlled URL.
-                    # Escape hatch: host-qualify ``repo:`` in marketplace.json.
-                    _risk = resolution.cross_repo_misconfig_risk
-                    if _risk is not None:
-                        _lead = (
-                            f"refused (dependency-confusion risk #1326): bare"
-                            f" `repo: {_risk.bare_repo_field}` on enterprise"
-                            f" marketplace '{_risk.marketplace_host}' is ambiguous."
-                            f" Host-qualify the plugin `repo` field in"
-                            f" marketplace.json to one of:"
-                        )
-                        reason = "\n".join(
-                            [
-                                _lead,
-                                f"  - '{_risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
-                                f"  - 'github.com/{_risk.bare_repo_field}' (declared cross-host dep on public github.com)",
-                            ]
-                        )
-                        invalid_outcomes.append((package, reason))
-                        if logger:
-                            logger.validation_fail(package, reason)
-                        continue
+                    # #1326: refuse before any outbound validation probe.
+                    admit_marketplace_resolution(resolution)
                     marketplace_provenance = resolution.provenance(marketplace_name, plugin_name)
                     package = canonical_str
                     marketplace_dep_ref = getattr(resolution, "dependency_reference", None)

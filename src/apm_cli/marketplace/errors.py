@@ -1,5 +1,12 @@
 """Marketplace-specific error hierarchy."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .resolver import CrossRepoMisconfigRisk
+
 
 class MarketplaceError(Exception):
     """Base class for marketplace errors."""
@@ -45,6 +52,31 @@ class PluginNotFoundError(MarketplaceError):
         super().__init__(
             f"Plugin '{plugin_name}' not found in marketplace '{marketplace_name}'. "
             f"Run 'apm marketplace browse {marketplace_name}' to see available plugins."
+        )
+
+
+class DependencyConfusionError(MarketplaceError, ValueError):
+    """A marketplace entry resolved to an ambiguous bare cross-repo source (#1326).
+
+    Raised only by
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`.
+    ``ValueError`` stays a base so resolution-error handlers keep recording it.
+    """
+
+    def __init__(self, risk: CrossRepoMisconfigRisk) -> None:
+        self.risk = risk
+        super().__init__(
+            "\n".join(
+                [
+                    f"refused (dependency-confusion risk #1326): bare"
+                    f" `repo: {risk.bare_repo_field}` on enterprise"
+                    f" marketplace '{risk.marketplace_host}' is ambiguous."
+                    f" Host-qualify the plugin `repo` field in"
+                    f" marketplace.json to one of:",
+                    f"  - '{risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
+                    f"  - 'github.com/{risk.bare_repo_field}' (declared cross-host dep on public github.com)",
+                ]
+            )
         )
 
 
