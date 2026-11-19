@@ -295,7 +295,7 @@ def _warn_unknown_mcp_ownership(logger: Any) -> None:
 
 
 def collect_mcp_servers(
-    project_root: Path, *, logger: Any = None, exclude_apm_managed: bool = False
+    project_root: Path, *, logger: Any = None, exclude_apm_managed: bool = True
 ) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json`` with credentials stripped.
 
@@ -454,7 +454,7 @@ def build_plugin_manifest(
         manifest.pop(key, None)
 
     if ecosystem == "claude":
-        mcp_servers = collect_mcp_servers(project_root, logger=logger, exclude_apm_managed=True)
+        mcp_servers = collect_mcp_servers(project_root, logger=logger)
         if mcp_servers:
             manifest["mcpServers"] = mcp_servers
     elif ecosystem == "codex":

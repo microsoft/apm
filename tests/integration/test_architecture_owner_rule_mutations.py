@@ -901,6 +901,35 @@ def test_update_intent_runs_inside_the_catalog_freshness_envelope(
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/core/plugin_manifest.py",
+            "project_root: Path, *, logger: Any = None, exclude_apm_managed: bool = True",
+            "project_root: Path, *, logger: Any = None, exclude_apm_managed: bool = False",
+        ),
+        (
+            "src/apm_cli/bundle/plugin_exporter.py",
+            "    root_mcp = _collect_mcp(project_root)",
+            "    root_mcp = _collect_mcp(project_root, exclude_apm_managed=False)",
+        ),
+    ],
+)
+def test_pack_never_ships_apm_rendered_mcp_servers(path: str, old: str, new: str) -> None:
+    """Root .mcp.json reads exclude APM-managed servers; opt-outs are registered (#3966)."""
+    rule_id = "marketplace-integrations-pack-plugin-manifests"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

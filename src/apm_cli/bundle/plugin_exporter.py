@@ -428,7 +428,7 @@ def _collect_hooks_from_root(
     return hooks
 
 
-def _collect_mcp(package_root: Path, *, exclude_apm_managed: bool = False) -> dict:
+def _collect_mcp(package_root: Path, *, exclude_apm_managed: bool = True) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json``."""
     from ..core.plugin_manifest import collect_mcp_servers
 
@@ -882,7 +882,8 @@ def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
     """
     if not install_path.is_dir():
         return False
-    if _collect_mcp(install_path):
+    # A dependency's own .mcp.json is authored by that package, not rendered by APM.
+    if _collect_mcp(install_path, exclude_apm_managed=False):
         return True
     if _collect_hooks_from_apm(install_path / ".apm"):
         return True
@@ -1099,7 +1100,7 @@ def export_plugin_bundle(
     _deep_merge(merged_hooks, root_hooks, overwrite=True)
 
     # MCP -- root package wins on server-name collision
-    root_mcp = _collect_mcp(project_root, exclude_apm_managed=True)
+    root_mcp = _collect_mcp(project_root)
     _deep_merge(merged_mcp, root_mcp, overwrite=True)
 
     # 7. Emit collision warnings
