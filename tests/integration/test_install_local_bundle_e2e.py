@@ -707,11 +707,13 @@ class TestInstallLocalBundleDryRun:
         def fake_effective_allow(
             project_root: Path,
             *,
+            user_scope: bool,
             no_policy: bool,
             logger: object,
             migrate_user_legacy: bool = True,
         ) -> dict | None:
             captured["project_root"] = project_root
+            captured["user_scope"] = user_scope
             captured["migrate_user_legacy"] = migrate_user_legacy
             return {}
 
@@ -739,6 +741,7 @@ class TestInstallLocalBundleDryRun:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert captured["project_root"] == project
+        assert captured["user_scope"] is False
         assert captured["migrate_user_legacy"] is False
 
 

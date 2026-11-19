@@ -671,7 +671,12 @@ class APMDependencyResolver:
             ValueError: Invalid marketplace or plugin configuration, or a
                 frozen or offline run without a matching lock row.
         """
-        from apm_cli.drift import frozen_marketplace_refusal, locked_marketplace_replay
+        from apm_cli.drift import (
+            MARKETPLACE_CATALOG_METADATA,
+            catalog_metadata_refusal,
+            frozen_marketplace_refusal,
+            locked_marketplace_replay,
+        )
 
         decision = locked_marketplace_replay(
             dep_ref,
@@ -707,6 +712,12 @@ class APMDependencyResolver:
             if resolution.dependency_reference is not None
             else DependencyReference.parse(resolution.canonical)
         )
+        # A cold server-owning row reads the catalog for server metadata only;
+        # the lock row still pins the download (#3989).
+        if decision.reason == MARKETPLACE_CATALOG_METADATA:
+            refusal = catalog_metadata_refusal(dep_ref, resolved, self._existing_lockfile)
+            if refusal is not None:
+                raise refusal
         manifest = getattr(resolution.plugin, "manifest", None)
         if isinstance(manifest, dict) and manifest:
             resolved.marketplace_manifest = dict(manifest)

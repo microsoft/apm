@@ -368,6 +368,28 @@ class CurrentMcpConfigView:
             project_root=self.project_root,
         )
 
+    def kept_dependencies(self) -> tuple[Any, ...]:
+        """Every server this view keeps as baseline, for org MCP policy.
+
+        Root, transitive, and recorded local-bundle servers all deploy, so
+        policy judges each. A kept config with no current declaration (a
+        bundle-owned or consent-retained lock entry) is parsed from its
+        recorded config; one that no longer parses is judged by name.
+        """
+        kept: list[Any] = []
+        seen: set[str] = set()
+        for dependency in self.dependencies:
+            name = getattr(dependency, "name", dependency)
+            if name in self.configs and name not in seen:
+                kept.append(dependency)
+                seen.add(name)
+        for name in sorted(set(self.configs) - seen):
+            try:
+                kept.append(MCPDependency.from_dict(dict(self.configs[name])))
+            except (ValueError, TypeError):
+                kept.append(MCPDependency(name=name, registry=False))
+        return tuple(kept)
+
     def diff(self, stored_configs: Mapping[str, Mapping[str, Any]]) -> McpConfigDiff:
         """Compare this current view with a stored lockfile baseline."""
         return McpConfigDiff.between(
@@ -576,10 +598,20 @@ def _bundle_owned_baseline(
     """Recorded local-bundle servers that no current declaration supersedes.
 
     Their only source is ``apm install <bundle>``, so the lock is their
-    baseline until that bundle is reinstalled without them.
+    baseline until that bundle is reinstalled without them. A ``bundle:``
+    provenance alone is a claim, not a deployment: the server is baseline
+    only when the lock also holds the native-entry receipt (an MCP URI
+    deployment row with a content hash) that a bundle install records.
     """
     if lockfile is None:
         return {}
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    deployed = {
+        name
+        for hashes in DeploymentLedgerCodec.mcp_native_hashes(lockfile).values()
+        for name in hashes
+    }
     return {
         name: owner
         for name, owner in lockfile.mcp_config_provenance.items()
@@ -587,6 +619,7 @@ def _bundle_owned_baseline(
         and owner.startswith(BUNDLE_MCP_OWNER_PREFIX)
         and name not in declared
         and name in lockfile.mcp_configs
+        and name in deployed
     }
 
 

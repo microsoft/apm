@@ -798,13 +798,15 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     subset_body = _awk_body(
         ci_checks, re.compile(r"^def _check_skill_subset_consistency\("), re.compile(r"^def ")
     )
+    view_body = _awk_body(ci_checks, re.compile(r"^def audit_mcp_view\("), re.compile(r"^def "))
     if (
         not _present_re(owner, re.compile(r"^def prepare_ci_audit_replay\("))
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay_error is not None")
-        or not _body_has(config_body, "project_root / APM_MODULES_DIR")
+        or not _body_has(config_body, "audit_mcp_view(")
+        or not _body_has(view_body, "project_root / APM_MODULES_DIR")
         or not _body_has(subset_body, "project_root / APM_MODULES_DIR")
     ):
         findings.append(

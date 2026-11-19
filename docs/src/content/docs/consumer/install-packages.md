@@ -90,7 +90,10 @@ deploys them and records them in `apm.lock.yaml`. It does not edit `apm.yml`. A 
 removes bundle MCP and LSP servers that are no longer shipped, are denied or are not
 approved. Bundle MCP servers are recorded in the lockfile, so they pass `apm audit --ci`
 and `apm install --frozen` and survive other installs and uninstalls; `apm install -g
-<bundle>` records them in `$APM_HOME/apm.lock.yaml`. To build one, see
+<bundle>` records them in `$APM_HOME/apm.lock.yaml`. A `bundle:` entry counts only
+when the lockfile also records its deployment, and org MCP policy still applies to
+it. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
+current directory's `apm.yml`. To build one, see
 [Build a plugin](../../producer/build-a-plugin/).
 
 ## Transport selection

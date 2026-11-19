@@ -4669,3 +4669,124 @@ def test_trust_owner_guard_requires_a_manifest_argument(path: str, old: str, new
         and "not a directory" in violation.message
         for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_config_view.py",
+            "        and name in deployed\n",
+            "",
+            id="bundle-claim-without-deployment-receipt",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "        mcp_deps = list(view.kept_dependencies())\n",
+            "        mcp_deps = manifest.get_all_mcp_dependencies()\n",
+            id="audit-policy-judges-only-apm-yml-servers",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "        mcp_brought_in_by=mcp_brought_in_by,\n",
+            "",
+            id="audit-policy-drops-transitive-declarers",
+        ),
+    ],
+)
+def test_bundle_baseline_guard_rejects_unjudged_or_unreceipted_servers(
+    path: str, old: str, new: str
+) -> None:
+    """#3989: a bundle: claim needs its receipt, and audit policy judges every kept server."""
+    rule_id = "mutation_writes.mcp_declaration_scope"
+    assert not run_selected_rules(ROOT, (rule_id,)).violations
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "                    _bundle_project_root,\n                    user_scope=global_,\n",
+            "                    _bundle_project_root,\n                    user_scope=False,\n",
+            id="global-bundle-install-reads-cwd-grants",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "    grants_manifest = project_manifest_path(manifest_root(project_root, "
+            "user_scope=user_scope))\n",
+            "    grants_manifest = project_manifest_path(project_root)\n",
+            id="bundle-grants-skip-the-scope-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "def _filter_bundle_executables(",
+            "def _cwd_allow_map(root):\n"
+            "    return effective_exec_map_for_project(root, policy=None)\n\n\n"
+            "def _filter_bundle_executables(",
+            id="root-wrapper-called-with-a-raw-root",
+        ),
+    ],
+)
+def test_bundle_trust_guard_rejects_scope_blind_grants(path: str, old: str, new: str) -> None:
+    """#3989: under -g a local bundle reads grants from the user manifest, never the CWD."""
+    rule_id = "install-deployment-executable-trust-context"
+    assert not [v for v in run_selected_rules(ROOT, (rule_id,)).violations if v.rule_id == rule_id]
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/deps/apm_resolver.py",
+            "            refusal = catalog_metadata_refusal(dep_ref, resolved, "
+            "self._existing_lockfile)\n",
+            "            refusal = None\n",
+            id="catalog-metadata-re-read-skips-the-lock-pin",
+        ),
+        pytest.param(
+            "src/apm_cli/drift.py",
+            "        and not detect_ref_change(resolved, locked_dep)\n",
+            "        and resolved.reference == locked_dep.resolved_ref\n",
+            id="pin-comparison-bypasses-the-ref-change-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/plan.py",
+            "def lockfile_satisfies_manifest(",
+            "from apm_cli.drift import MARKETPLACE_CATALOG_METADATA as _METADATA\n\n\n"
+            "def lockfile_satisfies_manifest(",
+            id="second-catalog-metadata-consumer",
+        ),
+    ],
+)
+def test_catalog_metadata_guard_keeps_the_lock_pin(path: str, old: str, new: str) -> None:
+    """#3989: a catalog edit cannot silently re-pin a locked server-owning package."""
+    rule_id = "marketplace-integrations-locked-evidence"
+    assert not run_selected_rules(ROOT, (rule_id,)).violations
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
