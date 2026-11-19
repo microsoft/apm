@@ -589,6 +589,40 @@ def test_hook_sidecar_comparison_must_use_canonical_owner(path: str, old: str, n
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/integration/hook_ownership.py",
+            "def local_bundle_hook_source_marker(",
+            "def local_bundle_hook_source_marker_disabled(",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "return local_bundle_hook_source_marker(bundle_id)",
+            'return f"local-bundle/{bundle_id}"',
+        ),
+        (
+            "src/apm_cli/install/local_bundle_hooks.py",
+            "outcome = integrator.integrate_hooks_for_target(",
+            "outcome = integrator.integrate_package_hooks_claude(",
+        ),
+    ],
+)
+def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: str) -> None:
+    """Local-bundle hooks keep the owner's marker and register via HookIntegrator (#3700)."""
+    rule_id = "mutation_writes.neutral_hook_contract"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

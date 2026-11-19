@@ -93,6 +93,8 @@ _AGENT_PLUGIN_LOADER = "src/apm_cli/agent_plugins/loader.py"
 
 _INSTALL_DRIFT = "src/apm_cli/install/drift.py"
 
+_LOCAL_BUNDLE_HOOKS = "src/apm_cli/install/local_bundle_hooks.py"
+
 
 _DEPLOYABLE_SOURCE_PLAN = "src/apm_cli/install/deployable_source_plan.py"
 
@@ -988,6 +990,51 @@ def _nhc_ownership_markers(provider: FactsProvider, rule_id: str) -> tuple[Viola
             rule_id,
             _HOOK_INTEGRATOR,
             "HookIntegrator must not reimplement a local dependency hook source marker",
+        )
+    )
+    findings.extend(_nhc_local_bundle_markers(provider, rule_id, owner, consumer))
+    return tuple(findings)
+
+
+def _nhc_local_bundle_markers(
+    provider: FactsProvider, rule_id: str, owner: FileFacts, consumer: FileFacts
+) -> tuple[Violation, ...]:
+    """Local-bundle hooks use the owner's marker and register via HookIntegrator (#3700)."""
+    facts_by_path, failures = _read_required(provider, rule_id, (_LOCAL_BUNDLE_HOOKS,))
+    findings: list[Violation] = list(failures)
+    findings.extend(
+        _require(
+            _count_regex_lines(owner, r"^def local_bundle_hook_source_marker\(") == 1,
+            rule_id,
+            _HOOK_OWNERSHIP,
+            "hook_ownership.py must define local_bundle_hook_source_marker exactly once",
+        )
+    )
+    findings.extend(
+        _require(
+            _has_fixed(consumer, "return local_bundle_hook_source_marker(bundle_id)"),
+            rule_id,
+            _HOOK_INTEGRATOR,
+            "HookIntegrator must mark local-bundle hooks through hook_ownership.py",
+        )
+    )
+    if not failures:
+        findings.extend(
+            _require(
+                _has_fixed(facts_by_path[_LOCAL_BUNDLE_HOOKS], ".integrate_hooks_for_target("),
+                rule_id,
+                _LOCAL_BUNDLE_HOOKS,
+                "local bundle hooks must register through HookIntegrator.integrate_hooks_for_target",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,)),
+            pattern=r"[\"']local-bundle/",
+            message="local-bundle hook source markers must route through hook_ownership.py",
+            exempt=False,
         )
     )
     return tuple(findings)

@@ -1160,6 +1160,28 @@ def integrate_local_bundle(
                     f"[dry-run] would deploy {record}" if dry_run else f"deployed {record}"
                 )
 
+    from .local_bundle_hooks import integrate_local_bundle_hooks
+
+    hook_result = integrate_local_bundle_hooks(
+        bundle_info,
+        pack_files,
+        project_root,
+        targets=targets,
+        slug=str(slug),
+        hooks_approved=_hooks_approved_bundle,
+        approval_key=approval_key,
+        force=force,
+        dry_run=dry_run,
+        scope=scope,
+        diagnostics=diagnostics,
+        logger=logger,
+    )
+    for record in hook_result.scripts:
+        if record not in deployed_hashes:
+            deployed_files.append(record)
+        deployed_hashes[record] = hook_result.script_hashes[record]
+    skipped += hook_result.skipped
+
     return {
         "deployed_files": deployed_files,
         "deployed_file_hashes": deployed_hashes,
@@ -1168,7 +1190,7 @@ def integrate_local_bundle(
         "skills": 0,
         "agents": 0,
         "commands": 0,
-        "hooks": 0,
+        "hooks": hook_result.hook_files,
         "instructions": 0,
         "prompts": 0,
         "sub_skills": 0,

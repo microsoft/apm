@@ -61,8 +61,10 @@ from apm_cli.integration.hook_native_formats import (
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
     dependency_hook_sources,
+    drop_dependency_owned_entries,
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
+    local_bundle_hook_source_marker,
     read_merged_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
@@ -897,6 +899,8 @@ class HookIntegrator(BaseIntegrator):
             if package_name == "_local":
                 return "_local"
             return f"_local/{package_name}"
+        if isinstance(bundle_id := getattr(package_info, "local_bundle_id", None), str):
+            return local_bundle_hook_source_marker(bundle_id)
         try:
             dependency_ref = vars(package_info).get("dependency_ref")
         except TypeError:
@@ -2057,25 +2061,16 @@ class HookIntegrator(BaseIntegrator):
                     sidecar_path.unlink()
                 return
 
-            if sidecar_path is not None and sidecar_path.exists():
+            had_sidecar = sidecar_path is not None and sidecar_path.exists()
+            if had_sidecar:
                 with open(sidecar_path, encoding="utf-8") as f:
                     sidecar_data = json.load(f)
                 if isinstance(sidecar_data, dict):
                     _reinject_apm_source_from_sidecar(data[container], sidecar_data)
 
-            modified = False
-            for event_name in list(data[container].keys()):
-                entries = data[container][event_name]
-                if isinstance(entries, list):
-                    filtered = [
-                        e for e in entries if not (isinstance(e, dict) and "_apm_source" in e)
-                    ]
-                    if len(filtered) != len(entries):
-                        modified = True
-                    data[container][event_name] = filtered
-                    if not filtered:
-                        del data[container][event_name]
-
+            # Local-bundle hooks are not dependency-owned; keep them (#3700).
+            modified = drop_dependency_owned_entries(data[container])
+            kept = _extract_apm_source_sidecar(data[container]) if had_sidecar else {}
             if not data[container]:
                 del data[container]
 
@@ -2084,7 +2079,9 @@ class HookIntegrator(BaseIntegrator):
                     json.dump(data, f, indent=2)
                     f.write("\n")
                 stats["files_removed"] += 1
-            if sidecar_path is not None and sidecar_path.exists():
+            if kept:
+                atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
+            elif had_sidecar:
                 sidecar_path.unlink()
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1

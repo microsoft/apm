@@ -160,6 +160,9 @@ References may resolve relative to the source hook descriptor when absent
 at the package root. A `./` script reference is packed the way `apm install`
 resolves it and anchored on the installed plugin root (for example
 `"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`); a symlinked script fails pack. Sibling assets and Node module type are preserved.
+`apm install <bundle>` registers these hooks through the same hook merge as a
+source install once the bundle's exact `name#version@sha256:<digest>` key is
+approved in `executables.allow`; otherwise they are skipped with one warning.
 Packing never executes scripts or translates hook semantics between hosts.
 Quoted filenames and selected directory references retain their meaning after
 relocation. Selected files must materialize each referenced directory; empty

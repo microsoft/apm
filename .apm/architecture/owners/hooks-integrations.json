@@ -39,15 +39,16 @@
     },
     {
       "id": "neutral-hook-contract",
-      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, and ownership-sidecar comparison",
-      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar)",
+      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, ownership-sidecar comparison, and local-bundle hook ownership markers",
+      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar, local_bundle_hook_source_marker); local bundle hooks register through HookIntegrator via install/local_bundle_hooks.py",
       "selectors": [
         "src/apm_cli/hook_contract.py",
         "src/apm_cli/integration/hook_ir.py",
         "src/apm_cli/integration/hook_native_formats.py",
         "src/apm_cli/integration/hook_cursor_preflight.py",
         "src/apm_cli/integration/hook_integrator.py",
-        "src/apm_cli/integration/hook_ownership.py"
+        "src/apm_cli/integration/hook_ownership.py",
+        "src/apm_cli/install/local_bundle_hooks.py"
       ],
       "guards": ["hooks-integrations-neutral-hook-contract"]
     },

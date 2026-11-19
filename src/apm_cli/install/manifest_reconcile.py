@@ -563,6 +563,35 @@ def surviving_deployed_paths(
     return frozenset(survivors | parents)
 
 
+def _retain_dropped(
+    files: list[str],
+    hashes: dict[str, str],
+    ledger: DeploymentLedger,
+    paths: set[str],
+    prior_hashes: dict[str, str],
+    prior_ledger: DeploymentLedger | None,
+) -> DeploymentLedger:
+    """Keep *paths* in the returned rows, hashes and ledger instead of pruning them."""
+    for path in paths:
+        if path not in files:
+            files.append(path)
+        if path in prior_hashes:
+            hashes[path] = prior_hashes[path]
+    if prior_ledger is None:
+        return ledger
+    from apm_cli.core.deployment_state import DeploymentLedger
+
+    records = dict(ledger.records)
+    records.update(
+        {
+            key: record
+            for key, record in prior_ledger.records.items()
+            if record.locator.value in paths
+        }
+    )
+    return DeploymentLedger(records=records)
+
+
 def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrapper; each knob is orthogonal
     *,
     project_root: Path,
@@ -663,6 +692,16 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         dropped |= (set(prior_files) & prior_owned) - surviving
     # Absence permits only metadata retirement, never a later unlink if a file appears.
     dropped -= verified_absent
+    if prior_ledger is not None and dropped:
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        # Imperative bundle output is never re-produced by an install (#3700).
+        bundle_kept = DeploymentLedgerCodec.local_bundle_scope(
+            dropped, DeploymentLedgerCodec.local_bundle_values(prior_ledger)
+        )
+        if bundle_kept:
+            dropped -= bundle_kept
+            ledger = _retain_dropped(files, hashes, ledger, bundle_kept, prior_hashes, prior_ledger)
     if not dropped:
         if include_ledger:
             return files, hashes, ledger
@@ -673,24 +712,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         # Retain every dropped path (row, hash, and prior ledger record) so the
         # lockfile keeps mirroring what remains on disk and the drop signal is
         # preserved for the next `apm install`, which does the physical prune.
-        for path in dropped:
-            if path not in files:
-                files.append(path)
-            if path in prior_hashes:
-                hashes[path] = prior_hashes[path]
-        if prior_ledger is not None:
-            from apm_cli.core.deployment_state import DeploymentLedger
-
-            dropped_values = set(dropped)
-            records = dict(ledger.records)
-            records.update(
-                {
-                    key: record
-                    for key, record in prior_ledger.records.items()
-                    if record.locator.value in dropped_values
-                }
-            )
-            ledger = DeploymentLedger(records=records)
+        ledger = _retain_dropped(files, hashes, ledger, dropped, prior_hashes, prior_ledger)
         if include_ledger:
             return files, hashes, ledger
         return files, hashes

@@ -842,7 +842,8 @@ class TestLocalBundlePathRouting:
             assert not original_path.exists()
 
     @pytest.mark.parametrize("rel", ["hooks.json", "hooks/scripts/fmt.sh", "hooks/fmt.json"])
-    def test_plugin_hook_paths_are_skipped_with_a_named_warning(self, rel: str) -> None:
+    def test_plugin_hook_paths_are_left_to_the_hook_integrator(self, rel: str) -> None:
+        """Plugin hook files are never file-copied; local_bundle_hooks registers them."""
         from apm_cli.install.local_bundle_paths import (
             bundle_deploy_relative_path,
             bundle_deploy_skip_warning,
@@ -852,9 +853,7 @@ class TestLocalBundlePathRouting:
         for target in (KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]):
             prefixes = frozenset({f"{target.root_dir}/"})
             assert bundle_deploy_relative_path(rel, prefixes, prefixes, target=target) is None
-            warning = bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target)
-            assert warning is not None
-            assert f"Skipped packed bundle hook file {rel!r}" in warning
+            assert bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target) is None
 
     def test_target_rooted_hook_files_keep_routing(self) -> None:
         """Deployed-layout bundles keep their target hook files (not plugin hooks)."""
