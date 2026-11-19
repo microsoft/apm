@@ -872,7 +872,7 @@ class TestApproveDenyCommandsIntegration:
         assert "executables" in data
         # Pins bind content, so the stored key is version-blind (#3902).
         grant = data["executables"]["allow"]["risky-pkg"]
-        assert list(grant["hooks"].values())[0].startswith("sha256:")
+        assert all(pin.startswith("sha256:") for pin in grant["hooks"].values())
 
     def test_approve_all(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
