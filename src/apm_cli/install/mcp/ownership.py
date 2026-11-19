@@ -727,6 +727,11 @@ def names_owned_by_active_peers(
     return kept
 
 
+def deselected_mcp_claims(owned: set[str], declared: set[str], selected: set[str]) -> set[str]:
+    """Owned, still-declared servers a target's ``targets:`` selection no longer includes."""
+    return (set(owned) & set(declared)) - set(selected)
+
+
 def retain_deferred_mcp_claims(
     current: dict[str, set[str]],
     previous: dict[str, set[str]],

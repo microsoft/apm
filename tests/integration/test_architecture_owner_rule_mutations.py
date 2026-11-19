@@ -4080,6 +4080,18 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
             "set(MCPIntegrator.get_server_names(prepared_mcp.dependencies))",
             id="frozen-claims-every-server-on-every-target",
         ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "target_decision is not None and target_decision.from_manifest",
+            'target_decision is not None and target_decision.source == "apm.yml"',
+            id="manifest-drop-keyed-on-display-label",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "            stale_for_target |= deselected_mcp_claims(\n",
+            "            stale_for_target |= set().union(\n",
+            id="owned-path-forks-deselection-algebra",
+        ),
     ],
 )
 def test_mcp_dependency_target_selection_guard_rejects_mutations(

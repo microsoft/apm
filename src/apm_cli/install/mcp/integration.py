@@ -111,6 +111,7 @@ def run_owned_mcp_integration(
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import MCPNativeConflictError
     from apm_cli.install.mcp.ownership import (
+        deselected_mcp_claims,
         names_owned_by_active_peers,
         retain_deferred_mcp_claims,
     )
@@ -186,9 +187,11 @@ def run_owned_mcp_integration(
         stale_for_target = (stale if target in selected_targets else old_owned) & names
         if target in selected_targets:
             # Declared servers whose `targets:` no longer select this runtime.
-            stale_for_target |= (
-                previous_targets.get(target, set()) & old_owned & new_names
-            ) - mcp_servers_for_runtime(dependencies, target)
+            stale_for_target |= deselected_mcp_claims(
+                previous_targets.get(target, set()) & old_owned,
+                new_names,
+                mcp_servers_for_runtime(dependencies, target),
+            )
         if stale_for_target and conflict is None:
             # An entry in a shared file (.mcp.json) stays while an active peer
             # owns it; only this runtime's claim retires.
@@ -569,19 +572,24 @@ def run_mcp_integration(  # noqa: PLR0913
             builtins.set(new_mcp_servers),
             managed_target_servers.get("copilot") if "copilot" in managed_target_servers else None,
         )
-        from apm_cli.install.mcp.ownership import names_owned_by_active_peers
+        from apm_cli.install.mcp.ownership import (
+            deselected_mcp_claims,
+            names_owned_by_active_peers,
+        )
         from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
         # Targets the manifest itself stopped selecting leave every entry's reach.
         manifest_selected = (
-            runtime is None and target_decision is not None and target_decision.source == "apm.yml"
+            runtime is None and target_decision is not None and target_decision.from_manifest
         )
         retired_by_target: builtins.dict[str, builtins.set] = {}
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
             if owned_target in managed_target_servers:
                 # Declared servers whose `targets:` no longer select this runtime.
                 admitted = mcp_servers_for_runtime(mcp_deps, owned_target)
-                retired_by_target[owned_target] = (builtins.set(owned) & new_mcp_servers) - admitted
+                retired_by_target[owned_target] = deselected_mcp_claims(
+                    owned, new_mcp_servers, admitted
+                )
                 continue
             # A runtime this run does not select keeps the servers that name it.
             kept = builtins.set(owned) & mcp_servers_for_runtime(

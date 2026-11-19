@@ -352,6 +352,10 @@ MCP install resolves targets in this order:
 post-exclusion selection; project, scope, and adapter gates can still skip a
 write.
 
+A `targets:` list on one `dependencies.mcp` entry narrows that set further
+for that server; see [Manifest Schema](../../reference/manifest-schema/).
+`apm install --target codex` does not remove a server scoped to `[claude]`.
+
 The same effective decision drives package, MCP, and LSP phases; APM does
 not re-resolve each phase independently.
 

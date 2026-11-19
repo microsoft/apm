@@ -286,12 +286,14 @@ _MCP_DEPENDENCY_TARGET_CONSUMERS: tuple[tuple[str, str, tuple[str, ...]], ...] =
         (
             "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
             "mcp_deps, owned_target, named_only=True",
+            "deselected_mcp_claims(",
+            "target_decision.from_manifest",
         ),
     ),
     (
         _MCP_INTEGRATION,
         "run_owned_mcp_integration",
-        ("mcp_servers_for_runtime(dependencies, target)",),
+        ("mcp_servers_for_runtime(dependencies, target)", "deselected_mcp_claims("),
     ),
     (
         "src/apm_cli/install/service_integration.py",

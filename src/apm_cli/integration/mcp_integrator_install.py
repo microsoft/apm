@@ -1973,9 +1973,11 @@ def run_mcp_install(  # noqa: PLR0913
         declared = _declared_mcp_targets(dep)
         if declared is not None and not dep_runtimes[id(dep)]:
             scoped_out.add(id(dep))
+            # Logged inline: an MCP-only run that changes nothing never
+            # renders the diagnostics summary, which would hide the skip.
             logger.warning(
-                f"MCP server '{dep.name}' targets [{', '.join(declared)}] do not overlap "
-                f"active MCP targets [{', '.join(target_runtimes)}]; skipping"
+                f"{dep.name}: MCP server targets [{', '.join(declared)}] do not overlap "
+                f"active install targets [{', '.join(target_runtimes)}]; skipping"
             )
 
     # Use the new registry operations module for better server detection

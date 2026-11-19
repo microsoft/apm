@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.deps.lockfile import LockFile
 from tests.integration._mcp_chain_kit import Chain, stdio_server
 
 pytestmark = [
@@ -58,6 +60,18 @@ def test_project_dependency_targets_scope_servers_per_target(
     assert set(chain.servers("cursor")) == {"srv-claude-only", "srv-cursor-only"}
     chain.ok("install", "--no-policy", "--frozen")
 
+    # An entry whose targets miss every active target is skipped, with a warning.
+    chain.write_manifest(
+        [_scoped("srv-claude-only", "cursor"), _scoped("srv-codex-only", "codex")],
+        targets=["claude", "cursor"],
+    )
+    result = chain.ok("install", "--no-policy")
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "srv-codex-only: MCP server targets [codex] do not overlap" in output
+    assert "srv-codex-only" not in chain.servers("claude")
+    assert "srv-codex-only" not in chain.servers("cursor")
+    assert chain.lock()["mcp_target_servers"] == {"cursor": ["srv-claude-only"]}
+
     # A target the manifest itself drops leaves every entry's reach.
     chain.write_manifest(
         [_scoped("srv-claude-only", "cursor"), _scoped("srv-cursor-only", "cursor")],
@@ -86,11 +100,16 @@ def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
         path = home / ".claude.json"
         return json.loads(path.read_text("utf-8")).get("mcpServers", {}) if path.exists() else {}
 
-    write_global([stdio_server("srv-a", "a")])
+    write_global([stdio_server("srv-a", "a"), stdio_server("srv-c", "c")])
     chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "claude")
-    assert set(claude_servers()) == {"srv-a"}
+    assert set(claude_servers()) == {"srv-a", "srv-c"}
+    lock_path = apm_home / "apm.lock.yaml"
+    receipt = DeploymentLedgerCodec.mcp_native_hashes(LockFile.read(lock_path))["claude"]["srv-a"]
 
-    write_global([_scoped("srv-a", "claude"), _scoped("srv-b", "codex")])
+    # An untargeted server follows the run's --target; a scoped one keeps its targets.
+    write_global(
+        [_scoped("srv-a", "claude"), _scoped("srv-b", "codex"), stdio_server("srv-c", "c")]
+    )
     result = chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "codex")
     assert "Removed stale MCP server 'srv-a'" not in result.stdout
     assert set(claude_servers()) == {"srv-a"}
@@ -101,12 +120,14 @@ def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
         for name in re.findall(r"^\[mcp_servers\.([^\].]+)\]$", codex_text, re.M)
         if not name.endswith(".env")
     }
-    assert codex_names == {"srv-b"}
+    assert codex_names == {"srv-b", "srv-c"}
     assert not re.search(r"^targets\s*=", codex_text, re.M)
-    lock = yaml.safe_load((apm_home / "apm.lock.yaml").read_text("utf-8"))
-    assert lock["mcp_target_servers"] == {"claude": ["srv-a"], "codex": ["srv-b"]}
+    lock = yaml.safe_load(lock_path.read_text("utf-8"))
+    assert lock["mcp_target_servers"] == {"claude": ["srv-a"], "codex": ["srv-b", "srv-c"]}
+    kept = DeploymentLedgerCodec.mcp_native_hashes(LockFile.read(lock_path))["claude"]
+    assert kept["srv-a"] == receipt
 
     # Undeclaring the server still retires it from the target outside this run.
-    write_global([_scoped("srv-b", "codex")])
+    write_global([_scoped("srv-b", "codex"), stdio_server("srv-c", "c")])
     chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "codex")
     assert claude_servers() == {}
