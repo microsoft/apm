@@ -4528,6 +4528,20 @@ def test_exec_decision_guard_rejects_second_readers(path: str, old: str, new: st
             id="bundle-lock-copied-from-the-project",
         ),
         pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            "    write_text_lf(\n"
+            "        bundle_dir / LOCKFILE_NAME, yaml.safe_dump(lockfile.to_dict())\n"
+            "    )",
+            id="bundle-lock-dict-dump-to-the-name-constant",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            "    shutil.copy2(get_lockfile_path(project_root), bundle_dir / LOCKFILE_NAME)",
+            id="bundle-lock-copied-to-the-name-constant",
+        ),
+        pytest.param(
             "src/apm_cli/bundle/lockfile_enrichment.py",
             '        data["apm_version"] = installed_apm_version()\n',
             "        pass\n",
